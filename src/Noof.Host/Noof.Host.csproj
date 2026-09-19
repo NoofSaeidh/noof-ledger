@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Noof.Domain\Noof.Domain.csproj" />
+    <ProjectReference Include="..\Noof.Application\Noof.Application.csproj" />
+    <ProjectReference Include="..\Noof.Persistence\Noof.Persistence.csproj" />
+    <ProjectReference Include="..\Noof.Ai\Noof.Ai.csproj" />
+    <ProjectReference Include="..\Noof.Fx\Noof.Fx.csproj" />
+    <ProjectReference Include="..\Noof.Receipts\Noof.Receipts.csproj" />
+    <ProjectReference Include="..\Noof.Telegram\Noof.Telegram.csproj" />
+    <ProjectReference Include="..\Noof.Web\Noof.Web.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsDeployableApp>true</IsDeployableApp>
+  </PropertyGroup>
+
+</Project>
