@@ -55,7 +55,7 @@ MAX      : 999.99                                                      <- over a
 
 Reproduced in this repository on 2026-09-19 in commit `cbdea7311de73b5ca4558f1f59aa10737898b50f`; recover the test with `git show cbdea7311de73b5ca4558f1f59aa10737898b50f`.
 
-`MAX` over money returning `999.99` when `1234.50` is present isn't a rough edge. It's a wrong answer with no warning. Postgres, same data, same three cultures: `numeric(19,4)`, correct ordering, `SUM 2310.9400`, `MAX 1234.5000`, every time.
+`MAX` over money returning `999.99` when `1234.50` is present isn't a rough edge. It's a wrong answer with no warning. Postgres, same data: `numeric(19,4)`, correct ordering, `SUM 2310.9400`, `MAX 1234.5000` — the arithmetically correct answers, which Phase 0's gate test will verify against a real server.
 
 **The operational objection is already paid.** PostgreSQL 17.5 was already on your PC (`C:\Program Files\PostgreSQL\17`, with `pg_trgm 1.6` and `unaccent 1.1`), and **you are now installing 18 via choco** — so the target is **PostgreSQL 18**, service `postgresql-x64-18`. (`dotnet-ef 10.0.12` is installed too.) Pin that major for the life of the app; there's no reason to chase releases on a single-user tracker.
 
