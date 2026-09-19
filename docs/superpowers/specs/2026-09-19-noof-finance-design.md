@@ -50,8 +50,10 @@ And on a *raw* connection in every culture — DB Browser, any script you ever w
 
 ```
 ORDER BY : 0.1, 0.2, 10.0, 100.0, 2.5, 9.99     <- lexicographic
-MAX      : 9.99                                  <- over a set containing 100.00
+MAX      : 999.99                                <- over a set containing 100.00
 ```
+
+Reproduced in this repository on 2026-09-19; see git history for `SqliteCounterfactualTests`.
 
 `MAX` over money returning `9.99` when `100.00` is present isn't a rough edge. It's a wrong answer with no warning. Postgres, same data, same three cultures: `numeric(19,4)`, correct ordering, `SUM -1111.7778`, `MAX 100.0000`, every time.
 
