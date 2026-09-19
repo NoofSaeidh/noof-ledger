@@ -1,0 +1,17 @@
+root = true
+
+[*.cs]
+indent_style = space
+indent_size = 4
+end_of_line = crlf
+insert_final_newline = true
+charset = utf-8
+csharp_style_namespace_declarations = file_scoped:error
+csharp_style_prefer_primary_constructors = true:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+dotnet_style_prefer_collection_expression = true:suggestion
+dotnet_diagnostic.CS1591.severity = none
+
+[*.{json,yml,yaml,props,targets,csproj,slnx}]
+indent_style = space
+indent_size = 2
