@@ -1,0 +1,38 @@
+# Build output
+bin/
+obj/
+artifacts/
+publish/
+*.user
+.vs/
+.idea/
+
+# Databases — never commit financial data
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.dump
+*.bak
+
+# Secrets — this is a public repo
+secrets.json
+appsettings.*.Local.json
+appsettings.Local.json
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.pem
+*.key
+dp-keys/
+
+# Real financial fixtures — receipts, voice notes, statements
+eval-local/
+logs/
+
+# OS
+Thumbs.db
+.DS_Store

@@ -1,0 +1,87 @@
+# noof-finance — working agreement
+
+Personal finance tracker. Telegram bot captures spending (text, voice, receipt photos), an LLM categorises it per line item, a local Blazor dashboard shows it across multiple wallets and currencies. C# / .NET 10, EF Core, strict TDD, local hosting, **public repo**.
+
+> **Status:** design under review in `docs/superpowers/specs/2026-09-19-noof-finance-design.md`. No product code until that spec is approved. Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
+
+---
+
+## 1. Model and effort policy
+
+**Default to the cheapest model that can do the job correctly.** Escalate on demonstrated need, not on suspicion that a task might be hard. Cost discipline is a standing requirement, not a preference.
+
+| Tier | Use for | Examples |
+|---|---|---|
+| **haiku** | Mechanical, deterministic, verifiable-at-a-glance work | Running tests and reporting pass/fail · running builds · file/dir listings · grep sweeps · renames · formatting · dependency version lookups · reading a log for a known string · scaffolding boilerplate from an explicit template |
+| **sonnet** | Analysis, review, and most implementation | Writing and modifying code · reading and explaining a subsystem · code review · test authoring · adversarial fact-checking · research against known docs · debugging a localised failure |
+| **opus** | Only genuinely hard reasoning with wide blast radius | Cross-cutting architecture decisions · synthesising many conflicting sources · designing a schema or seam that is expensive to reverse · diagnosing a bug that resisted sonnet |
+
+**Effort levels.** Do not use high or xhigh effort for small tasks. `low` for mechanical work, `medium` for ordinary implementation, `high`/`xhigh` reserved for the architecture- and correctness-critical reasoning that justifies opus in the first place.
+
+**Anti-patterns — do not do these:**
+- Running a test suite on opus. That is a haiku task; the model is not what makes tests pass.
+- Using xhigh effort to rename a variable, fix a typo, or add a using directive.
+- Escalating to opus because a task *sounds* important. Blast radius and reversibility decide the tier, not topic gravity.
+- Re-running expensive work that is already cached or already done. Check first.
+
+## 2. Subagent usage
+
+**Delegate aggressively, and delegate downward.** Any task that is self-contained, produces a summarisable result, and does not need this conversation's full context should go to a subagent on the cheapest adequate tier.
+
+- **Always delegate:** multi-file searches, "find where X is defined", test runs, build verification, reading a large file to answer one question, independent research, per-file review passes.
+- **Parallelise:** independent work goes out in one message as multiple subagents, not sequentially.
+- **Workflows:** for fan-out work, set `model` per stage — haiku for mechanical stages, sonnet for research and verification, opus only for final synthesis. Never let a whole workflow inherit opus by default.
+- **Keep the conclusion, not the transcript.** A subagent's job is to return the answer, not to dump file contents back into the main context.
+
+## 3. Code style
+
+**Write simple code that explains itself. Comments are a last resort, not a habit.**
+
+- **Avoid comments.** If a comment explains *what* the code does, delete it and fix the names instead. The only comments worth writing explain *why* — a non-obvious constraint, a workaround with a link, a deliberate deviation that would otherwise look like a bug.
+- **No XML doc blocks** on private or internal members. No `#region`. No commented-out code — git remembers it.
+- **Names carry the meaning.** A well-named method needs no header comment. If you cannot name it clearly, the method is doing too much.
+- **Small and focused.** Short methods, one reason to change per class. A long file is a design signal, not a formatting problem.
+
+**Use modern C# — this targets .NET 10, so write like it:**
+
+- File-scoped namespaces · primary constructors · `record` and `readonly record struct` for values · collection expressions (`[.. items]`) · target-typed `new`
+- Pattern matching and switch expressions over `if`/`else` chains · `is null` / `is not null`
+- `required` and `init` over constructor telescoping · raw string literals for multi-line text and JSON
+- Nullable reference types are on. The null-forgiving `!` operator needs a reason.
+- `async`/`await` end to end; no `.Result`, no `.Wait()`
+- LINQ where it reads better than a loop; a loop where LINQ does not
+
+**Don't:** defensive boilerplate for conditions that cannot occur · abstractions with one implementation and no second in sight · ceremony that exists to look enterprise.
+
+## 4. Engineering rules *(settled)*
+
+**Money**
+- Money is `decimal` + `Currency` in the domain. Never `double`, never `float`. Every method signature, test, component and report sees a `decimal`.
+- No number in user-facing output ever originates from a model. The LLM phrases figures that C# computed.
+
+**Architecture**
+- Projects are split: `Domain` ← `Application` ← (`Persistence` · `Ai` · `Fx` · `Receipts` · `Telegram` · `Web`) ← `Host`.
+- `Noof.Web` is UI only — no `DbContext`, no EF types, no `HttpClient`, no `Program.cs`. Enforced by `DisableTransitiveProjectReferences` plus an architecture test, because project references are transitive at compile time and a convention alone will not hold.
+- `Noof.Domain` has zero NuGet references. Asserted by a test.
+- Do not add MediatR, AutoMapper, generic repositories over `DbContext`, or CQRS scaffolding.
+
+**Database**
+- EF Core with migrations from the first commit. The database must be creatable from empty and upgradeable in one mechanism.
+- **Never call `EnsureCreated()`** — anywhere, including test helpers. It bypasses migrations and permanently poisons that database for `Migrate()`.
+- Tests run against a real database, never the EF InMemory provider.
+
+**Testing**
+- TDD: a failing test first, for all behaviour. Exempt: migrations, DTOs, `Program.cs` wiring.
+- `global.json` must contain `{"test":{"runner":"Microsoft.Testing.Platform"}}` or `dotnet test` fails outright on SDK 10.0.204.
+- The inner red-green loop never touches the network or a real model. Live model calls live in an opt-in suite that is skipped by default.
+
+**Secrets — this is a public repo**
+- Secrets are encrypted in the database and entered through the UI. Never in `appsettings.json`, never in the repo, never in a log, an exception message, or an LLM prompt.
+- `.gitignore` covers `publish/`, `artifacts/`, `*.db*`, secrets and any real receipt/voice/statement fixtures **before the first commit**.
+- Test fixtures are synthetic. Real financial data never enters the repo.
+
+## 5. Conventions
+
+- Run `dotnet test` before claiming anything works. State the actual result; never assert success without having seen it.
+- Prefer deterministic C# over an LLM call wherever both would work.
+- When a decision is expensive to reverse (schema, storage encoding, a seam), stop and flag it rather than choosing quietly.
