@@ -39,3 +39,18 @@ The spec was approved without answering these, so **each has taken its stated de
 | Base currency | **EUR** |
 | LLM | `claude-haiku-4-5` only, no adviser tier |
 | Bilingual category names | `NameEn` + `NameRu` |
+
+---
+
+## Auth addendum questions
+
+From §15 of the design, added 2026-09-19. All defaulted; none blocks any phase.
+
+| # | Question | Default taken | Decide by |
+|---|---|---|---|
+| A1 | Does anyone else have a Windows account on this PC? | **No** | Any time — a yes means flipping `Auth:Mode=Cookie` immediately, since that is the single scenario where auth is load-bearing today |
+| A2 | Will you reach the dashboard from your phone, and when? | **Not yet** | Enforced automatically: the startup guard refuses to boot on a non-loopback binding while `Auth:Mode=Off` |
+| A3 | Re-prompt for the password on `/settings/secrets` after ~10 minutes? | **Policy attached, handler lenient** | Whenever auth is switched on |
+| A4 | Set up trusted local HTTPS once, to unlock Windows Hello passkeys? | **No** — password stays the permanent mechanism | Any time |
+
+**Why A2 needs no discipline from you:** the guard makes the config key and the Kestrel binding physically inseparable. The day you widen the binding for phone access, the app will not start until auth is on. That is what stops "optional now" from becoming "forgotten forever".
