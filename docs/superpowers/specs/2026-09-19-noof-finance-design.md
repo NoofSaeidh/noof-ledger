@@ -49,13 +49,13 @@ A personal expense tracker for one person. You capture spending through a Telegr
 And on a *raw* connection in every culture — DB Browser, any script you ever write:
 
 ```
-ORDER BY : 0.1, 0.2, 10.0, 100.0, 2.5, 9.99     <- lexicographic
-MAX      : 999.99                                <- over a set containing 100.00
+ORDER BY : -45.25, 0.10, 10.00, 100.00, 1234.50, 2.05, 9.55, 999.99   <- lexicographic
+MAX      : 999.99                                                      <- over a set containing 1234.50
 ```
 
-Reproduced in this repository on 2026-09-19; see git history for `SqliteCounterfactualTests`.
+Reproduced in this repository on 2026-09-19 in commit `cbdea7311de73b5ca4558f1f59aa10737898b50f`; recover the test with `git show cbdea7311de73b5ca4558f1f59aa10737898b50f`.
 
-`MAX` over money returning `9.99` when `100.00` is present isn't a rough edge. It's a wrong answer with no warning. Postgres, same data, same three cultures: `numeric(19,4)`, correct ordering, `SUM -1111.7778`, `MAX 100.0000`, every time.
+`MAX` over money returning `999.99` when `1234.50` is present isn't a rough edge. It's a wrong answer with no warning. Postgres, same data, same three cultures: `numeric(19,4)`, correct ordering, `SUM -1111.7778`, `MAX 100.0000`, every time.
 
 **The operational objection is already paid.** PostgreSQL 17.5 was already on your PC (`C:\Program Files\PostgreSQL\17`, with `pg_trgm 1.6` and `unaccent 1.1`), and **you are now installing 18 via choco** — so the target is **PostgreSQL 18**, service `postgresql-x64-18`. (`dotnet-ef 10.0.12` is installed too.) Pin that major for the life of the app; there's no reason to chase releases on a single-user tracker.
 
