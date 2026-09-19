@@ -41,8 +41,9 @@ try {
     Restart-Service $ServiceName
     Start-Sleep -Seconds 3
 
-    $bytes = [byte[]]::new(24)
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    $bytes = New-Object byte[] 24
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
     $password = ([Convert]::ToBase64String($bytes)) -replace '[+/=]', 'x'
 
     Write-Host 'Resetting postgres password and creating databases...'
