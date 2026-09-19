@@ -277,3 +277,73 @@ Every bulk operation writes a **`RecategorizationBatch`** with full before/after
 ---
 
 *Approve to lock this spec and move to the implementation plan. Annotate anything you want changed and I'll revise and reopen.*
+
+---
+
+## 15. Authentication — addendum
+
+*Added 2026-09-19 after the approved spec, answering: "it is optional now, but would be great to still have users and auth (just to avoid unauthorized access)". Seven agents researched it; the threat model below is the honest version, not the flattering one.*
+
+### What auth actually buys — and what it doesn't
+
+Today the app binds `127.0.0.1` on a PC that is only on while you are logged in. **Against you, and against anything running as you, a login screen buys nothing**: that principal already holds the Postgres identity and the DPAPI keys that decrypt `app_secret`, so the database is readable without ever opening the dashboard.
+
+**Parsec is not an argument for app auth.** Whoever holds a Parsec session owns the desktop, therefore owns Postgres and DPAPI too. An app password makes them click once more. That is a Parsec/Windows-credential problem, and treating it as justification here would be self-deception.
+
+**There is exactly one real gain today: a second Windows account on this same PC.** Windows loopback sockets are not user-namespaced, so another logged-on account can reach `127.0.0.1:<port>` while your instance runs — but it *cannot* open the database (SSPI presents a different principal) and *cannot* decrypt `app_secret` (DPAPI is per-account). **The HTTP dashboard is the only cross-account path into your finances.** Narrow, but genuinely not theatre.
+
+**Auth starts earning its keep at one observable event:** the moment Kestrel stops binding `127.0.0.1` — i.e. when you want the dashboard on your phone. At that instant everyone on the wifi is in scope and the login is the only control that exists. *That event, not a date, is the trigger.*
+
+Explicitly **out of scope**: brute force, credential stuffing, session hijacking, phishing. There is no untrusted network and no second attacker population.
+
+### The decision
+
+**Hand-rolled cookie auth over a single `app_user` row** — roughly 120 lines. `PasswordHasher<AppUser>` (PBKDF2-HMACSHA512, 100k iterations) ships in the shared framework, so **zero new NuGet in Host or Persistence**. No ASP.NET Core Identity, no `UserManager`, no `SignInManager`.
+
+**Not** the `--auth Individual` scaffold: an agent ran it — **52 Razor files**, self-registration, email confirmation wired to a no-op sender, external OAuth, TOTP 2FA. Theatre at one user.
+
+**Not** Windows Negotiate. It provably works here (zero-prompt NTLM as `NOOF-DESKTOP\noofs`), but it **structurally cannot authenticate a phone browser** — the one trigger that makes auth load-bearing.
+
+### The switch, and why it isn't an untested code path
+
+One key: `Auth:Mode` = `Off` | `Cookie`, default **`Off`**. It does **not** branch the pipeline. `UseAuthentication`, `UseAuthorization`, `AddCascadingAuthenticationState`, `AuthorizeRouteView` and `[Authorize]` on every page ship **unconditionally from day one**. The key selects only *which handler is registered*:
+
+- **`Off`** — a ~15-line `LocalOwnerHandler` authenticates every request as the local owner. Every `[Authorize]` and `AuthorizeView` is satisfied, no login screen, **no behaviour change from today**.
+- **`Cookie`** — the real cookie scheme plus `/account/login`.
+
+Same pipeline, same attributes, same policies; both modes exercised in CI by parameterising `WebApplicationFactory`. **A forgotten flag cannot leave a route ungated, because no route's metadata depends on the flag.**
+
+**Startup guard, shipping in the same commit:** if any configured Kestrel URL is non-loopback while `Auth:Mode=Off`, **refuse to boot**. This makes the config key and the binding physically inseparable — the day you widen the binding for your phone, the app will not start until auth is on. Without it, *"optional now"* quietly becomes *"forgotten forever"*.
+
+### Details that are easy to get wrong
+
+- **Cookie:** `ExpireTimeSpan` 180 days, `SlidingExpiration` true, `IsPersistent` true. **Do not set `AuthenticationProperties.ExpiresUtc`** — it overrides sliding expiration, giving a hard expiry instead.
+- **`CookieSecurePolicy.Always` would break sign-in entirely** over plain-HTTP loopback. Leave it at `SameAsRequest`. This is the reflex copied from internet-facing tutorials.
+- **`Login.razor` in `Noof.Web` is a bare `<form method="post" action="/account/login">`** — no `@inject`, no `@rendermode`, no `HttpContext`. A cookie must be set by a terminal HTTP response; it cannot be set from inside an upgraded SignalR circuit. The POST is handled by a minimal-API endpoint in `Noof.Host`. Microsoft's scaffolded `Login.razor` injects `SignInManager` and `HttpContext` straight into the component — copying it would drag EF-backed services into the UI-only RCL and break the architecture test.
+- **No global `FallbackPolicy`.** The "secure by default" reflex would break `/healthz` and the deploy script's post-publish poll. Authorization stays opt-in per endpoint, with a `/healthz`-stays-anonymous regression test.
+- **First user via CLI only:** `Noof.Host.exe user set-password`, parsed before the host is built. No `/register`, no `/setup` page, no seeded credential. It doubles as the recovery path, which is why no reset flow is needed. **A password in any appsettings file is one commit from being permanent in a public repo.**
+
+### Architecture impact
+
+**No tenth project. No second DbContext.** `Noof.Web`'s `ProjectReference` set stays exactly `{Noof.Application, Noof.Domain}`.
+
+| Project | Change |
+|---|---|
+| `Noof.Domain` | `AppUser` POCO. **Still zero packages** — existing test unaffected |
+| `Noof.Application` | `IUserStore` + our own `IPasswordHasher` port. Deliberately does *not* reference `Microsoft.Extensions.Identity.Core` |
+| `Noof.Persistence` | `AppUserConfiguration`, store implementation, one migration. **csproj unchanged** |
+| `Noof.Web` | Gains **exactly one** `PackageReference`: `Microsoft.AspNetCore.Components.Authorization`. **The architecture test needs amending** to permit it |
+| `Noof.Host` | Handler registration, unconditional middleware, the login endpoint, the CLI verb, the startup guard |
+
+**No roles, no claims, no permission matrix.** One row, one human, one binary distinction. A role claim later costs less than the flag flip.
+
+**Passkeys deferred, not rejected.** .NET 10 Identity has genuine native passkey support, but Microsoft documents the HTTPS requirement unconditionally with no loopback exemption. Revisit once a trusted local HTTPS origin exists; the passkey then attaches to the same `app_user` row with the password as documented recovery.
+
+### Open questions
+
+| # | Question | Default |
+|---|---|---|
+| A1 | Does anyone else have a Windows account on this PC? **Yes means flip to `Cookie` now** — it's the one scenario where auth is load-bearing today | Assumed no |
+| A2 | Do you intend to reach the dashboard from your phone, and roughly when? | Not yet |
+| A3 | Re-prompt for the password on `/settings/secrets` if the session is older than ~10 min? | Policy attached, handler lenient |
+| A4 | Worth setting up trusted local HTTPS once, to unlock Windows Hello? | No — password stays permanent |
