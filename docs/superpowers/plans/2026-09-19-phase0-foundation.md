@@ -279,7 +279,7 @@ Expected: Build succeeded, 0 warnings, 0 errors.
 
 - [ ] **Step 9: Verify the test runner works**
 
-Run: `dotnet test NoofFinance.slnx`
+Run: `dotnet test --solution NoofFinance.slnx`
 Expected: all test projects discovered and passing. If this fails with *"Testing with VSTest target is no longer supported"*, the `global.json` `test.runner` stanza from Task 1 is missing or malformed.
 
 - [ ] **Step 10: Commit**
@@ -372,7 +372,7 @@ public class ProjectReferenceTests
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `dotnet test tests/Noof.Architecture.Tests`
+Run: `dotnet test --project tests/Noof.Architecture.Tests`
 Expected: FAIL — `AwesomeAssertions` is not referenced yet.
 
 - [ ] **Step 3: Add the assertion package**
@@ -383,7 +383,7 @@ dotnet add tests/Noof.Architecture.Tests package AwesomeAssertions
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `dotnet test tests/Noof.Architecture.Tests`
+Run: `dotnet test --project tests/Noof.Architecture.Tests`
 Expected: PASS, 7 tests.
 
 - [ ] **Step 5: Prove the test actually catches a violation**
@@ -392,7 +392,7 @@ This step exists because a boundary test that cannot fail is worse than none —
 
 ```bash
 dotnet add src/Noof.Web reference src/Noof.Persistence
-dotnet test tests/Noof.Architecture.Tests
+dotnet test --project tests/Noof.Architecture.Tests
 ```
 
 Expected: FAIL on `Project_references_exactly_its_allowed_set` for `Noof.Web`.
@@ -401,7 +401,7 @@ Expected: FAIL on `Project_references_exactly_its_allowed_set` for `Noof.Web`.
 
 ```bash
 dotnet remove src/Noof.Web reference src/Noof.Persistence
-dotnet test tests/Noof.Architecture.Tests
+dotnet test --project tests/Noof.Architecture.Tests
 ```
 
 Expected: PASS.
@@ -526,7 +526,7 @@ public class DatabaseReachableTests
 
 - [ ] **Step 6: Run to verify it fails**
 
-Run: `dotnet test tests/Noof.Persistence.Tests`
+Run: `dotnet test --project tests/Noof.Persistence.Tests`
 Expected: FAIL — `Npgsql` is not referenced yet.
 
 - [ ] **Step 7: Add the packages**
@@ -538,7 +538,7 @@ dotnet add tests/Noof.Persistence.Tests package AwesomeAssertions
 
 - [ ] **Step 8: Run to verify it passes**
 
-Run: `dotnet test tests/Noof.Persistence.Tests`
+Run: `dotnet test --project tests/Noof.Persistence.Tests`
 Expected: PASS, 2 tests.
 
 - [ ] **Step 9: Commit**
@@ -608,7 +608,7 @@ public class MoneyTests
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `dotnet test tests/Noof.Domain.Tests`
+Run: `dotnet test --project tests/Noof.Domain.Tests`
 Expected: FAIL — `Money` and `CurrencyCode` do not exist.
 
 - [ ] **Step 3: Implement the domain types**
@@ -674,7 +674,7 @@ public readonly record struct Money(decimal Amount, CurrencyCode Currency)
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `dotnet test tests/Noof.Domain.Tests`
+Run: `dotnet test --project tests/Noof.Domain.Tests`
 Expected: PASS, 4 tests.
 
 - [ ] **Step 5: Write the failing gate test**
@@ -839,7 +839,7 @@ public sealed class PostgresCollection : ICollectionFixture<PostgresFixture>;
 
 - [ ] **Step 7: Run to verify it fails**
 
-Run: `dotnet test tests/Noof.Persistence.Tests`
+Run: `dotnet test --project tests/Noof.Persistence.Tests`
 Expected: FAIL — `Npgsql` and `xunit.v3` are not referenced from `Noof.TestKit`.
 
 - [ ] **Step 8: Add the packages**
@@ -851,7 +851,7 @@ dotnet add tests/Noof.TestKit package xunit.v3
 
 - [ ] **Step 9: Run to verify it passes**
 
-Run: `dotnet test tests/Noof.Persistence.Tests`
+Run: `dotnet test --project tests/Noof.Persistence.Tests`
 Expected: PASS, 7 tests — including all three cultures.
 
 - [ ] **Step 10: Commit**
@@ -989,7 +989,7 @@ dotnet add tests/Noof.TestKit reference src/Noof.Persistence
 
 - [ ] **Step 3: Run to verify it fails**
 
-Run: `dotnet test tests/Noof.Persistence.Tests`
+Run: `dotnet test --project tests/Noof.Persistence.Tests`
 Expected: FAIL — `NoofDbContext` does not exist.
 
 - [ ] **Step 4: Implement the DbContext with the three irreversible conventions**
@@ -1085,7 +1085,7 @@ Expected: a `Migrations/` folder appears under `src/Noof.Persistence`.
 
 - [ ] **Step 6: Run to verify it passes**
 
-Run: `dotnet test tests/Noof.Persistence.Tests`
+Run: `dotnet test --project tests/Noof.Persistence.Tests`
 Expected: PASS, 12 tests.
 
 - [ ] **Step 7: Prime the template database**
@@ -1098,7 +1098,7 @@ dotnet ef database update --project src/Noof.Persistence --startup-project src/N
 
 - [ ] **Step 8: Run the whole suite**
 
-Run: `dotnet test NoofFinance.slnx`
+Run: `dotnet test --solution NoofFinance.slnx`
 Expected: PASS, all projects.
 
 - [ ] **Step 9: Commit**
@@ -1167,7 +1167,7 @@ public class SqliteCounterfactualTests
 
 ```bash
 dotnet add tests/Noof.Persistence.Tests package Microsoft.Data.Sqlite
-dotnet test tests/Noof.Persistence.Tests --filter "SqliteCounterfactual"
+dotnet test --project tests/Noof.Persistence.Tests --filter "SqliteCounterfactual"
 ```
 
 Expected: PASS — SQLite's lexicographic `MAX` returns `999.99`, not `1234.50`. **Record the actual value printed.**
@@ -1183,7 +1183,7 @@ The decision is made and recorded. Leaving a SQLite dependency in a Postgres pro
 ```bash
 rm tests/Noof.Persistence.Tests/SqliteCounterfactualTests.cs
 dotnet remove tests/Noof.Persistence.Tests package Microsoft.Data.Sqlite
-dotnet test NoofFinance.slnx
+dotnet test --solution NoofFinance.slnx
 ```
 
 Expected: PASS, all projects.
@@ -1224,7 +1224,7 @@ try {
     dotnet build NoofFinance.slnx -c Release
     if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
 
-    dotnet test NoofFinance.slnx -c Release
+    dotnet test --solution NoofFinance.slnx -c Release
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed; refusing to publish.' }
 
     if (Test-Path publish) { Remove-Item publish -Recurse -Force }
@@ -1258,7 +1258,7 @@ git commit -m "build: test-gated publish script targeting the publish folder"
 
 ## Phase 0 exit criteria
 
-- [ ] `dotnet test NoofFinance.slnx` is green, running on Microsoft Testing Platform.
+- [ ] `dotnet test --solution NoofFinance.slnx` is green, running on Microsoft Testing Platform.
 - [ ] The culture gate test passes for `en-US`, `ru-RU` and `sr-Latn-RS`.
 - [ ] Adding a forbidden `ProjectReference` turns the architecture test red — proven, not assumed.
 - [ ] `money_probe_entities.amount` is `numeric(19,4)`; `recorded_at` is `timestamp with time zone`.
