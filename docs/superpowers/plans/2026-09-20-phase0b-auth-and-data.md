@@ -1138,10 +1138,13 @@ Expected: `Web_package_references_are_exactly_its_allowed_set` FAILS (Authorizat
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.AspNetCore.Components.Routing
 @using Microsoft.AspNetCore.Components.Web
+@using static Microsoft.AspNetCore.Components.Web.RenderMode
 @using Noof.Ledger.Web
 @using Noof.Ledger.Web.Components
 @using Noof.Ledger.Web.Components.Layout
 ```
+
+> The `@using static ... RenderMode` line is required, not decorative: without it `@rendermode InteractiveServer` in `Counter.razor` does not compile. It is easy to miss because the .NET 10 template carries it implicitly.
 
 `src/Noof.Ledger.Web/Components/App.razor`:
 
