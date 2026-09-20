@@ -73,3 +73,89 @@ From §15 of the design, added 2026-09-19. All defaulted; none blocks any phase.
 The startup guard makes the config key and the Kestrel binding inseparable: widening the binding
 for phone access will refuse to start until auth is on. That is what stops "optional now" from
 becoming "forgotten forever" — no discipline required from you.
+
+---
+
+## Phase 1 decisions — taken 2026-09-21
+
+Four questions were put to the user before Phase 1 planning. All four are answered; two of them
+changed the design that the readiness audit had recommended.
+
+| # | Question | **Decision** |
+|---|---|---|
+| P1-1 | Category taxonomy — there was none anywhere in the repo or the spec | **Dynamic hierarchy.** Guid keys, self-referencing parent, sub-categories, bilingual `NameEn`/`NameRu`, renameable |
+| P1-2 | Q1, the PostgreSQL credential (was due this phase) | **Leave as is.** Re-parked to a new hardening phase, by explicit instruction |
+| P1-3 | Timezone for "today" / "this month" | **Per-transaction.** The zone is stored on the row, not assumed globally |
+| P1-4 | How much parsing grammar Phase 1 owns | **None. Extraction is the LLM's job** |
+
+### P1-1 — categories are data, not an enum
+
+Guid primary keys, `ParentId` for sub-categories, `NameEn` + `NameRu`, and renaming must not break
+anything. That last requirement is the one with teeth: **a renameable display name cannot be the key
+the model answers with.** Every category therefore carries an immutable `Slug` that is minted once and
+never changes; the model's structured-output enum is built from current slugs at call time, and
+`category.NameRu` can be rewritten freely without invalidating a single stored categorisation.
+
+Consequence for the request schema: the enum is per-request data, not a compile-time constant. There
+is no `CategoryKind` enum in the codebase and there must not be one.
+
+Seed: a starting tree, not a fixed taxonomy — the user renames and extends from there. A management
+UI is NOT a Phase 1 deliverable; the schema supports renaming from the first migration, which is the
+half that is expensive to retrofit.
+
+### P1-2 — Q1 is deferred, deliberately, and a new phase is owed
+
+The user's words: *"Оставь как есть до последней фазы (нужны новая фаза почистить и подготовить к
+'продакшну' руками)."* So Q1 does not move in Phase 1, and a **hardening / production-readiness
+phase** is now owed at the end of the roadmap. It should collect at least: the DPAPI-or-SSPI
+credential decision, a real look at what is logged, and whatever else accumulates as "fine for a
+single-user dev machine".
+
+Separately, and NOT part of that deferral: `ops/reset-database-auth.ps1:76` writes
+`Include Error Detail=true` into the credential file, so it reaches the application's runtime
+connection string and puts **parameter values into Npgsql exception text**. That is a secrets-leak
+surface and Phase 1 is when secrets start flowing through EF. Strip it from the runtime string in
+Phase 1; it is unrelated to how the password is stored.
+
+### P1-3 — the zone lives on the row
+
+Storage stays `DateTimeOffset` → `timestamptz`; that was already settled. What is new is that
+bucketing into a local day must not depend on the machine's clock. Telegram does not report the
+sender's zone, so the row's zone is stamped at capture time from a current-zone setting (default
+`Europe/Belgrade`) that the user can change when they travel. History then stays honest: a spend made
+in Belgrade keeps its Belgrade day even after the setting moves.
+
+`time_zone text` (IANA id) on the transaction, in the first migration. Retrofitting it means
+re-bucketing history against an assumption nobody wrote down.
+
+### P1-4 — extraction is the model's job, and what that costs
+
+The user's words: *"Это должно быть на стороне ллм только."* This overrides the readiness audit's
+central recommendation, which was a deterministic parser in Domain. There is no hand-rolled grammar,
+no currency-alias table, and no tokenizer in Phase 1.
+
+**Two things in the approved spec do not survive this unchanged, and are recorded here rather than
+quietly dropped:**
+
+1. Spec:157 requires the immediate Telegram reply to carry the total and running balance as
+   **model-free numbers**, before any model call. If nothing extracts the amount offline, that reply
+   cannot contain an amount. **Resolution:** with the network down the bot saves the raw message and
+   replies that it is saved and will be processed; the amount and balance appear when the message is
+   edited after processing. The acceptance criterion's "still saves" holds — what is saved is the raw
+   text, and nothing is ever lost.
+2. CLAUDE.md is absolute that no user-facing number originates from a model. **Resolution:
+   quote-and-verify, which the spec already describes at :159.** The model returns the *substring* it
+   believes is the amount; C# asserts that substring occurs verbatim in the stored `raw_text` and then
+   parses it itself with `decimal.Parse`. The number is therefore computed by C# from verified input,
+   never transcribed from a model's arithmetic. A model that paraphrases instead of quoting fails the
+   check and the job goes to the failed state rather than inventing a figure.
+
+Currency is simpler than the audit assumed: the model returns an ISO code constrained by the
+structured-output enum to the five supported codes, so `CurrencyCode` is constructed from ASCII and the
+`рсд` blocker below never arises.
+
+> **The blocker that made this decision necessary, kept for the record.** `CurrencyCode.cs:7` rejects
+> any value failing `char.IsAsciiLetter`. The literal token in the acceptance test, `рсд`, is three
+> characters — so the length check passes — and then throws on the ASCII check. Verified directly.
+> `CurrencyCode` must NOT be loosened: its ASCII/ordinal invariant is a settled decision driven by the
+> Serbian `LJ` collation bug. Any future deterministic parser must map aliases outside the type.
