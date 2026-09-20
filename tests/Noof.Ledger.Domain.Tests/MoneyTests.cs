@@ -76,6 +76,22 @@ public class MoneyTests
     }
 
     [Fact]
+    public void Negating_flips_the_sign_and_keeps_the_currency()
+    {
+        (-new Money(10.50m, CurrencyCode.Eur)).Should().Be(new Money(-10.50m, CurrencyCode.Eur));
+        (-new Money(-10.50m, CurrencyCode.Eur)).Should().Be(new Money(10.50m, CurrencyCode.Eur));
+    }
+
+    [Fact]
+    public void Negating_a_currency_less_default_throws()
+    {
+        var act = () => -default(Money);
+
+        act.Should().Throw<InvalidOperationException>()
+           .WithMessage("*currency*");
+    }
+
+    [Fact]
     public void Currency_code_rejects_anything_that_is_not_three_letters()
     {
         var act = () => new CurrencyCode("EURO");

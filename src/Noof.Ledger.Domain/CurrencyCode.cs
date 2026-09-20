@@ -1,6 +1,6 @@
 namespace Noof.Ledger.Domain;
 
-public readonly record struct CurrencyCode
+public readonly record struct CurrencyCode : IComparable<CurrencyCode>, IComparable
 {
     public CurrencyCode(string value)
     {
@@ -18,5 +18,22 @@ public readonly record struct CurrencyCode
     public static readonly CurrencyCode Rub = new("RUB");
     public static readonly CurrencyCode Kzt = new("KZT");
 
-    public override string ToString() => Value;
+    public int CompareTo(CurrencyCode other) => string.CompareOrdinal(Value, other.Value);
+
+    int IComparable.CompareTo(object? obj) => obj switch
+    {
+        null => 1,
+        CurrencyCode other => CompareTo(other),
+        _ => throw new ArgumentException($"Cannot compare a currency code with {obj.GetType().Name}.", nameof(obj)),
+    };
+
+    public static bool operator <(CurrencyCode left, CurrencyCode right) => left.CompareTo(right) < 0;
+
+    public static bool operator >(CurrencyCode left, CurrencyCode right) => left.CompareTo(right) > 0;
+
+    public static bool operator <=(CurrencyCode left, CurrencyCode right) => left.CompareTo(right) <= 0;
+
+    public static bool operator >=(CurrencyCode left, CurrencyCode right) => left.CompareTo(right) >= 0;
+
+    public override string ToString() => Value ?? string.Empty;
 }

@@ -1,10 +1,27 @@
 # Phase 0 — Foundation and Database Proof — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> ## STATUS: EXECUTED AND SUPERSEDED — DO NOT RE-RUN
+>
+> Phase 0 was implemented from this plan and completed. **The shipped code in `src/` and
+> `tests/` is the authority, not the code blocks below.** This document is kept as the record of
+> what was planned and why; several of its samples were deliberately changed during execution and
+> re-running them would REGRESS fixed defects.
+>
+> Known divergences, each intentional:
+>
+> | This plan says | Shipped reality | Why |
+> |---|---|---|
+> | five `tests/` projects; create `Noof.Ledger.Application.Tests` | **four** — that project was deleted | It held only assertion-free placeholders (`a440239`) |
+> | `Money.cs` operators with no guard | `+`, `-`, unary `-`, and `CompareTo` all reject currency-less `Money` | `8586923`, and the unary-negation hole found in final review |
+> | `DesignTimeDbContextFactory` reads `NOOF_DESIGN_TIME_PG`, falls back to a passwordless string | reads `NOOF_TEST_PG`, then the credential file, else throws | The planned fallback could never connect (`f8a2dc2`) |
+> | `ops/publish.ps1` checks only the exit code | also requires `succeeded: <n>` with n >= 1 | Exit code alone let a zero-test run look like a pass (`4899d53`) |
+> | `NoofDbContext`, `NoofFinance.slnx`, database `noof_finance` | `LedgerDbContext`, `NoofLedger.slnx`, database `noof_ledger` | Project renamed to Ledger (`c81339d`, `e621ab2`) |
+>
+> Phase 0 exit state: 65 tests, 0 failed, exit 0; `ops/publish.ps1` produces `publish/Noof.Ledger.Host.exe`.
 
 **Goal:** Stand up the nine-project solution with enforced boundaries, prove PostgreSQL handles money correctly in the user's own cultures where SQLite does not, and lock the three conventions that are expensive to reverse.
 
-**Architecture:** A .slnx solution with nine `src/` projects and five `tests/` projects for this phase. `Noof.Ledger.Domain` has zero package references; `Noof.Ledger.Web` is a UI-only Razor Class Library. Boundaries are enforced by tests that parse `.csproj` files, not by convention, because project references are transitive at compile time. Money is `decimal` + `Currency` in the domain, mapped to native `numeric(19,4)` in PostgreSQL 18.
+**Architecture:** A .slnx solution with nine `src/` projects and (as shipped) four `tests/` projects. `Noof.Ledger.Domain` has zero package references; `Noof.Ledger.Web` is a UI-only Razor Class Library. Boundaries are enforced by tests that parse `.csproj` files, not by convention, because project references are transitive at compile time. Money is `decimal` + `Currency` in the domain, mapped to native `numeric(19,4)` in PostgreSQL 18.
 
 **Tech Stack:** .NET 10 (SDK 10.0.204) · PostgreSQL 18 · EF Core 10 + Npgsql · xUnit v3 on Microsoft Testing Platform · AwesomeAssertions · ArchUnitNET
 
