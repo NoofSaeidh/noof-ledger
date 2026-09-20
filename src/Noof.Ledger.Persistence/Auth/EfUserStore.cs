@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Auth;
 using Noof.Ledger.Domain;
 
@@ -11,7 +11,7 @@ public sealed class EfUserStore(LedgerDbContext db) : IUserStore
 
     public async Task UpsertAsync(AppUser user, CancellationToken cancellationToken)
     {
-        var existing = await db.Users.FindAsync([user.Id], cancellationToken);
+        var existing = await FindByUsernameAsync(user.Username, cancellationToken);
 
         if (existing is null)
             db.Users.Add(user);

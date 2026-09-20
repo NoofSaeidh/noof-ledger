@@ -956,14 +956,36 @@ public class EfUserStoreTests(PostgresFixture fixture)
     }
 
     [Fact]
-    public async Task A_second_user_differing_only_by_case_is_rejected_by_the_database()
+    public async Task Upserting_a_case_variant_updates_the_existing_user_rather_than_adding_one()
     {
+        // Usernames are case-insensitive, so NOOF and noof are ONE account. An upsert keyed on Id
+        // instead of username would insert here, hit the unique index, and make `user set-password`
+        // fail on its second run — i.e. the password could never be changed.
         await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
         var store = new EfUserStore(db);
 
         await store.UpsertAsync(NewUser("noof"), TestContext.Current.CancellationToken);
+        var variant = NewUser("NOOF");
+        variant.PasswordHash = "rotated";
+        await store.UpsertAsync(variant, TestContext.Current.CancellationToken);
 
-        var act = async () => await store.UpsertAsync(NewUser("NOOF"), TestContext.Current.CancellationToken);
+        var all = await db.Users.ToListAsync(TestContext.Current.CancellationToken);
+        all.Should().ContainSingle();
+        all[0].PasswordHash.Should().Be("rotated");
+    }
+
+    [Fact]
+    public async Task The_database_itself_rejects_a_duplicate_username_differing_only_by_case()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+
+        db.Users.Add(NewUser("noof"));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        db.Users.Add(NewUser("NOOF"));
+        var act = async () => await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<DbUpdateException>();
     }
