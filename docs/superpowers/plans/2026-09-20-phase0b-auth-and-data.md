@@ -39,11 +39,11 @@ Every task's requirements implicitly include this section. Values are exact.
 
 Input classes the spec implies that no task's happy path exercises. Each is assigned to the task that owns the code.
 
-1. **A login POST with no antiforgery token must be rejected.** `.WithMetadata(new RequireAntiforgeryTokenAttribute())` alone does **not** protect a `MapPost` — verified returning 200 with no token supplied. Binding via `[FromForm]` parameters is what engages validation, and the failure is silent. → Task 10.
-2. **A wrong password must not produce an auth cookie.** The obvious bug is redirecting back to the login page while still signing the user in. → Task 10.
-3. **`/healthz` must stay anonymous under BOTH modes.** The "secure by default" reflex adds a global `FallbackPolicy`, which breaks the deploy script's post-publish poll. → Task 11.
-4. **A username that differs only by case must not create a second user.** `UPSERT` on a case-sensitive unique index silently produces two accounts. → Task 3 (citext/lower index) and Task 12.
-5. **The app must boot with PostgreSQL unreachable** when `Database:MigrateOnStartup=false`, and fail fast rather than hang when `true`. Every integration test depends on the first half. → Task 9.
+1. **A login POST with no antiforgery token must be rejected.** `.WithMetadata(new RequireAntiforgeryTokenAttribute())` alone does **not** protect a `MapPost` — verified returning 200 with no token supplied. Binding via `[FromForm]` parameters is what engages validation, and the failure is silent. → Task 11.
+2. **A wrong password must not produce an auth cookie.** The obvious bug is redirecting back to the login page while still signing the user in. → Task 11.
+3. **`/healthz` must stay anonymous under BOTH modes.** The "secure by default" reflex adds a global `FallbackPolicy`, which breaks the deploy script's post-publish poll. → Task 10, asserted again in Task 12.
+4. **A username that differs only by case must not create a second user.** `UPSERT` on a case-sensitive unique index silently produces two accounts. → Task 3 (the `lower(username)` index) and Task 8 (proved against a real database).
+5. **The app must boot with PostgreSQL unreachable** when `Database:MigrateOnStartup=false`, and fail fast rather than hang when `true`. Every integration test depends on the first half. → Task 10.
 
 ---
 
@@ -1067,8 +1067,868 @@ git commit -m "feat(persistence): EfUserStore with case-insensitive lookup"
 
 ---
 
-## Remaining tasks
+---
 
-Tasks 9–13 (the Blazor Server shell, `Program.cs` auth wiring, the login form and endpoint, the auth-mode integration matrix, the `user set-password` CLI verb, and the four Playwright smoke tests) depend on the RCL/Host split shape, which is being established by an empirical probe. They are appended to this plan once that lands, so that their steps name real files rather than a guessed layout.
+## Task 9: Web + Host — the Blazor Server shell across the UI-only boundary
 
-Tasks 1–8 above have no dependency on that shape and are ready to execute.
+**Files:**
+- Create: `src/Noof.Ledger.Web/Components/App.razor`, `Routes.razor`, `Layout/MainLayout.razor`, `Pages/Home.razor`, `Pages/Counter.razor`
+- Create: `src/Noof.Ledger.Web/wwwroot/app.css`
+- Modify: `src/Noof.Ledger.Web/_Imports.razor`, `Noof.Ledger.Web.csproj`
+- Modify: `src/Noof.Ledger.Host/Program.cs`, `Noof.Ledger.Host.csproj`
+- Create: `src/Noof.Ledger.Host/wwwroot/.gitkeep`
+- Modify: `Directory.Packages.props`
+- Modify: `tests/Noof.Ledger.Architecture.Tests/ProjectReferenceTests.cs`
+
+**Interfaces:**
+- Produces: `Noof.Ledger.Web.Components.App` — the root component `Program.cs` passes to `MapRazorComponents<App>()`.
+
+**This shape was established empirically, not guessed.** A two-project replica was built and run. Everything marked **VERIFIED** below was observed as real HTTP output.
+
+> ### The finding that will cost you an afternoon if you skip it
+>
+> **`_framework/blazor.web.js` returns 404 unless `Noof.Ledger.Host.csproj` sets `RequiresAspNetWebAssets`.**
+>
+> The Web SDK only pulls in the package that physically contains `blazor.web.js` when the **Host project itself** has at least one `.razor` file as `Content` — `Microsoft.NET.Sdk.Web.ProjectSystem.targets` gates it on `@(Content->AnyHaveMetadataValue(Extension, .razor))`. This architecture puts *every* `.razor` file in the RCL, so Host has none, the heuristic never fires, and you get a **silent 404**: the build is clean, the page renders, and interactivity is simply dead. Set it explicitly.
+
+- [ ] **Step 1: Write the failing architecture tests first**
+
+Two rules in CLAUDE.md are currently enforced by nothing, and both go live the moment this task runs. Add to `tests/Noof.Ledger.Architecture.Tests/ProjectReferenceTests.cs`:
+
+```csharp
+    [Fact]
+    public void Web_package_references_are_exactly_its_allowed_set()
+    {
+        Packages("Noof.Ledger.Web").Should().BeEquivalentTo(
+            "Microsoft.AspNetCore.Components.Web",
+            "Microsoft.AspNetCore.Components.Authorization");
+    }
+
+    [Fact]
+    public void Web_has_no_program_cs()
+    {
+        var web = Path.Combine(RepoRoot.Find().FullName, "src", "Noof.Ledger.Web");
+
+        Directory.EnumerateFiles(web, "Program.cs", SearchOption.AllDirectories)
+            .Should().BeEmpty("Noof.Ledger.Web is a UI-only class library; the host owns startup");
+    }
+
+    [Fact]
+    public void Web_is_a_razor_class_library_not_a_web_app()
+    {
+        Load("Noof.Ledger.Web").Root!.Attribute("Sdk")!.Value.Should().Be("Microsoft.NET.Sdk.Razor");
+    }
+```
+
+The existing package assertions are blacklists (`NotContain`). An exact set is what turns adding a package into a reviewed decision rather than an unwatched accumulation — which matters precisely because this task adds one.
+
+- [ ] **Step 2: Run them**
+
+Run: `dotnet test --project tests/Noof.Ledger.Architecture.Tests/Noof.Ledger.Architecture.Tests.csproj`
+Expected: `Web_package_references_are_exactly_its_allowed_set` FAILS (Authorization not added yet). The other two PASS — they are regression guards for the rest of this task.
+
+- [ ] **Step 3: Add the package**
+
+`Directory.Packages.props`:
+
+```xml
+    <PackageVersion Include="Microsoft.AspNetCore.Components.Authorization" Version="10.0.8" />
+```
+
+`src/Noof.Ledger.Web/Noof.Ledger.Web.csproj`, in the existing `PackageReference` ItemGroup:
+
+```xml
+    <PackageReference Include="Microsoft.AspNetCore.Components.Authorization" />
+```
+
+**VERIFIED:** 10.0.8 restores and builds clean under CPM + `TreatWarningsAsErrors` + `NuGetAuditMode=all`, needs no extra transitive pin, and produces no NU1008. Keep it lockstep with `Components.Web`. `AuthorizeRouteView`, `AuthorizeView`, `CascadingAuthenticationState` and `AuthenticationStateProvider` all live in this package — **not** in `Components.Web`, despite `AuthorizeRouteView`'s routing-flavoured name. `[Authorize]` and `<AntiforgeryToken />` already work without it.
+
+- [ ] **Step 4: Write the components**
+
+`src/Noof.Ledger.Web/_Imports.razor`:
+
+```razor
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.AspNetCore.Components.Routing
+@using Microsoft.AspNetCore.Components.Web
+@using Noof.Ledger.Web
+@using Noof.Ledger.Web.Components
+@using Noof.Ledger.Web.Components.Layout
+```
+
+`src/Noof.Ledger.Web/Components/App.razor`:
+
+```razor
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <link rel="stylesheet" href="@Assets["_content/Noof.Ledger.Web/app.css"]" />
+    <HeadOutlet />
+</head>
+<body>
+    <Routes />
+    <script src="_framework/blazor.web.js"></script>
+</body>
+</html>
+```
+
+> **Do not copy the .NET 10 template's `<ResourcePreloader />` or `<ImportMap />` tags.** They live in `Microsoft.AspNetCore.Components.Endpoints`, which a `Microsoft.NET.Sdk.Razor` project does not have, and adding `<FrameworkReference Include="Microsoft.AspNetCore.App" />` to get them makes NuGet flag the existing `Components.Web` package as redundant — **NU1510, a hard error** here. Both tags are optional optimisations. `HeadOutlet` is fine; it is in `Components.Web`.
+>
+> **VERIFIED:** the `@Assets[...]` key must carry the full `_content/<AssemblyName>/` prefix. Indexing the bare filename silently falls back to the unfingerprinted literal instead of erroring.
+
+`src/Noof.Ledger.Web/Components/Routes.razor`:
+
+```razor
+<Router AppAssembly="typeof(Routes).Assembly">
+    <Found Context="routeData">
+        <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(MainLayout)" />
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+    </Found>
+</Router>
+```
+
+`src/Noof.Ledger.Web/Components/Layout/MainLayout.razor`:
+
+```razor
+@inherits LayoutComponentBase
+
+<main class="page">
+    @Body
+</main>
+```
+
+`src/Noof.Ledger.Web/Components/Pages/Home.razor`:
+
+```razor
+@page "/"
+<PageTitle>Ledger</PageTitle>
+
+<h1>Ledger</h1>
+<p>Nothing to show yet.</p>
+```
+
+`src/Noof.Ledger.Web/Components/Pages/Counter.razor`:
+
+```razor
+@page "/counter"
+@rendermode InteractiveServer
+
+<PageTitle>Counter</PageTitle>
+
+<h1>Counter</h1>
+
+<p role="status">Current count: @count</p>
+
+<button class="btn" @onclick="Increment">Click me</button>
+
+@code {
+    int count;
+
+    void Increment() => count++;
+}
+```
+
+> `Counter` exists to give the E2E suite a real server-pushed DOM update to assert against (Task 14, E2E-2). It is the seam a future chart-interactivity test slots into. Delete it only when something real replaces it.
+
+`src/Noof.Ledger.Web/wwwroot/app.css` — a minimal stylesheet is enough; its job is to prove RCL static assets serve.
+
+- [ ] **Step 5: Wire the Host**
+
+`src/Noof.Ledger.Host/Noof.Ledger.Host.csproj`, add to the existing `PropertyGroup`:
+
+```xml
+    <RequiresAspNetWebAssets>true</RequiresAspNetWebAssets>
+```
+
+Create `src/Noof.Ledger.Host/wwwroot/.gitkeep` — without a `wwwroot`, startup logs a `WebRootPath was not found` warning.
+
+`src/Noof.Ledger.Host/Program.cs`:
+
+```csharp
+using Noof.Ledger.Web.Components;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddRazorComponents()
+    .AddInteractiveServerComponents();
+
+var app = builder.Build();
+
+app.UseAntiforgery();
+
+app.MapStaticAssets();
+app.MapRazorComponents<App>()
+    .AddInteractiveServerRenderMode();
+
+app.MapGet("/healthz", () => Results.Ok("ok"));
+
+app.Run();
+```
+
+> **`AddAdditionalAssemblies` is NOT needed here, and that is a consequence of the layout.** Endpoint discovery roots at the assembly containing the `TRootComponent` passed to `MapRazorComponents<App>()`. Because `App.razor` **and** the `@page` components both live in `Noof.Ledger.Web.dll`, they are the same assembly. **VERIFIED both ways:** with `App` in Host and a page in a separate referenced library, that page returned **404** until `.AddAdditionalAssemblies(...)` was added, then **200**. If pages are ever split across assemblies, this becomes mandatory.
+
+- [ ] **Step 6: Prove it actually serves, not merely compiles**
+
+```bash
+dotnet run --project src/Noof.Ledger.Host/Noof.Ledger.Host.csproj --urls http://127.0.0.1:5199
+```
+
+In another shell, and record the real status codes:
+
+```bash
+curl -s -o /dev/null -w "%{http_code} /\n"             http://127.0.0.1:5199/
+curl -s -o /dev/null -w "%{http_code} /counter\n"      http://127.0.0.1:5199/counter
+curl -s -o /dev/null -w "%{http_code} blazor.web.js\n" http://127.0.0.1:5199/_framework/blazor.web.js
+curl -s -o /dev/null -w "%{http_code} app.css\n"       http://127.0.0.1:5199/_content/Noof.Ledger.Web/app.css
+curl -s -o /dev/null -w "%{http_code} /healthz\n"      http://127.0.0.1:5199/healthz
+curl -s -o /dev/null -w "%{http_code} /nope-xyz\n"     http://127.0.0.1:5199/nope-xyz
+```
+
+Expected: `200 200 200 200 200` and **`404` for `/nope-xyz`**. The 404 matters — without it you have not shown routing works, only that something answers every request.
+
+**If `blazor.web.js` is 404, `RequiresAspNetWebAssets` is missing.** That is the whole point of Step 5.
+
+Stop the host.
+
+- [ ] **Step 7: Run the suite**
+
+Run: `dotnet test --solution NoofLedger.slnx`
+Expected: all green, including the three new architecture tests.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add src/Noof.Ledger.Web src/Noof.Ledger.Host Directory.Packages.props tests/Noof.Ledger.Architecture.Tests/ProjectReferenceTests.cs
+git commit -m "feat(web): Blazor Server shell in the UI-only RCL, with the boundary now test-enforced"
+```
+
+---
+
+## Task 10: Host — auth wiring, the migrate gate, and the loopback guard
+
+**Files:**
+- Modify: `src/Noof.Ledger.Host/Program.cs`, `appsettings.json`
+- Create: `tests/Noof.Ledger.Host.Tests/BootTests.cs`
+
+**Interfaces:**
+- Consumes: `AuthSchemes`, `LocalOwnerHandler` (Task 6), `LoopbackGuard` (Task 7), `IUserStore`/`IPasswordHasher` (Task 2), `EfUserStore` (Task 8), `PasswordHasherAdapter` (Task 5).
+- Produces: `public partial class Program` so `WebApplicationFactory<Program>` can reference it.
+
+**The flag selects a handler, never a branch.** Every piece of middleware and every attribute ships unconditionally. Only the registered scheme differs.
+
+- [ ] **Step 1: Write the failing boot tests**
+
+```csharp
+using AwesomeAssertions;
+using Microsoft.AspNetCore.Mvc.Testing;
+
+namespace Noof.Ledger.Host.Tests;
+
+public class BootTests
+{
+    static WebApplicationFactory<Program> Factory(string authMode, bool migrateOnStartup) =>
+        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Auth:Mode", authMode);
+            builder.UseSetting("Database:MigrateOnStartup", migrateOnStartup.ToString());
+            builder.UseSetting("ConnectionStrings:Ledger",
+                "Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none;Timeout=2");
+        });
+
+    [Fact]
+    public async Task Boots_and_serves_with_the_database_unreachable_when_migration_is_off()
+    {
+        using var factory = Factory("Off", migrateOnStartup: false);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync("/", TestContext.Current.CancellationToken);
+
+        response.IsSuccessStatusCode.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("Off")]
+    [InlineData("Cookie")]
+    public async Task Healthz_is_anonymous_under_both_modes(string mode)
+    {
+        using var factory = Factory(mode, migrateOnStartup: false);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync("/healthz", TestContext.Current.CancellationToken);
+
+        response.IsSuccessStatusCode.Should().BeTrue($"/healthz must stay anonymous under Auth:Mode={mode}");
+    }
+
+    [Fact]
+    public async Task Fails_fast_rather_than_hanging_when_migration_is_on_and_the_database_is_dead()
+    {
+        using var factory = Factory("Off", migrateOnStartup: true);
+
+        var act = async () =>
+        {
+            using var client = factory.CreateClient();
+            await client.GetAsync("/", TestContext.Current.CancellationToken);
+        };
+
+        await act.Should().ThrowAsync<Exception>();
+    }
+}
+```
+
+> The last test deliberately asserts `Exception`, not a specific type. One party observed `SocketException` for this scenario and another `TimeoutException`. The substantive behaviour — it fails, catchably, without hanging — is what matters, and pinning the inner type makes the test environment-dependent.
+
+Add `Microsoft.AspNetCore.Mvc.Testing` to the Host test project and a matching `PackageVersion` at **10.0.8** in `Directory.Packages.props`.
+
+- [ ] **Step 2: Run them and watch them fail**
+
+Run: `dotnet test --project tests/Noof.Ledger.Host.Tests/Noof.Ledger.Host.Tests.csproj`
+Expected: FAIL — `Program` is not accessible, and the config keys do nothing yet.
+
+- [ ] **Step 3: Write the wiring**
+
+```csharp
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.EntityFrameworkCore;
+using Noof.Ledger.Application.Auth;
+using Noof.Ledger.Host.Auth;
+using Noof.Ledger.Host.Startup;
+using Noof.Ledger.Persistence;
+using Noof.Ledger.Persistence.Auth;
+using Noof.Ledger.Web.Components;
+
+var builder = WebApplication.CreateBuilder(args);
+
+var authMode = builder.Configuration["Auth:Mode"] ?? "Off";
+var cookieMode = authMode.Equals("Cookie", StringComparison.OrdinalIgnoreCase);
+
+builder.Services.AddRazorComponents()
+    .AddInteractiveServerComponents();
+
+builder.Services.AddDbContext<LedgerDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("Ledger")));
+
+builder.Services.AddScoped<IUserStore, EfUserStore>();
+builder.Services.AddSingleton<IPasswordHasher, PasswordHasherAdapter>();
+
+var authentication = builder.Services.AddAuthentication(
+    cookieMode ? AuthSchemes.Cookie : AuthSchemes.LocalOwner);
+
+if (cookieMode)
+{
+    authentication.AddCookie(AuthSchemes.Cookie, options =>
+    {
+        options.LoginPath = "/account/login";
+        options.ExpireTimeSpan = TimeSpan.FromDays(180);
+        options.SlidingExpiration = true;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+    });
+}
+else
+{
+    authentication.AddScheme<AuthenticationSchemeOptions, LocalOwnerHandler>(AuthSchemes.LocalOwner, null);
+}
+
+builder.Services.AddAuthorization();
+builder.Services.AddCascadingAuthenticationState();
+
+var app = builder.Build();
+
+if (builder.Configuration.GetValue("Database:MigrateOnStartup", true))
+{
+    using var scope = app.Services.CreateScope();
+    await scope.ServiceProvider.GetRequiredService<LedgerDbContext>().Database.MigrateAsync();
+}
+
+app.UseAuthentication();
+app.UseAuthorization();
+app.UseAntiforgery();
+
+app.MapStaticAssets();
+app.MapRazorComponents<App>()
+    .AddInteractiveServerRenderMode();
+
+app.MapGet("/healthz", () => Results.Ok("ok")).AllowAnonymous();
+
+app.Lifetime.ApplicationStarted.Register(() =>
+{
+    var addresses = app.Services.GetRequiredService<IServer>()
+        .Features.Get<IServerAddressesFeature>()?.Addresses;
+
+    LoopbackGuard.AssertSafe([.. addresses ?? []], authMode);
+});
+
+app.Run();
+
+public partial class Program;
+```
+
+> **`CookieSecurePolicy.Always` would break sign-in entirely** over plain-HTTP loopback. `SameAsRequest` is deliberate, not an oversight — the reflex copied from internet-facing tutorials is wrong here.
+>
+> **No global `FallbackPolicy`.** The "secure by default" instinct breaks `/healthz` and the deploy script's post-publish poll. Authorization stays opt-in per endpoint.
+>
+> The guard reads what Kestrel **actually bound**, in `ApplicationStarted`. Re-deriving Kestrel's precedence across `ASPNETCORE_URLS`, `Kestrel:Endpoints` and `launchSettings.json` by hand is a bug source.
+
+`appsettings.json` gains:
+
+```json
+  "Auth": { "Mode": "Off" },
+  "Database": { "MigrateOnStartup": true },
+  "ConnectionStrings": { "Ledger": "" }
+```
+
+- [ ] **Step 4: Run the tests**
+
+Run: `dotnet test --solution NoofLedger.slnx`
+Expected: all green.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/Noof.Ledger.Host tests/Noof.Ledger.Host.Tests Directory.Packages.props
+git commit -m "feat(host): auth wiring that selects a handler rather than branching the pipeline"
+```
+
+---
+
+## Task 11: Web + Host — the login form and its endpoint
+
+**Files:**
+- Create: `src/Noof.Ledger.Web/Components/Account/Login.razor`
+- Create: `src/Noof.Ledger.Host/Endpoints/AccountEndpoints.cs`
+- Modify: `src/Noof.Ledger.Host/Program.cs`
+- Create: `tests/Noof.Ledger.Host.Tests/LoginEndpointTests.cs`, `FakeUserStore.cs`, `LoginHelper.cs`
+
+**Interfaces:**
+- Consumes: `IUserStore`, `IPasswordHasher`, `PasswordVerifyResult`, `AuthSchemes`.
+
+> ### The silent failure this task exists to prevent
+>
+> **`.WithMetadata(new RequireAntiforgeryTokenAttribute())` does NOT protect a `MapPost`.** Verified returning **200 with no token supplied**. What actually engages antiforgery validation is binding the form through **`[FromForm]` parameters**. A future "simplification" that switches the handler to `HttpContext` + `ReadFormAsync()` removes CSRF protection from login with **no compile error and no visible symptom**. The four-case test below is the only thing that would catch it. Do not delete it as redundant.
+
+**`Login.razor` is a bare form and must stay one.** No `@inject`, no `@rendermode`, no `HttpContext`. A cookie must be set by a terminal HTTP response; it cannot be set from inside an upgraded SignalR circuit. Microsoft's scaffolded `Login.razor` injects `SignInManager` and `HttpContext` straight into the component — copying it would drag EF-backed services into the UI-only RCL and break the architecture test.
+
+- [ ] **Step 1: Write the failing tests**
+
+```csharp
+using System.Net;
+using AwesomeAssertions;
+using Microsoft.AspNetCore.Mvc.Testing;
+
+namespace Noof.Ledger.Host.Tests;
+
+public class LoginEndpointTests
+{
+    static WebApplicationFactory<Program> CookieMode() =>
+        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Auth:Mode", "Cookie");
+            builder.UseSetting("Database:MigrateOnStartup", "false");
+            builder.UseSetting("ConnectionStrings:Ledger",
+                "Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none;Timeout=2");
+            builder.ConfigureServices(FakeUserStore.Register);
+        });
+
+    [Fact]
+    public async Task A_post_without_an_antiforgery_token_is_rejected()
+    {
+        using var factory = CookieMode();
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsync("/account/login",
+            new FormUrlEncodedContent([
+                new KeyValuePair<string, string>("username", "noof"),
+                new KeyValuePair<string, string>("password", "correct")]),
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task The_login_page_renders_a_plain_post_form_with_a_token()
+    {
+        using var factory = CookieMode();
+        using var client = factory.CreateClient();
+
+        var html = await client.GetStringAsync("/account/login", TestContext.Current.CancellationToken);
+
+        html.Should().Contain("method=\"post\"")
+            .And.Contain("action=\"/account/login\"")
+            .And.Contain("__RequestVerificationToken");
+    }
+
+    [Fact]
+    public async Task Correct_credentials_set_an_auth_cookie()
+    {
+        using var factory = CookieMode();
+        using var client = factory.CreateClient(new() { AllowAutoRedirect = false });
+
+        var response = await LoginHelper.PostWithTokenAsync(client, "noof", "correct");
+
+        response.Headers.TryGetValues("Set-Cookie", out var cookies).Should().BeTrue();
+        cookies!.Should().Contain(c => c.Contains(".AspNetCore.Cookie", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task A_wrong_password_sets_no_auth_cookie()
+    {
+        using var factory = CookieMode();
+        using var client = factory.CreateClient(new() { AllowAutoRedirect = false });
+
+        var response = await LoginHelper.PostWithTokenAsync(client, "noof", "wrong");
+
+        var cookies = response.Headers.TryGetValues("Set-Cookie", out var values)
+            ? values
+            : Enumerable.Empty<string>();
+
+        cookies.Should().NotContain(c => c.Contains(".AspNetCore.Cookie", StringComparison.OrdinalIgnoreCase));
+    }
+}
+```
+
+Write two small helpers in the same project:
+- `FakeUserStore` — a hand-written `IUserStore` holding one `AppUser` whose stored hash was produced by a real `PasswordHasherAdapter` from the password `"correct"`, plus a static `Register(IServiceCollection)` that replaces the registered `IUserStore`. A hand-written fake beats a mocking framework here: the interface has two methods.
+- `LoginHelper.PostWithTokenAsync(HttpClient, string, string)` — GET `/account/login`, extract the `__RequestVerificationToken` hidden input value with a regex, carry the returned cookies, and POST both fields plus the token.
+
+- [ ] **Step 2: Run and watch them fail**
+
+Run: `dotnet test --project tests/Noof.Ledger.Host.Tests/Noof.Ledger.Host.Tests.csproj`
+Expected: FAIL — `/account/login` does not exist.
+
+- [ ] **Step 3: Write the form**
+
+`src/Noof.Ledger.Web/Components/Account/Login.razor`:
+
+```razor
+@page "/account/login"
+@attribute [AllowAnonymous]
+
+<PageTitle>Sign in</PageTitle>
+
+<h1>Sign in</h1>
+
+<form method="post" action="/account/login">
+    <AntiforgeryToken />
+    <label>Username <input name="username" autocomplete="username" /></label>
+    <label>Password <input name="password" type="password" autocomplete="current-password" /></label>
+    <button type="submit">Sign in</button>
+</form>
+```
+
+- [ ] **Step 4: Write the endpoint**
+
+```csharp
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Mvc;
+using Noof.Ledger.Application.Auth;
+using Noof.Ledger.Host.Auth;
+
+namespace Noof.Ledger.Host.Endpoints;
+
+public static class AccountEndpoints
+{
+    public static void MapAccountEndpoints(this IEndpointRouteBuilder routes) =>
+        routes.MapPost("/account/login", async (
+            [FromForm] string username,
+            [FromForm] string password,
+            HttpContext context,
+            IUserStore users,
+            IPasswordHasher hasher,
+            CancellationToken cancellationToken) =>
+        {
+            var user = await users.FindByUsernameAsync(username, cancellationToken);
+
+            if (user is null || hasher.Verify(user, user.PasswordHash, password) is PasswordVerifyResult.Failed)
+                return Results.Redirect("/account/login?failed=1");
+
+            Claim[] claims =
+            [
+                new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                new(ClaimTypes.Name, user.Username),
+            ];
+
+            await context.SignInAsync(
+                AuthSchemes.Cookie,
+                new ClaimsPrincipal(new ClaimsIdentity(claims, AuthSchemes.Cookie)),
+                new AuthenticationProperties { IsPersistent = true });
+
+            return Results.Redirect("/");
+        });
+}
+```
+
+> **Do not set `AuthenticationProperties.ExpiresUtc`.** It overrides `SlidingExpiration`, turning the 180-day sliding window into a hard expiry.
+>
+> The `[FromForm]` parameters are load-bearing for CSRF protection, not a style choice.
+
+Add `app.MapAccountEndpoints();` to `Program.cs` after `MapRazorComponents`.
+
+- [ ] **Step 5: Run the tests**
+
+Run: `dotnet test --solution NoofLedger.slnx`
+Expected: all green. If `A_post_without_an_antiforgery_token_is_rejected` sees a 200 rather than 400, the binding is wrong — re-read the box above.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/Noof.Ledger.Web/Components/Account src/Noof.Ledger.Host/Endpoints src/Noof.Ledger.Host/Program.cs tests/Noof.Ledger.Host.Tests
+git commit -m "feat(auth): login form and endpoint, with antiforgery proven by test"
+```
+
+---
+
+## Task 12: Host — the auth-mode matrix
+
+**Files:**
+- Create: `tests/Noof.Ledger.Host.Tests/AuthModeTests.cs`
+- Modify: `src/Noof.Ledger.Web/Components/Pages/Home.razor`
+
+**Both modes are exercised in CI.** The whole design rests on the claim that `Auth:Mode` does not branch the pipeline; that claim is worth a test rather than an argument.
+
+- [ ] **Step 1: Put `[Authorize]` on a page**
+
+Add `@attribute [Authorize]` to `Home.razor`. Under `Off` the `LocalOwnerHandler` satisfies it, so nothing changes visibly — which is exactly the property under test.
+
+- [ ] **Step 2: Write the failing tests**
+
+```csharp
+using System.Net;
+using AwesomeAssertions;
+using Microsoft.AspNetCore.Mvc.Testing;
+
+namespace Noof.Ledger.Host.Tests;
+
+public class AuthModeTests
+{
+    static WebApplicationFactory<Program> Factory(string mode) =>
+        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Auth:Mode", mode);
+            builder.UseSetting("Database:MigrateOnStartup", "false");
+            builder.UseSetting("ConnectionStrings:Ledger",
+                "Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none;Timeout=2");
+            builder.ConfigureServices(FakeUserStore.Register);
+        });
+
+    [Fact]
+    public async Task Off_serves_an_authorized_page_without_a_login()
+    {
+        using var factory = Factory("Off");
+        using var client = factory.CreateClient(new() { AllowAutoRedirect = false });
+
+        var response = await client.GetAsync("/", TestContext.Current.CancellationToken);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Cookie_redirects_an_anonymous_visitor_to_the_login_page()
+    {
+        using var factory = Factory("Cookie");
+        using var client = factory.CreateClient(new() { AllowAutoRedirect = false });
+
+        var response = await client.GetAsync("/", TestContext.Current.CancellationToken);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        response.Headers.Location!.OriginalString.Should().Contain("/account/login");
+    }
+
+    [Fact]
+    public async Task The_login_page_itself_is_reachable_anonymously_under_cookie_mode()
+    {
+        using var factory = Factory("Cookie");
+        using var client = factory.CreateClient(new() { AllowAutoRedirect = false });
+
+        var response = await client.GetAsync("/account/login", TestContext.Current.CancellationToken);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+}
+```
+
+- [ ] **Step 3: Run, fix whatever is missing, run again**
+
+Run: `dotnet test --solution NoofLedger.slnx`
+Expected: all green. A redirect loop on the login page means it is missing its anonymous allowance.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add tests/Noof.Ledger.Host.Tests/AuthModeTests.cs src/Noof.Ledger.Web/Components/Pages/Home.razor
+git commit -m "test(auth): both modes exercised, including the login page's own anonymous access"
+```
+
+---
+
+## Task 13: Host — the `user set-password` CLI verb
+
+**Files:**
+- Create: `src/Noof.Ledger.Host/Cli/UserCommand.cs`
+- Modify: `src/Noof.Ledger.Host/Program.cs`
+- Create: `tests/Noof.Ledger.Host.Tests/CliVerbParsingTests.cs`
+
+**The only way a user is ever created.** There is no `/register`, no `/setup` page and no seeded credential — *a password in any appsettings file is one commit from being permanent in a public repo*. This verb doubles as the recovery path, which is why no reset flow is needed.
+
+It **upserts**: it creates the row if absent (question B1 in `docs/OPEN-QUESTIONS.md`). Nothing else can create the first user.
+
+- [ ] **Step 1: Write the failing parser test**
+
+```csharp
+using AwesomeAssertions;
+using Noof.Ledger.Host.Cli;
+
+namespace Noof.Ledger.Host.Tests;
+
+public class CliVerbParsingTests
+{
+    [Theory]
+    [InlineData(new[] { "user", "set-password", "noof" }, "noof")]
+    [InlineData(new[] { "user", "set-password", "someone-else" }, "someone-else")]
+    public void Recognises_the_verb_and_extracts_the_username(string[] args, string expected)
+    {
+        UserCommand.TryParse(args, out var username).Should().BeTrue();
+        username.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(new string[] { })]
+    [InlineData(new[] { "user" })]
+    [InlineData(new[] { "user", "set-password" })]
+    [InlineData(new[] { "users", "set-password", "noof" })]
+    [InlineData(new[] { "user", "setpassword", "noof" })]
+    [InlineData(new[] { "--urls", "http://127.0.0.1:5000" })]
+    public void Rejects_everything_else(string[] args)
+    {
+        UserCommand.TryParse(args, out _).Should().BeFalse();
+    }
+}
+```
+
+- [ ] **Step 2: Run it and watch it fail**
+
+Run: `dotnet test --project tests/Noof.Ledger.Host.Tests/Noof.Ledger.Host.Tests.csproj`
+Expected: build error, `UserCommand` does not exist.
+
+- [ ] **Step 3: Write the parser as a pure function**
+
+```csharp
+namespace Noof.Ledger.Host.Cli;
+
+public static class UserCommand
+{
+    public static bool TryParse(string[] args, out string username)
+    {
+        if (args is ["user", "set-password", var name, ..] && !string.IsNullOrWhiteSpace(name))
+        {
+            username = name;
+            return true;
+        }
+
+        username = string.Empty;
+        return false;
+    }
+}
+```
+
+- [ ] **Step 4: Wire it before the web host is built**
+
+At the very top of `Program.cs`, before `WebApplication.CreateBuilder`:
+
+```csharp
+if (UserCommand.TryParse(args, out var cliUsername))
+    return await UserCommand.RunAsync(cliUsername, args);
+```
+
+`RunAsync` builds a `Host.CreateApplicationBuilder` (**not** a `WebApplication`), reads the password from stdin with echo suppressed via `Console.ReadKey(intercept: true)`, hashes it with `PasswordHasherAdapter`, upserts through `EfUserStore`, and returns 0. It must never construct the web host.
+
+**Never log, echo or include the password in an exception message.**
+
+- [ ] **Step 5: Verify against the real database by hand**
+
+```bash
+dotnet run --project src/Noof.Ledger.Host/Noof.Ledger.Host.csproj -- user set-password noof
+```
+
+Then confirm a row exists and that the stored value is a hash, not the plaintext.
+
+- [ ] **Step 6: Run the suite and commit**
+
+```bash
+dotnet test --solution NoofLedger.slnx
+git add src/Noof.Ledger.Host/Cli src/Noof.Ledger.Host/Program.cs tests/Noof.Ledger.Host.Tests/CliVerbParsingTests.cs
+git commit -m "feat(host): user set-password, the only path to a first user"
+```
+
+---
+
+## Task 14: End-to-end — four Playwright smoke tests
+
+**Files:**
+- Create: `tests/Noof.Ledger.E2E.Tests/` (project, `HostProcessFixture`, tests)
+- Modify: `Directory.Packages.props`
+
+**Deliberately NOT added to `NoofLedger.slnx`,** so `ops/publish.ps1`'s gate is untouched and a browser suite can never block a deploy.
+
+**Exactly four tests. This is not a menu.** On a solo project every extra browser test is pure downside unless it buys a genuinely new failure mode. A flaky browser suite gets disabled within a month; four reliable ones survive.
+
+What E2E uniquely catches, that nothing else in the pyramid can see:
+1. The SignalR circuit actually connecting and round-tripping a server-computed DOM update.
+2. Static asset delivery **in the really served output** — not theoretical: an app launched from `dotnet build` output reproducibly failed to load a component's JS module, while the same app from `dotnet publish` output worked 5/5 times.
+3. A real cookie jar: real form POST, real `Set-Cookie`, real subsequent authorized navigation.
+
+- [ ] **Step 1: Create the project**
+
+```bash
+dotnet new xunit3 -o tests/Noof.Ledger.E2E.Tests
+dotnet add tests/Noof.Ledger.E2E.Tests/Noof.Ledger.E2E.Tests.csproj reference src/Noof.Ledger.Host/Noof.Ledger.Host.csproj
+```
+
+Strip the template's inline `Version=` attributes. Add `Microsoft.Playwright.Xunit.v3` with `PackageVersion` **1.62.0**. **Do not add this project to the solution.** Install browsers once: `pwsh tests/Noof.Ledger.E2E.Tests/bin/Debug/net10.0/playwright.ps1 install chromium`.
+
+- [ ] **Step 2: Write the host fixture**
+
+`HostProcessFixture : IAsyncLifetime` (**`ValueTask` signatures — xUnit v3**) that:
+1. runs `dotnet publish` of `Noof.Ledger.Host` to a temp directory,
+2. launches `dotnet Noof.Ledger.Host.dll --urls http://127.0.0.1:0` as a child process with `Auth__Mode=Off` and `Database__MigrateOnStartup=false`,
+3. reads the assigned port from the `Now listening on:` stdout line,
+4. polls the root URL until 2xx, capped at 30s,
+5. `Kill(entireProcessTree: true)` in teardown.
+
+> **Do NOT host the app under `WebApplicationFactory<Program>` with a Kestrel-forcing `CreateHost` override.** Reproduced verbatim by two independent parties: `InvalidCastException` — *"Unable to cast KestrelServerImpl to TestServer"* from `WebApplicationFactory.get_Server()`, even though Kestrel really started.
+>
+> Launch from **`dotnet publish` output, never `dotnet build` output.**
+
+- [ ] **Step 3: Write exactly four tests**
+
+- **E2E-1** — `/` loads, correct title, no redirect loop under `Auth:Mode=Off`.
+- **E2E-2** — click `/counter`'s button and assert the server-pushed DOM change. **Always precede the click with `WaitForLoadStateAsync(LoadState.NetworkIdle)`** — the click-before-SignalR-connects race is real and was actually reproduced.
+- **E2E-3** — subscribe to `Page.Response` and assert zero responses `>= 400` after NetworkIdle.
+- **E2E-4** — login round trip under `Auth:Mode=Cookie`: real form POST, real `Set-Cookie`, landing on an `[Authorize]` page. Seed the user via the Task 13 CLI verb in fixture setup.
+
+- [ ] **Step 4: Run and commit**
+
+```bash
+dotnet test --project tests/Noof.Ledger.E2E.Tests/Noof.Ledger.E2E.Tests.csproj
+dotnet test --solution NoofLedger.slnx   # must be unaffected
+git add tests/Noof.Ledger.E2E.Tests Directory.Packages.props
+git commit -m "test(e2e): four Playwright smoke tests, outside the publish gate"
+```
+
+---
+
+## Exit criteria
+
+- [ ] `dotnet test --solution NoofLedger.slnx` green, count grown by at least 40.
+- [ ] `dotnet test --project tests/Noof.Ledger.E2E.Tests/...` green, Chromium headless.
+- [ ] `ops/publish.ps1` still produces `publish/Noof.Ledger.Host.exe`.
+- [ ] Browsing `http://127.0.0.1:<port>/` under `Auth:Mode=Off` shows the dashboard with no login.
+- [ ] Flipping `Auth:Mode=Cookie` and running `user set-password` yields a working sign-in.
+- [ ] Binding a non-loopback URL while `Auth:Mode=Off` refuses to start.
