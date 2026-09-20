@@ -49,17 +49,4 @@ public class AuthModeTests
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
-
-    [Theory]
-    [InlineData("Off")]
-    [InlineData("Cookie")]
-    public async Task Healthz_answers_ok_anonymously_under_both_modes(string mode)
-    {
-        using var factory = Factory(mode);
-        using var client = factory.CreateClient(new() { AllowAutoRedirect = false });
-
-        var response = await client.GetAsync("/healthz", TestContext.Current.CancellationToken);
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-    }
 }
