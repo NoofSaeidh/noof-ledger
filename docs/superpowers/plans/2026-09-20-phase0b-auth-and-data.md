@@ -1309,6 +1309,89 @@ git commit -m "feat(web): Blazor Server shell in the UI-only RCL, with the bound
 
 **The flag selects a handler, never a branch.** Every piece of middleware and every attribute ships unconditionally. Only the registered scheme differs.
 
+### Task 10 amendment — resolving the connection string for the RUNNING app
+
+**The gap this closes.** Nothing outside `DesignTimeDbContextFactory` knows where the credential lives. This task sets `Database:MigrateOnStartup` to `true` by default, so without this the app would throw on startup in real use while every test still passed — the tests supply a connection string explicitly, so they would never notice.
+
+Create `src/Noof.Ledger.Persistence/LedgerConnectionString.cs`:
+
+```csharp
+namespace Noof.Ledger.Persistence;
+
+public static class LedgerConnectionString
+{
+    public const string DefaultDatabase = "noof_ledger";
+
+    public static string CredentialFile => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "NoofLedger",
+        "db.connection");
+
+    public static string Resolve(string? fromConfiguration, string database = DefaultDatabase)
+    {
+        if (!string.IsNullOrWhiteSpace(fromConfiguration))
+            return fromConfiguration;
+
+        var fromEnvironment = Environment.GetEnvironmentVariable("NOOF_TEST_PG");
+        if (!string.IsNullOrWhiteSpace(fromEnvironment))
+            return ForDatabase(fromEnvironment, database);
+
+        if (File.Exists(CredentialFile))
+        {
+            var fromFile = File.ReadAllText(CredentialFile).Trim();
+            if (!string.IsNullOrWhiteSpace(fromFile))
+                return ForDatabase(fromFile, database);
+        }
+
+        throw new InvalidOperationException(
+            $"No PostgreSQL connection string. Set ConnectionStrings:Ledger, or NOOF_TEST_PG, or run " +
+            $"ops/reset-database-auth.ps1 to create {CredentialFile}.");
+    }
+
+    static string ForDatabase(string connectionString, string database) =>
+        connectionString.Replace("Database=postgres", $"Database={database}", StringComparison.Ordinal);
+}
+```
+
+`Program.cs` then registers the context as:
+
+```csharp
+builder.Services.AddDbContext<LedgerDbContext>(options =>
+    options.UseNpgsql(LedgerConnectionString.Resolve(builder.Configuration.GetConnectionString("Ledger"))));
+```
+
+**Configuration wins when present.** Every `WebApplicationFactory` test passes a connection string via `UseSetting`, so it is returned unchanged and no test ever touches the credential file. The file is the fallback for the real app only.
+
+**Collapse `DesignTimeDbContextFactory` onto this.** It currently carries its own copy of the same resolution logic. Replace its body with a call to `LedgerConnectionString.Resolve(null)` so there is one implementation rather than two that can drift. Its existing behaviour must not change — `NOOF_TEST_PG` first, then the credential file, then a clear throw.
+
+Add tests to `tests/Noof.Ledger.Persistence.Tests/`:
+
+```csharp
+[Fact]
+public void Configuration_wins_over_every_fallback()
+{
+    LedgerConnectionString.Resolve("Host=example;Database=configured")
+        .Should().Be("Host=example;Database=configured");
+}
+
+[Fact]
+public void A_blank_configuration_value_is_treated_as_absent()
+{
+    var act = () => LedgerConnectionString.Resolve("   ");
+
+    act.Should().NotThrow("a blank setting must fall through to the credential file, not be used as one");
+}
+
+[Fact]
+public void The_resolved_string_names_the_ledger_database_not_postgres()
+{
+    LedgerConnectionString.Resolve(null).Should().Contain("Database=noof_ledger")
+        .And.NotContain("Database=postgres");
+}
+```
+
+> The third test depends on the credential file existing on this machine, which it does — Postgres is reachable and the suite is green against it. It is the test that would have caught this whole gap: it fails if nothing can resolve a real connection string.
+
 - [ ] **Step 1: Write the failing boot tests**
 
 ```csharp
