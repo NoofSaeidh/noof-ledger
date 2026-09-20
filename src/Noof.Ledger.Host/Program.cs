@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authentication;
+﻿using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
@@ -68,7 +68,19 @@ app.Lifetime.ApplicationStarted.Register(() =>
     var addresses = app.Services.GetRequiredService<IServer>()
         .Features.Get<IServerAddressesFeature>()?.Addresses;
 
-    LoopbackGuard.AssertSafe([.. addresses ?? []], authMode);
+    try
+    {
+        LoopbackGuard.AssertSafe([.. addresses ?? []], authMode);
+    }
+    catch (InvalidOperationException exposed)
+    {
+        // Throwing out of an ApplicationStarted callback does NOT stop the host: the hosting layer
+        // catches it, logs it, and Kestrel keeps serving. Verified. Shutting down explicitly is the
+        // only thing that actually closes the socket.
+        app.Services.GetRequiredService<ILogger<Program>>().LogCritical("{Message}", exposed.Message);
+        Environment.ExitCode = 1;
+        app.Lifetime.StopApplication();
+    }
 });
 
 app.Run();
