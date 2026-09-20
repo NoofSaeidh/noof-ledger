@@ -1,8 +1,8 @@
-# noof-finance — working agreement
+# noof-ledger — working agreement
 
 Personal finance tracker. Telegram bot captures spending (text, voice, receipt photos), an LLM categorises it per line item, a local Blazor dashboard shows it across multiple wallets and currencies. C# / .NET 10, EF Core, strict TDD, local hosting, **public repo**.
 
-> **Status:** design under review in `docs/superpowers/specs/2026-09-19-noof-finance-design.md`. No product code until that spec is approved. Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
+> **Status:** spec approved (`docs/superpowers/specs/2026-09-19-noof-finance-design.md`); **Phase 0 complete** — solution, EF Core model, first migration and the PostgreSQL money-storage gate test are in, 37 tests green. Next is Phase 0b (auth + data layer). Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
 
 ---
 

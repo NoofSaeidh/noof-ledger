@@ -1,4 +1,4 @@
-# noof-finance — Design (revision 2)
+# noof-ledger — Design (revision 2)
 
 **Status:** awaiting your review · **Date:** 2026-09-19
 
