@@ -61,8 +61,8 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
 
 **Architecture**
 - Projects are split: `Domain` ← `Application` ← (`Persistence` · `Ai` · `Fx` · `Receipts` · `Telegram` · `Web`) ← `Host`.
-- `Noof.Web` is UI only — no `DbContext`, no EF types, no `HttpClient`, no `Program.cs`. Enforced by `DisableTransitiveProjectReferences` plus an architecture test, because project references are transitive at compile time and a convention alone will not hold.
-- `Noof.Domain` has zero NuGet references. Asserted by a test.
+- `Noof.Ledger.Web` is UI only — no `DbContext`, no EF types, no `HttpClient`, no `Program.cs`. Enforced by `DisableTransitiveProjectReferences` plus an architecture test, because project references are transitive at compile time and a convention alone will not hold.
+- `Noof.Ledger.Domain` has zero NuGet references. Asserted by a test.
 - Do not add MediatR, AutoMapper, generic repositories over `DbContext`, or CQRS scaffolding.
 
 **Database**

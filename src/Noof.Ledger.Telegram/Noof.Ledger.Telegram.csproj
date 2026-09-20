@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Noof.Ledger.Application\Noof.Ledger.Application.csproj" />
+    <ProjectReference Include="..\Noof.Ledger.Domain\Noof.Ledger.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

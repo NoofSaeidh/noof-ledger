@@ -101,15 +101,15 @@ Your WSL install isn't wasted — it's what makes that option cheap later. And `
 
 ```
 src/
-  Noof.Domain        refs: NONE       Money, Ledger, Fold(), CategorizationAuthority, FX invariants
-  Noof.Application   refs: Domain     use cases + ports  ("all services")
-  Noof.Persistence   refs: App,Dom    DbContext, migrations, sinks, queue, integrity SQL
-  Noof.Ai            refs: App,Dom    categorizer, canonicalizer, explainer
-  Noof.Fx            refs: App,Dom    providers, archive, triangulation
-  Noof.Receipts      refs: App,Dom    fiscal QR, vision extraction
-  Noof.Telegram      refs: App,Dom    poller, router, presenter
-  Noof.Web           refs: App,Dom    RCL — UI ONLY. No DbContext, no EF type, no Program.cs
-  Noof.Host          refs: all        the only .exe, ~40-line Program.cs
+  Noof.Ledger.Domain        refs: NONE       Money, Ledger, Fold(), CategorizationAuthority, FX invariants
+  Noof.Ledger.Application   refs: Domain     use cases + ports  ("all services")
+  Noof.Ledger.Persistence   refs: App,Dom    DbContext, migrations, sinks, queue, integrity SQL
+  Noof.Ledger.Ai            refs: App,Dom    categorizer, canonicalizer, explainer
+  Noof.Ledger.Fx            refs: App,Dom    providers, archive, triangulation
+  Noof.Ledger.Receipts      refs: App,Dom    fiscal QR, vision extraction
+  Noof.Ledger.Telegram      refs: App,Dom    poller, router, presenter
+  Noof.Ledger.Web           refs: App,Dom    RCL — UI ONLY. No DbContext, no EF type, no Program.cs
+  Noof.Ledger.Host          refs: all        the only .exe, ~40-line Program.cs
 publish/   gitignored, code only, wiped every deploy
 ```
 
@@ -194,7 +194,7 @@ A currency exchange is `Transaction(Kind=Transfer)` with an owned **`FxConversio
 | 2 · Correctness | **SQL returning rows** | transfer legs net · line items sum to bill · uncategorized expense line · missing FX snapshot · balance vs reconciliation · duplicate-looking transaction |
 | 3 · Explanation | the **LLM**, in Russian | renders prose over facts C# already computed |
 
-**The LLM never returns a health status, never a number, never a branch of control flow** — enforced by an ArchUnitNET rule forbidding health and integrity checks from referencing `Noof.Ai`. The realistic failure is someone adding *"if the explainer says it's fine, auto-resolve"* to save a click, so it has to be a build failure.
+**The LLM never returns a health status, never a number, never a branch of control flow** — enforced by an ArchUnitNET rule forbidding health and integrity checks from referencing `Noof.Ledger.Ai`. The realistic failure is someone adding *"if the explainer says it's fine, auto-resolve"* to save a click, so it has to be a build failure.
 
 **Severity mapping matters more than it sounds:** a socket-level network failure is **amber**, with the text *"Offline — this is normal"*. Only a 401, pending migrations, missing secrets or low disk go **red**. A tile that goes red every time the wifi drops trains you to ignore the dashboard within a week — at which point a real fault goes unnoticed.
 
@@ -319,21 +319,21 @@ Same pipeline, same attributes, same policies; both modes exercised in CI by par
 
 - **Cookie:** `ExpireTimeSpan` 180 days, `SlidingExpiration` true, `IsPersistent` true. **Do not set `AuthenticationProperties.ExpiresUtc`** — it overrides sliding expiration, giving a hard expiry instead.
 - **`CookieSecurePolicy.Always` would break sign-in entirely** over plain-HTTP loopback. Leave it at `SameAsRequest`. This is the reflex copied from internet-facing tutorials.
-- **`Login.razor` in `Noof.Web` is a bare `<form method="post" action="/account/login">`** — no `@inject`, no `@rendermode`, no `HttpContext`. A cookie must be set by a terminal HTTP response; it cannot be set from inside an upgraded SignalR circuit. The POST is handled by a minimal-API endpoint in `Noof.Host`. Microsoft's scaffolded `Login.razor` injects `SignInManager` and `HttpContext` straight into the component — copying it would drag EF-backed services into the UI-only RCL and break the architecture test.
+- **`Login.razor` in `Noof.Ledger.Web` is a bare `<form method="post" action="/account/login">`** — no `@inject`, no `@rendermode`, no `HttpContext`. A cookie must be set by a terminal HTTP response; it cannot be set from inside an upgraded SignalR circuit. The POST is handled by a minimal-API endpoint in `Noof.Ledger.Host`. Microsoft's scaffolded `Login.razor` injects `SignInManager` and `HttpContext` straight into the component — copying it would drag EF-backed services into the UI-only RCL and break the architecture test.
 - **No global `FallbackPolicy`.** The "secure by default" reflex would break `/healthz` and the deploy script's post-publish poll. Authorization stays opt-in per endpoint, with a `/healthz`-stays-anonymous regression test.
-- **First user via CLI only:** `Noof.Host.exe user set-password`, parsed before the host is built. No `/register`, no `/setup` page, no seeded credential. It doubles as the recovery path, which is why no reset flow is needed. **A password in any appsettings file is one commit from being permanent in a public repo.**
+- **First user via CLI only:** `Noof.Ledger.Host.exe user set-password`, parsed before the host is built. No `/register`, no `/setup` page, no seeded credential. It doubles as the recovery path, which is why no reset flow is needed. **A password in any appsettings file is one commit from being permanent in a public repo.**
 
 ### Architecture impact
 
-**No tenth project. No second DbContext.** `Noof.Web`'s `ProjectReference` set stays exactly `{Noof.Application, Noof.Domain}`.
+**No tenth project. No second DbContext.** `Noof.Ledger.Web`'s `ProjectReference` set stays exactly `{Noof.Ledger.Application, Noof.Ledger.Domain}`.
 
 | Project | Change |
 |---|---|
-| `Noof.Domain` | `AppUser` POCO. **Still zero packages** — existing test unaffected |
-| `Noof.Application` | `IUserStore` + our own `IPasswordHasher` port. Deliberately does *not* reference `Microsoft.Extensions.Identity.Core` |
-| `Noof.Persistence` | `AppUserConfiguration`, store implementation, one migration. **csproj unchanged** |
-| `Noof.Web` | Gains **exactly one** `PackageReference`: `Microsoft.AspNetCore.Components.Authorization`. **The architecture test needs amending** to permit it |
-| `Noof.Host` | Handler registration, unconditional middleware, the login endpoint, the CLI verb, the startup guard |
+| `Noof.Ledger.Domain` | `AppUser` POCO. **Still zero packages** — existing test unaffected |
+| `Noof.Ledger.Application` | `IUserStore` + our own `IPasswordHasher` port. Deliberately does *not* reference `Microsoft.Extensions.Identity.Core` |
+| `Noof.Ledger.Persistence` | `AppUserConfiguration`, store implementation, one migration. **csproj unchanged** |
+| `Noof.Ledger.Web` | Gains **exactly one** `PackageReference`: `Microsoft.AspNetCore.Components.Authorization`. **The architecture test needs amending** to permit it |
+| `Noof.Ledger.Host` | Handler registration, unconditional middleware, the login endpoint, the CLI verb, the startup guard |
 
 **No roles, no claims, no permission matrix.** One row, one human, one binary distinction. A role claim later costs less than the flag flip.
 
@@ -356,10 +356,10 @@ Same pipeline, same attributes, same policies; both modes exercised in CI by par
 2. **The `LocalOwnerHandler` constructor is not a free choice.** The 4-argument `AuthenticationHandler` overload taking `ISystemClock` is `[Obsolete]`, which `TreatWarningsAsErrors` escalates to **CS0618 — verified to fail this repo's build with 2 errors**. Use the 3-argument `(IOptionsMonitor, ILoggerFactory, UrlEncoder)` overload. Every Microsoft sample still shows the 4-arg form.
 3. **Antiforgery does not work the idiomatic way.** A `MapPost` carrying only `.WithMetadata(new RequireAntiforgeryTokenAttribute())` **returns 200 with no token supplied** — proven twice against real Kestrel. Use `[FromForm]` parameter binding, which triggers validation, and keep the four-case antiforgery test as the guard.
 4. **"Refuses to boot" overstates what is cleanly achievable.** Kestrel's URL precedence across `ASPNETCORE_URLS`, `Kestrel:Endpoints` and `launchSettings` was not verifiable end to end, and re-deriving it by hand is a bug source. Read the addresses Kestrel **actually bound** via `IServerAddressesFeature` in `ApplicationStarted` and stop the application there. The pure-function guard stays, as the densely-tested core.
-5. **The `PasswordHasher` adapter must live in `Noof.Host`, not `Noof.Persistence`.** "Zero new NuGet" holds only because `Sdk.Web` carries an implicit `FrameworkReference` to `Microsoft.AspNetCore.App`. `Noof.Persistence` is a plain library and would need an explicit one.
-6. **`Noof.Web` does need `Microsoft.AspNetCore.Components.Authorization`** — but not for the reason implied. `[Authorize]` **already compiles today** via `Components.Web`; the new package is needed for `AuthorizeRouteView`, `AuthorizeView`, `CascadingAuthenticationState` and `AuthenticationStateProvider`. `<AntiforgeryToken />` is in `Components.Web` already. **No architecture test amendment is required** — none of them whitelist Web's packages. Add one that does.
+5. **The `PasswordHasher` adapter must live in `Noof.Ledger.Host`, not `Noof.Ledger.Persistence`.** "Zero new NuGet" holds only because `Sdk.Web` carries an implicit `FrameworkReference` to `Microsoft.AspNetCore.App`. `Noof.Ledger.Persistence` is a plain library and would need an explicit one.
+6. **`Noof.Ledger.Web` does need `Microsoft.AspNetCore.Components.Authorization`** — but not for the reason implied. `[Authorize]` **already compiles today** via `Components.Web`; the new package is needed for `AuthorizeRouteView`, `AuthorizeView`, `CascadingAuthenticationState` and `AuthenticationStateProvider`. `<AntiforgeryToken />` is in `Components.Web` already. **No architecture test amendment is required** — none of them whitelist Web's packages. Add one that does.
 7. **Do not host the app under `WebApplicationFactory` for Playwright.** A Kestrel-forcing `CreateHost` override throws `InvalidCastException` casting `KestrelServerImpl` to `TestServer` — reproduced verbatim by two parties. Launch a real child process, **from `dotnet publish` output rather than `dotnet build` output**: from build output a Blazor Server app reproducibly fails with *"Failed to load module script: MIME type of ''"* and clicks never register; from publish output it worked 5/5.
-8. **`[CollectionDefinition]` must live in the same assembly as the tests referencing it.** A definition in `Noof.TestKit` consumed from `Noof.Persistence.Tests` fails at runtime with *"did not have matching fixture data"*. Each consuming assembly needs its own wrapper — and `TestKit` therefore needs no xunit package after all.
+8. **`[CollectionDefinition]` must live in the same assembly as the tests referencing it.** A definition in `Noof.Ledger.TestKit` consumed from `Noof.Ledger.Persistence.Tests` fails at runtime with *"did not have matching fixture data"*. Each consuming assembly needs its own wrapper — and `TestKit` therefore needs no xunit package after all.
 9. **Every async HttpClient call in new tests must pass `TestContext.Current.CancellationToken`.** Analyzer rule `xUnit1051` is a warning by default, which `TreatWarningsAsErrors` makes a build error — a clean rebuild failed with 3× xUnit1051.
 10. **`dotnet ef migrations remove` is not offline-safe without `--force`.** It connects to call `HistoryRepository.GetAppliedMigrations()` and exits 1. Only `migrations add` and `migrations script` are unconditionally offline.
 

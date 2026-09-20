@@ -1,7 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-
-  <ItemGroup>
-    <ProjectReference Include="..\Noof.Domain\Noof.Domain.csproj" />
-  </ItemGroup>
-
-</Project>

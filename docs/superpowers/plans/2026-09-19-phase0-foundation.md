@@ -4,7 +4,7 @@
 
 **Goal:** Stand up the nine-project solution with enforced boundaries, prove PostgreSQL handles money correctly in the user's own cultures where SQLite does not, and lock the three conventions that are expensive to reverse.
 
-**Architecture:** A .slnx solution with nine `src/` projects and five `tests/` projects for this phase. `Noof.Domain` has zero package references; `Noof.Web` is a UI-only Razor Class Library. Boundaries are enforced by tests that parse `.csproj` files, not by convention, because project references are transitive at compile time. Money is `decimal` + `Currency` in the domain, mapped to native `numeric(19,4)` in PostgreSQL 18.
+**Architecture:** A .slnx solution with nine `src/` projects and five `tests/` projects for this phase. `Noof.Ledger.Domain` has zero package references; `Noof.Ledger.Web` is a UI-only Razor Class Library. Boundaries are enforced by tests that parse `.csproj` files, not by convention, because project references are transitive at compile time. Money is `decimal` + `Currency` in the domain, mapped to native `numeric(19,4)` in PostgreSQL 18.
 
 **Tech Stack:** .NET 10 (SDK 10.0.204) · PostgreSQL 18 · EF Core 10 + Npgsql · xUnit v3 on Microsoft Testing Platform · AwesomeAssertions · ArchUnitNET
 
@@ -20,7 +20,7 @@
 - All monetary columns are `numeric(19,4)`. All rate columns are `numeric(24,12)`.
 - All timestamps are `DateTimeOffset` mapped to `timestamptz`. Never `DateTime`.
 - `EnsureCreated()` is banned everywhere, including test helpers.
-- `Noof.Domain` has zero `PackageReference` entries.
+- `Noof.Ledger.Domain` has zero `PackageReference` entries.
 - Central package management: all versions live in `Directory.Packages.props`.
 - Code style: minimal-to-zero comments, self-documenting names, modern C# (file-scoped namespaces, primary constructors, records, collection expressions, pattern matching).
 - Public repo: no secrets, no real financial data, no database files in git.
@@ -46,15 +46,15 @@ Five conditions the spec implies that no task's happy path would exercise. Each 
 | `Directory.Build.targets` | Publish output to `publish/` for deployable apps only |
 | `Directory.Packages.props` | Every package version, centrally |
 | `NoofFinance.slnx` | Solution |
-| `src/Noof.Domain/Money.cs` | The money value object |
-| `src/Noof.Domain/CurrencyCode.cs` | ISO-4217 currency wrapper |
-| `src/Noof.Persistence/NoofDbContext.cs` | The single DbContext |
-| `src/Noof.Persistence/NoofDbContextConventions.cs` | The three irreversible mapping conventions |
-| `src/Noof.Persistence/DesignTimeDbContextFactory.cs` | Lets `dotnet ef` run without booting the host |
-| `tests/Noof.Architecture.Tests/ProjectReferenceTests.cs` | Boundary enforcement by parsing csproj XML |
-| `tests/Noof.Persistence.Tests/MoneyStorageTests.cs` | **The gate test** — culture-correct money |
-| `tests/Noof.Persistence.Tests/MigrationContractTests.cs` | Create-from-empty, idempotency, no pending changes |
-| `tests/Noof.TestKit/PostgresFixture.cs` | Template-database cloning per test class |
+| `src/Noof.Ledger.Domain/Money.cs` | The money value object |
+| `src/Noof.Ledger.Domain/CurrencyCode.cs` | ISO-4217 currency wrapper |
+| `src/Noof.Ledger.Persistence/NoofDbContext.cs` | The single DbContext |
+| `src/Noof.Ledger.Persistence/NoofDbContextConventions.cs` | The three irreversible mapping conventions |
+| `src/Noof.Ledger.Persistence/DesignTimeDbContextFactory.cs` | Lets `dotnet ef` run without booting the host |
+| `tests/Noof.Ledger.Architecture.Tests/ProjectReferenceTests.cs` | Boundary enforcement by parsing csproj XML |
+| `tests/Noof.Ledger.Persistence.Tests/MoneyStorageTests.cs` | **The gate test** — culture-correct money |
+| `tests/Noof.Ledger.Persistence.Tests/MigrationContractTests.cs` | Create-from-empty, idempotency, no pending changes |
+| `tests/Noof.Ledger.TestKit/PostgresFixture.cs` | Template-database cloning per test class |
 
 ---
 
@@ -211,43 +211,43 @@ SDK 10.0.204 is expected to emit `NoofFinance.slnx`. Confirm which extension you
 ```bash
 dotnet new sln -n NoofFinance
 ls NoofFinance.*          # expect NoofFinance.slnx
-dotnet new classlib -o src/Noof.Domain -f net10.0
-dotnet new classlib -o src/Noof.Application -f net10.0
-dotnet new classlib -o src/Noof.Persistence -f net10.0
-dotnet new classlib -o src/Noof.Ai -f net10.0
-dotnet new classlib -o src/Noof.Fx -f net10.0
-dotnet new classlib -o src/Noof.Receipts -f net10.0
-dotnet new classlib -o src/Noof.Telegram -f net10.0
-dotnet new razorclasslib -o src/Noof.Web -f net10.0
-dotnet new web -o src/Noof.Host -f net10.0
+dotnet new classlib -o src/Noof.Ledger.Domain -f net10.0
+dotnet new classlib -o src/Noof.Ledger.Application -f net10.0
+dotnet new classlib -o src/Noof.Ledger.Persistence -f net10.0
+dotnet new classlib -o src/Noof.Ledger.Ai -f net10.0
+dotnet new classlib -o src/Noof.Ledger.Fx -f net10.0
+dotnet new classlib -o src/Noof.Ledger.Receipts -f net10.0
+dotnet new classlib -o src/Noof.Ledger.Telegram -f net10.0
+dotnet new razorclasslib -o src/Noof.Ledger.Web -f net10.0
+dotnet new web -o src/Noof.Ledger.Host -f net10.0
 ```
 
 - [ ] **Step 3: Create the test projects**
 
 ```bash
-dotnet new xunit3 -o tests/Noof.TestKit -f net10.0
-dotnet new xunit3 -o tests/Noof.Domain.Tests -f net10.0
-dotnet new xunit3 -o tests/Noof.Application.Tests -f net10.0
-dotnet new xunit3 -o tests/Noof.Persistence.Tests -f net10.0
-dotnet new xunit3 -o tests/Noof.Architecture.Tests -f net10.0
+dotnet new xunit3 -o tests/Noof.Ledger.TestKit -f net10.0
+dotnet new xunit3 -o tests/Noof.Ledger.Domain.Tests -f net10.0
+dotnet new xunit3 -o tests/Noof.Ledger.Application.Tests -f net10.0
+dotnet new xunit3 -o tests/Noof.Ledger.Persistence.Tests -f net10.0
+dotnet new xunit3 -o tests/Noof.Ledger.Architecture.Tests -f net10.0
 ```
 
 - [ ] **Step 4: Wire the reference graph**
 
 ```bash
-dotnet add src/Noof.Application reference src/Noof.Domain
-dotnet add src/Noof.Persistence reference src/Noof.Application src/Noof.Domain
-dotnet add src/Noof.Ai reference src/Noof.Application src/Noof.Domain
-dotnet add src/Noof.Fx reference src/Noof.Application src/Noof.Domain
-dotnet add src/Noof.Receipts reference src/Noof.Application src/Noof.Domain
-dotnet add src/Noof.Telegram reference src/Noof.Application src/Noof.Domain
-dotnet add src/Noof.Web reference src/Noof.Application src/Noof.Domain
-dotnet add src/Noof.Host reference src/Noof.Domain src/Noof.Application src/Noof.Persistence src/Noof.Ai src/Noof.Fx src/Noof.Receipts src/Noof.Telegram src/Noof.Web
+dotnet add src/Noof.Ledger.Application reference src/Noof.Ledger.Domain
+dotnet add src/Noof.Ledger.Persistence reference src/Noof.Ledger.Application src/Noof.Ledger.Domain
+dotnet add src/Noof.Ledger.Ai reference src/Noof.Ledger.Application src/Noof.Ledger.Domain
+dotnet add src/Noof.Ledger.Fx reference src/Noof.Ledger.Application src/Noof.Ledger.Domain
+dotnet add src/Noof.Ledger.Receipts reference src/Noof.Ledger.Application src/Noof.Ledger.Domain
+dotnet add src/Noof.Ledger.Telegram reference src/Noof.Ledger.Application src/Noof.Ledger.Domain
+dotnet add src/Noof.Ledger.Web reference src/Noof.Ledger.Application src/Noof.Ledger.Domain
+dotnet add src/Noof.Ledger.Host reference src/Noof.Ledger.Domain src/Noof.Ledger.Application src/Noof.Ledger.Persistence src/Noof.Ledger.Ai src/Noof.Ledger.Fx src/Noof.Ledger.Receipts src/Noof.Ledger.Telegram src/Noof.Ledger.Web
 
-dotnet add tests/Noof.TestKit reference src/Noof.Application src/Noof.Domain
-dotnet add tests/Noof.Domain.Tests reference src/Noof.Domain tests/Noof.TestKit
-dotnet add tests/Noof.Application.Tests reference src/Noof.Application tests/Noof.TestKit
-dotnet add tests/Noof.Persistence.Tests reference src/Noof.Persistence tests/Noof.TestKit
+dotnet add tests/Noof.Ledger.TestKit reference src/Noof.Ledger.Application src/Noof.Ledger.Domain
+dotnet add tests/Noof.Ledger.Domain.Tests reference src/Noof.Ledger.Domain tests/Noof.Ledger.TestKit
+dotnet add tests/Noof.Ledger.Application.Tests reference src/Noof.Ledger.Application tests/Noof.Ledger.TestKit
+dotnet add tests/Noof.Ledger.Persistence.Tests reference src/Noof.Ledger.Persistence tests/Noof.Ledger.TestKit
 ```
 
 - [ ] **Step 5: Add every project to the solution**
@@ -258,7 +258,7 @@ dotnet sln add $(find src tests -name "*.csproj")
 
 - [ ] **Step 6: Mark the host as deployable**
 
-Edit `src/Noof.Host/Noof.Host.csproj`, adding inside the first `<PropertyGroup>`:
+Edit `src/Noof.Ledger.Host/Noof.Ledger.Host.csproj`, adding inside the first `<PropertyGroup>`:
 
 ```xml
 <IsDeployableApp>true</IsDeployableApp>
@@ -266,7 +266,7 @@ Edit `src/Noof.Host/Noof.Host.csproj`, adding inside the first `<PropertyGroup>`
 
 - [ ] **Step 7: Lock the Web boundary at compile time**
 
-Edit `src/Noof.Web/Noof.Web.csproj`, adding inside the first `<PropertyGroup>`. Without this, a transitive reference makes `Noof.Web` able to see EF Core types and the boundary is only a convention:
+Edit `src/Noof.Ledger.Web/Noof.Ledger.Web.csproj`, adding inside the first `<PropertyGroup>`. Without this, a transitive reference makes `Noof.Ledger.Web` able to see EF Core types and the boundary is only a convention:
 
 ```xml
 <DisableTransitiveProjectReferences>true</DisableTransitiveProjectReferences>
@@ -294,7 +294,7 @@ git commit -m "build: scaffold nine source projects and five test projects"
 ## Task 3: Enforce the architecture boundaries
 
 **Files:**
-- Create: `tests/Noof.Architecture.Tests/ProjectReferenceTests.cs`
+- Create: `tests/Noof.Ledger.Architecture.Tests/ProjectReferenceTests.cs`
 - Test: same file
 
 **Interfaces:**
@@ -303,10 +303,10 @@ git commit -m "build: scaffold nine source projects and five test projects"
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/Noof.Architecture.Tests/RepoRoot.cs`:
+Create `tests/Noof.Ledger.Architecture.Tests/RepoRoot.cs`:
 
 ```csharp
-namespace Noof.Architecture.Tests;
+namespace Noof.Ledger.Architecture.Tests;
 
 public static class RepoRoot
 {
@@ -321,22 +321,22 @@ public static class RepoRoot
 }
 ```
 
-Create `tests/Noof.Architecture.Tests/ProjectReferenceTests.cs`:
+Create `tests/Noof.Ledger.Architecture.Tests/ProjectReferenceTests.cs`:
 
 ```csharp
 using System.Xml.Linq;
 using AwesomeAssertions;
 
-namespace Noof.Architecture.Tests;
+namespace Noof.Ledger.Architecture.Tests;
 
 public class ProjectReferenceTests
 {
     [Theory]
-    [InlineData("Noof.Domain")]
-    [InlineData("Noof.Application", "Noof.Domain")]
-    [InlineData("Noof.Persistence", "Noof.Application", "Noof.Domain")]
-    [InlineData("Noof.Web", "Noof.Application", "Noof.Domain")]
-    [InlineData("Noof.Telegram", "Noof.Application", "Noof.Domain")]
+    [InlineData("Noof.Ledger.Domain")]
+    [InlineData("Noof.Ledger.Application", "Noof.Ledger.Domain")]
+    [InlineData("Noof.Ledger.Persistence", "Noof.Ledger.Application", "Noof.Ledger.Domain")]
+    [InlineData("Noof.Ledger.Web", "Noof.Ledger.Application", "Noof.Ledger.Domain")]
+    [InlineData("Noof.Ledger.Telegram", "Noof.Ledger.Application", "Noof.Ledger.Domain")]
     public void Project_references_exactly_its_allowed_set(string project, params string[] allowed)
     {
         References(project).Should().BeEquivalentTo(allowed);
@@ -345,13 +345,13 @@ public class ProjectReferenceTests
     [Fact]
     public void Domain_has_no_package_references()
     {
-        Packages("Noof.Domain").Should().BeEmpty();
+        Packages("Noof.Ledger.Domain").Should().BeEmpty();
     }
 
     [Fact]
     public void Web_has_no_entity_framework_package()
     {
-        Packages("Noof.Web").Should().NotContain(p => p.Contains("EntityFrameworkCore", StringComparison.OrdinalIgnoreCase));
+        Packages("Noof.Ledger.Web").Should().NotContain(p => p.Contains("EntityFrameworkCore", StringComparison.OrdinalIgnoreCase));
     }
 
     static XDocument Load(string project)
@@ -372,18 +372,18 @@ public class ProjectReferenceTests
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `dotnet test --project tests/Noof.Architecture.Tests`
+Run: `dotnet test --project tests/Noof.Ledger.Architecture.Tests`
 Expected: FAIL — `AwesomeAssertions` is not referenced yet.
 
 - [ ] **Step 3: Add the assertion package**
 
 ```bash
-dotnet add tests/Noof.Architecture.Tests package AwesomeAssertions
+dotnet add tests/Noof.Ledger.Architecture.Tests package AwesomeAssertions
 ```
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `dotnet test --project tests/Noof.Architecture.Tests`
+Run: `dotnet test --project tests/Noof.Ledger.Architecture.Tests`
 Expected: PASS, 7 tests.
 
 - [ ] **Step 5: Prove the test actually catches a violation**
@@ -391,17 +391,17 @@ Expected: PASS, 7 tests.
 This step exists because a boundary test that cannot fail is worse than none — it creates false confidence.
 
 ```bash
-dotnet add src/Noof.Web reference src/Noof.Persistence
-dotnet test --project tests/Noof.Architecture.Tests
+dotnet add src/Noof.Ledger.Web reference src/Noof.Ledger.Persistence
+dotnet test --project tests/Noof.Ledger.Architecture.Tests
 ```
 
-Expected: FAIL on `Project_references_exactly_its_allowed_set` for `Noof.Web`.
+Expected: FAIL on `Project_references_exactly_its_allowed_set` for `Noof.Ledger.Web`.
 
 - [ ] **Step 6: Revert the deliberate violation**
 
 ```bash
-dotnet remove src/Noof.Web reference src/Noof.Persistence
-dotnet test --project tests/Noof.Architecture.Tests
+dotnet remove src/Noof.Ledger.Web reference src/Noof.Ledger.Persistence
+dotnet test --project tests/Noof.Ledger.Architecture.Tests
 ```
 
 Expected: PASS.
@@ -409,7 +409,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add tests/Noof.Architecture.Tests
+git add tests/Noof.Ledger.Architecture.Tests
 git commit -m "test: enforce project boundaries by parsing csproj references"
 ```
 
@@ -418,7 +418,7 @@ git commit -m "test: enforce project boundaries by parsing csproj references"
 ## Task 4: PostgreSQL ready and reachable
 
 **Files:**
-- Create: `ops/setup-database.ps1`, `tests/Noof.TestKit/DatabaseSettings.cs`
+- Create: `ops/setup-database.ps1`, `tests/Noof.Ledger.TestKit/DatabaseSettings.cs`
 
 **Interfaces:**
 - Produces: `DatabaseSettings.AdminConnectionString` and `DatabaseSettings.TemplateDatabase`, consumed by Task 5 and Task 6.
@@ -467,10 +467,10 @@ Expected: `Databases ready.`
 
 - [ ] **Step 4: Create the test connection settings**
 
-Create `tests/Noof.TestKit/DatabaseSettings.cs`:
+Create `tests/Noof.Ledger.TestKit/DatabaseSettings.cs`:
 
 ```csharp
-namespace Noof.TestKit;
+namespace Noof.Ledger.TestKit;
 
 public static class DatabaseSettings
 {
@@ -489,14 +489,14 @@ public static class DatabaseSettings
 
 This is **Review Focus #4** — the database being unreachable must produce a clear diagnostic.
 
-Create `tests/Noof.Persistence.Tests/DatabaseReachableTests.cs`:
+Create `tests/Noof.Ledger.Persistence.Tests/DatabaseReachableTests.cs`:
 
 ```csharp
 using AwesomeAssertions;
 using Npgsql;
-using Noof.TestKit;
+using Noof.Ledger.TestKit;
 
-namespace Noof.Persistence.Tests;
+namespace Noof.Ledger.Persistence.Tests;
 
 public class DatabaseReachableTests
 {
@@ -526,19 +526,19 @@ public class DatabaseReachableTests
 
 - [ ] **Step 6: Run to verify it fails**
 
-Run: `dotnet test --project tests/Noof.Persistence.Tests`
+Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests`
 Expected: FAIL — `Npgsql` is not referenced yet.
 
 - [ ] **Step 7: Add the packages**
 
 ```bash
-dotnet add src/Noof.Persistence package Npgsql.EntityFrameworkCore.PostgreSQL
-dotnet add tests/Noof.Persistence.Tests package AwesomeAssertions
+dotnet add src/Noof.Ledger.Persistence package Npgsql.EntityFrameworkCore.PostgreSQL
+dotnet add tests/Noof.Ledger.Persistence.Tests package AwesomeAssertions
 ```
 
 - [ ] **Step 8: Run to verify it passes**
 
-Run: `dotnet test --project tests/Noof.Persistence.Tests`
+Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests`
 Expected: PASS, 2 tests.
 
 - [ ] **Step 9: Commit**
@@ -555,21 +555,21 @@ git commit -m "feat: database setup script and reachability tests"
 This is the executable form of the answer to *"Maybe postgres then?"*. It stays in the suite forever.
 
 **Files:**
-- Create: `src/Noof.Domain/CurrencyCode.cs`, `src/Noof.Domain/Money.cs`, `tests/Noof.Persistence.Tests/MoneyStorageTests.cs`
-- Test: `tests/Noof.Domain.Tests/MoneyTests.cs`
+- Create: `src/Noof.Ledger.Domain/CurrencyCode.cs`, `src/Noof.Ledger.Domain/Money.cs`, `tests/Noof.Ledger.Persistence.Tests/MoneyStorageTests.cs`
+- Test: `tests/Noof.Ledger.Domain.Tests/MoneyTests.cs`
 
 **Interfaces:**
 - Produces: `Money(decimal Amount, CurrencyCode Currency)` and `CurrencyCode(string Value)`, consumed by every later task.
 
 - [ ] **Step 1: Write the failing domain test**
 
-Create `tests/Noof.Domain.Tests/MoneyTests.cs`:
+Create `tests/Noof.Ledger.Domain.Tests/MoneyTests.cs`:
 
 ```csharp
 using AwesomeAssertions;
-using Noof.Domain;
+using Noof.Ledger.Domain;
 
-namespace Noof.Domain.Tests;
+namespace Noof.Ledger.Domain.Tests;
 
 public class MoneyTests
 {
@@ -608,15 +608,15 @@ public class MoneyTests
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `dotnet test --project tests/Noof.Domain.Tests`
+Run: `dotnet test --project tests/Noof.Ledger.Domain.Tests`
 Expected: FAIL — `Money` and `CurrencyCode` do not exist.
 
 - [ ] **Step 3: Implement the domain types**
 
-Create `src/Noof.Domain/CurrencyCode.cs`:
+Create `src/Noof.Ledger.Domain/CurrencyCode.cs`:
 
 ```csharp
-namespace Noof.Domain;
+namespace Noof.Ledger.Domain;
 
 public readonly record struct CurrencyCode
 {
@@ -640,19 +640,19 @@ public readonly record struct CurrencyCode
 }
 ```
 
-Create `src/Noof.Domain/CurrencyMismatchException.cs`:
+Create `src/Noof.Ledger.Domain/CurrencyMismatchException.cs`:
 
 ```csharp
-namespace Noof.Domain;
+namespace Noof.Ledger.Domain;
 
 public sealed class CurrencyMismatchException(CurrencyCode left, CurrencyCode right)
     : InvalidOperationException($"Cannot combine {left} with {right}.");
 ```
 
-Create `src/Noof.Domain/Money.cs`:
+Create `src/Noof.Ledger.Domain/Money.cs`:
 
 ```csharp
-namespace Noof.Domain;
+namespace Noof.Ledger.Domain;
 
 public readonly record struct Money(decimal Amount, CurrencyCode Currency)
 {
@@ -674,22 +674,22 @@ public readonly record struct Money(decimal Amount, CurrencyCode Currency)
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `dotnet test --project tests/Noof.Domain.Tests`
+Run: `dotnet test --project tests/Noof.Ledger.Domain.Tests`
 Expected: PASS, 4 tests.
 
 - [ ] **Step 5: Write the failing gate test**
 
 The values matter. `1234.50` vs `999.99` and `9.55` vs `10.00` invert under `sr-Latn-RS`, where `.` is the group separator. A naive set like `{9.5, 10.0, 102.18}` passes with or without the bug and proves nothing.
 
-Create `tests/Noof.Persistence.Tests/MoneyStorageTests.cs`:
+Create `tests/Noof.Ledger.Persistence.Tests/MoneyStorageTests.cs`:
 
 ```csharp
 using System.Globalization;
 using AwesomeAssertions;
 using Npgsql;
-using Noof.TestKit;
+using Noof.Ledger.TestKit;
 
-namespace Noof.Persistence.Tests;
+namespace Noof.Ledger.Persistence.Tests;
 
 [Collection("postgres")]
 public class MoneyStorageTests(PostgresFixture fixture)
@@ -783,7 +783,7 @@ public class MoneyStorageTests(PostgresFixture fixture)
 
 - [ ] **Step 6: Write the fixture the gate test needs**
 
-Create `tests/Noof.TestKit/PostgresFixture.cs`. Two things here are not optional:
+Create `tests/Noof.Ledger.TestKit/PostgresFixture.cs`. Two things here are not optional:
 
 - `ClearAllPools()` **before** `DROP DATABASE` — without it the drop blocks on pooled connections and teardown hangs forever with no error.
 - Nothing may hold a connection to `noof_test_template` while a clone runs. `CREATE DATABASE … TEMPLATE` fails with *"source database is being accessed by other users"*. If you see that, close any open pgAdmin or psql session pointed at the template.
@@ -792,7 +792,7 @@ Create `tests/Noof.TestKit/PostgresFixture.cs`. Two things here are not optional
 using Npgsql;
 using Xunit;
 
-namespace Noof.TestKit;
+namespace Noof.Ledger.TestKit;
 
 public sealed class PostgresFixture : IAsyncLifetime
 {
@@ -839,25 +839,25 @@ public sealed class PostgresCollection : ICollectionFixture<PostgresFixture>;
 
 - [ ] **Step 7: Run to verify it fails**
 
-Run: `dotnet test --project tests/Noof.Persistence.Tests`
-Expected: FAIL — `Npgsql` and `xunit.v3` are not referenced from `Noof.TestKit`.
+Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests`
+Expected: FAIL — `Npgsql` and `xunit.v3` are not referenced from `Noof.Ledger.TestKit`.
 
 - [ ] **Step 8: Add the packages**
 
 ```bash
-dotnet add tests/Noof.TestKit package Npgsql
-dotnet add tests/Noof.TestKit package xunit.v3
+dotnet add tests/Noof.Ledger.TestKit package Npgsql
+dotnet add tests/Noof.Ledger.TestKit package xunit.v3
 ```
 
 - [ ] **Step 9: Run to verify it passes**
 
-Run: `dotnet test --project tests/Noof.Persistence.Tests`
+Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests`
 Expected: PASS, 7 tests — including all three cultures.
 
 - [ ] **Step 10: Commit**
 
 ```bash
-git add src/Noof.Domain tests/
+git add src/Noof.Ledger.Domain tests/
 git commit -m "feat: Money value object and the culture-correctness gate test"
 ```
 
@@ -866,7 +866,7 @@ git commit -m "feat: Money value object and the culture-correctness gate test"
 ## Task 6: EF conventions, first migration, migration contract
 
 **Files:**
-- Create: `src/Noof.Persistence/NoofDbContext.cs`, `src/Noof.Persistence/DesignTimeDbContextFactory.cs`, `tests/Noof.Persistence.Tests/MigrationContractTests.cs`
+- Create: `src/Noof.Ledger.Persistence/NoofDbContext.cs`, `src/Noof.Ledger.Persistence/DesignTimeDbContextFactory.cs`, `tests/Noof.Ledger.Persistence.Tests/MigrationContractTests.cs`
 
 **Interfaces:**
 - Consumes: `Money`, `CurrencyCode` from Task 5.
@@ -874,15 +874,15 @@ git commit -m "feat: Money value object and the culture-correctness gate test"
 
 - [ ] **Step 1: Write the failing convention test**
 
-Create `tests/Noof.Persistence.Tests/MigrationContractTests.cs`:
+Create `tests/Noof.Ledger.Persistence.Tests/MigrationContractTests.cs`:
 
 ```csharp
 using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
-using Noof.Persistence;
-using Noof.TestKit;
+using Noof.Ledger.Persistence;
+using Noof.Ledger.TestKit;
 
-namespace Noof.Persistence.Tests;
+namespace Noof.Ledger.Persistence.Tests;
 
 [Collection("postgres")]
 public class MigrationContractTests(PostgresFixture fixture)
@@ -957,7 +957,7 @@ public class MigrationContractTests(PostgresFixture fixture)
 
 - [ ] **Step 2: Extend the fixture to hand out a DbContext**
 
-Append to `tests/Noof.TestKit/PostgresFixture.cs`, inside the `PostgresFixture` class:
+Append to `tests/Noof.Ledger.TestKit/PostgresFixture.cs`, inside the `PostgresFixture` class:
 
 ```csharp
     public async Task<NoofDbContext> CreateContextAsync()
@@ -981,25 +981,25 @@ Append to `tests/Noof.TestKit/PostgresFixture.cs`, inside the `PostgresFixture` 
     }
 ```
 
-Add the matching usings at the top of the file: `using Microsoft.EntityFrameworkCore;` and `using Noof.Persistence;`, and add the project reference:
+Add the matching usings at the top of the file: `using Microsoft.EntityFrameworkCore;` and `using Noof.Ledger.Persistence;`, and add the project reference:
 
 ```bash
-dotnet add tests/Noof.TestKit reference src/Noof.Persistence
+dotnet add tests/Noof.Ledger.TestKit reference src/Noof.Ledger.Persistence
 ```
 
 - [ ] **Step 3: Run to verify it fails**
 
-Run: `dotnet test --project tests/Noof.Persistence.Tests`
+Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests`
 Expected: FAIL — `NoofDbContext` does not exist.
 
 - [ ] **Step 4: Implement the DbContext with the three irreversible conventions**
 
-Create `src/Noof.Persistence/MoneyProbeEntity.cs`. This entity exists only so Phase 0 can assert the conventions produce the right column types; Phase 1 replaces it with the real model.
+Create `src/Noof.Ledger.Persistence/MoneyProbeEntity.cs`. This entity exists only so Phase 0 can assert the conventions produce the right column types; Phase 1 replaces it with the real model.
 
 ```csharp
-using Noof.Domain;
+using Noof.Ledger.Domain;
 
-namespace Noof.Persistence;
+namespace Noof.Ledger.Persistence;
 
 public sealed class MoneyProbeEntity
 {
@@ -1009,13 +1009,13 @@ public sealed class MoneyProbeEntity
 }
 ```
 
-Create `src/Noof.Persistence/NoofDbContext.cs`:
+Create `src/Noof.Ledger.Persistence/NoofDbContext.cs`:
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
-using Noof.Domain;
+using Noof.Ledger.Domain;
 
-namespace Noof.Persistence;
+namespace Noof.Ledger.Persistence;
 
 public class NoofDbContext(DbContextOptions<NoofDbContext> options) : DbContext(options)
 {
@@ -1050,13 +1050,13 @@ public class NoofDbContext(DbContextOptions<NoofDbContext> options) : DbContext(
 }
 ```
 
-Create `src/Noof.Persistence/DesignTimeDbContextFactory.cs`. This lets `dotnet ef` run without booting the web host:
+Create `src/Noof.Ledger.Persistence/DesignTimeDbContextFactory.cs`. This lets `dotnet ef` run without booting the web host:
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 
-namespace Noof.Persistence;
+namespace Noof.Ledger.Persistence;
 
 public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<NoofDbContext>
 {
@@ -1077,15 +1077,15 @@ public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<Noo
 - [ ] **Step 5: Add the design package and create the first migration**
 
 ```bash
-dotnet add src/Noof.Persistence package Microsoft.EntityFrameworkCore.Design
-dotnet ef migrations add InitialCreate --project src/Noof.Persistence --startup-project src/Noof.Persistence
+dotnet add src/Noof.Ledger.Persistence package Microsoft.EntityFrameworkCore.Design
+dotnet ef migrations add InitialCreate --project src/Noof.Ledger.Persistence --startup-project src/Noof.Ledger.Persistence
 ```
 
-Expected: a `Migrations/` folder appears under `src/Noof.Persistence`.
+Expected: a `Migrations/` folder appears under `src/Noof.Ledger.Persistence`.
 
 - [ ] **Step 6: Run to verify it passes**
 
-Run: `dotnet test --project tests/Noof.Persistence.Tests`
+Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests`
 Expected: PASS, 12 tests.
 
 - [ ] **Step 7: Prime the template database**
@@ -1093,7 +1093,7 @@ Expected: PASS, 12 tests.
 The fixture's `CreateDatabaseAsync` clones `noof_test_template`, so the template must carry the migrated schema.
 
 ```bash
-dotnet ef database update --project src/Noof.Persistence --startup-project src/Noof.Persistence --connection "Host=127.0.0.1;Port=5432;Database=noof_test_template;Username=postgres"
+dotnet ef database update --project src/Noof.Ledger.Persistence --startup-project src/Noof.Ledger.Persistence --connection "Host=127.0.0.1;Port=5432;Database=noof_test_template;Username=postgres"
 ```
 
 - [ ] **Step 8: Run the whole suite**
@@ -1104,7 +1104,7 @@ Expected: PASS, all projects.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add src/Noof.Persistence tests/
+git add src/Noof.Ledger.Persistence tests/
 git commit -m "feat: DbContext conventions, first migration and migration contract tests"
 ```
 
@@ -1115,7 +1115,7 @@ git commit -m "feat: DbContext conventions, first migration and migration contra
 The spec's central claim is that SQLite fails where Postgres succeeds. This task proves it once, records the evidence, and deletes the code. Without it, the database decision rests on a report rather than on something this repository can demonstrate.
 
 **Files:**
-- Create then delete: `tests/Noof.Persistence.Tests/SqliteCounterfactualTests.cs`
+- Create then delete: `tests/Noof.Ledger.Persistence.Tests/SqliteCounterfactualTests.cs`
 - Modify: `docs/superpowers/specs/2026-09-19-noof-finance-design.md`
 
 - [ ] **Step 1: Write the counterfactual test**
@@ -1125,7 +1125,7 @@ using System.Globalization;
 using AwesomeAssertions;
 using Microsoft.Data.Sqlite;
 
-namespace Noof.Persistence.Tests;
+namespace Noof.Ledger.Persistence.Tests;
 
 public class SqliteCounterfactualTests
 {
@@ -1166,8 +1166,8 @@ public class SqliteCounterfactualTests
 - [ ] **Step 2: Add the SQLite package and run it**
 
 ```bash
-dotnet add tests/Noof.Persistence.Tests package Microsoft.Data.Sqlite
-dotnet test --project tests/Noof.Persistence.Tests --filter "SqliteCounterfactual"
+dotnet add tests/Noof.Ledger.Persistence.Tests package Microsoft.Data.Sqlite
+dotnet test --project tests/Noof.Ledger.Persistence.Tests --filter "SqliteCounterfactual"
 ```
 
 Expected: PASS — SQLite's lexicographic `MAX` returns `999.99`, not `1234.50`. **Record the actual value printed.**
@@ -1181,8 +1181,8 @@ Edit `docs/superpowers/specs/2026-09-19-noof-finance-design.md`, in §3, replaci
 The decision is made and recorded. Leaving a SQLite dependency in a Postgres project invites someone to use it.
 
 ```bash
-rm tests/Noof.Persistence.Tests/SqliteCounterfactualTests.cs
-dotnet remove tests/Noof.Persistence.Tests package Microsoft.Data.Sqlite
+rm tests/Noof.Ledger.Persistence.Tests/SqliteCounterfactualTests.cs
+dotnet remove tests/Noof.Ledger.Persistence.Tests package Microsoft.Data.Sqlite
 dotnet test --solution NoofFinance.slnx
 ```
 
@@ -1205,8 +1205,8 @@ git commit -m "test: reproduce and record the SQLite decimal defect, then remove
 - [ ] **Step 1: Verify publish lands in `publish/`**
 
 ```bash
-dotnet publish src/Noof.Host/Noof.Host.csproj -c Release -o publish
-ls publish/Noof.Host.exe
+dotnet publish src/Noof.Ledger.Host/Noof.Ledger.Host.csproj -c Release -o publish
+ls publish/Noof.Ledger.Host.exe
 ```
 
 Expected: the executable exists. Note that `-o` on a *solution* is an error since SDK 7.0.200 — always publish the host project.
@@ -1229,7 +1229,7 @@ try {
 
     if (Test-Path publish) { Remove-Item publish -Recurse -Force }
 
-    dotnet publish src/Noof.Host/Noof.Host.csproj -c Release -o publish
+    dotnet publish src/Noof.Ledger.Host/Noof.Ledger.Host.csproj -c Release -o publish
     if ($LASTEXITCODE -ne 0) { throw 'Publish failed.' }
 
     Write-Host "Published to $root\publish"
@@ -1263,6 +1263,6 @@ git commit -m "build: test-gated publish script targeting the publish folder"
 - [ ] Adding a forbidden `ProjectReference` turns the architecture test red — proven, not assumed.
 - [ ] `money_probe_entities.amount` is `numeric(19,4)`; `recorded_at` is `timestamp with time zone`.
 - [ ] `MigrateAsync()` creates from empty, is idempotent, and reports no pending model changes.
-- [ ] `ops/publish.ps1` produces `publish/Noof.Host.exe` and refuses to publish when tests fail.
+- [ ] `ops/publish.ps1` produces `publish/Noof.Ledger.Host.exe` and refuses to publish when tests fail.
 - [ ] The SQLite defect is reproduced, recorded in the spec, and the dependency removed.
 - [ ] The Postgres service is `Automatic` and survives a reboot.

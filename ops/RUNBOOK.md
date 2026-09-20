@@ -35,7 +35,7 @@ if they're already present, always resets the password and credential file to
 a fresh value, and always restores password authentication in its `finally`
 block regardless of how it exits.
 
-Consuming the connection string: `Noof.TestKit.DatabaseSettings` reads
+Consuming the connection string: `Noof.Ledger.TestKit.DatabaseSettings` reads
 `NOOF_TEST_PG` first, then falls back to the `db.connection` file described
 above (because a `User`-scope environment variable is not inherited by shells
 that were already running when the script set it). Neither the connection
