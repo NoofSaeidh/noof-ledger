@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Auth;
 using Noof.Ledger.Host.Auth;
+using Noof.Ledger.Host.Endpoints;
 using Noof.Ledger.Host.Startup;
 using Noof.Ledger.Persistence;
 using Noof.Ledger.Persistence.Auth;
@@ -60,6 +61,8 @@ app.UseAntiforgery();
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
+
+app.MapAccountEndpoints();
 
 app.MapGet("/healthz", () => Results.Ok("ok")).AllowAnonymous();
 
