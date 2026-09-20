@@ -13,6 +13,7 @@
 
   <PropertyGroup>
     <IsDeployableApp>true</IsDeployableApp>
+    <RequiresAspNetWebAssets>true</RequiresAspNetWebAssets>
   </PropertyGroup>
 
 </Project>

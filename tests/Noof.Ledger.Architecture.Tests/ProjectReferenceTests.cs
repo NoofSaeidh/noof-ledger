@@ -46,6 +46,29 @@ public class ProjectReferenceTests
             p.Contains("HttpClient", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public void Web_package_references_are_exactly_its_allowed_set()
+    {
+        Packages("Noof.Ledger.Web").Should().BeEquivalentTo(
+            "Microsoft.AspNetCore.Components.Web",
+            "Microsoft.AspNetCore.Components.Authorization");
+    }
+
+    [Fact]
+    public void Web_has_no_program_cs()
+    {
+        var web = Path.Combine(RepoRoot.Find().FullName, "src", "Noof.Ledger.Web");
+
+        Directory.EnumerateFiles(web, "Program.cs", SearchOption.AllDirectories)
+            .Should().BeEmpty("Noof.Ledger.Web is a UI-only class library; the host owns startup");
+    }
+
+    [Fact]
+    public void Web_is_a_razor_class_library_not_a_web_app()
+    {
+        Load("Noof.Ledger.Web").Root!.Attribute("Sdk")!.Value.Should().Be("Microsoft.NET.Sdk.Razor");
+    }
+
     static XDocument Load(string project)
     {
         var path = Path.Combine(RepoRoot.Find().FullName, "src", project, $"{project}.csproj");

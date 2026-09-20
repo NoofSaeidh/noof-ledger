@@ -1,6 +1,18 @@
+using Noof.Ledger.Web.Components;
+
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddRazorComponents()
+    .AddInteractiveServerComponents();
+
 var app = builder.Build();
 
-app.MapGet("/", () => "Hello World!");
+app.UseAntiforgery();
+
+app.MapStaticAssets();
+app.MapRazorComponents<App>()
+    .AddInteractiveServerRenderMode();
+
+app.MapGet("/healthz", () => Results.Ok("ok"));
 
 app.Run();

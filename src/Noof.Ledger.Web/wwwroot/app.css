@@ -1,0 +1,12 @@
+body {
+    font-family: system-ui, sans-serif;
+    margin: 0;
+}
+
+.page {
+    padding: 1rem 2rem;
+}
+
+.btn {
+    padding: 0.4rem 0.8rem;
+}
