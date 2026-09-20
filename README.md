@@ -76,4 +76,5 @@ Domain  ←  Application  ←  Persistence · Ai · Fx · Receipts · Telegram �
 
 ## Licence
 
-Not yet chosen. Until one is added, no permission is granted to use this code.
+None, deliberately. This is published to be read, not reused — default copyright applies, so no
+permission is granted to copy, modify or distribute it.
