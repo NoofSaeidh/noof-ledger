@@ -7,6 +7,7 @@ using Noof.Ledger.Application.Auth;
 using Noof.Ledger.Host.Auth;
 using Noof.Ledger.Host.Startup;
 using Noof.Ledger.Persistence;
+using Noof.Ledger.Persistence.Auth;
 using Noof.Ledger.Web.Components;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -21,6 +22,7 @@ builder.Services.AddDbContext<LedgerDbContext>(options =>
     options.UseNpgsql(LedgerConnectionString.Resolve(builder.Configuration.GetConnectionString("Ledger"))));
 
 builder.Services.AddSingleton<IPasswordHasher, PasswordHasherAdapter>();
+builder.Services.AddScoped<IUserStore, EfUserStore>();
 
 var authentication = builder.Services.AddAuthentication(
     cookieMode ? AuthSchemes.Cookie : AuthSchemes.LocalOwner);
