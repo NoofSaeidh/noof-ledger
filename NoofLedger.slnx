@@ -13,6 +13,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/Noof.Ledger.Architecture.Tests/Noof.Ledger.Architecture.Tests.csproj" />
     <Project Path="tests/Noof.Ledger.Domain.Tests/Noof.Ledger.Domain.Tests.csproj" />
+    <Project Path="tests/Noof.Ledger.Host.Tests/Noof.Ledger.Host.Tests.csproj" />
     <Project Path="tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj" />
     <Project Path="tests/Noof.Ledger.TestKit/Noof.Ledger.TestKit.csproj" />
   </Folder>

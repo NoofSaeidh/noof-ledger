@@ -39,3 +39,6 @@ Thumbs.db
 
 # SDD workspace (scratch)
 .superpowers/
+
+# Test runner output
+TestResults/

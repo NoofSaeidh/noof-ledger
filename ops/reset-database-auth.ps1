@@ -78,7 +78,10 @@ $connection = "Host=127.0.0.1;Port=5432;Database=postgres;Username=postgres;Pass
 $dataRoot = Join-Path $env:LOCALAPPDATA 'NoofLedger'
 New-Item -ItemType Directory -Force -Path $dataRoot | Out-Null
 $credentialFile = Join-Path $dataRoot 'db.connection'
-Set-Content -Path $credentialFile -Value $connection -Encoding UTF8
+# UTF8 without a BOM. PowerShell 5.1's -Encoding UTF8 always writes one, and Npgsql
+# rejects a connection string whose first character is a BOM when the file is piped
+# straight into a command line (File.ReadAllText strips it, so the app never notices).
+[System.IO.File]::WriteAllText($credentialFile, $connection, (New-Object System.Text.UTF8Encoding $false))
 
 [Environment]::SetEnvironmentVariable('NOOF_TEST_PG', $connection, 'User')
 

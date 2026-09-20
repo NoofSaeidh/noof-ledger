@@ -34,6 +34,10 @@ The spec was approved without answering these, so **each has taken its stated de
 | Question | Answer |
 |---|---|
 | Database engine | **PostgreSQL 18** — installed via choco |
+| Project name | **Ledger** — `Noof.Ledger.*`, solution `NoofLedger.slnx`, database `noof_ledger` |
+| `Money` ordering across currencies | **Throws.** Comparing 10 EUR to 10 USD has no correct answer. Callers sort mixed lists explicitly: `OrderBy(m => m.Currency).ThenBy(m => m.Amount)` |
+| `CurrencyCode` ordering | **Ordinal, never cultural** — `string.CompareOrdinal`. Serbian Latin treats `LJ` as one collating letter and would invert pairs |
+| `Microsoft.AspNetCore.Components.Authorization` version | **10.0.8**, lockstep with `Components.Web`. Verified to restore and build clean under CPM + `TreatWarningsAsErrors` |
 | Containers (Docker/Podman) | **No**, for now — reasoning in §4 of the design |
 | Money representation | `decimal` + `Currency`, native `numeric(19,4)` |
 | Base currency | **EUR** |
@@ -54,3 +58,18 @@ From §15 of the design, added 2026-09-19. All defaulted; none blocks any phase.
 | A4 | Set up trusted local HTTPS once, to unlock Windows Hello passkeys? | **No** — password stays the permanent mechanism | Any time |
 
 **Why A2 needs no discipline from you:** the guard makes the config key and the Kestrel binding physically inseparable. The day you widen the binding for phone access, the app will not start until auth is on. That is what stops "optional now" from becoming "forgotten forever".
+
+---
+
+## Phase 0b questions — raised by the auth/data research
+
+| # | Question | Default taken | Decide by |
+|---|---|---|---|
+| B1 | Does `user set-password` CREATE the `app_user` row, or require it to exist? There is no `/register` and no `/setup` page, so nothing else can create it | **Upsert** — it creates the row if absent. Otherwise the app has no path to a first user at all | Phase 0b, task 13 |
+| B2 | Which entities beyond `AppUser` ship before Phase 1? | **None.** `MoneyProbeEntity` stays as the Money-mapping regression fixture and is dropped in Phase 1 when a real Money-bearing entity exists | Phase 1 |
+| B3 | Should the loopback guard also reject a non-loopback *configured* URL pre-bind, as an early check? | **No** — the post-bind `IServerAddressesFeature` check is authoritative. Re-deriving Kestrel's URL precedence by hand is a bug source | Phase 0b, task 9 |
+
+**Note on A1/A2.** `Auth:Mode` still defaults to `Off`, so the login screen is not in the way.
+The startup guard makes the config key and the Kestrel binding inseparable: widening the binding
+for phone access will refuse to start until auth is on. That is what stops "optional now" from
+becoming "forgotten forever" — no discipline required from you.

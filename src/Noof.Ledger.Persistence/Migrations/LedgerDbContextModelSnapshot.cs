@@ -9,54 +9,82 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
-namespace Noof.Ledger.Persistence.Migrations;
-
-[DbContext(typeof(LedgerDbContext))]
-partial class LedgerDbContextModelSnapshot : ModelSnapshot
+namespace Noof.Ledger.Persistence.Migrations
 {
-    protected override void BuildModel(ModelBuilder modelBuilder)
+    [DbContext(typeof(LedgerDbContext))]
+    partial class LedgerDbContextModelSnapshot : ModelSnapshot
     {
+        protected override void BuildModel(ModelBuilder modelBuilder)
+        {
 #pragma warning disable 612, 618
-        modelBuilder
-            .HasDefaultSchema("public")
-            .HasAnnotation("ProductVersion", "10.0.12")
-            .HasAnnotation("Relational:MaxIdentifierLength", 63);
+            modelBuilder
+                .HasDefaultSchema("public")
+                .HasAnnotation("ProductVersion", "10.0.12")
+                .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
-        NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
+            NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-        modelBuilder.Entity("Noof.Ledger.Persistence.MoneyProbeEntity", b =>
-            {
-                b.Property<int>("Id")
-                    .ValueGeneratedOnAdd()
-                    .HasColumnType("integer")
-                    .HasColumnName("id");
+            modelBuilder.Entity("Noof.Ledger.Domain.AppUser", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
 
-                NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("created_at");
 
-                b.Property<DateTimeOffset>("RecordedAt")
-                    .HasColumnType("timestamptz")
-                    .HasColumnName("recorded_at");
+                    b.Property<string>("PasswordHash")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("password_hash");
 
-                b.ComplexProperty(typeof(Dictionary<string, object>), "Amount", "Noof.Ledger.Persistence.MoneyProbeEntity.Amount#Money", b1 =>
-                    {
-                        b1.IsRequired();
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("username");
 
-                        b1.Property<decimal>("Amount")
-                            .HasPrecision(19, 4)
-                            .HasColumnType("numeric(19,4)")
-                            .HasColumnName("amount");
+                    b.HasKey("Id");
 
-                        b1.Property<string>("Currency")
-                            .IsRequired()
-                            .HasMaxLength(3)
-                            .HasColumnType("character varying(3)")
-                            .HasColumnName("currency");
-                    });
+                    b.ToTable("app_user", "public");
+                });
 
-                b.HasKey("Id");
+            modelBuilder.Entity("Noof.Ledger.Persistence.MoneyProbeEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
 
-                b.ToTable("money_probe_entities", "public");
-            });
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("RecordedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("recorded_at");
+
+                    b.ComplexProperty(typeof(Dictionary<string, object>), "Amount", "Noof.Ledger.Persistence.MoneyProbeEntity.Amount#Money", b1 =>
+                        {
+                            b1.IsRequired();
+
+                            b1.Property<decimal>("Amount")
+                                .HasPrecision(19, 4)
+                                .HasColumnType("numeric(19,4)")
+                                .HasColumnName("amount");
+
+                            b1.Property<string>("Currency")
+                                .IsRequired()
+                                .HasMaxLength(3)
+                                .HasColumnType("character varying(3)")
+                                .HasColumnName("currency");
+                        });
+
+                    b.HasKey("Id");
+
+                    b.ToTable("money_probe_entities", "public");
+                });
 #pragma warning restore 612, 618
+        }
     }
 }
