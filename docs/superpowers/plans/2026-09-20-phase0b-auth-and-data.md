@@ -66,23 +66,6 @@ namespace Noof.Ledger.Domain.Tests;
 public class AppUserTests
 {
     [Fact]
-    public void Round_trips_its_properties()
-    {
-        var created = DateTimeOffset.UtcNow;
-        var user = new AppUser
-        {
-            Id = Guid.NewGuid(),
-            Username = "noof",
-            PasswordHash = "hash",
-            CreatedAt = created,
-        };
-
-        user.Username.Should().Be("noof");
-        user.PasswordHash.Should().Be("hash");
-        user.CreatedAt.Should().Be(created);
-    }
-
-    [Fact]
     public void Password_hash_can_be_replaced_without_rebuilding_the_user()
     {
         var user = new AppUser
@@ -99,6 +82,8 @@ public class AppUserTests
     }
 }
 ```
+
+> One test, deliberately. A second test constructing the object and asserting the getters return the literals it just passed in would assert only on its own setup constants against plain auto-properties — nothing short of a miscompilation could fail it. The test above earns its place differently: `user.PasswordHash = "new"` only compiles because the setter is public rather than `init`, so it is a compile-time guard on exactly the contract Tasks 5, 8, 10 and 11 depend on.
 
 - [ ] **Step 2: Run it and watch it fail**
 
