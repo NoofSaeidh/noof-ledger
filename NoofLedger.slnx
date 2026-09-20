@@ -1,0 +1,19 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Noof.Ledger.Ai/Noof.Ledger.Ai.csproj" />
+    <Project Path="src/Noof.Ledger.Application/Noof.Ledger.Application.csproj" />
+    <Project Path="src/Noof.Ledger.Domain/Noof.Ledger.Domain.csproj" />
+    <Project Path="src/Noof.Ledger.Fx/Noof.Ledger.Fx.csproj" />
+    <Project Path="src/Noof.Ledger.Host/Noof.Ledger.Host.csproj" />
+    <Project Path="src/Noof.Ledger.Persistence/Noof.Ledger.Persistence.csproj" />
+    <Project Path="src/Noof.Ledger.Receipts/Noof.Ledger.Receipts.csproj" />
+    <Project Path="src/Noof.Ledger.Telegram/Noof.Ledger.Telegram.csproj" />
+    <Project Path="src/Noof.Ledger.Web/Noof.Ledger.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Noof.Ledger.Architecture.Tests/Noof.Ledger.Architecture.Tests.csproj" />
+    <Project Path="tests/Noof.Ledger.Domain.Tests/Noof.Ledger.Domain.Tests.csproj" />
+    <Project Path="tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj" />
+    <Project Path="tests/Noof.Ledger.TestKit/Noof.Ledger.TestKit.csproj" />
+  </Folder>
+</Solution>

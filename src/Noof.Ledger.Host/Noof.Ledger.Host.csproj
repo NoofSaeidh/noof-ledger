@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Noof.Ledger.Domain\Noof.Ledger.Domain.csproj" />
+    <ProjectReference Include="..\Noof.Ledger.Application\Noof.Ledger.Application.csproj" />
+    <ProjectReference Include="..\Noof.Ledger.Persistence\Noof.Ledger.Persistence.csproj" />
+    <ProjectReference Include="..\Noof.Ledger.Ai\Noof.Ledger.Ai.csproj" />
+    <ProjectReference Include="..\Noof.Ledger.Fx\Noof.Ledger.Fx.csproj" />
+    <ProjectReference Include="..\Noof.Ledger.Receipts\Noof.Ledger.Receipts.csproj" />
+    <ProjectReference Include="..\Noof.Ledger.Telegram\Noof.Ledger.Telegram.csproj" />
+    <ProjectReference Include="..\Noof.Ledger.Web\Noof.Ledger.Web.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <IsDeployableApp>true</IsDeployableApp>
+  </PropertyGroup>
+
+</Project>

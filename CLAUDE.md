@@ -1,8 +1,8 @@
-# noof-finance — working agreement
+# noof-ledger — working agreement
 
 Personal finance tracker. Telegram bot captures spending (text, voice, receipt photos), an LLM categorises it per line item, a local Blazor dashboard shows it across multiple wallets and currencies. C# / .NET 10, EF Core, strict TDD, local hosting, **public repo**.
 
-> **Status:** design under review in `docs/superpowers/specs/2026-09-19-noof-finance-design.md`. No product code until that spec is approved. Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
+> **Status:** spec approved (`docs/superpowers/specs/2026-09-19-noof-finance-design.md`); **Phase 0 complete** — solution, EF Core model, first migration and the PostgreSQL money-storage gate test are in, 37 tests green. Next is Phase 0b (auth + data layer). Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
 
 ---
 
@@ -61,11 +61,12 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
 
 **Architecture**
 - Projects are split: `Domain` ← `Application` ← (`Persistence` · `Ai` · `Fx` · `Receipts` · `Telegram` · `Web`) ← `Host`.
-- `Noof.Web` is UI only — no `DbContext`, no EF types, no `HttpClient`, no `Program.cs`. Enforced by `DisableTransitiveProjectReferences` plus an architecture test, because project references are transitive at compile time and a convention alone will not hold.
-- `Noof.Domain` has zero NuGet references. Asserted by a test.
+- `Noof.Ledger.Web` is UI only — no `DbContext`, no EF types, no `HttpClient`, no `Program.cs`. Enforced by `DisableTransitiveProjectReferences` plus an architecture test, because project references are transitive at compile time and a convention alone will not hold.
+- `Noof.Ledger.Domain` has zero NuGet references. Asserted by a test.
 - Do not add MediatR, AutoMapper, generic repositories over `DbContext`, or CQRS scaffolding.
 
 **Database**
+- **EF generates block-scoped namespaces.** `IDE0161` is an error here, so a freshly scaffolded migration **fails the build** until you convert it to a file-scoped namespace. That is deliberate — the alternative is a style rule nothing enforces.
 - EF Core with migrations from the first commit. The database must be creatable from empty and upgradeable in one mechanism.
 - **Never call `EnsureCreated()`** — anywhere, including test helpers. It bypasses migrations and permanently poisons that database for `Migrate()`.
 - Tests run against a real database, never the EF InMemory provider.

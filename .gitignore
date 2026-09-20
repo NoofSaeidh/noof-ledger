@@ -36,3 +36,6 @@ logs/
 # OS
 Thumbs.db
 .DS_Store
+
+# SDD workspace (scratch)
+.superpowers/

@@ -1,4 +1,4 @@
-# noof-finance — Design (revision 2)
+# noof-ledger — Design (revision 2)
 
 **Status:** awaiting your review · **Date:** 2026-09-19
 
@@ -49,11 +49,13 @@ A personal expense tracker for one person. You capture spending through a Telegr
 And on a *raw* connection in every culture — DB Browser, any script you ever write:
 
 ```
-ORDER BY : 0.1, 0.2, 10.0, 100.0, 2.5, 9.99     <- lexicographic
-MAX      : 9.99                                  <- over a set containing 100.00
+ORDER BY : -45.25, 0.10, 10.00, 100.00, 1234.50, 2.05, 9.55, 999.99   <- lexicographic
+MAX      : 999.99                                                      <- over a set containing 1234.50
 ```
 
-`MAX` over money returning `9.99` when `100.00` is present isn't a rough edge. It's a wrong answer with no warning. Postgres, same data, same three cultures: `numeric(19,4)`, correct ordering, `SUM -1111.7778`, `MAX 100.0000`, every time.
+Reproduced in this repository on 2026-09-19 in commit `cbdea7311de73b5ca4558f1f59aa10737898b50f`; recover the test with `git show cbdea7311de73b5ca4558f1f59aa10737898b50f`.
+
+`MAX` over money returning `999.99` when `1234.50` is present isn't a rough edge. It's a wrong answer with no warning. Postgres, same data: `numeric(19,4)`, correct ordering, `SUM 2310.9400`, `MAX 1234.5000` — verified against PostgreSQL 18.6 in all three cultures by the Phase 0 gate test, commit 05a41c0.
 
 **The operational objection is already paid.** PostgreSQL 17.5 was already on your PC (`C:\Program Files\PostgreSQL\17`, with `pg_trgm 1.6` and `unaccent 1.1`), and **you are now installing 18 via choco** — so the target is **PostgreSQL 18**, service `postgresql-x64-18`. (`dotnet-ef 10.0.12` is installed too.) Pin that major for the life of the app; there's no reason to chase releases on a single-user tracker.
 
@@ -66,7 +68,7 @@ MAX      : 9.99                                  <- over a set containing 100.00
 **No provider abstraction.** "SQLite now, Postgres later" is a fantasy that costs more than it saves — migrations are provider-specific, and the data migration is an export/import with a text→numeric parse in the middle, which is the exact parse that already throws under `ru-RU`.
 
 > **❓ Q1 — The one thing that cannot live in the database.**
-> The Postgres password can't be stored encrypted *inside the database it opens*. Two options: **(a) Windows-integrated auth (SSPI)** — no password exists at all, which eliminates the exception rather than managing it; **(b) a DPAPI-protected file** under `%LOCALAPPDATA%`. I lean (a), with a 30-minute spike in Phase 0 to confirm. Either way it is never in `appsettings.json`.
+> The Postgres password can't be stored encrypted *inside the database it opens*. Two options were on the table: **(a) Windows-integrated auth (SSPI)** — no password exists at all; **(b) a DPAPI-protected file** under `%LOCALAPPDATA%`. Neither shipped. What Phase 0 actually built is a third thing: `ops/reset-database-auth.ps1` generates a random password and writes it to a plaintext file at `%LOCALAPPDATA%\NoofLedger\db.connection`, outside the repo and never in `appsettings.json`. That's acceptable for a single-user local dev machine, but the SSPI/DPAPI upgrade is re-parked — decide by Phase 1.
 
 > **✅ Q2 — ANSWERED: PostgreSQL 18**, which you're installing via choco. Settled, no action needed.
 
@@ -99,15 +101,15 @@ Your WSL install isn't wasted — it's what makes that option cheap later. And `
 
 ```
 src/
-  Noof.Domain        refs: NONE       Money, Ledger, Fold(), CategorizationAuthority, FX invariants
-  Noof.Application   refs: Domain     use cases + ports  ("all services")
-  Noof.Persistence   refs: App,Dom    DbContext, migrations, sinks, queue, integrity SQL
-  Noof.Ai            refs: App,Dom    categorizer, canonicalizer, explainer
-  Noof.Fx            refs: App,Dom    providers, archive, triangulation
-  Noof.Receipts      refs: App,Dom    fiscal QR, vision extraction
-  Noof.Telegram      refs: App,Dom    poller, router, presenter
-  Noof.Web           refs: App,Dom    RCL — UI ONLY. No DbContext, no EF type, no Program.cs
-  Noof.Host          refs: all        the only .exe, ~40-line Program.cs
+  Noof.Ledger.Domain        refs: NONE       Money, Ledger, Fold(), CategorizationAuthority, FX invariants
+  Noof.Ledger.Application   refs: Domain     use cases + ports  ("all services")
+  Noof.Ledger.Persistence   refs: App,Dom    DbContext, migrations, sinks, queue, integrity SQL
+  Noof.Ledger.Ai            refs: App,Dom    categorizer, canonicalizer, explainer
+  Noof.Ledger.Fx            refs: App,Dom    providers, archive, triangulation
+  Noof.Ledger.Receipts      refs: App,Dom    fiscal QR, vision extraction
+  Noof.Ledger.Telegram      refs: App,Dom    poller, router, presenter
+  Noof.Ledger.Web           refs: App,Dom    RCL — UI ONLY. No DbContext, no EF type, no Program.cs
+  Noof.Ledger.Host          refs: all        the only .exe, ~40-line Program.cs
 publish/   gitignored, code only, wiped every deploy
 ```
 
@@ -161,7 +163,7 @@ A currency exchange is `Transaction(Kind=Transfer)` with an owned **`FxConversio
 
 ## 9. Secrets
 
-`app_secret` holds **ciphertext only**, produced by ASP.NET Core Data Protection with a per-secret purpose chain — so the Telegram protector cannot decrypt the Anthropic payload even inside one process. The key ring lives at `%LOCALAPPDATA%\NoofFinance\dp-keys` wrapped with `ProtectKeysWithDpapi()`.
+`app_secret` holds **ciphertext only**, produced by ASP.NET Core Data Protection with a per-secret purpose chain — so the Telegram protector cannot decrypt the Anthropic payload even inside one process. The key ring lives at `%LOCALAPPDATA%\NoofLedger\dp-keys` wrapped with `ProtectKeysWithDpapi()`.
 
 **Nothing is in `appsettings.json`**, so there is nothing to mis-gitignore in a public repo, and a leaked database dump is inert.
 
@@ -192,7 +194,7 @@ A currency exchange is `Transaction(Kind=Transfer)` with an owned **`FxConversio
 | 2 · Correctness | **SQL returning rows** | transfer legs net · line items sum to bill · uncategorized expense line · missing FX snapshot · balance vs reconciliation · duplicate-looking transaction |
 | 3 · Explanation | the **LLM**, in Russian | renders prose over facts C# already computed |
 
-**The LLM never returns a health status, never a number, never a branch of control flow** — enforced by an ArchUnitNET rule forbidding health and integrity checks from referencing `Noof.Ai`. The realistic failure is someone adding *"if the explainer says it's fine, auto-resolve"* to save a click, so it has to be a build failure.
+**The LLM never returns a health status, never a number, never a branch of control flow** — enforced by an ArchUnitNET rule forbidding health and integrity checks from referencing `Noof.Ledger.Ai`. The realistic failure is someone adding *"if the explainer says it's fine, auto-resolve"* to save a click, so it has to be a build failure.
 
 **Severity mapping matters more than it sounds:** a socket-level network failure is **amber**, with the text *"Offline — this is normal"*. Only a 401, pending migrations, missing secrets or low disk go **red**. A tile that goes red every time the wifi drops trains you to ignore the dashboard within a week — at which point a real fault goes unnoticed.
 
@@ -263,7 +265,7 @@ Every bulk operation writes a **`RecategorizationBatch`** with full before/after
 
 | # | Question | Default if you say nothing |
 |---|---|---|
-| Q1 | Postgres credential: SSPI or DPAPI file? | SSPI, spiked in Phase 0 |
+| Q1 | Postgres credential: SSPI or DPAPI file? | Neither — generated password in a plaintext file, re-parked to Phase 1 |
 | ~~Q2~~ | ~~Postgres 17 or 18?~~ | ✅ **Answered: 18** |
 | Q3 | Write `.wslconfig` for you? | Not written |
 | Q4 | NBS as the RSD mid source? | `open.er-api.com` for all five |
@@ -275,3 +277,90 @@ Every bulk operation writes a **`RecategorizationBatch`** with full before/after
 ---
 
 *Approve to lock this spec and move to the implementation plan. Annotate anything you want changed and I'll revise and reopen.*
+
+---
+
+## 15. Authentication — addendum
+
+*Added 2026-09-19 after the approved spec, answering: "it is optional now, but would be great to still have users and auth (just to avoid unauthorized access)". Seven agents researched it; the threat model below is the honest version, not the flattering one.*
+
+### What auth actually buys — and what it doesn't
+
+Today the app binds `127.0.0.1` on a PC that is only on while you are logged in. **Against you, and against anything running as you, a login screen buys nothing**: that principal already holds the Postgres identity and the DPAPI keys that decrypt `app_secret`, so the database is readable without ever opening the dashboard.
+
+**Parsec is not an argument for app auth.** Whoever holds a Parsec session owns the desktop, therefore owns Postgres and DPAPI too. An app password makes them click once more. That is a Parsec/Windows-credential problem, and treating it as justification here would be self-deception.
+
+**There is exactly one real gain today: a second Windows account on this same PC.** Windows loopback sockets are not user-namespaced, so another logged-on account can reach `127.0.0.1:<port>` while your instance runs — but it *cannot* open the database (SSPI presents a different principal) and *cannot* decrypt `app_secret` (DPAPI is per-account). **The HTTP dashboard is the only cross-account path into your finances.** Narrow, but genuinely not theatre.
+
+**Auth starts earning its keep at one observable event:** the moment Kestrel stops binding `127.0.0.1` — i.e. when you want the dashboard on your phone. At that instant everyone on the wifi is in scope and the login is the only control that exists. *That event, not a date, is the trigger.*
+
+Explicitly **out of scope**: brute force, credential stuffing, session hijacking, phishing. There is no untrusted network and no second attacker population.
+
+### The decision
+
+**Hand-rolled cookie auth over a single `app_user` row** — roughly 120 lines. `PasswordHasher<AppUser>` (PBKDF2-HMACSHA512, 100k iterations) ships in the shared framework, so **zero new NuGet in Host or Persistence**. No ASP.NET Core Identity, no `UserManager`, no `SignInManager`.
+
+**Not** the `--auth Individual` scaffold: an agent ran it — **52 Razor files**, self-registration, email confirmation wired to a no-op sender, external OAuth, TOTP 2FA. Theatre at one user.
+
+**Not** Windows Negotiate. It provably works here (zero-prompt NTLM as `NOOF-DESKTOP\noofs`), but it **structurally cannot authenticate a phone browser** — the one trigger that makes auth load-bearing.
+
+### The switch, and why it isn't an untested code path
+
+One key: `Auth:Mode` = `Off` | `Cookie`, default **`Off`**. It does **not** branch the pipeline. `UseAuthentication`, `UseAuthorization`, `AddCascadingAuthenticationState`, `AuthorizeRouteView` and `[Authorize]` on every page ship **unconditionally from day one**. The key selects only *which handler is registered*:
+
+- **`Off`** — a ~15-line `LocalOwnerHandler` authenticates every request as the local owner. Every `[Authorize]` and `AuthorizeView` is satisfied, no login screen, **no behaviour change from today**.
+- **`Cookie`** — the real cookie scheme plus `/account/login`.
+
+Same pipeline, same attributes, same policies; both modes exercised in CI by parameterising `WebApplicationFactory`. **A forgotten flag cannot leave a route ungated, because no route's metadata depends on the flag.**
+
+**Startup guard, shipping in the same commit:** if any configured Kestrel URL is non-loopback while `Auth:Mode=Off`, **refuse to boot**. This makes the config key and the binding physically inseparable — the day you widen the binding for your phone, the app will not start until auth is on. Without it, *"optional now"* quietly becomes *"forgotten forever"*.
+
+### Details that are easy to get wrong
+
+- **Cookie:** `ExpireTimeSpan` 180 days, `SlidingExpiration` true, `IsPersistent` true. **Do not set `AuthenticationProperties.ExpiresUtc`** — it overrides sliding expiration, giving a hard expiry instead.
+- **`CookieSecurePolicy.Always` would break sign-in entirely** over plain-HTTP loopback. Leave it at `SameAsRequest`. This is the reflex copied from internet-facing tutorials.
+- **`Login.razor` in `Noof.Ledger.Web` is a bare `<form method="post" action="/account/login">`** — no `@inject`, no `@rendermode`, no `HttpContext`. A cookie must be set by a terminal HTTP response; it cannot be set from inside an upgraded SignalR circuit. The POST is handled by a minimal-API endpoint in `Noof.Ledger.Host`. Microsoft's scaffolded `Login.razor` injects `SignInManager` and `HttpContext` straight into the component — copying it would drag EF-backed services into the UI-only RCL and break the architecture test.
+- **No global `FallbackPolicy`.** The "secure by default" reflex would break `/healthz` and the deploy script's post-publish poll. Authorization stays opt-in per endpoint, with a `/healthz`-stays-anonymous regression test.
+- **First user via CLI only:** `Noof.Ledger.Host.exe user set-password`, parsed before the host is built. No `/register`, no `/setup` page, no seeded credential. It doubles as the recovery path, which is why no reset flow is needed. **A password in any appsettings file is one commit from being permanent in a public repo.**
+
+### Architecture impact
+
+**No tenth project. No second DbContext.** `Noof.Ledger.Web`'s `ProjectReference` set stays exactly `{Noof.Ledger.Application, Noof.Ledger.Domain}`.
+
+| Project | Change |
+|---|---|
+| `Noof.Ledger.Domain` | `AppUser` POCO. **Still zero packages** — existing test unaffected |
+| `Noof.Ledger.Application` | `IUserStore` + our own `IPasswordHasher` port. Deliberately does *not* reference `Microsoft.Extensions.Identity.Core` |
+| `Noof.Ledger.Persistence` | `AppUserConfiguration`, store implementation, one migration. **csproj unchanged** |
+| `Noof.Ledger.Web` | Gains **exactly one** `PackageReference`: `Microsoft.AspNetCore.Components.Authorization`. **The architecture test needs amending** to permit it |
+| `Noof.Ledger.Host` | Handler registration, unconditional middleware, the login endpoint, the CLI verb, the startup guard |
+
+**No roles, no claims, no permission matrix.** One row, one human, one binary distinction. A role claim later costs less than the flag flip.
+
+**Passkeys deferred, not rejected.** .NET 10 Identity has genuine native passkey support, but Microsoft documents the HTTPS requirement unconditionally with no loopback exemption. Revisit once a trusted local HTTPS origin exists; the passkey then attaches to the same `app_user` row with the password as documented recovery.
+
+### Open questions
+
+| # | Question | Default |
+|---|---|---|
+| A1 | Does anyone else have a Windows account on this PC? **Yes means flip to `Cookie` now** — it's the one scenario where auth is load-bearing today | Assumed no |
+| A2 | Do you intend to reach the dashboard from your phone, and roughly when? | Not yet |
+| A3 | Re-prompt for the password on `/settings/secrets` if the session is older than ~10 min? | Policy attached, handler lenient |
+| A4 | Worth setting up trusted local HTTPS once, to unlock Windows Hello? | No — password stays permanent |
+
+### §15 corrections — found when the design was made concrete
+
+*Ten items below were proven wrong or incomplete by execution. Each was reproduced on this machine, several by two independent parties. The implementation plan at `docs/superpowers/plans/2026-09-19-phase0b-auth-and-data-layer.md` is authoritative where it differs from the text above.*
+
+1. **`Database:MigrateOnStartup` was missing entirely, and it is load-bearing.** Code between `builder.Build()` and `app.Run()` genuinely executes under `WebApplicationFactory`, so an ungated `MigrateAsync()` there makes **every** integration test require a live PostgreSQL. Add the flag (default `true` in appsettings); every factory test sets it `false` via `UseSetting`. Without this the entire offline test suite is impossible.
+2. **The `LocalOwnerHandler` constructor is not a free choice.** The 4-argument `AuthenticationHandler` overload taking `ISystemClock` is `[Obsolete]`, which `TreatWarningsAsErrors` escalates to **CS0618 — verified to fail this repo's build with 2 errors**. Use the 3-argument `(IOptionsMonitor, ILoggerFactory, UrlEncoder)` overload. Every Microsoft sample still shows the 4-arg form.
+3. **Antiforgery does not work the idiomatic way.** A `MapPost` carrying only `.WithMetadata(new RequireAntiforgeryTokenAttribute())` **returns 200 with no token supplied** — proven twice against real Kestrel. Use `[FromForm]` parameter binding, which triggers validation, and keep the four-case antiforgery test as the guard.
+4. **"Refuses to boot" overstates what is cleanly achievable.** Kestrel's URL precedence across `ASPNETCORE_URLS`, `Kestrel:Endpoints` and `launchSettings` was not verifiable end to end, and re-deriving it by hand is a bug source. Read the addresses Kestrel **actually bound** via `IServerAddressesFeature` in `ApplicationStarted` and stop the application there. The pure-function guard stays, as the densely-tested core.
+5. **The `PasswordHasher` adapter must live in `Noof.Ledger.Host`, not `Noof.Ledger.Persistence`.** "Zero new NuGet" holds only because `Sdk.Web` carries an implicit `FrameworkReference` to `Microsoft.AspNetCore.App`. `Noof.Ledger.Persistence` is a plain library and would need an explicit one.
+6. **`Noof.Ledger.Web` does need `Microsoft.AspNetCore.Components.Authorization`** — but not for the reason implied. `[Authorize]` **already compiles today** via `Components.Web`; the new package is needed for `AuthorizeRouteView`, `AuthorizeView`, `CascadingAuthenticationState` and `AuthenticationStateProvider`. `<AntiforgeryToken />` is in `Components.Web` already. **No architecture test amendment is required** — none of them whitelist Web's packages. Add one that does.
+7. **Do not host the app under `WebApplicationFactory` for Playwright.** A Kestrel-forcing `CreateHost` override throws `InvalidCastException` casting `KestrelServerImpl` to `TestServer` — reproduced verbatim by two parties. Launch a real child process, **from `dotnet publish` output rather than `dotnet build` output**: from build output a Blazor Server app reproducibly fails with *"Failed to load module script: MIME type of ''"* and clicks never register; from publish output it worked 5/5.
+8. **`[CollectionDefinition]` must live in the same assembly as the tests referencing it.** A definition in `Noof.Ledger.TestKit` consumed from `Noof.Ledger.Persistence.Tests` fails at runtime with *"did not have matching fixture data"*. Each consuming assembly needs its own wrapper — and `TestKit` therefore needs no xunit package after all.
+9. **Every async HttpClient call in new tests must pass `TestContext.Current.CancellationToken`.** Analyzer rule `xUnit1051` is a warning by default, which `TreatWarningsAsErrors` makes a build error — a clean rebuild failed with 3× xUnit1051.
+10. **`dotnet ef migrations remove` is not offline-safe without `--force`.** It connects to call `HistoryRepository.GetAppliedMigrations()` and exits 1. Only `migrations add` and `migrations script` are unconditionally offline.
+
+**Also struck from §3:** the claim that SQLite silently rounds `123456789.123456789` did **not** reproduce in two re-runs and must not be quoted. The reproduced indictments remain: TEXT affinity instead of `numeric(19,4)`, no `varchar(3)` length enforcement, and the culture-dependent decimal `OrderBy` that still throws under `ru-RU` on EF Core 10.
