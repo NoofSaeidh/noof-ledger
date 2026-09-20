@@ -27,6 +27,12 @@ public class ProjectReferenceTests
     }
 
     [Fact]
+    public void Application_has_no_package_references()
+    {
+        Packages("Noof.Ledger.Application").Should().BeEmpty();
+    }
+
+    [Fact]
     public void Web_has_no_entity_framework_package()
     {
         Packages("Noof.Ledger.Web").Should().NotContain(p => p.Contains("EntityFrameworkCore", StringComparison.OrdinalIgnoreCase));
