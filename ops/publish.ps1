@@ -6,10 +6,10 @@ try {
     dotnet build NoofFinance.slnx -c Release
     if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
 
-    dotnet test --solution NoofFinance.slnx -c Release
-    # Exit code 8 means "no tests ran" (empty test assembly), which is acceptable during development.
-    # Exit codes 1-2 indicate actual test failures.
-    if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 8) { throw 'Tests failed; refusing to publish.' }
+    $testOutput = dotnet test --solution NoofFinance.slnx -c Release 2>&1 | Out-String
+    Write-Host $testOutput
+    if ($LASTEXITCODE -ne 0) { throw 'Tests failed; refusing to publish.' }
+    if ($testOutput -notmatch '(?m)^\s*succeeded:\s*([1-9]\d*)') { throw 'No tests ran; refusing to publish.' }
 
     if (Test-Path publish) { Remove-Item publish -Recurse -Force }
 
