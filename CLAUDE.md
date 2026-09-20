@@ -2,7 +2,9 @@
 
 Personal finance tracker. Telegram bot captures spending (text, voice, receipt photos), an LLM categorises it per line item, a local Blazor dashboard shows it across multiple wallets and currencies. C# / .NET 10, EF Core, strict TDD, local hosting, **public repo**.
 
-> **Status:** spec approved (`docs/superpowers/specs/2026-09-19-noof-finance-design.md`); **Phase 0 complete** — solution, EF Core model, first migration and the PostgreSQL money-storage gate test are in, 37 tests green. Next is Phase 0b (auth + data layer). Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
+> **Status:** spec approved (`docs/superpowers/specs/2026-09-19-noof-finance-design.md`); **Phases 0 and 0b complete** — solution, EF Core model and migrations, PostgreSQL money-storage gate, authentication in two modes, the `user set-password` verb, the loopback interlock and a Blazor Server shell. 136 solution tests plus 4 Playwright smoke tests, all green; `ops/publish.ps1` produces a runnable host. Next is Phase 1 (capture and categorisation). Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
+>
+> **Before enabling `Auth:Mode=Cookie`, the operator must run `user set-password noof`** — the existing row's password was set during Phase 0b verification and is not theirs.
 
 ---
 
