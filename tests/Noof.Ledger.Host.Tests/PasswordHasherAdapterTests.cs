@@ -1,4 +1,6 @@
-using AwesomeAssertions;
+﻿using AwesomeAssertions;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Options;
 using Noof.Ledger.Application.Auth;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Host.Auth;
@@ -39,6 +41,19 @@ public class PasswordHasherAdapterTests
         var hasher = new PasswordHasherAdapter();
 
         hasher.Hash(User, "same").Should().NotBe(hasher.Hash(User, "same"));
+    }
+
+    [Fact]
+    public void A_legacy_format_hash_asks_to_be_rehashed_rather_than_failing()
+    {
+        var legacy = new PasswordHasher<AppUser>(Options.Create(new PasswordHasherOptions
+        {
+            CompatibilityMode = PasswordHasherCompatibilityMode.IdentityV2,
+        }));
+        var legacyHash = legacy.HashPassword(User, "correct horse battery staple");
+
+        new PasswordHasherAdapter().Verify(User, legacyHash, "correct horse battery staple")
+            .Should().Be(PasswordVerifyResult.SuccessRehashNeeded);
     }
 
     [Fact]
