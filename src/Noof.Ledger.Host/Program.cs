@@ -5,11 +5,18 @@ using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Auth;
 using Noof.Ledger.Host.Auth;
+using Noof.Ledger.Host.Cli;
 using Noof.Ledger.Host.Endpoints;
 using Noof.Ledger.Host.Startup;
 using Noof.Ledger.Persistence;
 using Noof.Ledger.Persistence.Auth;
 using Noof.Ledger.Web.Components;
+
+if (UserCommand.TryParse(args, out var cliUsername))
+{
+    Environment.ExitCode = await UserCommand.RunAsync(cliUsername, args);
+    return;
+}
 
 var builder = WebApplication.CreateBuilder(args);
 
