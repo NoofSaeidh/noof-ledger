@@ -1,6 +1,10 @@
 using System.Net;
 using AwesomeAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using Noof.Ledger.Application.Auth;
+using Noof.Ledger.Domain;
+using Noof.Ledger.Host.Auth;
 
 namespace Noof.Ledger.Host.Tests;
 
@@ -16,13 +20,23 @@ public class LoginEndpointTests
             builder.ConfigureServices(FakeUserStore.Register);
         });
 
+    static WebApplicationFactory<Program> OffMode() =>
+        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Auth:Mode", "Off");
+            builder.UseSetting("Database:MigrateOnStartup", "false");
+            builder.UseSetting("ConnectionStrings:Ledger",
+                "Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none;Timeout=2");
+            builder.ConfigureServices(FakeUserStore.Register);
+        });
+
     [Fact]
     public async Task A_post_without_an_antiforgery_token_is_rejected()
     {
         using var factory = CookieMode();
         using var client = factory.CreateClient();
 
-        var response = await client.PostAsync("/account/login",
+        var response = await client.PostAsync("/account/login/submit",
             new FormUrlEncodedContent([
                 new KeyValuePair<string, string>("username", "noof"),
                 new KeyValuePair<string, string>("password", "correct")]),
@@ -40,7 +54,7 @@ public class LoginEndpointTests
         var html = await client.GetStringAsync("/account/login", TestContext.Current.CancellationToken);
 
         html.Should().Contain("method=\"post\"")
-            .And.Contain("action=\"/account/login\"")
+            .And.Contain("action=\"/account/login/submit\"")
             .And.Contain("__RequestVerificationToken");
     }
 
@@ -69,5 +83,53 @@ public class LoginEndpointTests
             : Enumerable.Empty<string>();
 
         cookies.Should().NotContain(c => c.Contains(".AspNetCore.Cookie", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task A_valid_login_under_Auth_Mode_Off_does_not_500()
+    {
+        using var factory = OffMode();
+        using var client = factory.CreateClient(new() { AllowAutoRedirect = false });
+
+        var response = await LoginHelper.PostWithTokenAsync(client, "noof", "correct");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Redirect);
+    }
+
+    [Fact]
+    public async Task An_unknown_username_still_pays_the_verify_cost_exactly_once()
+    {
+        var counting = new CountingPasswordHasher(new PasswordHasherAdapter());
+
+        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Auth:Mode", "Cookie");
+            builder.UseSetting("Database:MigrateOnStartup", "false");
+            builder.UseSetting("ConnectionStrings:Ledger",
+                "Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none;Timeout=2");
+            builder.ConfigureServices(services =>
+            {
+                FakeUserStore.Register(services);
+                services.AddSingleton<IPasswordHasher>(counting);
+            });
+        });
+        using var client = factory.CreateClient(new() { AllowAutoRedirect = false });
+
+        await LoginHelper.PostWithTokenAsync(client, "does-not-exist", "whatever");
+
+        counting.VerifyCallCount.Should().Be(1);
+    }
+
+    sealed class CountingPasswordHasher(IPasswordHasher inner) : IPasswordHasher
+    {
+        public int VerifyCallCount { get; private set; }
+
+        public string Hash(AppUser user, string password) => inner.Hash(user, password);
+
+        public PasswordVerifyResult Verify(AppUser user, string hash, string password)
+        {
+            VerifyCallCount++;
+            return inner.Verify(user, hash, password);
+        }
     }
 }

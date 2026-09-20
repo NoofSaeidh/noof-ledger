@@ -28,20 +28,19 @@ builder.Services.AddScoped<IUserStore, EfUserStore>();
 var authentication = builder.Services.AddAuthentication(
     cookieMode ? AuthSchemes.Cookie : AuthSchemes.LocalOwner);
 
-if (cookieMode)
+authentication.AddCookie(AuthSchemes.Cookie, options =>
 {
-    authentication.AddCookie(AuthSchemes.Cookie, options =>
-    {
-        options.LoginPath = "/account/login";
-        options.ExpireTimeSpan = TimeSpan.FromDays(180);
-        options.SlidingExpiration = true;
-        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
-    });
-}
-else
-{
+    options.LoginPath = "/account/login";
+    options.ExpireTimeSpan = TimeSpan.FromDays(180);
+    options.SlidingExpiration = true;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+});
+
+// LocalOwnerHandler authenticates every request as the owner with no credential check, so it must
+// not exist at all in Cookie mode; the cookie scheme, by contrast, is harmless whenever it isn't
+// the default, so it can stay registered in both modes.
+if (!cookieMode)
     authentication.AddScheme<AuthenticationSchemeOptions, LocalOwnerHandler>(AuthSchemes.LocalOwner, null);
-}
 
 builder.Services.AddAuthorization();
 builder.Services.AddCascadingAuthenticationState();
