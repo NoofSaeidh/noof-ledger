@@ -51,7 +51,7 @@ try {
     & $psql -U postgres -h 127.0.0.1 -v ON_ERROR_STOP=1 -c "ALTER USER postgres WITH PASSWORD '$password';"
     if ($LASTEXITCODE -ne 0) { throw 'Failed to set the postgres password.' }
 
-    foreach ($db in @('noof_finance', 'noof_test_template')) {
+    foreach ($db in @('noof_ledger', 'noof_ledger_test_template')) {
         $exists = & $psql -U postgres -h 127.0.0.1 -tAc "SELECT 1 FROM pg_database WHERE datname='$db';"
         if ($exists -ne '1') {
             & $psql -U postgres -h 127.0.0.1 -v ON_ERROR_STOP=1 -c "CREATE DATABASE $db;"
@@ -75,7 +75,7 @@ finally {
 
 $connection = "Host=127.0.0.1;Port=5432;Database=postgres;Username=postgres;Password=$password;Include Error Detail=true"
 
-$dataRoot = Join-Path $env:LOCALAPPDATA 'NoofFinance'
+$dataRoot = Join-Path $env:LOCALAPPDATA 'NoofLedger'
 New-Item -ItemType Directory -Force -Path $dataRoot | Out-Null
 $credentialFile = Join-Path $dataRoot 'db.connection'
 Set-Content -Path $credentialFile -Value $connection -Encoding UTF8

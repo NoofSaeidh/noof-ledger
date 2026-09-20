@@ -11,8 +11,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 namespace Noof.Ledger.Persistence.Migrations
 {
-    [DbContext(typeof(NoofDbContext))]
-    partial class NoofDbContextModelSnapshot : ModelSnapshot
+    [DbContext(typeof(LedgerDbContext))]
+    partial class LedgerDbContextModelSnapshot : ModelSnapshot
     {
         protected override void BuildModel(ModelBuilder modelBuilder)
         {

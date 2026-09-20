@@ -15,13 +15,13 @@ What it does:
 - Temporarily switches loopback (`127.0.0.1`/`::1`) authentication in
   `pg_hba.conf` to `trust` so it can set a password without already knowing one.
 - Generates a random password and sets it on the `postgres` superuser.
-- Creates the `noof_finance` and `noof_test_template` databases if they don't
+- Creates the `noof_ledger` and `noof_ledger_test_template` databases if they don't
   already exist, and ensures the `pg_trgm` and `unaccent` extensions are
   installed in both.
 - Restores `pg_hba.conf` to `scram-sha-256` authentication (in a `finally`
   block, so this happens even if a step above fails).
 - Writes the resulting connection string to
-  `%LOCALAPPDATA%\NoofFinance\db.connection` and sets it as the `NOOF_TEST_PG`
+  `%LOCALAPPDATA%\NoofLedger\db.connection` and sets it as the `NOOF_TEST_PG`
   user environment variable.
 
 Backups: before editing `pg_hba.conf`, the script copies it to

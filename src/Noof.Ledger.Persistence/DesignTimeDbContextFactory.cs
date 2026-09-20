@@ -3,22 +3,22 @@ using Microsoft.EntityFrameworkCore.Design;
 
 namespace Noof.Ledger.Persistence;
 
-public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<NoofDbContext>
+public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<LedgerDbContext>
 {
-    public NoofDbContext CreateDbContext(string[] args)
+    public LedgerDbContext CreateDbContext(string[] args)
     {
-        var options = new DbContextOptionsBuilder<NoofDbContext>()
+        var options = new DbContextOptionsBuilder<LedgerDbContext>()
             .UseNpgsql(ResolveConnectionString())
             .Options;
 
-        return new NoofDbContext(options);
+        return new LedgerDbContext(options);
     }
 
     private static string ResolveConnectionString()
     {
         var credentialFile = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "NoofFinance",
+            "NoofLedger",
             "db.connection");
 
         var fromEnvironment = Environment.GetEnvironmentVariable("NOOF_TEST_PG");
@@ -38,5 +38,5 @@ public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<Noo
     }
 
     private static string ForDesignTimeDatabase(string connectionString) =>
-        connectionString.Replace("Database=postgres", "Database=noof_finance", StringComparison.Ordinal);
+        connectionString.Replace("Database=postgres", "Database=noof_ledger", StringComparison.Ordinal);
 }

@@ -2,11 +2,11 @@ namespace Noof.Ledger.TestKit;
 
 public static class DatabaseSettings
 {
-    public const string TemplateDatabase = "noof_test_template";
+    public const string TemplateDatabase = "noof_ledger_test_template";
 
     private static readonly string CredentialFile = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "NoofFinance",
+        "NoofLedger",
         "db.connection");
 
     public static string AdminConnectionString

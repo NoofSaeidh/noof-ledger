@@ -68,7 +68,7 @@ Reproduced in this repository on 2026-09-19 in commit `cbdea7311de73b5ca4558f1f5
 **No provider abstraction.** "SQLite now, Postgres later" is a fantasy that costs more than it saves — migrations are provider-specific, and the data migration is an export/import with a text→numeric parse in the middle, which is the exact parse that already throws under `ru-RU`.
 
 > **❓ Q1 — The one thing that cannot live in the database.**
-> The Postgres password can't be stored encrypted *inside the database it opens*. Two options were on the table: **(a) Windows-integrated auth (SSPI)** — no password exists at all; **(b) a DPAPI-protected file** under `%LOCALAPPDATA%`. Neither shipped. What Phase 0 actually built is a third thing: `ops/reset-database-auth.ps1` generates a random password and writes it to a plaintext file at `%LOCALAPPDATA%\NoofFinance\db.connection`, outside the repo and never in `appsettings.json`. That's acceptable for a single-user local dev machine, but the SSPI/DPAPI upgrade is re-parked — decide by Phase 1.
+> The Postgres password can't be stored encrypted *inside the database it opens*. Two options were on the table: **(a) Windows-integrated auth (SSPI)** — no password exists at all; **(b) a DPAPI-protected file** under `%LOCALAPPDATA%`. Neither shipped. What Phase 0 actually built is a third thing: `ops/reset-database-auth.ps1` generates a random password and writes it to a plaintext file at `%LOCALAPPDATA%\NoofLedger\db.connection`, outside the repo and never in `appsettings.json`. That's acceptable for a single-user local dev machine, but the SSPI/DPAPI upgrade is re-parked — decide by Phase 1.
 
 > **✅ Q2 — ANSWERED: PostgreSQL 18**, which you're installing via choco. Settled, no action needed.
 
@@ -163,7 +163,7 @@ A currency exchange is `Transaction(Kind=Transfer)` with an owned **`FxConversio
 
 ## 9. Secrets
 
-`app_secret` holds **ciphertext only**, produced by ASP.NET Core Data Protection with a per-secret purpose chain — so the Telegram protector cannot decrypt the Anthropic payload even inside one process. The key ring lives at `%LOCALAPPDATA%\NoofFinance\dp-keys` wrapped with `ProtectKeysWithDpapi()`.
+`app_secret` holds **ciphertext only**, produced by ASP.NET Core Data Protection with a per-secret purpose chain — so the Telegram protector cannot decrypt the Anthropic payload even inside one process. The key ring lives at `%LOCALAPPDATA%\NoofLedger\dp-keys` wrapped with `ProtectKeysWithDpapi()`.
 
 **Nothing is in `appsettings.json`**, so there is nothing to mis-gitignore in a public repo, and a leaked database dump is inert.
 

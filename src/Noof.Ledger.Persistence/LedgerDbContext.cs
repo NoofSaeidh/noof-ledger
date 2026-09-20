@@ -3,7 +3,7 @@ using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Persistence;
 
-public class NoofDbContext(DbContextOptions<NoofDbContext> options) : DbContext(options)
+public class LedgerDbContext(DbContextOptions<LedgerDbContext> options) : DbContext(options)
 {
     public DbSet<MoneyProbeEntity> MoneyProbes => Set<MoneyProbeEntity>();
 

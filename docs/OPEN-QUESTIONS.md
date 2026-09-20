@@ -15,7 +15,7 @@ The spec was approved without answering these, so **each has taken its stated de
 
 ## Why each default is safe to defer
 
-**Q1** — SSPI was never spiked. What shipped instead is a generated password written to a plaintext file at `%LOCALAPPDATA%\NoofFinance\db.connection`, created by `ops/reset-database-auth.ps1` — outside the repo and never in `appsettings.json`. That is acceptable for a single-user local dev machine, but it is neither of the two options on the table, so the SSPI/DPAPI upgrade is re-parked here, decide by Phase 1.
+**Q1** — SSPI was never spiked. What shipped instead is a generated password written to a plaintext file at `%LOCALAPPDATA%\NoofLedger\db.connection`, created by `ops/reset-database-auth.ps1` — outside the repo and never in `appsettings.json`. That is acceptable for a single-user local dev machine, but it is neither of the two options on the table, so the SSPI/DPAPI upgrade is re-parked here, decide by Phase 1.
 
 **Q3** — Only matters while WSL runs. Nothing in the design touches it now.
 

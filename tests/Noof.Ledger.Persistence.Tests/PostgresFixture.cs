@@ -10,7 +10,7 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
-    public async Task<NoofDbContext> CreateContextAsync()
+    public async Task<LedgerDbContext> CreateContextAsync()
     {
         var name = $"noof_test_{Guid.NewGuid():N}";
 
@@ -23,11 +23,11 @@ public sealed class PostgresFixture : IAsyncLifetime
 
         created.Add(name);
 
-        var options = new DbContextOptionsBuilder<NoofDbContext>()
+        var options = new DbContextOptionsBuilder<LedgerDbContext>()
             .UseNpgsql(DatabaseSettings.For(name))
             .Options;
 
-        return new NoofDbContext(options);
+        return new LedgerDbContext(options);
     }
 
     public async Task<NpgsqlConnection> CreateDatabaseAsync()

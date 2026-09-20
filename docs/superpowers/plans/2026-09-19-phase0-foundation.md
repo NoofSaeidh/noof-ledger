@@ -45,11 +45,11 @@ Five conditions the spec implies that no task's happy path would exercise. Each 
 | `Directory.Build.props` | TFM, nullable, warnings, globalization, CPM |
 | `Directory.Build.targets` | Publish output to `publish/` for deployable apps only |
 | `Directory.Packages.props` | Every package version, centrally |
-| `NoofFinance.slnx` | Solution |
+| `NoofLedger.slnx` | Solution |
 | `src/Noof.Ledger.Domain/Money.cs` | The money value object |
 | `src/Noof.Ledger.Domain/CurrencyCode.cs` | ISO-4217 currency wrapper |
-| `src/Noof.Ledger.Persistence/NoofDbContext.cs` | The single DbContext |
-| `src/Noof.Ledger.Persistence/NoofDbContextConventions.cs` | The three irreversible mapping conventions |
+| `src/Noof.Ledger.Persistence/LedgerDbContext.cs` | The single DbContext |
+| `src/Noof.Ledger.Persistence/LedgerDbContextConventions.cs` | The three irreversible mapping conventions |
 | `src/Noof.Ledger.Persistence/DesignTimeDbContextFactory.cs` | Lets `dotnet ef` run without booting the host |
 | `tests/Noof.Ledger.Architecture.Tests/ProjectReferenceTests.cs` | Boundary enforcement by parsing csproj XML |
 | `tests/Noof.Ledger.Persistence.Tests/MoneyStorageTests.cs` | **The gate test** — culture-correct money |
@@ -191,7 +191,7 @@ git commit -m "build: pin SDK, central packages and Microsoft Testing Platform r
 ## Task 2: Solution and project skeleton
 
 **Files:**
-- Create: `NoofFinance.slnx`, nine `src/` projects, five `tests/` projects
+- Create: `NoofLedger.slnx`, nine `src/` projects, five `tests/` projects
 
 **Interfaces:**
 - Produces: the reference graph that Task 3 asserts.
@@ -206,11 +206,11 @@ dotnet new install xunit.v3.templates
 
 - [ ] **Step 2: Create the solution and source projects**
 
-SDK 10.0.204 is expected to emit `NoofFinance.slnx`. Confirm which extension you actually got before continuing — every later command in this plan names `NoofFinance.slnx`, and if you have a `.sln` instead you must either use `dotnet new sln --format slnx` or substitute the name throughout.
+SDK 10.0.204 is expected to emit `NoofLedger.slnx`. Confirm which extension you actually got before continuing — every later command in this plan names `NoofLedger.slnx`, and if you have a `.sln` instead you must either use `dotnet new sln --format slnx` or substitute the name throughout.
 
 ```bash
-dotnet new sln -n NoofFinance
-ls NoofFinance.*          # expect NoofFinance.slnx
+dotnet new sln -n NoofLedger
+ls NoofLedger.*          # expect NoofLedger.slnx
 dotnet new classlib -o src/Noof.Ledger.Domain -f net10.0
 dotnet new classlib -o src/Noof.Ledger.Application -f net10.0
 dotnet new classlib -o src/Noof.Ledger.Persistence -f net10.0
@@ -274,12 +274,12 @@ Edit `src/Noof.Ledger.Web/Noof.Ledger.Web.csproj`, adding inside the first `<Pro
 
 - [ ] **Step 8: Verify the solution builds**
 
-Run: `dotnet build NoofFinance.slnx`
+Run: `dotnet build NoofLedger.slnx`
 Expected: Build succeeded, 0 warnings, 0 errors.
 
 - [ ] **Step 9: Verify the test runner works**
 
-Run: `dotnet test --solution NoofFinance.slnx`
+Run: `dotnet test --solution NoofLedger.slnx`
 Expected: all test projects discovered and passing. If this fails with *"Testing with VSTest target is no longer supported"*, the `global.json` `test.runner` stanza from Task 1 is missing or malformed.
 
 - [ ] **Step 10: Commit**
@@ -449,10 +449,10 @@ Start-Service -Name $ServiceName
 
 $psql = (Get-ChildItem 'C:\Program Files\PostgreSQL\*\bin\psql.exe' | Sort-Object FullName -Descending)[0].FullName
 
-& $psql -U $Superuser -v ON_ERROR_STOP=1 -c "CREATE DATABASE noof_finance;"
-& $psql -U $Superuser -v ON_ERROR_STOP=1 -c "CREATE DATABASE noof_test_template;"
+& $psql -U $Superuser -v ON_ERROR_STOP=1 -c "CREATE DATABASE noof_ledger;"
+& $psql -U $Superuser -v ON_ERROR_STOP=1 -c "CREATE DATABASE noof_ledger_test_template;"
 
-foreach ($db in @('noof_finance', 'noof_test_template')) {
+foreach ($db in @('noof_ledger', 'noof_ledger_test_template')) {
     & $psql -U $Superuser -d $db -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
     & $psql -U $Superuser -d $db -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS unaccent;"
 }
@@ -474,7 +474,7 @@ namespace Noof.Ledger.TestKit;
 
 public static class DatabaseSettings
 {
-    public const string TemplateDatabase = "noof_test_template";
+    public const string TemplateDatabase = "noof_ledger_test_template";
 
     public static string AdminConnectionString =>
         Environment.GetEnvironmentVariable("NOOF_TEST_PG")
@@ -786,7 +786,7 @@ public class MoneyStorageTests(PostgresFixture fixture)
 Create `tests/Noof.Ledger.TestKit/PostgresFixture.cs`. Two things here are not optional:
 
 - `ClearAllPools()` **before** `DROP DATABASE` — without it the drop blocks on pooled connections and teardown hangs forever with no error.
-- Nothing may hold a connection to `noof_test_template` while a clone runs. `CREATE DATABASE … TEMPLATE` fails with *"source database is being accessed by other users"*. If you see that, close any open pgAdmin or psql session pointed at the template.
+- Nothing may hold a connection to `noof_ledger_test_template` while a clone runs. `CREATE DATABASE … TEMPLATE` fails with *"source database is being accessed by other users"*. If you see that, close any open pgAdmin or psql session pointed at the template.
 
 ```csharp
 using Npgsql;
@@ -866,11 +866,11 @@ git commit -m "feat: Money value object and the culture-correctness gate test"
 ## Task 6: EF conventions, first migration, migration contract
 
 **Files:**
-- Create: `src/Noof.Ledger.Persistence/NoofDbContext.cs`, `src/Noof.Ledger.Persistence/DesignTimeDbContextFactory.cs`, `tests/Noof.Ledger.Persistence.Tests/MigrationContractTests.cs`
+- Create: `src/Noof.Ledger.Persistence/LedgerDbContext.cs`, `src/Noof.Ledger.Persistence/DesignTimeDbContextFactory.cs`, `tests/Noof.Ledger.Persistence.Tests/MigrationContractTests.cs`
 
 **Interfaces:**
 - Consumes: `Money`, `CurrencyCode` from Task 5.
-- Produces: `NoofDbContext`, consumed by every later persistence task.
+- Produces: `LedgerDbContext`, consumed by every later persistence task.
 
 - [ ] **Step 1: Write the failing convention test**
 
@@ -960,7 +960,7 @@ public class MigrationContractTests(PostgresFixture fixture)
 Append to `tests/Noof.Ledger.TestKit/PostgresFixture.cs`, inside the `PostgresFixture` class:
 
 ```csharp
-    public async Task<NoofDbContext> CreateContextAsync()
+    public async Task<LedgerDbContext> CreateContextAsync()
     {
         var name = $"noof_test_{Guid.NewGuid():N}";
 
@@ -973,11 +973,11 @@ Append to `tests/Noof.Ledger.TestKit/PostgresFixture.cs`, inside the `PostgresFi
 
         created.Add(name);
 
-        var options = new DbContextOptionsBuilder<NoofDbContext>()
+        var options = new DbContextOptionsBuilder<LedgerDbContext>()
             .UseNpgsql(DatabaseSettings.For(name))
             .Options;
 
-        return new NoofDbContext(options);
+        return new LedgerDbContext(options);
     }
 ```
 
@@ -990,7 +990,7 @@ dotnet add tests/Noof.Ledger.TestKit reference src/Noof.Ledger.Persistence
 - [ ] **Step 3: Run to verify it fails**
 
 Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests`
-Expected: FAIL — `NoofDbContext` does not exist.
+Expected: FAIL — `LedgerDbContext` does not exist.
 
 - [ ] **Step 4: Implement the DbContext with the three irreversible conventions**
 
@@ -1009,7 +1009,7 @@ public sealed class MoneyProbeEntity
 }
 ```
 
-Create `src/Noof.Ledger.Persistence/NoofDbContext.cs`:
+Create `src/Noof.Ledger.Persistence/LedgerDbContext.cs`:
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
@@ -1017,7 +1017,7 @@ using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Persistence;
 
-public class NoofDbContext(DbContextOptions<NoofDbContext> options) : DbContext(options)
+public class LedgerDbContext(DbContextOptions<LedgerDbContext> options) : DbContext(options)
 {
     public DbSet<MoneyProbeEntity> MoneyProbes => Set<MoneyProbeEntity>();
 
@@ -1058,18 +1058,18 @@ using Microsoft.EntityFrameworkCore.Design;
 
 namespace Noof.Ledger.Persistence;
 
-public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<NoofDbContext>
+public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<LedgerDbContext>
 {
-    public NoofDbContext CreateDbContext(string[] args)
+    public LedgerDbContext CreateDbContext(string[] args)
     {
         var connectionString = Environment.GetEnvironmentVariable("NOOF_DESIGN_TIME_PG")
-            ?? "Host=127.0.0.1;Port=5432;Database=noof_finance;Username=postgres";
+            ?? "Host=127.0.0.1;Port=5432;Database=noof_ledger;Username=postgres";
 
-        var options = new DbContextOptionsBuilder<NoofDbContext>()
+        var options = new DbContextOptionsBuilder<LedgerDbContext>()
             .UseNpgsql(connectionString)
             .Options;
 
-        return new NoofDbContext(options);
+        return new LedgerDbContext(options);
     }
 }
 ```
@@ -1090,15 +1090,15 @@ Expected: PASS, 12 tests.
 
 - [ ] **Step 7: Prime the template database**
 
-The fixture's `CreateDatabaseAsync` clones `noof_test_template`, so the template must carry the migrated schema.
+The fixture's `CreateDatabaseAsync` clones `noof_ledger_test_template`, so the template must carry the migrated schema.
 
 ```bash
-dotnet ef database update --project src/Noof.Ledger.Persistence --startup-project src/Noof.Ledger.Persistence --connection "Host=127.0.0.1;Port=5432;Database=noof_test_template;Username=postgres"
+dotnet ef database update --project src/Noof.Ledger.Persistence --startup-project src/Noof.Ledger.Persistence --connection "Host=127.0.0.1;Port=5432;Database=noof_ledger_test_template;Username=postgres"
 ```
 
 - [ ] **Step 8: Run the whole suite**
 
-Run: `dotnet test --solution NoofFinance.slnx`
+Run: `dotnet test --solution NoofLedger.slnx`
 Expected: PASS, all projects.
 
 - [ ] **Step 9: Commit**
@@ -1183,7 +1183,7 @@ The decision is made and recorded. Leaving a SQLite dependency in a Postgres pro
 ```bash
 rm tests/Noof.Ledger.Persistence.Tests/SqliteCounterfactualTests.cs
 dotnet remove tests/Noof.Ledger.Persistence.Tests package Microsoft.Data.Sqlite
-dotnet test --solution NoofFinance.slnx
+dotnet test --solution NoofLedger.slnx
 ```
 
 Expected: PASS, all projects.
@@ -1221,10 +1221,10 @@ $root = Split-Path $PSScriptRoot -Parent
 
 Push-Location $root
 try {
-    dotnet build NoofFinance.slnx -c Release
+    dotnet build NoofLedger.slnx -c Release
     if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
 
-    dotnet test --solution NoofFinance.slnx -c Release
+    dotnet test --solution NoofLedger.slnx -c Release
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed; refusing to publish.' }
 
     if (Test-Path publish) { Remove-Item publish -Recurse -Force }
@@ -1258,7 +1258,7 @@ git commit -m "build: test-gated publish script targeting the publish folder"
 
 ## Phase 0 exit criteria
 
-- [ ] `dotnet test --solution NoofFinance.slnx` is green, running on Microsoft Testing Platform.
+- [ ] `dotnet test --solution NoofLedger.slnx` is green, running on Microsoft Testing Platform.
 - [ ] The culture gate test passes for `en-US`, `ru-RU` and `sr-Latn-RS`.
 - [ ] Adding a forbidden `ProjectReference` turns the architecture test red — proven, not assumed.
 - [ ] `money_probe_entities.amount` is `numeric(19,4)`; `recorded_at` is `timestamp with time zone`.

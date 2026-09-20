@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 namespace Noof.Ledger.Persistence.Migrations
 {
-    [DbContext(typeof(NoofDbContext))]
+    [DbContext(typeof(LedgerDbContext))]
     [Migration("20260920000442_InitialCreate")]
     partial class InitialCreate
     {
