@@ -1,6 +1,5 @@
 using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
-using Noof.Ledger.Persistence;
 using Noof.Ledger.TestKit;
 
 namespace Noof.Ledger.Persistence.Tests;

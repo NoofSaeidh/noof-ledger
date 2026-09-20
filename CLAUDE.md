@@ -66,6 +66,7 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
 - Do not add MediatR, AutoMapper, generic repositories over `DbContext`, or CQRS scaffolding.
 
 **Database**
+- **EF generates block-scoped namespaces.** `IDE0161` is an error here, so a freshly scaffolded migration **fails the build** until you convert it to a file-scoped namespace. That is deliberate — the alternative is a style rule nothing enforces.
 - EF Core with migrations from the first commit. The database must be creatable from empty and upgradeable in one mechanism.
 - **Never call `EnsureCreated()`** — anywhere, including test helpers. It bypasses migrations and permanently poisons that database for `Migrate()`.
 - Tests run against a real database, never the EF InMemory provider.

@@ -1,5 +1,4 @@
 using AwesomeAssertions;
-using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Domain.Tests;
 
