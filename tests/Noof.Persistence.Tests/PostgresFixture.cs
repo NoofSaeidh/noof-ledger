@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Noof.TestKit;
 
@@ -8,6 +9,26 @@ public sealed class PostgresFixture : IAsyncLifetime
     readonly List<string> created = [];
 
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;
+
+    public async Task<NoofDbContext> CreateContextAsync()
+    {
+        var name = $"noof_test_{Guid.NewGuid():N}";
+
+        await using (var admin = new NpgsqlConnection(DatabaseSettings.AdminConnectionString))
+        {
+            await admin.OpenAsync(TestContext.Current.CancellationToken);
+            await using var create = new NpgsqlCommand($"CREATE DATABASE \"{name}\"", admin);
+            await create.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
+
+        created.Add(name);
+
+        var options = new DbContextOptionsBuilder<NoofDbContext>()
+            .UseNpgsql(DatabaseSettings.For(name))
+            .Options;
+
+        return new NoofDbContext(options);
+    }
 
     public async Task<NpgsqlConnection> CreateDatabaseAsync()
     {
