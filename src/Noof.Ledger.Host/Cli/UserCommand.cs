@@ -79,6 +79,10 @@ public static class UserCommand
         if (Console.IsInputRedirected)
             return Console.ReadLine() ?? string.Empty;
 
+        // Only when a human is watching: under a pipe this would be noise on stdout that the
+        // caller has to parse around.
+        Console.Write("Password: ");
+
         var password = new StringBuilder();
         ConsoleKeyInfo key;
 
