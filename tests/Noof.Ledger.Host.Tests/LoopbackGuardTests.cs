@@ -1,4 +1,4 @@
-using AwesomeAssertions;
+﻿using AwesomeAssertions;
 using Noof.Ledger.Host.Startup;
 
 namespace Noof.Ledger.Host.Tests;
@@ -39,6 +39,31 @@ public class LoopbackGuardTests
         var act = () => LoopbackGuard.AssertSafe([address], "Cookie");
 
         act.Should().NotThrow();
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("None")]
+    [InlineData("off ")]
+    [InlineData("Disabled")]
+    [InlineData("cookies")]
+    public void An_unrecognised_mode_enforces_rather_than_skipping(string mode)
+    {
+        var act = () => LoopbackGuard.AssertSafe(["http://0.0.0.0:5000"], mode);
+
+        act.Should().Throw<InvalidOperationException>(
+            "an unrecognised mode registers the no-auth handler, so the interlock must not be skipped");
+    }
+
+    [Theory]
+    [InlineData("http://[::]:5000")]
+    [InlineData("http://not a url at all")]
+    [InlineData("garbage")]
+    public void Anything_not_demonstrably_loopback_fails_closed(string address)
+    {
+        var act = () => LoopbackGuard.AssertSafe([address], "Off");
+
+        act.Should().Throw<InvalidOperationException>();
     }
 
     [Fact]
