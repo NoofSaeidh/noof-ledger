@@ -68,7 +68,7 @@ Reproduced in this repository on 2026-09-19 in commit `cbdea7311de73b5ca4558f1f5
 **No provider abstraction.** "SQLite now, Postgres later" is a fantasy that costs more than it saves — migrations are provider-specific, and the data migration is an export/import with a text→numeric parse in the middle, which is the exact parse that already throws under `ru-RU`.
 
 > **❓ Q1 — The one thing that cannot live in the database.**
-> The Postgres password can't be stored encrypted *inside the database it opens*. Two options: **(a) Windows-integrated auth (SSPI)** — no password exists at all, which eliminates the exception rather than managing it; **(b) a DPAPI-protected file** under `%LOCALAPPDATA%`. I lean (a), with a 30-minute spike in Phase 0 to confirm. Either way it is never in `appsettings.json`.
+> The Postgres password can't be stored encrypted *inside the database it opens*. Two options were on the table: **(a) Windows-integrated auth (SSPI)** — no password exists at all; **(b) a DPAPI-protected file** under `%LOCALAPPDATA%`. Neither shipped. What Phase 0 actually built is a third thing: `ops/reset-database-auth.ps1` generates a random password and writes it to a plaintext file at `%LOCALAPPDATA%\NoofFinance\db.connection`, outside the repo and never in `appsettings.json`. That's acceptable for a single-user local dev machine, but the SSPI/DPAPI upgrade is re-parked — decide by Phase 1.
 
 > **✅ Q2 — ANSWERED: PostgreSQL 18**, which you're installing via choco. Settled, no action needed.
 
@@ -265,7 +265,7 @@ Every bulk operation writes a **`RecategorizationBatch`** with full before/after
 
 | # | Question | Default if you say nothing |
 |---|---|---|
-| Q1 | Postgres credential: SSPI or DPAPI file? | SSPI, spiked in Phase 0 |
+| Q1 | Postgres credential: SSPI or DPAPI file? | Neither — generated password in a plaintext file, re-parked to Phase 1 |
 | ~~Q2~~ | ~~Postgres 17 or 18?~~ | ✅ **Answered: 18** |
 | Q3 | Write `.wslconfig` for you? | Not written |
 | Q4 | NBS as the RSD mid source? | `open.er-api.com` for all five |

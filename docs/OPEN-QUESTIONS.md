@@ -5,7 +5,7 @@ The spec was approved without answering these, so **each has taken its stated de
 
 | # | Question | Default taken | Decide by |
 |---|---|---|---|
-| Q1 | Postgres credential: Windows-integrated auth (SSPI) or a DPAPI-protected password file? | **SSPI**, spiked first | Phase 0 |
+| Q1 | Postgres credential: Windows-integrated auth (SSPI) or a DPAPI-protected password file? | **Neither** — a generated password in a plaintext file outside the repo | Phase 1 |
 | Q3 | Write `%UserProfile%\.wslconfig`? WSL is running uncapped — 50% of RAM (~32 GB) + ~16 GB swap, and `ext4.vhdx` grows but never shrinks | **Not written** | Any time — unrelated to this project now containers are out |
 | Q4 | Canonical mid-rate source for RSD: `open.er-api.com` for all five currencies, or add NBS *srednji kurs* for RSD? | **`open.er-api.com`** for all five | Phase 5 |
 | Q5 | Accept the larger Phase 1, or split it and accept rework? | **Larger Phase 1** — build the capture-path contracts once | Settled by approval |
@@ -15,7 +15,7 @@ The spec was approved without answering these, so **each has taken its stated de
 
 ## Why each default is safe to defer
 
-**Q1** — SSPI removes the one secret that cannot live encrypted in the database it opens. If the Phase 0 spike fails, the DPAPI file is a drop-in fallback; either way it is never in `appsettings.json`.
+**Q1** — SSPI was never spiked. What shipped instead is a generated password written to a plaintext file at `%LOCALAPPDATA%\NoofFinance\db.connection`, created by `ops/reset-database-auth.ps1` — outside the repo and never in `appsettings.json`. That is acceptable for a single-user local dev machine, but it is neither of the two options on the table, so the SSPI/DPAPI upgrade is re-parked here, decide by Phase 1.
 
 **Q3** — Only matters while WSL runs. Nothing in the design touches it now.
 
