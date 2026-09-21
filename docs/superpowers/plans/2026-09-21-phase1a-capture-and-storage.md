@@ -3807,13 +3807,15 @@ git commit -m "feat(capture): EfCaptureStore writes the transaction and its job 
 - Modify: `Directory.Packages.props`
 - Modify: `tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj`
 - Create: `tests/Noof.Ledger.Persistence.Tests/EfJobQueueTests.cs`
+- Create: `src/Noof.Ledger.Application/Jobs/IJobQueue.cs`
 - Create: `src/Noof.Ledger.Persistence/Jobs/EfJobQueue.cs`
 
 **Interfaces:**
-- Consumes (assumed already in place from earlier tasks in this plan — the Domain model and Application ports for the capture path, and the Persistence configuration + migration for it): `IJobQueue` in `Noof.Ledger.Application.Jobs` with the exact five members below; `CategorizationJob` and `JobStatus` in `Noof.Ledger.Domain`; `LedgerDbContext.CategorizationJobs` (a `DbSet<CategorizationJob>`) mapped, following the same style as `AppUserConfiguration`, to table `categorization_job` with snake_case columns `id, transaction_id, status, attempt_count, run_after, claimed_at, claimed_by, last_error, created_at, updated_at`, already migrated.
+- Creates, because nothing earlier in this plan does: `IJobQueue` in `Noof.Ledger.Application.Jobs`, with the exact five members below. The file-structure table lists it, but no task delivered it — verified by `grep -rn "IJobQueue"` returning nothing before this task. Its shape is fully dictated by the `EfJobQueue` implementation given here, so no design judgement is involved.
+- Consumes (in place from earlier tasks in this plan — the Domain model and Application ports for the capture path, and the Persistence configuration + migration for it): `IJobQueue` in `Noof.Ledger.Application.Jobs` with the exact five members below; `CategorizationJob` and `JobStatus` in `Noof.Ledger.Domain`; `LedgerDbContext.CategorizationJobs` (a `DbSet<CategorizationJob>`) mapped, following the same style as `AppUserConfiguration`, to table `categorization_jobs` with snake_case columns `id, transaction_id, status, attempt_count, run_after, claimed_at, claimed_by, last_error, created_at, updated_at`, already migrated.
 - Produces: `EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, int maxAttempts) : IJobQueue` in namespace `Noof.Ledger.Persistence.Jobs`. **Not wired into DI anywhere** — `Program.cs` and `UserCommand.cs` are untouched by this task, the same way `EfUserStore`'s own task (Task 8, phase0b) left its DI registration to a later host-wiring task. Whoever builds the worker that calls this queue also reads `Jobs:MaxAttempts` from configuration and passes it into the constructor.
 
-> **If your repo doesn't have `categorization_job` under that exact name when you reach this task**, an earlier task named it differently. That is not a reason to redesign anything here — every SQL string in `EfJobQueue.cs` below is a self-contained literal; find-and-replace the table/column names in those five strings and everything else in this task is unaffected. The very first test you run (Step 3) will fail loudly with `relation "categorization_job" does not exist` if this is the case, so you cannot silently get it wrong.
+> **If your repo doesn't have `categorization_jobs` under that exact name when you reach this task**, an earlier task named it differently. That is not a reason to redesign anything here — every SQL string in `EfJobQueue.cs` below is a self-contained literal; find-and-replace the table/column names in those five strings and everything else in this task is unaffected. The very first test you run (Step 3) will fail loudly with `relation "categorization_jobs" does not exist` if this is the case, so you cannot silently get it wrong.
 
 **How `ClaimAsync`'s `lease` parameter and `ReleaseExpiredLeasesAsync`'s lack of one fit together.** `CategorizationJob` has no separate "lease expires at" column — it only has `RunAfter`. So `RunAfter` does double duty: for a `Pending` job it means "don't attempt before this time"; for a `Claimed` job it means "if still claimed past this time, the lease has expired." `ClaimAsync` sets `run_after = now + lease` at the moment it claims, which is exactly why `ReleaseExpiredLeasesAsync(now)` needs no lease argument of its own — it just asks "which claimed jobs have a `run_after` in the past."
 
@@ -3867,10 +3869,14 @@ namespace Noof.Ledger.Persistence.Tests;
 [Collection("postgres")]
 public class EfJobQueueTests(PostgresFixture fixture)
 {
-    static CategorizationJob NewJob(DateTimeOffset runAfter, JobStatus status = JobStatus.Pending, int attemptCount = 0) => new()
+    // transactionId must be a row that exists. FK_categorization_jobs_transactions_transaction_id is a
+    // real, non-deferred foreign key, so a fabricated Guid fails every insert with 23503 before the test
+    // reaches its own assertion. Seed a Wallet (IsDefault: false, so it does not collide with the one
+    // Task 3 seeds under ix_wallets_single_default) and a Transaction first, and pass that id in here.
+    static CategorizationJob NewJob(Guid transactionId, DateTimeOffset runAfter, JobStatus status = JobStatus.Pending, int attemptCount = 0) => new()
     {
         Id = Guid.NewGuid(),
-        TransactionId = Guid.NewGuid(),
+        TransactionId = transactionId,
         Status = status,
         AttemptCount = attemptCount,
         RunAfter = runAfter,
