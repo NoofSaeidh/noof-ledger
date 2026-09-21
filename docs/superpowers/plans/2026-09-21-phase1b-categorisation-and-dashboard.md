@@ -3028,7 +3028,7 @@ EOF
 
 ---
 
-- [ ] **Step 1: Confirm the test project can see `Noof.Ledger.Application`**
+- [x] **Step 1: Confirm the test project can see `Noof.Ledger.Application`**
 
 Open `tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj`. If Task 2 already added a `ProjectReference` to `..\..\src\Noof.Ledger.Application\Noof.Ledger.Application.csproj`, do nothing. If it is missing, add it:
 
@@ -3044,7 +3044,7 @@ Expected: builds clean.
 
 ---
 
-- [ ] **Step 2: Write the failing guard test for the gate helper**
+- [x] **Step 2: Write the failing guard test for the gate helper**
 
 Create `tests/Noof.Ledger.Ai.Tests/LiveModelGateTests.cs`:
 
@@ -3080,14 +3080,14 @@ public sealed class LiveModelGateTests
 }
 ```
 
-- [ ] **Step 3: Run it and watch it fail**
+- [x] **Step 3: Run it and watch it fail**
 
 Run: `dotnet test --project tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj --filter "LiveModelGateTests"`
 Expected: BUILD FAILS — `CS0246: The type or namespace name 'LiveModelGate' could not be found`.
 
 ---
 
-- [ ] **Step 4: Write the gate helper**
+- [x] **Step 4: Write the gate helper**
 
 Create `tests/Noof.Ledger.Ai.Tests/LiveModelGate.cs`:
 
@@ -3125,14 +3125,14 @@ static class LiveModelGate
 }
 ```
 
-- [ ] **Step 5: Run it and watch it pass**
+- [x] **Step 5: Run it and watch it pass**
 
 Run: `dotnet test --project tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj --filter "LiveModelGateTests"`
 Expected: PASS — 3 of 3.
 
 ---
 
-- [ ] **Step 6: Write the live suite**
+- [x] **Step 6: Write the live suite**
 
 Create `tests/Noof.Ledger.Ai.Tests/LiveModelTests.cs`:
 
@@ -3321,7 +3321,7 @@ public sealed class LiveModelTests
 
 ---
 
-- [ ] **Step 7: Confirm it builds and skips cleanly with no key set**
+- [x] **Step 7: Confirm it builds and skips cleanly with no key set**
 
 Run: `dotnet test --project tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj --filter "LiveModelTests"`
 Expected: BUILD succeeds; all 7 tests report **Skipped**, none report **Failed**. This is the property that keeps the default loop honest — a developer with no key configured must see skips, never failures, never a silent pass that ran nothing.
@@ -3342,14 +3342,14 @@ Expected: PASS — 7 of 7. If a categorisation test fails, read the failure mess
 
 ---
 
-- [ ] **Step 9: Confirm the whole solution stays green with no key at all**
+- [x] **Step 9: Confirm the whole solution stays green with no key at all**
 
 Run: `dotnet test --solution NoofLedger.slnx`
 Expected: PASS/Skipped only, zero Failed. This is the property the task exists to guarantee: a suite that spends money must never be able to start doing so by accident.
 
 ---
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```
 git add tests/Noof.Ledger.Ai.Tests/LiveModelGate.cs tests/Noof.Ledger.Ai.Tests/LiveModelGateTests.cs tests/Noof.Ledger.Ai.Tests/LiveModelTests.cs tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj
