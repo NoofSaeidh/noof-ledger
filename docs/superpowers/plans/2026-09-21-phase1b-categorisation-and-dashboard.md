@@ -3441,7 +3441,7 @@ No `.csproj` or `Directory.Packages.props` edit is needed. `Noof.Ledger.Persiste
 
 12. **Every read-back assertion after a write uses either `.AsNoTracking()` or `db.ChangeTracker.Clear()` first.** `ApplyAsync`'s raw-SQL `DELETE` is invisible to the change tracker — a `LineItem` entity added and saved by an earlier `ApplyAsync` call stays tracked as `Unchanged` even after a later call deletes its row directly in Postgres. `LineItemMoneyMappingTests` already hit an adjacent version of this defect once (a tracked entity's client-side value surviving a read-back that should have reflected the database's own rounding); Step 7's idempotency test calls out the same risk explicitly before its final read.
 
-- [ ] **Step 1: Write the failing test for `EfCategoryCatalog`**
+- [x] **Step 1: Write the failing test for `EfCategoryCatalog`**
 
 Create `tests/Noof.Ledger.Persistence.Tests/EfCategoryCatalogTests.cs`:
 
@@ -3492,11 +3492,11 @@ public class EfCategoryCatalogTests(PostgresFixture fixture)
 Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj`
 Expected: build error — `The type or namespace name 'Categorization' does not exist in the namespace 'Noof.Ledger.Persistence'` (from `using Noof.Ledger.Persistence.Categorization;`) and `The type or namespace name 'EfCategoryCatalog' could not be found`.
 
-- [ ] **Step 2: Confirm the failure is the one you expect**
+- [x] **Step 2: Confirm the failure is the one you expect**
 
 Re-run the Step 1 command and read the output. If it is anything other than "type not found" (a Postgres connection error, or an error inside the test file itself), stop and fix that first.
 
-- [ ] **Step 3: Write `EfCategoryCatalog`**
+- [x] **Step 3: Write `EfCategoryCatalog`**
 
 Create `src/Noof.Ledger.Persistence/Categorization/EfCategoryCatalog.cs`:
 
@@ -3522,7 +3522,7 @@ public sealed class EfCategoryCatalog(LedgerDbContext db) : ICategoryCatalog
 Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj`
 Expected: `EfCategoryCatalogTests` is green.
 
-- [ ] **Step 4: Write the failing tests for `EfMerchantDirectory`**
+- [x] **Step 4: Write the failing tests for `EfMerchantDirectory`**
 
 Create `tests/Noof.Ledger.Persistence.Tests/EfMerchantDirectoryTests.cs`:
 
@@ -3678,11 +3678,11 @@ public class EfMerchantDirectoryTests(PostgresFixture fixture)
 Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj`
 Expected: build error — `The type or namespace name 'EfMerchantDirectory' could not be found`.
 
-- [ ] **Step 5: Confirm the failure is the one you expect**
+- [x] **Step 5: Confirm the failure is the one you expect**
 
 Same command as Step 4. If the error is not "type not found," stop and fix that first.
 
-- [ ] **Step 6: Write `EfMerchantDirectory`**
+- [x] **Step 6: Write `EfMerchantDirectory`**
 
 Create `src/Noof.Ledger.Persistence/Categorization/EfMerchantDirectory.cs`:
 
@@ -3768,7 +3768,7 @@ Expected: `EfMerchantDirectoryTests` is green — all 7 facts.
 
 > **Postgres blocks, then rejects, the loser — it does not let both inserts through.** `LinkAliasAsync_the_loser_of_a_race_returns_the_winners_id_and_leaves_no_orphaned_merchant` holds worker A's transaction open after its insert; worker B's insert against the same `folded` primary key cannot know yet whether A will commit or roll back, so Postgres blocks B until A resolves. Only once A commits does B's insert get evaluated and fail with the `PK_merchant_aliases` violation. This is why the test asserts `finished.Should().NotBeSameAs(idBTask, ...)` before committing A — proving B was genuinely blocked, not merely fast — exactly the same shape as `EfCaptureStoreTests.Concurrent_CaptureAsync_calls_for_the_same_chat_and_message_let_exactly_one_caller_insert`.
 
-- [ ] **Step 7: Write the failing tests for `EfCategorizationStore`**
+- [x] **Step 7: Write the failing tests for `EfCategorizationStore`**
 
 Create `tests/Noof.Ledger.Persistence.Tests/EfCategorizationStoreTests.cs`:
 
@@ -4049,11 +4049,11 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
 Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj`
 Expected: build error — `The type or namespace name 'EfCategorizationStore' could not be found`.
 
-- [ ] **Step 8: Confirm the failure is the one you expect**
+- [x] **Step 8: Confirm the failure is the one you expect**
 
 Same command as Step 7. If the error is not "type not found," stop and fix that first.
 
-- [ ] **Step 9: Write `EfCategorizationStore`**
+- [x] **Step 9: Write `EfCategorizationStore`**
 
 Create `src/Noof.Ledger.Persistence/Categorization/EfCategorizationStore.cs`:
 
@@ -4128,12 +4128,12 @@ Expected: `EfCategorizationStoreTests` is green — all 8 facts, including `Appl
 
 > **Why `await using var tx` needs no explicit `catch`/`RollbackAsync`.** Disposing an `IDbContextTransaction` that was never committed rolls it back — the same guarantee `ThrowsBeforeCommitInterceptor`'s own use in `EfCaptureStoreTests` already relies on. An explicit `try/catch { await tx.RollbackAsync(...); throw; }` here would be exactly the kind of defensive boilerplate CLAUDE.md §3 asks not to write for a condition (the transaction staying uncommitted) that the `await using` already guarantees handles itself.
 
-- [ ] **Step 10: Run the full suite**
+- [x] **Step 10: Run the full suite**
 
 Run: `dotnet test --solution NoofLedger.slnx`
 Expected: all green — the 16 new facts across `EfCategoryCatalogTests` (1), `EfMerchantDirectoryTests` (7) and `EfCategorizationStoreTests` (8), plus every pre-existing test.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add src/Noof.Ledger.Persistence/Categorization/EfCategoryCatalog.cs src/Noof.Ledger.Persistence/Categorization/EfMerchantDirectory.cs src/Noof.Ledger.Persistence/Categorization/EfCategorizationStore.cs tests/Noof.Ledger.Persistence.Tests/EfCategoryCatalogTests.cs tests/Noof.Ledger.Persistence.Tests/EfMerchantDirectoryTests.cs tests/Noof.Ledger.Persistence.Tests/EfCategorizationStoreTests.cs
