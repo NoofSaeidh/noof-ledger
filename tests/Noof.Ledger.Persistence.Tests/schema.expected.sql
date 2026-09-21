@@ -1,3 +1,11 @@
+CREATE TABLE public.app_secret (
+    key text NOT NULL,
+    ciphertext text NOT NULL,
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT "PK_app_secret" PRIMARY KEY (key)
+);
+
+
 CREATE TABLE public.app_user (
     id uuid NOT NULL,
     username character varying(64) NOT NULL,

@@ -4,12 +4,14 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Auth;
+using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Host.Auth;
 using Noof.Ledger.Host.Cli;
 using Noof.Ledger.Host.Endpoints;
 using Noof.Ledger.Host.Startup;
 using Noof.Ledger.Persistence;
 using Noof.Ledger.Persistence.Auth;
+using Noof.Ledger.Persistence.Secrets;
 using Noof.Ledger.Web.Components;
 
 if (UserCommand.TryParse(args, out var cliUsername))
@@ -26,11 +28,18 @@ var cookieMode = authMode.Equals("Cookie", StringComparison.OrdinalIgnoreCase);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
+builder.Services.AddSingleton(TimeProvider.System);
+
+var dataProtectionKeyRingDirectory = new DirectoryInfo(Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NoofLedger", "dp-keys"));
+DataProtectionSetup.Configure(builder.Services, dataProtectionKeyRingDirectory);
+
 builder.Services.AddDbContext<LedgerDbContext>(options =>
     options.UseNpgsql(LedgerConnectionString.Resolve(builder.Configuration.GetConnectionString("Ledger"))));
 
 builder.Services.AddSingleton<IPasswordHasher, PasswordHasherAdapter>();
 builder.Services.AddScoped<IUserStore, EfUserStore>();
+builder.Services.AddScoped<ISecretStore, EfSecretStore>();
 
 var authentication = builder.Services.AddAuthentication(
     cookieMode ? AuthSchemes.Cookie : AuthSchemes.LocalOwner);
