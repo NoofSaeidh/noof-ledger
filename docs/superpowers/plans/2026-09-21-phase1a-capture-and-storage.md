@@ -4576,7 +4576,7 @@ public sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, in
         var claimed = await db.CategorizationJobs
             .FromSqlRaw(
                 """
-                UPDATE categorization_job
+                UPDATE categorization_jobs
                 SET status = 1,
                     claimed_at = @now,
                     claimed_by = @workerId,
@@ -4584,7 +4584,7 @@ public sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, in
                     run_after = @leaseExpiry,
                     updated_at = @now
                 WHERE id = (
-                    SELECT id FROM categorization_job
+                    SELECT id FROM categorization_jobs
                     WHERE status = 0 AND run_after <= @now
                     ORDER BY run_after
                     LIMIT 1
@@ -4604,7 +4604,7 @@ public sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, in
     public async Task<JobCompletionOutcome> SucceedAsync(Guid jobId, string workerId, CancellationToken cancellationToken)
     {
         var rows = await db.Database.ExecuteSqlRawAsync(
-            "UPDATE categorization_job SET status = 2, updated_at = @now WHERE id = @jobId AND claimed_by = @workerId AND status = 1",
+            "UPDATE categorization_jobs SET status = 2, updated_at = @now WHERE id = @jobId AND claimed_by = @workerId AND status = 1",
             [
                 new NpgsqlParameter("now", timeProvider.GetUtcNow()),
                 new NpgsqlParameter("jobId", jobId),
@@ -4619,7 +4619,7 @@ public sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, in
     {
         var rows = await db.Database.ExecuteSqlRawAsync(
             """
-            UPDATE categorization_job
+            UPDATE categorization_jobs
             SET status = CASE WHEN attempt_count >= @maxAttempts THEN 3 ELSE 0 END,
                 run_after = CASE WHEN attempt_count >= @maxAttempts THEN run_after ELSE @runAfter END,
                 claimed_at = NULL,
@@ -4644,7 +4644,7 @@ public sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, in
     public async Task<JobCompletionOutcome> FailAsync(Guid jobId, string workerId, string error, CancellationToken cancellationToken)
     {
         var rows = await db.Database.ExecuteSqlRawAsync(
-            "UPDATE categorization_job SET status = 3, last_error = @error, updated_at = @now WHERE id = @jobId AND claimed_by = @workerId AND status = 1",
+            "UPDATE categorization_jobs SET status = 3, last_error = @error, updated_at = @now WHERE id = @jobId AND claimed_by = @workerId AND status = 1",
             [
                 new NpgsqlParameter("error", error),
                 new NpgsqlParameter("now", timeProvider.GetUtcNow()),
@@ -4664,7 +4664,7 @@ public sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, in
         RequireUtc(now, nameof(now));
 
         return db.Database.ExecuteSqlRawAsync(
-            "UPDATE categorization_job SET status = 0, claimed_at = NULL, claimed_by = NULL, updated_at = @now WHERE status = 1 AND run_after <= @now",
+            "UPDATE categorization_jobs SET status = 0, claimed_at = NULL, claimed_by = NULL, updated_at = @now WHERE status = 1 AND run_after <= @now",
             [new NpgsqlParameter("now", now)],
             cancellationToken);
     }
