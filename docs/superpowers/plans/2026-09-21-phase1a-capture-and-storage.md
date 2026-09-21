@@ -1563,13 +1563,32 @@ public class MerchantAliasWriteOnceTests(PostgresFixture fixture)
         await act.Should().ThrowAsync<PostgresException>(
             "merchant_aliases is append-only; deleting history must be impossible even by direct SQL");
     }
+    [Fact]
+    public async Task Truncating_the_alias_table_is_rejected_by_the_database()
+    {
+        await using var db = await SeedAliasAsync(fixture);
+
+        var act = async () => await db.Database.ExecuteSqlAsync(
+            $"TRUNCATE merchant_aliases",
+            TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<PostgresException>(
+            "PostgreSQL never fires row-level triggers for TRUNCATE, so the write-once guard above does not see it");
+
+        var survivors = await db.Database.SqlQuery<int>(
+            $"SELECT count(*)::int FROM merchant_aliases",
+            TestContext.Current.CancellationToken).ToListAsync(TestContext.Current.CancellationToken);
+
+        survivors.Single().Should().Be(1,
+            "a trigger that raised only after the truncate had already run would satisfy the assertion above");
+    }
 }
 ```
 
 - [ ] **Step 10: Run it and watch it fail**
 
 Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj`
-Expected: both new tests FAIL — the raw `UPDATE`/`DELETE` succeed silently (no exception thrown), because nothing in the schema forbids it yet.
+Expected: all three new tests FAIL — the raw `UPDATE`, `DELETE` and `TRUNCATE` all succeed silently (no exception thrown), because nothing in the schema forbids them yet.
 
 - [ ] **Step 11: Add the write-once trigger by hand**
 
@@ -1578,6 +1597,9 @@ In the migration generated in Step 7, inside `Up(MigrationBuilder migrationBuild
 ```csharp
             migrationBuilder.Sql(
                 """
+                -- Must reference only TG_OP / TG_TABLE_NAME, never OLD or NEW: the TRUNCATE trigger
+                -- below calls this same function FOR EACH STATEMENT, where neither exists, and the
+                -- failure would surface at TRUNCATE time rather than at CREATE TRIGGER time.
                 CREATE FUNCTION public.merchant_aliases_write_once() RETURNS trigger AS $$
                 BEGIN
                     RAISE EXCEPTION 'merchant_aliases is write-once: % on % is not permitted', TG_OP, TG_TABLE_NAME;
@@ -1587,6 +1609,13 @@ In the migration generated in Step 7, inside `Up(MigrationBuilder migrationBuild
                 CREATE TRIGGER merchant_aliases_write_once_guard
                     BEFORE UPDATE OR DELETE ON public.merchant_aliases
                     FOR EACH ROW EXECUTE FUNCTION public.merchant_aliases_write_once();
+
+                -- PostgreSQL never fires ROW-level triggers for TRUNCATE, so the guard above
+                -- does not see it: one statement empties the table with no error raised.
+                -- Proven against a real database before this line existed.
+                CREATE TRIGGER merchant_aliases_no_truncate
+                    BEFORE TRUNCATE ON public.merchant_aliases
+                    FOR EACH STATEMENT EXECUTE FUNCTION public.merchant_aliases_write_once();
                 """);
 ```
 
@@ -1595,6 +1624,7 @@ In `Down(MigrationBuilder migrationBuilder)`, immediately before the `DropTable(
 ```csharp
             migrationBuilder.Sql(
                 """
+                DROP TRIGGER IF EXISTS merchant_aliases_no_truncate ON public.merchant_aliases;
                 DROP TRIGGER IF EXISTS merchant_aliases_write_once_guard ON public.merchant_aliases;
                 DROP FUNCTION IF EXISTS public.merchant_aliases_write_once();
                 """);
