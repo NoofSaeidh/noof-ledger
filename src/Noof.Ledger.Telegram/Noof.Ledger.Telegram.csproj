@@ -1,6 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="Telegram.Bot" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Noof.Ledger.Application\Noof.Ledger.Application.csproj" />
     <ProjectReference Include="..\Noof.Ledger.Domain\Noof.Ledger.Domain.csproj" />
   </ItemGroup>

@@ -51,20 +51,132 @@ namespace Noof.Ledger.Persistence.Migrations
                     b.ToTable("app_user", "public");
                 });
 
-            modelBuilder.Entity("Noof.Ledger.Persistence.MoneyProbeEntity", b =>
+            modelBuilder.Entity("Noof.Ledger.Domain.CategorizationJob", b =>
                 {
-                    b.Property<int>("Id")
+                    b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
+                        .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempt_count");
 
-                    b.Property<DateTimeOffset>("RecordedAt")
+                    b.Property<DateTimeOffset?>("ClaimedAt")
                         .HasColumnType("timestamptz")
-                        .HasColumnName("recorded_at");
+                        .HasColumnName("claimed_at");
 
-                    b.ComplexProperty(typeof(Dictionary<string, object>), "Amount", "Noof.Ledger.Persistence.MoneyProbeEntity.Amount#Money", b1 =>
+                    b.Property<string>("ClaimedBy")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("claimed_by");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("text")
+                        .HasColumnName("last_error");
+
+                    b.Property<DateTimeOffset>("RunAfter")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("run_after");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TransactionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("transaction_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TransactionId");
+
+                    b.HasIndex("Status", "RunAfter");
+
+                    b.ToTable("categorization_jobs", "public");
+                });
+
+            modelBuilder.Entity("Noof.Ledger.Domain.Category", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("NameEn")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("name_en");
+
+                    b.Property<string>("NameRu")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("name_ru");
+
+                    b.Property<Guid?>("ParentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("parent_id");
+
+                    b.Property<string>("Slug")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("slug");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ParentId");
+
+                    b.HasIndex("Slug")
+                        .IsUnique();
+
+                    b.ToTable("categories", "public");
+                });
+
+            modelBuilder.Entity("Noof.Ledger.Domain.LineItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("CategorizedBy")
+                        .HasColumnType("integer")
+                        .HasColumnName("categorized_by");
+
+                    b.Property<Guid?>("CategoryId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("category_id");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("description");
+
+                    b.Property<Guid?>("MerchantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("merchant_id");
+
+                    b.Property<Guid>("TransactionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("transaction_id");
+
+                    b.ComplexProperty(typeof(Dictionary<string, object>), "Amount", "Noof.Ledger.Domain.LineItem.Amount#Money", b1 =>
                         {
                             b1.IsRequired();
 
@@ -82,7 +194,215 @@ namespace Noof.Ledger.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("money_probe_entities", "public");
+                    b.HasIndex("CategoryId");
+
+                    b.HasIndex("MerchantId");
+
+                    b.HasIndex("TransactionId");
+
+                    b.ToTable("line_items", "public");
+                });
+
+            modelBuilder.Entity("Noof.Ledger.Domain.Merchant", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("display_name");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer")
+                        .HasColumnName("kind");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("merchants", "public");
+                });
+
+            modelBuilder.Entity("Noof.Ledger.Domain.MerchantAlias", b =>
+                {
+                    b.Property<string>("Folded")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("folded");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("MerchantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("merchant_id");
+
+                    b.HasKey("Folded");
+
+                    b.HasIndex("MerchantId");
+
+                    b.ToTable("merchant_aliases", "public");
+                });
+
+            modelBuilder.Entity("Noof.Ledger.Domain.Transaction", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int?>("BotMessageId")
+                        .HasColumnType("integer")
+                        .HasColumnName("bot_message_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("occurred_at");
+
+                    b.Property<string>("RawText")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("raw_text");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
+
+                    b.Property<long>("TelegramChatId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("telegram_chat_id");
+
+                    b.Property<int>("TelegramMessageId")
+                        .HasColumnType("integer")
+                        .HasColumnName("telegram_message_id");
+
+                    b.Property<string>("TimeZoneId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("time_zone_id");
+
+                    b.Property<Guid>("WalletId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("wallet_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WalletId");
+
+                    b.HasIndex("TelegramChatId", "TelegramMessageId")
+                        .IsUnique();
+
+                    b.ToTable("transactions", "public");
+                });
+
+            modelBuilder.Entity("Noof.Ledger.Domain.Wallet", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("currency");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_default");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("name");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("wallets", "public");
+                });
+
+            modelBuilder.Entity("Noof.Ledger.Persistence.Secrets.AppSecret", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasColumnType("text")
+                        .HasColumnName("key");
+
+                    b.Property<string>("Ciphertext")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("ciphertext");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Key");
+
+                    b.ToTable("app_secret", "public");
+                });
+
+            modelBuilder.Entity("Noof.Ledger.Domain.CategorizationJob", b =>
+                {
+                    b.HasOne("Noof.Ledger.Domain.Transaction", null)
+                        .WithMany()
+                        .HasForeignKey("TransactionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Noof.Ledger.Domain.Category", b =>
+                {
+                    b.HasOne("Noof.Ledger.Domain.Category", null)
+                        .WithMany()
+                        .HasForeignKey("ParentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Noof.Ledger.Domain.LineItem", b =>
+                {
+                    b.HasOne("Noof.Ledger.Domain.Category", null)
+                        .WithMany()
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Noof.Ledger.Domain.Merchant", null)
+                        .WithMany()
+                        .HasForeignKey("MerchantId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Noof.Ledger.Domain.Transaction", null)
+                        .WithMany()
+                        .HasForeignKey("TransactionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Noof.Ledger.Domain.MerchantAlias", b =>
+                {
+                    b.HasOne("Noof.Ledger.Domain.Merchant", null)
+                        .WithMany()
+                        .HasForeignKey("MerchantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Noof.Ledger.Domain.Transaction", b =>
+                {
+                    b.HasOne("Noof.Ledger.Domain.Wallet", null)
+                        .WithMany()
+                        .HasForeignKey("WalletId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

@@ -6,10 +6,18 @@ namespace Noof.Ledger.E2E.Tests;
 
 sealed partial class HostProcess : IAsyncDisposable
 {
+    readonly List<string> capturedOutputLines = [];
+    readonly Lock captureLock = new();
+
     Process? process;
     string? publishDirectory;
 
     public string BaseUrl { get; private set; } = string.Empty;
+
+    public IReadOnlyList<string> CapturedOutputLines
+    {
+        get { lock (captureLock) { return [.. capturedOutputLines]; } }
+    }
 
     public static async Task<string> PublishHostAsync(CancellationToken cancellationToken)
     {
@@ -46,6 +54,8 @@ sealed partial class HostProcess : IAsyncDisposable
     {
         this.publishDirectory = publishDirectory;
         process = Launch(publishDirectory, environment);
+        process.OutputDataReceived += CaptureLine;
+        process.ErrorDataReceived += CaptureLine;
 
         try
         {
@@ -110,6 +120,15 @@ sealed partial class HostProcess : IAsyncDisposable
                 }
             }
         }
+    }
+
+    void CaptureLine(object? sender, DataReceivedEventArgs e)
+    {
+        if (e.Data is null)
+            return;
+
+        lock (captureLock)
+            capturedOutputLines.Add(e.Data);
     }
 
     static Process Launch(string publishDirectory, IReadOnlyDictionary<string, string> environment)
