@@ -4198,14 +4198,15 @@ git commit -m "feat(persistence): EfJobQueue with SKIP LOCKED claiming and an at
 **Files:**
 - Create: `tests/Noof.Ledger.Telegram.Tests/Noof.Ledger.Telegram.Tests.csproj`, `xunit.runner.json`
 - Create: `tests/Noof.Ledger.Telegram.Tests/TelegramBackoffTests.cs`, `TelegramUpdateOffsetStoreTests.cs`, `TelegramOwnerGateTests.cs`, `TelegramChatNotifierTests.cs`, `TelegramBotClientFactoryTests.cs`, `TelegramUpdateRouterTests.cs`, `TelegramPollingServiceTests.cs`
+- Create: `src/Noof.Ledger.Application/Chat/IChatNotifier.cs` — **plan defect, fixed here**: the global File Structure table (this document, line 49) and this task's own Interfaces section below both call this "locked, shipped by earlier Phase 1A tasks", but no task 1–7 creates it — confirmed by grepping every task's steps for `Chat/IChatNotifier` (no hits) and by the actual repo state at the start of Task 8 (`src/Noof.Ledger.Application` has no `Chat` folder). Task 8 is this port's sole producer as well as its sole consumer; create it in Stage 4 immediately before `TelegramChatNotifier`, the class that implements it.
 - Create: `src/Noof.Ledger.Telegram/TelegramClientHandle.cs`, `TelegramBackoff.cs`, `TelegramUpdateOffsetStore.cs`, `TelegramOwnerGate.cs`, `TelegramChatNotifier.cs`, `ITelegramUpdateRouter.cs`, `TelegramUpdateRouter.cs`, `ITelegramBotClientFactory.cs`, `TelegramBotClientFactory.cs`, `TelegramPollingService.cs`
 - Create: `tests/Noof.Ledger.Host.Tests/TelegramHttpClientLoggingTests.cs`
 - Modify: `src/Noof.Ledger.Telegram/Noof.Ledger.Telegram.csproj`, `src/Noof.Ledger.Host/Program.cs`
 - Modify: `Directory.Packages.props`, `NoofLedger.slnx`, `tests/Noof.Ledger.Architecture.Tests/ProjectReferenceTests.cs`
 
 **Interfaces:**
-- Consumes (locked, from `Noof.Ledger.Application`, shipped by earlier Phase 1A tasks — **not present in the repo yet**; if you hit "type or namespace `ISecretStore`/`ICaptureStore` could not be found", that earlier task hasn't landed, this one didn't break anything): `ISecretStore`, `SecretResult`, `SecretState`, `SecretKeys` (`Noof.Ledger.Application.Secrets`); `ICaptureStore`, `CapturedMessage` (`Noof.Ledger.Application.Capture`); `IChatNotifier` (`Noof.Ledger.Application.Chat`).
-- Produces: everything listed in `producedInterfaces` above. The one other task most likely to need it soon is the categorisation worker — it will resolve `IChatNotifier` from DI and call `EditAsync` once a job finishes; nothing here needs to change for that to work.
+- Consumes (locked, from `Noof.Ledger.Application`, shipped by earlier Phase 1A tasks — **not present in the repo yet**; if you hit "type or namespace `ISecretStore`/`ICaptureStore` could not be found", that earlier task hasn't landed, this one didn't break anything): `ISecretStore`, `SecretResult`, `SecretState`, `SecretKeys` (`Noof.Ledger.Application.Secrets`); `ICaptureStore`, `CapturedMessage` (`Noof.Ledger.Application.Capture`).
+- Produces: everything listed in `producedInterfaces` above, plus `IChatNotifier` (`Noof.Ledger.Application.Chat`) itself — see the Files-list note above. The one other task most likely to need it soon is the categorisation worker — it will resolve `IChatNotifier` from DI and call `EditAsync` once a job finishes; nothing here needs to change for that to work.
 
 **Read first, before writing anything:** `src/Noof.Ledger.Host/Program.cs` — modified in Step 34 below. Independently confirmed against the current repository state (not merely assumed): as of this review it ends with `builder.Services.AddCascadingAuthenticationState();` immediately followed by `var app = builder.Build();`, and it does **not yet** contain any `ISecretStore`/`ICaptureStore` registrations, because the Secrets/Capture-ports tasks this task consumes have not landed yet either. When they do land first, they will almost certainly insert their own `AddScoped<...>()` lines in that same gap — leave those alone and add this task's block near them, anchored the same way: immediately before `var app = builder.Build();`. And `tests/Noof.Ledger.Architecture.Tests/ProjectReferenceTests.cs` (its current shape, confirmed against the file: package assertions are one dedicated `[Fact]` per project — `Domain_has_no_package_references`, `Application_has_no_package_references`, `Web_package_references_are_exactly_its_allowed_set`, plus a few Web-only facts — there is **no** existing assertion for `Noof.Ledger.Telegram`'s packages, and its `ProjectReference` row in the `Theory` at the top is already correct (`Application`, `Domain`) and needs no change; if an earlier task already generalised the per-project package assertions into a parameterised `Theory` instead of the current one-`Fact`-per-project style, add Telegram's row to that theory instead of adding a new `Fact` — the **set of three package names** is what matters, not which test shape carries it).
 
@@ -4678,9 +4679,22 @@ public class TelegramChatNotifierTests
 - [ ] **Step 19: Run it and watch it fail**
 
 Run: `dotnet test --project tests/Noof.Ledger.Telegram.Tests/Noof.Ledger.Telegram.Tests.csproj`
-Expected: build error, `TelegramClientHandle`/`TelegramChatNotifier` do not exist.
+Expected: build error, `TelegramClientHandle`/`TelegramChatNotifier` do not exist (and, before those, `IChatNotifier` itself — see Step 20's defect note).
 
 - [ ] **Step 20: Implement them**
+
+First, the missing port. Create `src/Noof.Ledger.Application/Chat/IChatNotifier.cs` — this is the plan defect recorded in the Files list above: `IChatNotifier` was documented as already shipped, but no task before this one creates it, so it is created here, right before its sole implementation:
+
+```csharp
+namespace Noof.Ledger.Application.Chat;
+
+public interface IChatNotifier
+{
+    Task<int> SendAsync(long chatId, string text, CancellationToken cancellationToken);
+
+    Task EditAsync(long chatId, int messageId, string text, CancellationToken cancellationToken);
+}
+```
 
 Create `src/Noof.Ledger.Telegram/TelegramClientHandle.cs`:
 
@@ -5455,7 +5469,7 @@ Nothing in this step edits the acknowledgement message with a real amount — th
 - [ ] **Step 41: Commit**
 
 ```bash
-git add tests/Noof.Ledger.Telegram.Tests src/Noof.Ledger.Telegram tests/Noof.Ledger.Host.Tests/TelegramHttpClientLoggingTests.cs src/Noof.Ledger.Host/Program.cs Directory.Packages.props NoofLedger.slnx tests/Noof.Ledger.Architecture.Tests/ProjectReferenceTests.cs
+git add tests/Noof.Ledger.Telegram.Tests src/Noof.Ledger.Telegram src/Noof.Ledger.Application/Chat tests/Noof.Ledger.Host.Tests/TelegramHttpClientLoggingTests.cs src/Noof.Ledger.Host/Program.cs Directory.Packages.props NoofLedger.slnx tests/Noof.Ledger.Architecture.Tests/ProjectReferenceTests.cs
 git commit -m "$(cat <<'EOF'
 feat(telegram): long-polling bot with an owner allowlist and a durable offset
 
