@@ -68,8 +68,11 @@ if (!cookieMode)
 builder.Services.AddAuthorization();
 builder.Services.AddCascadingAuthenticationState();
 
-builder.Services.AddHttpClient("telegram");
-builder.Logging.AddFilter("System.Net.Http.HttpClient.telegram", LogLevel.None);
+// A log-level filter is a suppression a more specific configured category can override at
+// runtime - Logging:LogLevel:System.Net.Http.HttpClient.telegram.LogicalHandler beats a filter on
+// the shorter prefix and puts the full request URI, bot token included, at Information. Removing
+// the logging handlers from the pipeline instead means there is nothing left to re-enable.
+builder.Services.AddHttpClient("telegram").RemoveAllLoggers();
 
 builder.Services.AddSingleton<TelegramClientHandle>();
 builder.Services.AddSingleton<ITelegramBotClientFactory, TelegramBotClientFactory>();
