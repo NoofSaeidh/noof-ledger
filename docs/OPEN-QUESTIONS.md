@@ -190,3 +190,80 @@ it missed on startup. The price is that it holds full account credentials instea
 only write to one chat — a materially different secret to be storing, in a project whose repository is
 public. **Undecided, and deliberately not decided here.** Revisit if the "off for a week" case turns out
 to matter in practice; until then the honest statement is the one in the README, not "nothing is lost".
+
+---
+
+## P1-6 — the capture relay: the cloud receives, the PC drains
+
+**Decided 2026-09-21**, after two research passes (7 areas then 6, each independently verified; the
+second flagged **28 quoted prices that their own citations did not support**, which is the reason nothing
+below is repeated from memory).
+
+### The decision
+
+A Telegram **webhook** posts each update to a small always-on cloud function, which appends it to a
+queue. The local application no longer long-polls Telegram at all; it **drains that queue outbound over
+HTTPS** whenever it is running, and acknowledges what it has stored.
+
+Everything else stays exactly where it is: the Blazor dashboard, PostgreSQL, the job worker, the
+DPAPI-protected key ring, the loopback interlock, and the plaintext local database credential. **No
+ledger data, no bot token and no key material leaves the machine.**
+
+**Rejected: the MTProto userbot.** The operator's words: *"не хочу в юзерботов с такими рисками идти."*
+The cost objection had collapsed — a Serbian prepaid SIM is about €12 one-off, not the ~$2,842 that
+Fragment's resale market now asks — but the risk objection did not. A fresh account on a new number
+running an unofficial client is the profile in every documented ban report, while an established account
+is safer and is the personal identity the operator specifically did not want to stake. No authoritative
+ban statistic exists for a passive reader, and none is going to.
+
+**Rejected: hosting the whole application.** €6/month forever, a 2–4 day Linux port, and — the part that
+decides it — `ProtectKeysWithDpapi()` is Windows-only and a certificate-protected key ring cannot decrypt
+what DPAPI wrote, so **every stored secret would have to be re-entered**. It also puts a public-repo
+finance application on the open internet for no gain the relay does not already provide.
+
+**Not needed: edge encryption.** The operator was asked directly whether raw expense text may sit with a
+provider and answered that it is not a secret. So the relay stores plaintext updates and the ECDH
+scheme the research proposed is dropped — half a day saved on a protection nobody wanted.
+
+### What this honestly does and does not buy
+
+**It does not close the 24-hour window. It removes the PC's uptime from the equation.**
+
+The same buffer applies to webhook mode — *"Incoming updates are stored on the server until the bot
+receives them either way, but they will not be kept longer than 24 hours"* — and Telegram retries a
+failing webhook *"a reasonable amount of attempts"*, a budget documented nowhere
+([core.telegram.org/bots/api](https://core.telegram.org/bots/api), read 2026-09-21).
+
+So the residual risk becomes: the cloud function must answer 2XX within an unknown retry budget, and at
+worst within 24 hours. A managed function's availability is in a different class from a desktop that is
+deliberately switched off for a weekend — which is the actual problem — but this is a very large
+reduction, not a guarantee. Only reading history would have been a guarantee, and that route was
+rejected on its own terms. **Say "the PC being off no longer loses anything", never "nothing is lost".**
+
+### Shape
+
+- **AWS Lambda Function URL** + **DynamoDB** in provisioned-capacity mode. Verified free allowances
+  (Lambda 1M requests and 400k GB-seconds per month; DynamoDB 25 WCU/25 RCU/25 GB) sit orders of
+  magnitude above roughly twenty messages a day, so the expected bill is **$0.00**.
+- `.NET 10` is a GA managed Lambda runtime (`dotnet10`, Amazon Linux 2023), so the relay is C# like
+  everything else. Azure was considered and is workable on Flex Consumption, but Microsoft's own pages
+  contradict each other on .NET 10 support while AWS's do not.
+- `setWebhook` carries a **`secret_token`**, and the function rejects any request whose
+  `X-Telegram-Bot-Api-Secret-Token` header does not match. That is what stops anyone who finds the URL
+  from injecting expenses.
+- Webhook and `getUpdates` are **mutually exclusive**, so this replaces the Telegram-facing half of
+  `TelegramPollingService` rather than adding to it.
+- Dedup stays on `update_id`, and the existing `(chat_id, message_id)` unique index keeps working
+  unchanged — the message ids are still Bot API ids, which is precisely why the userbot route would have
+  broken it.
+
+### The one assumption nobody could verify from documentation
+
+**Whether Telegram accepts the TLS certificate of a `*.lambda-url.<region>.on.aws` hostname.** No primary
+AWS or Telegram page states it. It is the single biggest unknown under this plan, it is settled by a
+two-hour spike with a throwaway bot, and **if it fails the plan changes shape** (an API Gateway custom
+domain, or Azure, would be the fallback). Do that spike before writing anything else.
+
+Second unknown, and it interacts with the first: **cold-start latency** of `dotnet10` for a function
+invoked a few dozen times a day. Because the retry budget is undocumented, a slow cold start is a
+correctness question rather than a latency curiosity. SnapStart is available on `dotnet10` if needed.

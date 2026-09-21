@@ -92,3 +92,35 @@ and worth measuring first: the win is wall-clock as much as reliability.
 
 **Do not** reach for the EF InMemory provider. `CLAUDE.md` bans it for good reasons, and every one of
 these tests exists precisely because it runs against real PostgreSQL.
+
+---
+
+## `UseForwardedHeaders` is missing, and `CookieSecurePolicy.SameAsRequest` depends on it
+
+**Wanted.** `app.UseForwardedHeaders(...)` configured before authentication, so the app sees the original
+scheme when something terminates TLS in front of it.
+
+**Why it is not scheduled.** Not reachable today: the app binds loopback only, nothing sits in front of
+it, and `LoopbackGuard` refuses a non-loopback bind unless cookie auth is on. The capture relay decided
+in `OPEN-QUESTIONS.md` P1-6 does not change that — the drain is outbound, so nothing proxies inbound.
+
+**Why it is written down anyway.** `Program.cs` sets `CookieSecurePolicy.SameAsRequest`. Behind a
+TLS-terminating proxy the app sees plain HTTP and therefore ships the authentication cookie **without the
+Secure flag**, silently. The day anyone puts this behind a reverse proxy — a later hosting decision, a
+tunnel for phone access — that is a live session-hijack surface and nothing will warn about it.
+
+About an hour, and it belongs with whatever first introduces a proxy.
+
+---
+
+## Reaching the dashboard from a phone, away from home
+
+**Wanted.** The operator said "later, not now" when asked (2026-09-21).
+
+**Why it is recorded.** It is the one condition that would reverse P1-6's rejection of hosting. Hosting
+was declined because it costs €6/month and a full Linux port to buy only what the capture relay already
+buys for nothing. If remote dashboard access becomes wanted, hosting buys two things instead of one and
+the arithmetic flips — at which point the relay becomes redundant rather than complementary.
+
+**Design consequence now:** nothing in the relay work should assume the application is unreachable from
+outside. It should assume only that it is *currently* loopback-bound.
