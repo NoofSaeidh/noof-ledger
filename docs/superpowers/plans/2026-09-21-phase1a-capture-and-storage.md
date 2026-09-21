@@ -5159,7 +5159,7 @@ public class TelegramPollingServiceTests
         var secretStore = WithToken("tok1");
         var client = Substitute.For<ITelegramBotClient>();
         client.SendRequest(Arg.Any<GetUpdatesRequest>(), Arg.Any<CancellationToken>())
-            .Returns(_ => throw new HttpRequestException("cable pulled"));
+            .Returns<Update[]>(_ => throw new HttpRequestException("cable pulled"));
         var clientFactory = Substitute.For<ITelegramBotClientFactory>();
         clientFactory.Create("tok1").Returns(client);
         var router = Substitute.For<ITelegramUpdateRouter>();
@@ -5203,6 +5203,8 @@ public class TelegramPollingServiceTests
 > This is the automated proof behind "`getUpdates` throwing must log, back off, and keep polling — never kill the service": the last two tests show a thrown exception turns into `TelegramPollResult.Failed` (never an escaped exception) and that the very next tick calls `GetUpdates` again on the same client. The "pull the actual network cable while the real bot is live" scenario itself is a manual check (Step 40) — nothing in this repo's default test loop is allowed to touch a real network or a real Telegram server.
 >
 > **Known, accepted gap.** None of these tests call `ExecuteAsync` — the actual `BackgroundService` loop that reads the result of `RunTickAsync` and decides how long to wait before the next tick. Every test here drives `RunTickAsync` directly. That means the idle/backoff delay selection inside `ExecuteAsync` (Step 32) is proven correct only by inspection, not by a passing test — spinning up a real `BackgroundService` against a `FakeTimeProvider` and synchronising on tick counts is a reasonable follow-up, but it is more machinery than this task's budget covers, and pretending otherwise here would be worse than naming the gap.
+>
+> **Plan defect, fixed above.** `GetUpdates_throwing_is_reported_as_failed_without_throwing_or_advancing_the_offset` originally read `.Returns(_ => throw new HttpRequestException("cable pulled"))`. `SendRequest<TResponse>` returns `Task<TResponse>` (here `Task<Update[]>`), and NSubstitute 6.2.0 (the pinned version) exposes both `Returns<T>(T, Func<CallInfo,T>, ...)` and `Returns<T>(Task<T>, Func<CallInfo,T>, ...)` as extension methods; because a `throw` expression converts to any type, the compiler cannot pick between `T = Task<Update[]>` and `T = Update[]` and the build fails with `CS0121: The call is ambiguous`. Confirmed by building this exact test against this repo's pinned package versions, not assumed. The fix is the explicit type argument shown above, `.Returns<Update[]>(_ => throw ...)`, which restricts resolution to the `Task<T>`-returning overload. `Keeps_polling_after_a_failed_tick`'s block-bodied lambda a few tests later does not need this — its `return Array.Empty<Update>();` statement already pins the inferred `T` to `Update[]`, so the ambiguity only bites the single-expression `throw` form.
 
 - [ ] **Step 31: Run it and watch it fail**
 
