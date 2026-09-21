@@ -2157,7 +2157,7 @@ IChatClient chat = raw.AsIChatClient(options.Model);
 
 ---
 
-- [ ] **Step 0: Confirm the ground this task builds on (read-only)**
+- [x] **Step 0: Confirm the ground this task builds on (read-only)**
 
 Run, and read the output before writing anything:
 ```
@@ -2168,7 +2168,7 @@ grep -rn "JsonElement BuildRecordSpending\|JsonElement BuildListMerchants\|class
 ```
 Expected: the `Anthropic` package reference and `AnthropicOptions` already exist (Task 2's job); `Noof.Ledger.Ai.Tests.csproj` already references `Noof.Ledger.Ai`, `AwesomeAssertions`, and `xunit.v3.mtp-v2`. If `CategorizationSchema`/`CategorizationPrompt` are not yet present with the `JsonElement`-returning shape, Task 2 hasn't landed yet — stop and wait for it; this task's Step 5 code will not compile without them. If the test csproj is missing a package reference this task needs, add only that missing line — do not otherwise touch a file another task owns.
 
-- [ ] **Step 1: Write the HTTP stub and the canned responses**
+- [x] **Step 1: Write the HTTP stub and the canned responses**
 
 Create `tests/Noof.Ledger.Ai.Tests/StubHttpMessageHandler.cs`:
 ```csharp
@@ -2263,7 +2263,7 @@ public static class AnthropicResponses
 }
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 Create `tests/Noof.Ledger.Ai.Tests/AnthropicCategorizerTests.cs`:
 ```csharp
@@ -2601,11 +2601,11 @@ public class AnthropicKeyProbeTests
 Run: `dotnet test --project tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj`
 Expected: build errors — `AnthropicClientFactory`, `AnthropicCategorizer`, `AnthropicKeyProbe` do not exist yet.
 
-- [ ] **Step 3: Confirm the failure is the one you expect**
+- [x] **Step 3: Confirm the failure is the one you expect**
 
 Same command as Step 2. If the error is a Postgres/network error or anything other than "type or namespace not found" for the three new Ai types, stop and fix that first. This test project touches no database and no network by design.
 
-- [ ] **Step 4: `AnthropicClientFactory`**
+- [x] **Step 4: `AnthropicClientFactory`**
 
 Create `src/Noof.Ledger.Ai/AnthropicClientFactory.cs`:
 ```csharp
@@ -2652,7 +2652,7 @@ public sealed class AnthropicClientFactory(
 }
 ```
 
-- [ ] **Step 5: `AnthropicCategorizer`**
+- [x] **Step 5: `AnthropicCategorizer`**
 
 Create `src/Noof.Ledger.Ai/AnthropicCategorizer.cs`:
 ```csharp
@@ -2923,12 +2923,12 @@ public sealed class AnthropicCategorizer(IAnthropicClientFactory clientFactory, 
 
 > **This shape follows the captured HTTP body (facts 1–7 above), not a spike against the compiled `Microsoft.Extensions.AI.Abstractions` types themselves.** Member names for `ChatResponse` (`Messages`, `FinishReason`), `ChatMessage` (`Contents`, the `(ChatRole, IList<AIContent>)` constructor), and `AIFunctionDeclaration`'s exact override surface are standard shapes for that package version but were not individually captured the way the HTTP body was. If any of these fail to compile, that is exactly the signal to fix here, against the real package, not by changing what the tests expect — see `## CONTRACT GAP`.
 
-- [ ] **Step 6: Run the tests**
+- [x] **Step 6: Run the tests**
 
 Run: `dotnet test --project tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj`
 Expected: still red — `AnthropicKeyProbe` does not exist yet (Step 2's `AnthropicKeyProbeTests.cs` references it). Every `AnthropicCategorizerTests` fact should now compile and, if Step 5's assumed member shapes compile as written, pass. If a member name is wrong, this is exactly the signal the callout above describes — resolve it against the compiled package before moving on, not by changing test expectations.
 
-- [ ] **Step 7: `AnthropicKeyProbe`**
+- [x] **Step 7: `AnthropicKeyProbe`**
 
 Create `src/Noof.Ledger.Ai/AnthropicKeyProbe.cs`:
 ```csharp
@@ -2971,14 +2971,14 @@ public sealed class AnthropicKeyProbe(IAnthropicClientFactory clientFactory) : I
 }
 ```
 
-- [ ] **Step 8: Run the full Ai test project**
+- [x] **Step 8: Run the full Ai test project**
 
 Run: `dotnet test --project tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj`
 Expected: all green — `AnthropicCategorizerTests` (11 facts: happy-path JSON answer, first-call shape incl. the trap-5 guard, no beta header, list_merchants-then-no-tools-follow-up, the double-list_merchants no-third-request guard, neither-JSON-nor-tool-transient, the 12-row status-code `Theory`, missing-key, unreadable-key, key-never-leaks, canonicalize-merchant) and `AnthropicKeyProbeTests` (4 facts).
 
 Then run the full solution once to confirm nothing else broke: `dotnet test --solution NoofLedger.slnx`
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add src/Noof.Ledger.Ai/AnthropicClientFactory.cs src/Noof.Ledger.Ai/AnthropicCategorizer.cs src/Noof.Ledger.Ai/AnthropicKeyProbe.cs tests/Noof.Ledger.Ai.Tests/StubHttpMessageHandler.cs tests/Noof.Ledger.Ai.Tests/AnthropicResponses.cs tests/Noof.Ledger.Ai.Tests/AnthropicCategorizerTests.cs tests/Noof.Ledger.Ai.Tests/AnthropicKeyProbeTests.cs
@@ -2996,9 +2996,9 @@ EOF
 
 ## CONTRACT GAP
 
-1. **`AIFunctionDeclaration`'s exact member list.** The established fact is "`AIFunctionDeclaration` is `abstract` with an overridable `JsonElement JsonSchema`" — proved by a captured HTTP body showing the schema passed through unchanged. This task's `RawSchemaFunctionDeclaration` additionally assumes `Name` and `Description` are each an overridable `string` property with no other required override, and that a plain parameterless-then-property-initialised subclass (no mandatory base constructor argument) compiles. If the real base type requires a constructor argument (e.g. a `protected AIFunctionDeclaration(string name)`), adjust `RawSchemaFunctionDeclaration`'s constructor accordingly — nothing else in this task depends on its internals beyond `Name`/`Description`/`JsonSchema` being readable back the way `AnthropicCategorizer` uses them.
-2. **`ChatMessage`'s multi-content constructor and `ChatResponse`'s member names.** `new ChatMessage(ChatRole.Tool, [new FunctionResultContent(...)])`, `response.Messages` (`IList<ChatMessage>`), `message.Contents` (`IEnumerable<AIContent>`), and `response.FinishReason` are the standard shapes for this package version but were not individually captured by the stub-handler run the way the request-body facts (1–9 in this task's Interfaces section) were. If any of these compile under a different name (e.g. `StopReason` instead of `FinishReason`), fix the reference here rather than reshaping the test expectations, per Step 5's callout.
-3. **`ChatOptions.Tools`' element type.** Assumed to be `IList<AITool>?` (or an equivalent collection type a collection expression can target) with `AIFunctionDeclaration` deriving from `AITool`. If `Tools` instead requires a different collection type or `AIFunctionDeclaration` requires an adapter to become an `AITool`, Step 5's `Tools = [listMerchantsTool]` line is the only line that needs to change.
+1. **CLOSED (Task 3).** **`AIFunctionDeclaration`'s exact member list.** The established fact is "`AIFunctionDeclaration` is `abstract` with an overridable `JsonElement JsonSchema`" — proved by a captured HTTP body showing the schema passed through unchanged. This task's `RawSchemaFunctionDeclaration` additionally assumes `Name` and `Description` are each an overridable `string` property with no other required override, and that a plain parameterless-then-property-initialised subclass (no mandatory base constructor argument) compiles. If the real base type requires a constructor argument (e.g. a `protected AIFunctionDeclaration(string name)`), adjust `RawSchemaFunctionDeclaration`'s constructor accordingly — nothing else in this task depends on its internals beyond `Name`/`Description`/`JsonSchema` being readable back the way `AnthropicCategorizer` uses them. Confirmed by compiling `RawSchemaFunctionDeclaration` exactly as written against the real `Anthropic` 12.49.0 / `Microsoft.Extensions.AI.Abstractions` 10.5.1 packages: no base constructor argument is required, and `Name`/`Description`/`JsonSchema` are each an overridable property as assumed.
+2. **CLOSED (Task 3).** **`ChatMessage`'s multi-content constructor and `ChatResponse`'s member names.** `new ChatMessage(ChatRole.Tool, [new FunctionResultContent(...)])`, `response.Messages` (`IList<ChatMessage>`), `message.Contents` (`IEnumerable<AIContent>`), and `response.FinishReason` are the standard shapes for this package version but were not individually captured by the stub-handler run the way the request-body facts (1–9 in this task's Interfaces section) were. If any of these compile under a different name (e.g. `StopReason` instead of `FinishReason`), fix the reference here rather than reshaping the test expectations, per Step 5's callout. Confirmed: `AnthropicCategorizer.cs` compiles unchanged against these exact member names, and the full `AnthropicCategorizerTests` suite (including the tool round trip) passes against them.
+3. **CLOSED (Task 3).** **`ChatOptions.Tools`' element type.** Assumed to be `IList<AITool>?` (or an equivalent collection type a collection expression can target) with `AIFunctionDeclaration` deriving from `AITool`. If `Tools` instead requires a different collection type or `AIFunctionDeclaration` requires an adapter to become an `AITool`, Step 5's `Tools = [listMerchantsTool]` line is the only line that needs to change. Confirmed: `Tools = [listMerchantsTool]` compiles unchanged, and `Sends_json_schema_output_config_and_exactly_one_tool_on_the_first_call` verifies exactly one tool reaches the wire.
 
 ---
 
