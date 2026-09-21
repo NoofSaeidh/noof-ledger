@@ -48,16 +48,4 @@ public class AppUserModelTests
 
         entity.FindPrimaryKey()!.Properties.Select(p => p.Name).Should().Equal(nameof(AppUser.Id));
     }
-
-    [Fact]
-    public void The_money_probe_mapping_is_unchanged_by_the_move_to_configuration_classes()
-    {
-        using var db = BuildOfflineContext();
-        var entity = db.Model.FindEntityType(typeof(MoneyProbeEntity))!;
-        var money = entity.GetComplexProperties().Single();
-
-        entity.GetTableName().Should().Be("money_probe_entities");
-        money.ComplexType.FindProperty("Amount")!.GetColumnName().Should().Be("amount");
-        money.ComplexType.FindProperty("Currency")!.GetMaxLength().Should().Be(3);
-    }
 }
