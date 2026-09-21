@@ -437,12 +437,14 @@ CategorizationWorker tick
 3. **`ProposalVerification.TryResolve` fails the whole proposal on the first invalid item and never leaks a partially built result.** `items` is assigned the empty list *before* the per-item loop starts, and every failing `return false` inside that loop leaves it untouched — the loop's own local accumulator (holding any earlier, individually-valid items) is only ever assigned to the `items` out-parameter on the final, all-items-passed success path. A test proves this with a valid item first and an invalid one second, specifically to rule out the accumulator leaking.
 4. **`CategorySlug` is matched against `offeredSlugs` case-insensitively (ordinal) but the *resolved* value is normalized to the offered collection's own casing, not the model's.** The Anthropic docs note enum values can come back in unexpected casing; comparing case-insensitively avoids rejecting an otherwise-valid answer for that reason alone, and resolving to the offered casing means every downstream ordinal `slug -> CategoryId` lookup only ever sees the one casing this codebase minted.
 5. **`Description` (the 512-character `line_items.description` column) is truncated, not rejected, when over length.** It is free display text, never an identity key, and it stays correctable later (`CategorizationAuthority.User` can override a model-written line per the contract). Losing the tail of an unusually verbose description costs nothing that matters; discarding an otherwise-correct categorization over it would.
-6. **`MerchantQuote` (the 256-character `merchant_alias.folded`/`merchant.display_name` columns) is rejected, not truncated, checked against BOTH its raw length and its `MerchantName.Fold`-ed length.** Both checks are necessary because `Fold`'s `ToUpperInvariant` can *expand* a string — Unicode's default uppercase mapping turns `'ß'` (U+00DF) into `"SS"` unconditionally, so a raw quote sitting exactly at the 256 limit can still overflow the folded column. Truncating a merchant name, unlike truncating a description, risks writing a plausible-looking but wrong identity into a table that `IMerchantDirectory.LinkAliasAsync` never overwrites — so this one fails the whole proposal instead.
+6. **`MerchantQuote` (the 256-character `merchant_alias.folded`/`merchant.display_name` columns) is rejected, not truncated — and its RAW length is the only check needed.** Truncating a merchant name, unlike truncating a description, risks writing a plausible-looking but wrong identity into a table that `IMerchantDirectory.LinkAliasAsync` never overwrites, so an over-long quote fails the whole proposal instead.
+
+   > **A second check on the folded length was specified here and then removed, which is worth recording so nobody adds it back.** The reasoning for it was that `ToUpperInvariant` expands `'ß'` (U+00DF) to `"SS"`, letting a quote at exactly 256 raw characters overflow the folded column. **That is true of Unicode's full case mapping and of Java, and false on .NET**, which uses simple 1:1 case mapping. Measured on this repository's runtime rather than argued: `"ß".ToUpperInvariant()` returns `"ß"`, and sweeping every code point in the Basic Multilingual Plane found **zero** whose uppercase is longer than its input. `Fold` splits, joins and uppercases — none of which can lengthen a string — so `raw.Length <= 256` already implies `Fold(raw).Length <= 256`. A second check would be defensive boilerplate for a condition that cannot occur, which CLAUDE.md forbids by name.
 7. **`MerchantQuote`, when present, must occur verbatim (plain ordinal substring) in the raw text.** The contract states this rule for `AmountQuote` explicitly but is silent on `MerchantQuote`; this task extends it by the same reasoning the contract already gives for amounts, scaled by consequence: a hallucinated merchant name becomes a **permanent** write-once alias row, so the cost of accepting one unchecked is unbounded in time. Unlike `QuotedAmount`, no whole-word boundary check is applied here — the boundary check exists specifically because `"500"` inside `"1500"` is a different *number*, not a truncated one; `"Café"` occurring inside `"Café Central"` is still the same literal text, not a different claim, so a plain `Contains` is the right amount of strictness.
 
 ---
 
-- [ ] **Step 1: Create the contract records**
+- [x] **Step 1: Create the contract records**
 
 Create `src/Noof.Ledger.Application/Categorization/CategorizationContract.cs`:
 
@@ -507,7 +509,7 @@ public sealed record MerchantAliasEntry(string Folded, Guid MerchantId, string D
 
 This is a fixed contract of plain data records with no branching logic — the DTO exemption from the standing TDD rule applies, same as `CapturedMessage`/`ICaptureStore` in Phase 1A's Task 6. No failing test to write here.
 
-- [ ] **Step 2: Create the model port**
+- [x] **Step 2: Create the model port**
 
 Create `src/Noof.Ledger.Application/Categorization/ICategorizer.cs`:
 
@@ -526,7 +528,7 @@ public interface ICategorizer
 }
 ```
 
-- [ ] **Step 3: Create the read-side store ports**
+- [x] **Step 3: Create the read-side store ports**
 
 Create `src/Noof.Ledger.Application/Categorization/ICategoryCatalog.cs`:
 
@@ -557,7 +559,7 @@ public interface IMerchantDirectory
 }
 ```
 
-- [ ] **Step 4: Create the write-side store port**
+- [x] **Step 4: Create the write-side store port**
 
 Create `src/Noof.Ledger.Application/Categorization/ICategorizationStore.cs`:
 
@@ -577,7 +579,7 @@ public interface ICategorizationStore
 }
 ```
 
-- [ ] **Step 5: Create the model-failure classification**
+- [x] **Step 5: Create the model-failure classification**
 
 Create `src/Noof.Ledger.Application/Categorization/ModelCallException.cs`:
 
@@ -600,7 +602,7 @@ public sealed class ModelCallException(ModelFailureKind kind, string message, Ex
 }
 ```
 
-- [ ] **Step 6: Create the reporting port**
+- [x] **Step 6: Create the reporting port**
 
 Create `src/Noof.Ledger.Application/Reporting/ISpendingReadModel.cs`:
 
@@ -634,7 +636,7 @@ public interface ISpendingReadModel
 }
 ```
 
-- [ ] **Step 7: Create the secret probe port**
+- [x] **Step 7: Create the secret probe port**
 
 Create `src/Noof.Ledger.Application/Secrets/ISecretProbe.cs`:
 
@@ -654,12 +656,12 @@ public interface ISecretProbe
 }
 ```
 
-- [ ] **Step 8: Build and confirm the contract compiles clean**
+- [x] **Step 8: Build and confirm the contract compiles clean**
 
 Run: `dotnet build src/Noof.Ledger.Application/Noof.Ledger.Application.csproj`
 Expected: `Build succeeded`, `0 Warning(s)`, `0 Error(s)`. `Noof.Ledger.Application` still has zero `PackageReference` entries — you have not added one; everything above resolves against `Noof.Ledger.Domain` and the BCL only.
 
-- [ ] **Step 9: Commit the contract and the ports**
+- [x] **Step 9: Commit the contract and the ports**
 
 ```bash
 git add src/Noof.Ledger.Application/Categorization/CategorizationContract.cs src/Noof.Ledger.Application/Categorization/ICategorizer.cs src/Noof.Ledger.Application/Categorization/ICategoryCatalog.cs src/Noof.Ledger.Application/Categorization/IMerchantDirectory.cs src/Noof.Ledger.Application/Categorization/ICategorizationStore.cs src/Noof.Ledger.Application/Categorization/ModelCallException.cs src/Noof.Ledger.Application/Reporting/ISpendingReadModel.cs src/Noof.Ledger.Application/Secrets/ISecretProbe.cs
@@ -672,7 +674,7 @@ EOF
 )"
 ```
 
-- [ ] **Step 10: Write the failing test matrix for `MerchantScan.Matches`**
+- [x] **Step 10: Write the failing test matrix for `MerchantScan.Matches`**
 
 Create `tests/Noof.Ledger.Persistence.Tests/MerchantScanTests.cs`:
 
@@ -783,12 +785,12 @@ public class MerchantScanTests
 }
 ```
 
-- [ ] **Step 11: Run it and watch it fail**
+- [x] **Step 11: Run it and watch it fail**
 
 Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj --filter MerchantScanTests`
 Expected: build error — `error CS0246: The type or namespace name 'MerchantScan' could not be found` (`MerchantAliasEntry` already exists from Step 1, so only `MerchantScan` is missing).
 
-- [ ] **Step 12: Write the minimal implementation**
+- [x] **Step 12: Write the minimal implementation**
 
 Create `src/Noof.Ledger.Application/Categorization/MerchantScan.cs`:
 
@@ -847,12 +849,12 @@ public static class MerchantScan
 }
 ```
 
-- [ ] **Step 13: Run the tests and watch them pass**
+- [x] **Step 13: Run the tests and watch them pass**
 
 Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj --filter MerchantScanTests`
 Expected: PASS — 7 `[Fact]`s plus the 2-case `[Theory]`, 9 test cases total, `Errors: 0, Failed: 0`.
 
-- [ ] **Step 14: Commit**
+- [x] **Step 14: Commit**
 
 ```bash
 git add src/Noof.Ledger.Application/Categorization/MerchantScan.cs tests/Noof.Ledger.Persistence.Tests/MerchantScanTests.cs
@@ -865,7 +867,7 @@ EOF
 )"
 ```
 
-- [ ] **Step 15: Write the failing test matrix for `ProposalVerification.TryResolve`**
+- [x] **Step 15: Write the failing test matrix for `ProposalVerification.TryResolve`**
 
 This is the second most security-relevant function in the phase, after `QuotedAmount` itself — it is where every one of the contract's per-item guarantees gets composed and enforced together. Create `tests/Noof.Ledger.Persistence.Tests/ProposalVerificationTests.cs`:
 
@@ -1027,25 +1029,6 @@ public class ProposalVerificationTests
     }
 
     [Fact]
-    public void A_merchant_quote_whose_fold_exceeds_256_characters_fails_even_though_its_raw_length_does_not()
-    {
-        // ToUpperInvariant's default Unicode case mapping expands 'ß' (U+00DF) to "SS", so a raw
-        // quote sitting exactly at the 256 limit can still overflow the folded column. 250 'a's
-        // plus 6 'ß's is 256 raw characters, but folds to 250 + 6*2 = 262.
-        var merchantQuote = new string('a', 250) + new string('ß', 6);
-        merchantQuote.Length.Should().Be(256);
-
-        var proposal = new CategorizationProposal([ValidItem(merchantQuote: merchantQuote)]);
-
-        var resolved = ProposalVerification.TryResolve(
-            $"кофе 250 рсд у {merchantQuote}", proposal, ["groceries"], [], out var items, out var failure);
-
-        resolved.Should().BeFalse();
-        items.Should().BeEmpty();
-        failure.Should().NotBeEmpty();
-    }
-
-    [Fact]
     public void A_merchant_quote_that_does_not_occur_verbatim_in_the_raw_text_fails()
     {
         // The write-once alias table never overwrites (IMerchantDirectory.LinkAliasAsync), so a
@@ -1095,12 +1078,12 @@ public class ProposalVerificationTests
 }
 ```
 
-- [ ] **Step 16: Run it and watch it fail**
+- [x] **Step 16: Run it and watch it fail**
 
 Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj --filter ProposalVerificationTests`
 Expected: build error — `error CS0246: The type or namespace name 'ProposalVerification' could not be found`.
 
-- [ ] **Step 17: Write the minimal implementation**
+- [x] **Step 17: Write the minimal implementation**
 
 Create `src/Noof.Ledger.Application/Categorization/ProposalVerification.cs`:
 
@@ -1199,17 +1182,17 @@ public static class ProposalVerification
 }
 ```
 
-- [ ] **Step 18: Run the tests and watch them pass**
+- [x] **Step 18: Run the tests and watch them pass**
 
 Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj --filter ProposalVerificationTests`
-Expected: PASS — 14 `[Fact]`s, `Errors: 0, Failed: 0`.
+Expected: PASS — 13 `[Fact]`s, `Errors: 0, Failed: 0`.
 
-- [ ] **Step 19: Run the whole solution once to confirm nothing else moved**
+- [x] **Step 19: Run the whole solution once to confirm nothing else moved**
 
 Run: `dotnet test --solution NoofLedger.slnx`
 Expected: PASS, exit 0 — total test count grown by 23 (9 `MerchantScanTests` cases + 14 `ProposalVerificationTests` cases) relative to Phase 1A's baseline, everything else unchanged.
 
-- [ ] **Step 20: Commit**
+- [x] **Step 20: Commit**
 
 ```bash
 git add src/Noof.Ledger.Application/Categorization/ProposalVerification.cs tests/Noof.Ledger.Persistence.Tests/ProposalVerificationTests.cs
