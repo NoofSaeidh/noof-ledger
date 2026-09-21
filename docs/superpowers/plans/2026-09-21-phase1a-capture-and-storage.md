@@ -434,10 +434,56 @@ public class QuotedAmountTests
         resolved.Should().BeTrue();
         money.Should().Be(new Money(250m, CurrencyCode.Rsd));
     }
+
+    // A quote that occurs verbatim as a SUBSTRING of a larger number is not the same claim as a
+    // quote that occurs as its own number. "500" inside "1500" is a fragment the model mis-bounded,
+    // not the figure it actually saw -- exactly what this gate exists to catch, per the review that
+    // found it: rawText.Contains alone blocks an invented figure but not a mis-bounded one.
+    [Fact]
+    public void A_quote_that_is_only_a_fragment_of_a_larger_number_fails()
+    {
+        var resolved = QuotedAmount.TryResolve("кофе 1500 рсд", "500", "RSD", out var money, out var failure);
+
+        resolved.Should().BeFalse();
+        money.Should().Be(default(Money));
+        failure.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void A_quote_that_is_only_the_leading_digits_of_a_larger_number_fails()
+    {
+        var resolved = QuotedAmount.TryResolve("кофе 1500 рсд", "1", "RSD", out var money, out var failure);
+
+        resolved.Should().BeFalse();
+        money.Should().Be(default(Money));
+        failure.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void A_quote_that_is_a_fragment_of_a_hyphenated_date_fails()
+    {
+        var resolved = QuotedAmount.TryResolve("оплата 2026-09-21 300", "2026", "RSD", out var money, out var failure);
+
+        resolved.Should().BeFalse();
+        money.Should().Be(default(Money));
+        failure.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void A_quote_with_two_separators_of_the_same_kind_is_not_a_single_well_formed_number()
+    {
+        var resolved = QuotedAmount.TryResolve("заметка 1.2.3 конец", "1.2.3", "RSD", out var money, out var failure);
+
+        resolved.Should().BeFalse();
+        money.Should().Be(default(Money));
+        failure.Should().NotBeEmpty();
+    }
 }
 ```
 
 > `TryResolve` must check that `amountQuote` occurs verbatim in `rawText` **before** any trimming or normalisation, using the quote exactly as the model returned it. If the implementation instead normalises first and checks containment on the normalised copy, a model that paraphrases the figure can slip a fabricated number past the gate this function exists to be. Keep the containment check literally first, against the raw parameter — Step 16 relies on this order.
+>
+> **Substring is not enough — a boundary check is required too (2026-09-21 review).** `rawText.Contains(amountQuote)` alone blocks a figure the model invented but not one it mis-bounded: `("кофе 1500 рсд", "500")` resolved to 500 RSD, `("кофе 1500 рсд", "1")` resolved to 1 RSD, and `("оплата 2026-09-21 300", "2026")` resolved to 2026 RSD, because "500", "1" and "2026" are all genuine substrings of a larger number or date already in the text. A matching occurrence must not be flanked by a digit, `.`, `,` or `-` on either side (these are exactly the characters that can continue a number or a hyphenated date; whitespace, other punctuation and the string's start/end are genuine boundaries) — and since a quote can legitimately occur twice (`A_quote_repeated_in_the_raw_text_still_resolves`), accept as soon as ANY occurrence has valid boundaries on both sides, not only the first. Separately, `"1.2.3"` resolved to `12.3` because the old code kept only the last `.` as the decimal point and silently discarded the first — a quote must have at most one `.` and at most one `,` to count as a single well-formed number. Implement both checks directly in `QuotedAmount.TryResolve`/`TryParseAmount` as shown in Step 16 below — do not defer this to a later task.
 
 - [ ] **Step 15: Run it and watch it fail**
 
@@ -487,9 +533,21 @@ public static class QuotedAmount
             return false;
         }
 
-        // Verbatim check against the quote exactly as given -- before any normalisation. This
-        // is the entire safety property this type exists to enforce; see the test file's trap.
-        if (string.IsNullOrEmpty(rawText) || !rawText.Contains(amountQuote, StringComparison.Ordinal))
+        // Verbatim AND boundary check against the quote exactly as given -- before any
+        // normalisation. This is the entire safety property this type exists to enforce; see the
+        // test file's trap. rawText.Contains alone blocks a figure the model invented, but not one
+        // it mis-bounded: "500" is a true substring of "1500", so a naive Contains would let the
+        // model claim a quote of "500" against raw text that actually says 1500. A boundary is
+        // therefore required on both sides of a matching occurrence: a digit obviously continues
+        // the same number, and so do '.' and ',' (the two characters this parser itself treats as
+        // separators -- a quote flanked by either might really be a longer number with the digits
+        // on the other side of that separator left out) and '-' (a quote flanked by it might really
+        // be one segment of a hyphenated date, e.g. "2026" in "2026-09-21"). Any other character,
+        // including whitespace and the start/end of the string, is a genuine boundary. Because a
+        // quote can legitimately occur more than once (see
+        // A_quote_repeated_in_the_raw_text_still_resolves), this accepts if ANY occurrence has valid
+        // boundaries on both sides, not only the first.
+        if (string.IsNullOrEmpty(rawText) || !OccursAsWholeNumber(rawText, amountQuote))
         {
             failure = $"Quote \"{amountQuote}\" does not occur verbatim in the raw text.";
             return false;
@@ -525,6 +583,18 @@ public static class QuotedAmount
         if (!candidate.All(c => char.IsAsciiDigit(c) || c is '.' or ','))
         {
             failure = $"Amount quote \"{quote}\" is not a plain number.";
+            return false;
+        }
+
+        // A single well-formed number has at most one decimal point and, per the separator rule
+        // below, at most one grouping mark -- this parser only ever treats ONE occurrence of '.'
+        // and ONE occurrence of ',' as meaningful (whichever is rightmost becomes the decimal
+        // point when both are present). Two dots with no comma, as in "1.2.3", has no unambiguous
+        // reading: the old code silently kept only the last dot as decimal and discarded the
+        // first, inventing "12.3" out of a quote that was never a single number to begin with.
+        if (candidate.Count(c => c == '.') > 1 || candidate.Count(c => c == ',') > 1)
+        {
+            failure = $"Amount quote \"{quote}\" is not a single well-formed number.";
             return false;
         }
 
@@ -571,6 +641,26 @@ public static class QuotedAmount
         return true;
     }
 
+    static bool IsNumberBoundaryChar(char c) => char.IsAsciiDigit(c) || c is '.' or ',' or '-';
+
+    static bool OccursAsWholeNumber(string rawText, string quote)
+    {
+        var searchFrom = 0;
+        while (true)
+        {
+            var index = rawText.IndexOf(quote, searchFrom, StringComparison.Ordinal);
+            if (index < 0)
+                return false;
+
+            var before = index == 0 || !IsNumberBoundaryChar(rawText[index - 1]);
+            var after = index + quote.Length == rawText.Length || !IsNumberBoundaryChar(rawText[index + quote.Length]);
+            if (before && after)
+                return true;
+
+            searchFrom = index + 1;
+        }
+    }
+
     static bool TryParseCurrency(string? code, out CurrencyCode currency, out string failure)
     {
         currency = default;
@@ -600,7 +690,7 @@ public static class QuotedAmount
 - [ ] **Step 17: Run the tests and watch them pass**
 
 Run: `dotnet test --project tests/Noof.Ledger.Domain.Tests/Noof.Ledger.Domain.Tests.csproj`
-Expected: PASS (16 new test cases across the facts and theories above, plus everything from Step 12 still green).
+Expected: PASS (20 new test cases across the facts and theories above, plus everything from Step 12 still green).
 
 Then confirm the whole solution still builds and no architecture rule regressed — this task adds files to `Noof.Ledger.Domain` but no package references, so `Domain_has_no_package_references` in `tests/Noof.Ledger.Architecture.Tests/ProjectReferenceTests.cs` must still pass:
 
@@ -2875,7 +2965,42 @@ to:
     public string BaseUrl => host.BaseUrl;
 
     public IReadOnlyList<string> CapturedOutputLines => host.CapturedOutputLines;
+
+    // Reads back what the browser-driven save actually persisted, bypassing the UI (which by
+    // design never shows a saved secret's plaintext -- see SecretsPageSourceTests). Talks to the
+    // same clone database and the same DPAPI-protected key ring directory
+    // (Program.cs: %LocalApplicationData%\NoofLedger\dp-keys) the spawned host process itself uses,
+    // so decrypting a value the host encrypted moments earlier just works: DPAPI is scoped to the
+    // current Windows user, not to a process, and both this test and the host run as that user.
+    public async Task<string?> ReadStoredSecretAsync(string key, CancellationToken cancellationToken)
+    {
+        // DataProtectionSetup.Configure calls ProtectKeysWithDpapi, which is Windows-only -- this
+        // whole suite (like the app it drives) already only ever runs on Windows, so this guard is
+        // just what tells the platform-compatibility analyzer that, rather than a real fallback.
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException("This suite only runs on Windows, same as the app.");
+
+        var contextOptions = new DbContextOptionsBuilder<LedgerDbContext>()
+            .UseNpgsql(DatabaseSettings.For(cloneDatabaseName))
+            .Options;
+        await using var db = new LedgerDbContext(contextOptions);
+
+        var keyRingDirectory = new DirectoryInfo(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NoofLedger", "dp-keys"));
+        var services = new ServiceCollection();
+        DataProtectionSetup.Configure(services, keyRingDirectory);
+        await using var dataProtectionServices = services.BuildServiceProvider();
+        var dataProtection = dataProtectionServices.GetRequiredService<IDataProtectionProvider>();
+
+        var store = new EfSecretStore(db, dataProtection, TimeProvider.System);
+        var result = await store.GetAsync(key, cancellationToken);
+        return result.Value;
+    }
 ```
+
+Add the usings this needs at the top of the file: `Microsoft.AspNetCore.DataProtection`, `Microsoft.EntityFrameworkCore`, `Microsoft.Extensions.DependencyInjection`, `Noof.Ledger.Application.Secrets`, `Noof.Ledger.Host.Startup`, `Noof.Ledger.Persistence`, `Noof.Ledger.Persistence.Secrets` (alongside the existing `System.Diagnostics`, `Noof.Ledger.TestKit`, `Npgsql`). All of these resolve through the project's existing `ProjectReference`s to `Noof.Ledger.Host` and `Noof.Ledger.TestKit` — no new `PackageReference` is needed, confirmed by building. `ReadStoredSecretAsync` is not used yet at this point in the task; Step 4 below is what calls it.
+
+> **Why this method exists at all (2026-09-21 review).** `Saving_trims_surrounding_whitespace_before_storing` (added in Step 4) needs to prove that whitespace was actually stripped before storage, not merely that the UI still says "Set" — the page never renders a saved secret's value back (by design), so there is no way to observe trimming through the browser alone. Reading the ciphertext back through a second `EfSecretStore`, pointed at the identical key ring directory the spawned host process already uses, is the only way to check without changing what the page itself exposes.
 
 - [ ] **Step 4: Write the failing E2E tests**
 
@@ -2918,6 +3043,57 @@ public sealed class SettingsSecretsTests(CookieModeHostFixture fixture) : PageTe
             await Page.Locator($"#save-{SecretKeys.AnthropicApiKey}").ClickAsync();
             await Expect(status).ToContainTextAsync("Set", new() { Timeout = 2_000 });
         });
+    }
+
+    [Fact]
+    public async Task Saving_a_blank_value_is_refused_and_the_secret_stays_missing()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/settings/secrets");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var status = Page.Locator($"#status-{SecretKeys.TelegramOwnerChatId}");
+        await Expect(status).ToContainTextAsync("Not set");
+
+        // No FillAsync call: the field starts empty, which is exactly the "clicked Save without
+        // typing anything" scenario the review proved stores state Present with "".
+        await Page.Locator($"#save-{SecretKeys.TelegramOwnerChatId}").ClickAsync();
+
+        // Storing an empty value as Present would reject every chat AND leave the owner-claim
+        // recovery path disarmed, silently.
+        await Expect(status).ToContainTextAsync("Not set");
+        await Expect(Page.Locator($"#error-{SecretKeys.TelegramOwnerChatId}")).ToBeVisibleAsync();
+
+        var stored = await fixture.ReadStoredSecretAsync(SecretKeys.TelegramOwnerChatId, TestContext.Current.CancellationToken);
+        stored.Should().BeNull("a blank save must leave no row at all, not a Present row holding an empty string");
+    }
+
+    [Fact]
+    public async Task Saving_trims_surrounding_whitespace_before_storing()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/settings/secrets");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var padded = $"   123456:e2e-trim-{Guid.NewGuid():N}   ";
+        var status = Page.Locator($"#status-{SecretKeys.TelegramBotToken}");
+
+        await RetryUntilAsync(async () =>
+        {
+            await Page.Locator($"#secret-{SecretKeys.TelegramBotToken}").FillAsync(padded);
+            await Page.Locator($"#save-{SecretKeys.TelegramBotToken}").ClickAsync();
+            await Expect(status).ToContainTextAsync("Set", new() { Timeout = 2_000 });
+        });
+
+        var stored = await fixture.ReadStoredSecretAsync(SecretKeys.TelegramBotToken, TestContext.Current.CancellationToken);
+        stored.Should().Be(padded.Trim(),
+            "an untrimmed leading space or trailing newline makes every call using this token 404 with only an opaque log line to show for it");
     }
 
     [Fact]
@@ -2973,13 +3149,16 @@ public sealed class SettingsSecretsTests(CookieModeHostFixture fixture) : PageTe
 ```
 
 > The `RetryUntilAsync` wrapper mirrors `SmokeTests.RetryUntilAsync` exactly. `WaitForLoadStateAsync(NetworkIdle)` can resolve before the SignalR circuit has actually finished attaching — a click that lands in that gap is simply lost, not an error. This has been reproduced in this codebase already (see the comment above the counter-click test in `SmokeTests.cs`); do not skip it here just because there's no comment reminding you a second time.
+>
+> **`Saving_a_blank_value_is_refused_and_the_secret_stays_missing` and `Saving_trims_surrounding_whitespace_before_storing`, added by a later security review (2026-09-21).** A closing review proved two things against the page as originally drafted below: saving an empty value stored state `Present` with `""` — for `telegram-owner-chat-id` that rejects every chat AND leaves the first-message owner-claim recovery path disarmed, silently, since `Present` looks identical to a real value everywhere else that reads it — and a bot token pasted with a leading space or trailing newline was stored verbatim and then 404s on every call with only an opaque log line to show for it. Both tests must be written and seen to fail (Step 5) **before** `SaveAsync` gains the trim/refuse logic in Step 8 — writing them afterward would prove nothing.
 
 - [ ] **Step 5: Run it and watch it fail**
 
 Run: `dotnet test --project tests/Noof.Ledger.E2E.Tests/Noof.Ledger.E2E.Tests.csproj`
 
-Expected: `LoginTests` and `SmokeTests` still PASS (unaffected — Steps 2–3 were purely additive). Both new facts FAIL:
+Expected: `LoginTests` and `SmokeTests` still PASS (unaffected — Steps 2–3 were purely additive). All four new facts FAIL:
 - `Anonymous_visitor_is_redirected_and_a_signed_in_visitor_saves_through_the_circuit` throws `Microsoft.Playwright.PlaywrightException: Timeout 30000ms exceeded` from `WaitForURLAsync("**/account/login*")` — the route doesn't exist yet, so there is nothing to redirect from (an unmatched Blazor route with no `<NotFound>` fragment responds 404, not a redirect).
+- `Saving_a_blank_value_is_refused_and_the_secret_stays_missing` and `Saving_trims_surrounding_whitespace_before_storing` fail the same way, for the same reason — the route doesn't exist yet.
 - `No_captured_log_line_contains_a_value_submitted_through_this_page` throws a Playwright timeout from `Locator.FillAsync` on `#secret-telegram-bot-token` — no such element exists yet.
 
 - [ ] **Step 6: Write the failing source-constraint test**
@@ -3054,6 +3233,10 @@ Create `src/Noof.Ledger.Web/Components/Pages/Settings/Secrets.razor`:
     <section>
         <h2>@row.Label</h2>
         <p id="status-@row.Key">@Describe(row.Status)</p>
+        @if (row.Error is not null)
+        {
+            <p id="error-@row.Key">@row.Error</p>
+        }
         <input id="secret-@row.Key" type="password" autocomplete="off" @bind="row.PendingValue" />
         <button id="save-@row.Key" type="button" @onclick="() => SaveAsync(row)">Save</button>
     </section>
@@ -3066,6 +3249,7 @@ Create `src/Noof.Ledger.Web/Components/Pages/Settings/Secrets.razor`:
         public required string Label { get; init; }
         public SecretStatus Status { get; set; }
         public string PendingValue { get; set; } = string.Empty;
+        public string? Error { get; set; }
     }
 
     readonly List<Row> rows =
@@ -3083,7 +3267,22 @@ Create `src/Noof.Ledger.Web/Components/Pages/Settings/Secrets.razor`:
 
     async Task SaveAsync(Row row)
     {
-        await SecretStore.SetAsync(row.Key, row.PendingValue, CancellationToken.None);
+        // Trim first: a leading space or trailing newline pasted alongside a token is invisible in
+        // a password input and would otherwise be stored verbatim, breaking every call that uses it
+        // (a bot token 404s; a chat id matches nothing) with only an opaque downstream error to show
+        // for it. An empty result after trimming must be refused, not stored: for
+        // telegram-owner-chat-id specifically, storing "" still leaves SecretState.Present, which
+        // both rejects every chat AND leaves the first-message owner claim permanently disarmed --
+        // silently, since Present looks the same as a real value everywhere else that reads it.
+        var trimmed = row.PendingValue.Trim();
+        if (trimmed.Length == 0)
+        {
+            row.Error = "Enter a value before saving.";
+            return;
+        }
+
+        row.Error = null;
+        await SecretStore.SetAsync(row.Key, trimmed, CancellationToken.None);
         row.PendingValue = string.Empty;
         row.Status = await SecretStore.GetStatusAsync(row.Key, CancellationToken.None);
     }
@@ -3103,6 +3302,8 @@ Create `src/Noof.Ledger.Web/Components/Pages/Settings/Secrets.razor`:
 > There is no `<form>` anywhere on this page and no `<AntiforgeryToken />`. That is intentional, not an oversight: `Save` is a circuit method invocation over the already-authenticated SignalR connection, not an HTTP POST, so `Login.razor`'s `[FromForm]`-engages-antiforgery mechanism (see `AccountEndpoints.cs`) has nothing to attach to here and does not need to.
 >
 > `ISecretStore.GetAsync` never appears in this file. `SecretStatus` structurally cannot carry a plaintext value (it's `State` + `UpdatedAt` only) — so "never render a stored secret back" is guaranteed by the type the page is restricted to, not by a rule someone has to remember to follow.
+>
+> **Trim-and-refuse, added by a later security review (2026-09-21) — keep this proportionate.** This is a trim and an emptiness check, not a validation framework: do not add shape validation for a token's format against Telegram's own rules. `SaveAsync` must trim before checking for emptiness and before saving — trimming after the emptiness check would let a whitespace-only value slip through as "non-empty". The `row.Error` field and its paragraph exist so refusal is visible to the operator (`#error-@row.Key`), not merely silent — "tell the operator rather than storing nothing silently" is itself part of the fix, not incidental to it.
 
 - [ ] **Step 9: Run the architecture test again**
 
@@ -3114,17 +3315,25 @@ Expected: PASS.
 
 Run: `dotnet test --project tests/Noof.Ledger.E2E.Tests/Noof.Ledger.E2E.Tests.csproj`
 
-Expected: PASS — all four tests in the project (`LoginTests`, the two `SmokeTests`, both new `SettingsSecretsTests` facts) green. `No_captured_log_line_contains_a_value_submitted_through_this_page` passing right now only shows nothing *currently* logs the value — it doesn't yet prove the test would catch it if something did. Steps 11–12 fix that.
+Expected: PASS — all six tests in the project (`LoginTests`, the two `SmokeTests`, all four new `SettingsSecretsTests` facts) green. `No_captured_log_line_contains_a_value_submitted_through_this_page` passing right now only shows nothing *currently* logs the value — it doesn't yet prove the test would catch it if something did. Steps 11–12 fix that.
 
 - [ ] **Step 11: Prove the log-scrubbing test has teeth**
 
-Temporarily add one line to `SaveAsync` in `Secrets.razor`:
+Temporarily add one line to `SaveAsync` in `Secrets.razor`, right after the trim/refuse check, logging the (already-trimmed) value that is about to be saved:
 
 ```csharp
     async Task SaveAsync(Row row)
     {
-        Console.WriteLine($"Saving {row.Key}: {row.PendingValue}");
-        await SecretStore.SetAsync(row.Key, row.PendingValue, CancellationToken.None);
+        var trimmed = row.PendingValue.Trim();
+        if (trimmed.Length == 0)
+        {
+            row.Error = "Enter a value before saving.";
+            return;
+        }
+
+        Console.WriteLine($"Saving {row.Key}: {trimmed}");
+        row.Error = null;
+        await SecretStore.SetAsync(row.Key, trimmed, CancellationToken.None);
         row.PendingValue = string.Empty;
         row.Status = await SecretStore.GetStatusAsync(row.Key, CancellationToken.None);
     }
@@ -3132,7 +3341,7 @@ Temporarily add one line to `SaveAsync` in `Secrets.razor`:
 
 Run: `dotnet test --project tests/Noof.Ledger.E2E.Tests/Noof.Ledger.E2E.Tests.csproj`
 
-Expected: `No_captured_log_line_contains_a_value_submitted_through_this_page` FAILS — the assertion message shows the injected line containing the submitted value. The other three tests still PASS. (Each `dotnet test` run here republishes `Noof.Ledger.Host` from source, so this edit is picked up automatically — no manual publish step.)
+Expected: `No_captured_log_line_contains_a_value_submitted_through_this_page` FAILS — the assertion message shows the injected line containing the submitted value. The other five tests still PASS. (Each `dotnet test` run here republishes `Noof.Ledger.Host` from source, so this edit is picked up automatically — no manual publish step.)
 
 - [ ] **Step 12: Remove the diagnostic line**
 
@@ -3140,7 +3349,7 @@ Delete the `Console.WriteLine` line added in Step 11, restoring `SaveAsync` to i
 
 Run: `dotnet test --project tests/Noof.Ledger.E2E.Tests/Noof.Ledger.E2E.Tests.csproj`
 
-Expected: PASS again, all four tests.
+Expected: PASS again, all six tests.
 
 - [ ] **Step 13: Confirm the rest of the suite is unaffected**
 
@@ -3694,10 +3903,25 @@ public class CaptureTimeZoneGuardTests
 
         act.Should().Throw<InvalidOperationException>().WithMessage("*Capture:TimeZone*");
     }
+
+    [Fact]
+    public void A_Windows_time_zone_id_is_rejected_even_though_FindSystemTimeZoneById_accepts_it()
+    {
+        // TimeZoneInfo.FindSystemTimeZoneById also accepts a Windows id on Windows, but
+        // time_zone_id is documented (Transaction.cs) and consumed downstream as IANA. Verified on
+        // this machine: TryConvertWindowsIdToIanaId("Central Europe Standard Time", ...) succeeds
+        // (-> "Europe/Budapest"), while TryConvertWindowsIdToIanaId("Europe/Belgrade", ...) fails --
+        // that asymmetry is the cheapest available discriminator between the two id families.
+        var act = () => CaptureTimeZoneGuard.Resolve("Central Europe Standard Time");
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*Capture:TimeZone*");
+    }
 }
 ```
 
 > **This is the test the task explicitly calls out: it confirms `TimeZoneInfo.FindSystemTimeZoneById` actually accepts `Europe/Belgrade` on this machine, rather than assuming it.** `Directory.Build.props` already sets `InvariantGlobalization` to `false`, which globalization-invariant .NET builds would otherwise need for any IANA id lookup to work at all - if this test ever fails, check that setting before suspecting the id itself.
+>
+> **`FindSystemTimeZoneById` alone is not enough (2026-09-21 review).** On Windows it also accepts a Windows id such as `"Central Europe Standard Time"`, which would then pass a guard whose error message promises IANA and get written into `time_zone_id` -- which `Transaction.cs` documents, and Phase 1B reads back, as IANA. `TimeZoneInfo.TryConvertWindowsIdToIanaId` is the cheapest discriminator: a Windows id converts to an IANA one; an IANA id does not convert further. Implement the extra check in Step 9 below — do not defer it.
 
 - [ ] **Step 8: Run it and watch it fail**
 
@@ -3715,23 +3939,36 @@ public static class CaptureTimeZoneGuard
 {
     public static TimeZoneInfo Resolve(string configuredId)
     {
+        TimeZoneInfo resolved;
         try
         {
-            return TimeZoneInfo.FindSystemTimeZoneById(configuredId);
+            resolved = TimeZoneInfo.FindSystemTimeZoneById(configuredId);
         }
         catch (Exception exposed) when (exposed is TimeZoneNotFoundException or InvalidTimeZoneException)
         {
-            throw new InvalidOperationException(
-                $"Capture:TimeZone '{configuredId}' is not a valid IANA time zone id on this machine.", exposed);
+            throw NotAnIanaId(configuredId, exposed);
         }
+
+        // FindSystemTimeZoneById also accepts a Windows id (e.g. "Central Europe Standard Time")
+        // on Windows, but Transaction.TimeZoneId is documented and consumed downstream as IANA.
+        // TryConvertWindowsIdToIanaId only ever succeeds for a Windows id -- an IANA id passed to
+        // it returns false -- which makes it the cheapest available discriminator: if the
+        // configured id itself converts, it was never IANA to begin with.
+        if (TimeZoneInfo.TryConvertWindowsIdToIanaId(configuredId, out _))
+            throw NotAnIanaId(configuredId, exposed: null);
+
+        return resolved;
     }
+
+    static InvalidOperationException NotAnIanaId(string configuredId, Exception? exposed) =>
+        new($"Capture:TimeZone '{configuredId}' is not a valid IANA time zone id on this machine.", exposed);
 }
 ```
 
 - [ ] **Step 10: Run the host tests green**
 
 Run: `dotnet test --project tests/Noof.Ledger.Host.Tests/Noof.Ledger.Host.Tests.csproj`
-Expected: all green, including the 2 new `CaptureTimeZoneGuardTests`.
+Expected: all green, including the 3 new `CaptureTimeZoneGuardTests`.
 
 - [ ] **Step 11: Wire it into `Program.cs` and `appsettings.json`**
 
@@ -4955,11 +5192,12 @@ Add it to the test project's `PackageReference` group in `tests/Noof.Ledger.Tele
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
 ```
 
+> **`CapturedMessage.SentAt` must come from Telegram's own `Message.Date`, never from a clock read at handling time (2026-09-21 review).** The whole point of this phase is that a message survives an outage: one sent at 23:50 and processed at 08:00 the next day must keep its 23:50 timestamp, because `time_zone_id` exists specifically so day/month buckets can be computed from it later (Phase 1B). A test that pins `CapturedMessage.SentAt` to a fake clock's `GetUtcNow()` is wrong at this layer even though it looks identical to a correct test — it only catches drift if the message's own `Date` and the processing clock are made to disagree. `Message.Date` deserialises as `DateTime` with `Kind=Utc` (verified against Telegram.Bot 22.10.3.1's `UnixDateTimeConverter`), so `new DateTimeOffset(message.Date)` carries a genuine zero offset. Because nothing in `TelegramUpdateRouter` reads the clock once this is fixed, its constructor drops the `TimeProvider` parameter entirely — write the test file below as shown, not with a `FakeTimeProvider` pinning `SentAt` to `now`.
+
 Create `tests/Noof.Ledger.Telegram.Tests/TelegramUpdateRouterTests.cs`:
 
 ```csharp
 using AwesomeAssertions;
-using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using Noof.Ledger.Application.Capture;
 using Noof.Ledger.Application.Chat;
@@ -4971,52 +5209,82 @@ namespace Noof.Ledger.Telegram.Tests;
 
 public class TelegramUpdateRouterTests
 {
-    static (TelegramUpdateRouter Router, ICaptureStore CaptureStore, IChatNotifier ChatNotifier, FakeTimeProvider Clock) CreateRouter(long ownerChatId)
+    static (TelegramUpdateRouter Router, ICaptureStore CaptureStore, IChatNotifier ChatNotifier) CreateRouter(long ownerChatId)
     {
         var secretStore = Substitute.For<ISecretStore>();
         secretStore.GetAsync(SecretKeys.TelegramOwnerChatId, Arg.Any<CancellationToken>())
             .Returns(new SecretResult(SecretState.Present, ownerChatId.ToString()));
         var captureStore = Substitute.For<ICaptureStore>();
         var chatNotifier = Substitute.For<IChatNotifier>();
-        var clock = new FakeTimeProvider();
-        var router = new TelegramUpdateRouter(captureStore, chatNotifier, new TelegramOwnerGate(secretStore), clock);
+        var router = new TelegramUpdateRouter(captureStore, chatNotifier, new TelegramOwnerGate(secretStore));
 
-        return (router, captureStore, chatNotifier, clock);
+        return (router, captureStore, chatNotifier);
     }
 
-    static Update TextMessage(long chatId, int messageId, string text) => new()
+    static Update TextMessage(long chatId, int messageId, string text, DateTime date) => new()
     {
         Id = 900,
-        Message = new Message { Id = messageId, Chat = new Chat { Id = chatId }, Text = text },
+        Message = new Message { Id = messageId, Chat = new Chat { Id = chatId }, Text = text, Date = date },
     };
 
     [Fact]
     public async Task Captures_replies_and_attaches_the_reply_for_the_owner()
     {
-        var (router, captureStore, chatNotifier, clock) = CreateRouter(ownerChatId: 111L);
-        var now = DateTimeOffset.Parse("2026-09-21T10:00:00Z");
-        clock.SetUtcNow(now);
+        var (router, captureStore, chatNotifier) = CreateRouter(ownerChatId: 111L);
+        var sentAt = DateTimeOffset.Parse("2026-09-21T10:00:00Z");
         var transactionId = Guid.NewGuid();
         captureStore.CaptureAsync(Arg.Any<CapturedMessage>(), "Europe/Belgrade", Arg.Any<CancellationToken>())
             .Returns(transactionId);
         chatNotifier.SendAsync(111L, TelegramUpdateRouter.ReceiptAcknowledgement, Arg.Any<CancellationToken>())
             .Returns(777);
 
-        await router.HandleAsync(TextMessage(111L, 5, "coffee 3.20 EUR"), "Europe/Belgrade", TestContext.Current.CancellationToken);
+        await router.HandleAsync(
+            TextMessage(111L, 5, "coffee 3.20 EUR", sentAt.UtcDateTime),
+            "Europe/Belgrade",
+            TestContext.Current.CancellationToken);
 
         await captureStore.Received(1).CaptureAsync(
-            Arg.Is<CapturedMessage>(m => m.ChatId == 111L && m.MessageId == 5 && m.Text == "coffee 3.20 EUR" && m.SentAt == now),
+            Arg.Is<CapturedMessage>(m => m.ChatId == 111L && m.MessageId == 5 && m.Text == "coffee 3.20 EUR" && m.SentAt == sentAt),
             "Europe/Belgrade",
             Arg.Any<CancellationToken>());
         await captureStore.Received(1).AttachBotMessageAsync(transactionId, 777, Arg.Any<CancellationToken>());
     }
 
     [Fact]
+    public async Task Stores_the_time_Telegram_sent_the_message_not_the_time_it_was_processed()
+    {
+        // An outage can queue a message for hours; Telegram's own Message.Date is when the spend
+        // happened, "now" at handling time is only when we got around to it. Collapsing every
+        // queued message onto the reconnection moment buckets it into the wrong local day once
+        // Phase 1B reads time_zone_id back to compute "today" / "this month".
+        var (router, captureStore, chatNotifier) = CreateRouter(ownerChatId: 111L);
+        var sentAt = DateTimeOffset.Parse("2026-09-21T23:50:00Z");
+        captureStore.CaptureAsync(Arg.Any<CapturedMessage>(), "Europe/Belgrade", Arg.Any<CancellationToken>())
+            .Returns(Guid.NewGuid());
+        chatNotifier.SendAsync(111L, TelegramUpdateRouter.ReceiptAcknowledgement, Arg.Any<CancellationToken>())
+            .Returns(777);
+
+        // "Processed" hours after "sent" -- exactly the outage-recovery scenario this guards.
+        await router.HandleAsync(
+            TextMessage(111L, 5, "coffee 3.20 EUR", sentAt.UtcDateTime),
+            "Europe/Belgrade",
+            TestContext.Current.CancellationToken);
+
+        await captureStore.Received(1).CaptureAsync(
+            Arg.Is<CapturedMessage>(m => m.SentAt == sentAt),
+            "Europe/Belgrade",
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Rejects_a_stranger_before_capturing_or_replying()
     {
-        var (router, captureStore, chatNotifier, _) = CreateRouter(ownerChatId: 111L);
+        var (router, captureStore, chatNotifier) = CreateRouter(ownerChatId: 111L);
 
-        await router.HandleAsync(TextMessage(999L, 5, "coffee 3.20 EUR"), "Europe/Belgrade", TestContext.Current.CancellationToken);
+        await router.HandleAsync(
+            TextMessage(999L, 5, "coffee 3.20 EUR", DateTime.UtcNow),
+            "Europe/Belgrade",
+            TestContext.Current.CancellationToken);
 
         await captureStore.DidNotReceive().CaptureAsync(Arg.Any<CapturedMessage>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await chatNotifier.DidNotReceive().SendAsync(Arg.Any<long>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
@@ -5025,7 +5293,7 @@ public class TelegramUpdateRouterTests
     [Fact]
     public async Task Ignores_an_update_with_no_message()
     {
-        var (router, captureStore, _, _) = CreateRouter(ownerChatId: 111L);
+        var (router, captureStore, _) = CreateRouter(ownerChatId: 111L);
 
         await router.HandleAsync(new Update { Id = 901 }, "Europe/Belgrade", TestContext.Current.CancellationToken);
 
@@ -5035,7 +5303,7 @@ public class TelegramUpdateRouterTests
     [Fact]
     public async Task Ignores_a_message_with_no_text()
     {
-        var (router, captureStore, _, _) = CreateRouter(ownerChatId: 111L);
+        var (router, captureStore, _) = CreateRouter(ownerChatId: 111L);
         var update = new Update { Id = 902, Message = new Message { Id = 6, Chat = new Chat { Id = 111L } } };
 
         await router.HandleAsync(update, "Europe/Belgrade", TestContext.Current.CancellationToken);
@@ -5077,8 +5345,7 @@ namespace Noof.Ledger.Telegram;
 public sealed class TelegramUpdateRouter(
     ICaptureStore captureStore,
     IChatNotifier chatNotifier,
-    TelegramOwnerGate ownerGate,
-    TimeProvider timeProvider)
+    TelegramOwnerGate ownerGate)
     : ITelegramUpdateRouter
 {
     public const string ReceiptAcknowledgement = "Saved. I'll add the amount once it's categorised.";
@@ -5097,7 +5364,13 @@ public sealed class TelegramUpdateRouter(
         if (message.Text is not { Length: > 0 } text)
             return;
 
-        var captured = new CapturedMessage(message.Chat.Id, message.Id, text, timeProvider.GetUtcNow());
+        // message.Date is when Telegram received it from the sender, not when we got around to
+        // processing it -- an outage can queue a message for hours, and every queued message must
+        // keep its own moment so time_zone_id buckets it into the correct local day later.
+        // Message.Date deserialises as DateTime with Kind=Utc (confirmed against Telegram.Bot
+        // 22.10.3.1's UnixDateTimeConverter), so this offset is genuinely zero, not just labelled so.
+        var sentAt = new DateTimeOffset(message.Date);
+        var captured = new CapturedMessage(message.Chat.Id, message.Id, text, sentAt);
         var transactionId = await captureStore.CaptureAsync(captured, timeZoneId, cancellationToken);
 
         var botMessageId = await chatNotifier.SendAsync(message.Chat.Id, ReceiptAcknowledgement, cancellationToken);
@@ -5109,7 +5382,7 @@ public sealed class TelegramUpdateRouter(
 - [ ] **Step 25: Run green**
 
 Run: `dotnet test --project tests/Noof.Ledger.Telegram.Tests/Noof.Ledger.Telegram.Tests.csproj`
-Expected: all green.
+Expected: all green (6 tests in `TelegramUpdateRouterTests`, up from 5, plus everything else in this project).
 
 ---
 
