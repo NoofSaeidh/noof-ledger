@@ -1278,7 +1278,7 @@ public static class CategorizationPrompt
 
 #### Stage 0 — package, the options DTO, and the test project
 
-- [ ] **Step 1: Add the Anthropic package**
+- [x] **Step 1: Add the Anthropic package**
 
 `Directory.Packages.props` — append to the first `<ItemGroup>` (not the `Testing`-labelled one), after the `Microsoft.Extensions.Hosting.Abstractions` line:
 
@@ -1305,12 +1305,12 @@ public static class CategorizationPrompt
 
 This is a package-only change with nothing to test-first — same category as Task 8 Stage 0's package addition in the 1A plan.
 
-- [ ] **Step 2: Build and confirm the package restores cleanly**
+- [x] **Step 2: Build and confirm the package restores cleanly**
 
 Run: `dotnet build src/Noof.Ledger.Ai/Noof.Ledger.Ai.csproj`
 Expected: `Build succeeded`, `0 Warning(s)`, `0 Error(s)`. `Anthropic` 12.49.0 brings `Microsoft.Extensions.AI.Abstractions` 10.5.1 transitively (plus `System.Net.ServerSentEvents` and `System.Text.Json`) — none of the three are written as `<PackageReference>` lines in this `.csproj`, and none need to be; `NuGetAuditMode=all` does not block this restore.
 
-- [ ] **Step 3: Add `AnthropicOptions`**
+- [x] **Step 3: Add `AnthropicOptions`**
 
 This is a plain options DTO with no branching logic — exempt from test-first per `CLAUDE.md`'s testing rules ("Exempt: migrations, DTOs, `Program.cs` wiring"), the same exemption Task 1 of the 1A plan used for its three trailing enums.
 
@@ -1341,7 +1341,7 @@ public sealed class AnthropicOptions
 }
 ```
 
-- [ ] **Step 4: Scaffold `Noof.Ledger.Ai.Tests`**
+- [x] **Step 4: Scaffold `Noof.Ledger.Ai.Tests`**
 
 Create `tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj`:
 
@@ -1397,12 +1397,12 @@ In `NoofLedger.slnx`, add the project to the `/tests/` folder as the **first** e
 
 > **This line is not optional.** `dotnet test --solution NoofLedger.slnx` only runs projects listed in `NoofLedger.slnx`. `tests/Noof.Ledger.E2E.Tests` exists on disk in this repository right now and is **not** in the solution file — its tests silently never run under `--solution`, and that trap has already been sprung once in this project. If this step is skipped, every later `dotnet test --solution` in this task (and in Task 3) reports success while running zero tests from this project.
 
-- [ ] **Step 5: Confirm the scaffold builds and wires into the solution**
+- [x] **Step 5: Confirm the scaffold builds and wires into the solution**
 
 Run: `dotnet test --project tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj`
 Expected: `Build succeeded`; the runner reports zero tests found. That is not a failure — there are no test classes yet — it only confirms the project compiles and its references resolve.
 
-- [ ] **Step 6: Commit the scaffold**
+- [x] **Step 6: Commit the scaffold**
 
 ```bash
 git add Directory.Packages.props src/Noof.Ledger.Ai/Noof.Ledger.Ai.csproj src/Noof.Ledger.Ai/AnthropicOptions.cs tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj tests/Noof.Ledger.Ai.Tests/xunit.runner.json NoofLedger.slnx
@@ -1419,7 +1419,7 @@ EOF
 
 #### Stage 1 — `CategorizationSchema`
 
-- [ ] **Step 7: Write the failing test file**
+- [x] **Step 7: Write the failing test file**
 
 Create `tests/Noof.Ledger.Ai.Tests/CategorizationSchemaTests.cs`:
 
@@ -1629,12 +1629,12 @@ public class CategorizationSchemaTests
 }
 ```
 
-- [ ] **Step 8: Run it and watch it fail**
+- [x] **Step 8: Run it and watch it fail**
 
 Run: `dotnet test --project tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj`
 Expected: build error — `error CS0246: The type or namespace name 'CategorizationSchema' could not be found`.
 
-- [ ] **Step 9: Implement `CategorizationSchema`**
+- [x] **Step 9: Implement `CategorizationSchema`**
 
 Create `src/Noof.Ledger.Ai/CategorizationSchema.cs`:
 
@@ -1752,12 +1752,12 @@ public static class CategorizationSchema
 }
 ```
 
-- [ ] **Step 10: Run the tests and watch them pass**
+- [x] **Step 10: Run the tests and watch them pass**
 
 Run: `dotnet test --project tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj`
 Expected: PASS. The runner counts theory rows individually, so `CategorizationSchemaTests` reports **19** cases (12 facts plus the 7 rows of `No_unsupported_json_schema_keyword_appears_anywhere`) — one more than a strict-tool-use draft of this test would have had, because of the new round-trip fact. A smaller number means a test was dropped; a larger one means you added one — reconcile either way rather than assuming this plan's count is stale.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add src/Noof.Ledger.Ai/CategorizationSchema.cs tests/Noof.Ledger.Ai.Tests/CategorizationSchemaTests.cs
@@ -1774,7 +1774,7 @@ EOF
 
 #### Stage 2 — `CategorizationPrompt`
 
-- [ ] **Step 12: Write the failing test file**
+- [x] **Step 12: Write the failing test file**
 
 Create `tests/Noof.Ledger.Ai.Tests/CategorizationPromptTests.cs`:
 
@@ -1867,12 +1867,12 @@ public class CategorizationPromptTests
 }
 ```
 
-- [ ] **Step 13: Run it and watch it fail**
+- [x] **Step 13: Run it and watch it fail**
 
 Run: `dotnet test --project tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj`
 Expected: build error — `error CS0246: The type or namespace name 'CategorizationPrompt' could not be found`.
 
-- [ ] **Step 14: Implement `CategorizationPrompt`**
+- [x] **Step 14: Implement `CategorizationPrompt`**
 
 Create `src/Noof.Ledger.Ai/CategorizationPrompt.cs`:
 
@@ -1988,12 +1988,12 @@ public static class CategorizationPrompt
 
 > **Wording note.** `System`'s references to "Call record_spending" from a strict-tool-use draft were rewritten to "Answer with" throughout, and one sentence about `list_merchants` was added ("you may call list_merchants to check the full list before answering") — under the new approach `record_spending` is not a tool the model calls, it is the JSON answer itself, constrained by the response format; only `list_merchants` remains a real tool. `CategorizationPromptTests` does not pin the literal word "Call" or "Answer with" anywhere, so this rewrite does not change what the existing test assertions check.
 
-- [ ] **Step 15: Run the tests and watch them pass**
+- [x] **Step 15: Run the tests and watch them pass**
 
 Run: `dotnet test --project tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj`
 Expected: PASS, all facts from Stage 1 and Stage 2 green.
 
-- [ ] **Step 16: Commit**
+- [x] **Step 16: Commit**
 
 ```bash
 git add src/Noof.Ledger.Ai/CategorizationPrompt.cs tests/Noof.Ledger.Ai.Tests/CategorizationPromptTests.cs
@@ -2010,7 +2010,7 @@ EOF
 
 #### Stage 3 — confirm the whole solution sees the new project
 
-- [ ] **Step 17: Run the full solution suite**
+- [x] **Step 17: Run the full solution suite**
 
 Run: `dotnet test --solution NoofLedger.slnx`
 Expected: all green, and the assembly list in the output includes `Noof.Ledger.Ai.Tests` — if it does not appear at all, Step 4's `NoofLedger.slnx` edit did not land. No commit here; this step is verification only, and Steps 6/11/16 already committed everything this task changed.
