@@ -3522,6 +3522,7 @@ Create `src/Noof.Ledger.Persistence/Capture/EfCaptureStore.cs`:
 using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Capture;
 using Noof.Ledger.Domain;
+using Npgsql;
 
 namespace Noof.Ledger.Persistence.Capture;
 
@@ -3529,9 +3530,7 @@ public sealed class EfCaptureStore(LedgerDbContext db, TimeProvider timeProvider
 {
     public async Task<Guid> CaptureAsync(CapturedMessage message, string timeZoneId, CancellationToken cancellationToken)
     {
-        var existing = await db.Transactions.SingleOrDefaultAsync(
-            t => t.TelegramChatId == message.ChatId && t.TelegramMessageId == message.MessageId,
-            cancellationToken);
+        var existing = await FindExistingAsync(message, cancellationToken);
 
         if (existing is not null)
             return existing.Id;
@@ -3545,7 +3544,7 @@ public sealed class EfCaptureStore(LedgerDbContext db, TimeProvider timeProvider
         var now = timeProvider.GetUtcNow();
         var transactionId = Guid.NewGuid();
 
-        db.Transactions.Add(new Transaction
+        var transaction = new Transaction
         {
             Id = transactionId,
             WalletId = wallet.Id,
@@ -3556,9 +3555,8 @@ public sealed class EfCaptureStore(LedgerDbContext db, TimeProvider timeProvider
             TelegramChatId = message.ChatId,
             TelegramMessageId = message.MessageId,
             CreatedAt = now,
-        });
-
-        db.CategorizationJobs.Add(new CategorizationJob
+        };
+        var job = new CategorizationJob
         {
             Id = Guid.NewGuid(),
             TransactionId = transactionId,
@@ -3567,12 +3565,41 @@ public sealed class EfCaptureStore(LedgerDbContext db, TimeProvider timeProvider
             RunAfter = now,
             CreatedAt = now,
             UpdatedAt = now,
-        });
+        };
+        db.Transactions.Add(transaction);
+        db.CategorizationJobs.Add(job);
 
-        await db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            return transactionId;
+        }
+        catch (DbUpdateException ex) when (IsDuplicateCaptureViolation(ex))
+        {
+            // Another concurrent call for the same (ChatId, MessageId) committed first. Ours never
+            // did; detach both rows so the re-read below goes back to the database instead of
+            // returning these uncommitted, never-persisted entities from the identity map.
+            db.Entry(transaction).State = EntityState.Detached;
+            db.Entry(job).State = EntityState.Detached;
 
-        return transactionId;
+            var winner = await FindExistingAsync(message, cancellationToken)
+                ?? throw new InvalidOperationException(
+                    "A unique-constraint violation on capture reported a winner that cannot be found.");
+            return winner.Id;
+        }
     }
+
+    Task<Transaction?> FindExistingAsync(CapturedMessage message, CancellationToken cancellationToken) =>
+        db.Transactions.SingleOrDefaultAsync(
+            t => t.TelegramChatId == message.ChatId && t.TelegramMessageId == message.MessageId,
+            cancellationToken);
+
+    static bool IsDuplicateCaptureViolation(DbUpdateException ex) =>
+        ex.InnerException is PostgresException
+        {
+            SqlState: PostgresErrorCodes.UniqueViolation,
+            ConstraintName: "IX_transactions_telegram_chat_id_telegram_message_id",
+        };
 
     public async Task AttachBotMessageAsync(Guid transactionId, int botMessageId, CancellationToken cancellationToken)
     {
@@ -3585,11 +3612,60 @@ public sealed class EfCaptureStore(LedgerDbContext db, TimeProvider timeProvider
 ```
 
 > The idempotency lookup runs before the wallet lookup, not after. Swap the order and `A_replay_succeeds_even_if_no_wallet_is_marked_default_any_more` starts failing: a replay of an already-captured message would throw `InvalidOperationException` the moment nobody is marked default any more, even though nothing new needs to be written.
+>
+> **Plan defect, fixed above.** The version originally drafted here let a `DbUpdateException`/`PostgresException` 23505 on the `(ChatId, MessageId)` unique index escape uncaught whenever two callers raced the same capture concurrently — the write-path stayed correct (exactly one transaction, one job), but the losing caller's `CaptureAsync` threw instead of honouring the idempotency the interface promises. The `catch` above narrows on the specific constraint name, not every `DbUpdateException`, re-reads, and returns the winner's id; add the concurrency test below to `Step 3`'s test file to prove it (a sequential replay test cannot observe this — see `EfCaptureStoreTests.cs`'s note on it).
+
+Add this test to `tests/Noof.Ledger.Persistence.Tests/EfCaptureStoreTests.cs` from Step 3, directly before `AttachBotMessageAsync_stamps_the_bot_message_id_onto_the_row`:
+
+```csharp
+    // ICaptureStore.CaptureAsync promises idempotency on (ChatId, MessageId). A plain sequential
+    // replay test (above) cannot tell "idempotent" from "the loser throws a raw 23505 that a caller
+    // happens not to hit" - only genuine concurrency does. This forces it the same way the owner-claim
+    // race test does: hold the winning insert open inside an uncommitted transaction so the second
+    // caller's insert must block on the database lock, not race past it, before either result is
+    // observed.
+    [Fact]
+    public async Task Concurrent_CaptureAsync_calls_for_the_same_chat_and_message_let_exactly_one_caller_insert()
+    {
+        await using var dbA = await fixture.CreateContextAsync();
+        await dbA.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await RemoveSeededDefaultWalletAsync(dbA, TestContext.Current.CancellationToken);
+        dbA.Wallets.Add(DefaultWallet());
+        await dbA.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var optionsB = new DbContextOptionsBuilder<LedgerDbContext>()
+            .UseNpgsql(dbA.Database.GetConnectionString()!)
+            .Options;
+        await using var dbB = new LedgerDbContext(optionsB);
+
+        var storeA = new EfCaptureStore(dbA, new FakeTimeProvider());
+        var storeB = new EfCaptureStore(dbB, new FakeTimeProvider());
+        var message = NewMessage();
+
+        await using var txA = await dbA.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
+
+        var idA = await storeA.CaptureAsync(message, "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        var idBTask = storeB.CaptureAsync(message, "Europe/Belgrade", TestContext.Current.CancellationToken);
+        var finished = await Task.WhenAny(idBTask, Task.Delay(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+
+        finished.Should().NotBeSameAs(idBTask,
+            "the second capture's insert must block on the first's uncommitted row, not race past it undetected");
+
+        await txA.CommitAsync(TestContext.Current.CancellationToken);
+
+        var idB = await idBTask;
+
+        idB.Should().Be(idA, "both callers captured the identical (ChatId, MessageId); the loser must return the winner's id, not throw");
+        (await dbA.Transactions.CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
+        (await dbA.CategorizationJobs.CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
+    }
+```
 
 - [ ] **Step 6: Run the persistence tests green**
 
 Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj`
-Expected: all green, including the 7 new `EfCaptureStoreTests`.
+Expected: all green, including the 8 `EfCaptureStoreTests` (7 original plus the concurrency test above).
 
 - [ ] **Step 7: Write the failing test for `CaptureTimeZoneGuard`**
 
@@ -4494,6 +4570,103 @@ Expected: all green.
 
 #### Stage 3 — `TelegramOwnerGate` (the allowlist)
 
+- [ ] **Step 13A (contract amendment): `ISecretStore.TrySetIfMissingAsync`, so the claim below can be a real compare-and-swap**
+
+A security review after this task originally shipped found that `ClaimAsync` (Step 16) was read-then-write with no compare-and-swap: two chats messaging before any owner exists both read `Missing` from `GetAsync`, both call `SetAsync`, and the loser gets a raw `Npgsql.PostgresException` 23505 on `PK_app_secret` that propagates out through `TelegramOwnerGate` to the poller's catch-all, logged there as "Telegram getUpdates failed" — which is untrue and misleading. This was safe only because a single poller processes updates one at a time; a second Host process against the same database (plausible on an unsupervised personal machine) reintroduces the race silently, since that invariant lives only in prose, not code.
+
+The fix is a set-if-absent primitive on `ISecretStore` distinct from `SetAsync`'s plain upsert: `SetAsync` is last-write-wins (correct for pasting a rotated API key), but the owner claim needs first-writer-wins, with the loser told it lost rather than handed an exception.
+
+Add to `src/Noof.Ledger.Application/Secrets/ISecretStore.cs`, after `SetAsync`:
+
+```csharp
+    // Inserts only if the key is still Missing; returns false without writing anything if another
+    // call already claimed it first, however close the race. Exists for callers where "first
+    // writer wins" is the correct outcome, unlike SetAsync's plain upsert.
+    Task<bool> TrySetIfMissingAsync(string key, string plaintext, CancellationToken cancellationToken);
+```
+
+Implement it in `src/Noof.Ledger.Persistence/Secrets/EfSecretStore.cs` (add `using Npgsql;` alongside the existing usings), directly after `SetAsync`:
+
+```csharp
+    public async Task<bool> TrySetIfMissingAsync(string key, string plaintext, CancellationToken cancellationToken)
+    {
+        var existing = await db.Secrets.FindAsync([key], cancellationToken);
+        if (existing is not null)
+            return false;
+
+        var secret = new AppSecret
+        {
+            Key = key,
+            Ciphertext = Protector(key).Protect(plaintext),
+            UpdatedAt = timeProvider.GetUtcNow(),
+        };
+        db.Secrets.Add(secret);
+
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateException ex) when (IsAppSecretPrimaryKeyViolation(ex))
+        {
+            // Another call won the race between our FindAsync and this SaveChangesAsync. That row
+            // is real; ours never committed. Detach it so a later read goes back to the database
+            // instead of returning this uncommitted, never-persisted entity from the identity map.
+            db.Entry(secret).State = EntityState.Detached;
+            return false;
+        }
+    }
+
+    static bool IsAppSecretPrimaryKeyViolation(DbUpdateException ex) =>
+        ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: "PK_app_secret" };
+```
+
+Add the discriminating test to `tests/Noof.Ledger.Persistence.Tests/EfSecretStoreTests.cs`. A sequential test cannot observe this race — it would pass against the original read-then-write `SetAsync` just as easily as against a real compare-and-swap — so this forces genuine DB-level contention: one call holds its insert open inside an uncommitted transaction, and the other's insert must block on it, not race past it, before either result is observed.
+
+```csharp
+    [Fact]
+    public async Task Concurrent_TrySetIfMissingAsync_calls_for_the_same_key_let_exactly_one_caller_win()
+    {
+        await using var dbA = await fixture.CreateContextAsync();
+        await dbA.Database.MigrateAsync(TestContext.Current.CancellationToken);
+
+        var optionsB = new DbContextOptionsBuilder<LedgerDbContext>()
+            .UseNpgsql(dbA.Database.GetConnectionString()!)
+            .Options;
+        await using var dbB = new LedgerDbContext(optionsB);
+
+        var storeA = CreateStore(dbA);
+        var storeB = CreateStore(dbB);
+
+        await using var txA = await dbA.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
+
+        var claimedA = await storeA.TrySetIfMissingAsync(
+            SecretKeys.TelegramOwnerChatId, "111", TestContext.Current.CancellationToken);
+        claimedA.Should().BeTrue("chat 111 inserted first and still holds the row inside its open transaction");
+
+        var claimBTask = storeB.TrySetIfMissingAsync(
+            SecretKeys.TelegramOwnerChatId, "222", TestContext.Current.CancellationToken);
+        var finished = await Task.WhenAny(claimBTask, Task.Delay(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+
+        finished.Should().NotBeSameAs(claimBTask,
+            "chat 222's insert must block on the uncommitted row from chat 111, not race past it undetected");
+
+        await txA.CommitAsync(TestContext.Current.CancellationToken);
+
+        var claimedB = await claimBTask;
+
+        claimedB.Should().BeFalse("chat 111 already committed the key; chat 222 lost the race but must not throw");
+
+        var owner = await storeA.GetAsync(SecretKeys.TelegramOwnerChatId, TestContext.Current.CancellationToken);
+        owner.Should().Be(new SecretResult(SecretState.Present, "111"));
+
+        (await dbA.Secrets.CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
+    }
+```
+
+Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj`
+Expected: fails to compile until `TrySetIfMissingAsync` exists on both the interface and `EfSecretStore`; then green.
+
 - [ ] **Step 14: Write the failing tests**
 
 Create `tests/Noof.Ledger.Telegram.Tests/TelegramOwnerGateTests.cs`:
@@ -4514,12 +4687,29 @@ public class TelegramOwnerGateTests
         var secretStore = Substitute.For<ISecretStore>();
         secretStore.GetAsync(SecretKeys.TelegramOwnerChatId, Arg.Any<CancellationToken>())
             .Returns(new SecretResult(SecretState.Missing, null));
+        secretStore.TrySetIfMissingAsync(SecretKeys.TelegramOwnerChatId, "111", Arg.Any<CancellationToken>())
+            .Returns(true);
         var gate = new TelegramOwnerGate(secretStore);
 
         var allowed = await gate.IsAllowedAsync(111L, TestContext.Current.CancellationToken);
 
         allowed.Should().BeTrue();
-        await secretStore.Received(1).SetAsync(SecretKeys.TelegramOwnerChatId, "111", TestContext.Current.CancellationToken);
+        await secretStore.Received(1).TrySetIfMissingAsync(SecretKeys.TelegramOwnerChatId, "111", TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task Losing_the_claim_race_to_another_chat_is_rejected_not_an_error()
+    {
+        var secretStore = Substitute.For<ISecretStore>();
+        secretStore.GetAsync(SecretKeys.TelegramOwnerChatId, Arg.Any<CancellationToken>())
+            .Returns(new SecretResult(SecretState.Missing, null), new SecretResult(SecretState.Present, "222"));
+        secretStore.TrySetIfMissingAsync(SecretKeys.TelegramOwnerChatId, "111", Arg.Any<CancellationToken>())
+            .Returns(false);
+        var gate = new TelegramOwnerGate(secretStore);
+
+        var allowed = await gate.IsAllowedAsync(111L, TestContext.Current.CancellationToken);
+
+        allowed.Should().BeFalse("chat 222 committed first; 111 lost the race and is not the owner");
     }
 
     [Fact]
@@ -4533,7 +4723,7 @@ public class TelegramOwnerGateTests
         var allowed = await gate.IsAllowedAsync(111L, TestContext.Current.CancellationToken);
 
         allowed.Should().BeTrue();
-        await secretStore.DidNotReceive().SetAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await secretStore.DidNotReceive().TrySetIfMissingAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -4547,7 +4737,7 @@ public class TelegramOwnerGateTests
         var allowed = await gate.IsAllowedAsync(999L, TestContext.Current.CancellationToken);
 
         allowed.Should().BeFalse();
-        await secretStore.DidNotReceive().SetAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await secretStore.DidNotReceive().TrySetIfMissingAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -4598,13 +4788,21 @@ public sealed class TelegramOwnerGate(ISecretStore secretStore)
 
     async Task<bool> ClaimAsync(long chatId, CancellationToken cancellationToken)
     {
-        await secretStore.SetAsync(SecretKeys.TelegramOwnerChatId, chatId.ToString(CultureInfo.InvariantCulture), cancellationToken);
-        return true;
+        var chatIdText = chatId.ToString(CultureInfo.InvariantCulture);
+
+        if (await secretStore.TrySetIfMissingAsync(SecretKeys.TelegramOwnerChatId, chatIdText, cancellationToken))
+            return true;
+
+        // Lost the race: another chat claimed ownership between our GetAsync and this call. Honour
+        // whoever actually won rather than surfacing the conflict as an error - the loser here is
+        // simply not the owner, which is the correct outcome, not a failure.
+        var owner = await secretStore.GetAsync(SecretKeys.TelegramOwnerChatId, cancellationToken);
+        return owner.State is SecretState.Present && owner.Value == chatIdText;
     }
 }
 ```
 
-> This is safe against a "two strangers message at once" race only because updates are processed one at a time by a single poller loop (Stage 6) — there is never a second `IsAllowedAsync` call in flight while the first one's `SetAsync` is still pending. If that assumption ever changes (concurrent update processing), this needs a real compare-and-swap.
+> Deterministic under concurrency by construction now, not by the "single poller" assumption the original draft of this method relied on (see Step 13A) — `TrySetIfMissingAsync` resolves the race at the database, and the loser here is simply told it lost rather than handed a raw `PostgresException`.
 
 - [ ] **Step 17: Run green**
 
@@ -5263,11 +5461,11 @@ public sealed class TelegramPollingService(
 
     public async Task<TelegramPollResult> RunTickAsync(CancellationToken cancellationToken)
     {
-        using var scope = scopeFactory.CreateScope();
-        var secretStore = scope.ServiceProvider.GetRequiredService<ISecretStore>();
-
         try
         {
+            using var scope = scopeFactory.CreateScope();
+            var secretStore = scope.ServiceProvider.GetRequiredService<ISecretStore>();
+
             var secret = await secretStore.GetAsync(SecretKeys.TelegramBotToken, cancellationToken);
 
             if (secret.State is not SecretState.Present)
@@ -5287,6 +5485,10 @@ public sealed class TelegramPollingService(
             var timeZoneId = configuration["Capture:TimeZone"] ?? "Europe/Belgrade";
             var pollingSeconds = int.TryParse(configuration["Telegram:PollingSeconds"], out var seconds) ? seconds : 30;
 
+            // clientHandle.Current is always assigned above whenever secret.Value != activeToken,
+            // and that branch is guaranteed to have run at least once by this point: activeToken
+            // starts null and secret.State is Present here, so the very first successful tick sets it
+            // before this line is ever reached.
             var updates = await clientHandle.Current!.GetUpdates(
                 offset: offset,
                 timeout: pollingSeconds,
@@ -5324,6 +5526,56 @@ public sealed class TelegramPollingService(
 > **`TimeProvider` has no `Delay` method — confirmed by compiling against it, not assumed.** Reflecting the real .NET 10 `TimeProvider` type shows exactly five members: `GetUtcNow`, `GetLocalNow`, `GetTimestamp`, `GetElapsedTime`, `CreateTimer`. There is no instance or extension `Delay`. The testable, `FakeTimeProvider`-aware delay is the static overload `Task.Delay(TimeSpan delay, TimeProvider timeProvider, CancellationToken cancellationToken)` used above — writing `timeProvider.Delay(delay, stoppingToken)` instead is `CS1061` and fails the whole project's build. Nothing in `TelegramPollingServiceTests.cs` would catch this before the build itself does, since every test there drives `RunTickAsync` directly and never runs `ExecuteAsync` (see the "known, accepted gap" note under Step 30) — which is exactly why it is called out here explicitly rather than left to be discovered by a failed build in Step 33.
 >
 > **Plan defect, fixed above, and it is not merely theoretical.** The version of this method originally drafted here called `secretStore.GetAsync(SecretKeys.TelegramBotToken, cancellationToken)` *before* the `try`, not inside it. `EfSecretStore.GetAsync` (the real implementation this resolves to at runtime) does `await db.Secrets.FindAsync(...)` with no exception handling around connectivity failures — it throws when the database is unreachable, same as any other EF query. With the token fetch outside the `try`, that exception propagated out of `RunTickAsync`, out of `ExecuteAsync`'s loop, and into `BackgroundService`'s own exception handling, whose .NET default (`BackgroundServiceExceptionBehavior.StopHost`) stops the entire host. This is not a hypothetical: running the full `Noof.Ledger.Host.Tests` suite with the token fetch outside the `try` turned `LoopbackGuardTerminatesTests.An_exposed_binding_is_allowed_once_auth_is_on` — a Task-1–7 test that was green before this task started — red, because that test points the host at a deliberately dead connection string and expects it to keep running for 8 seconds; `TelegramPollingService`'s very first tick killed it instead. Moving the token fetch inside the `try` (shown above) fixed it: the token fetch is a tick failure like any other now, reported as `TelegramPollResult.Failed` rather than escaping.
+>
+> **Second plan defect, found by a later security review and also fixed above.** Moving the token fetch inside the `try` was only half the fix: `scopeFactory.CreateScope()` and `scope.ServiceProvider.GetRequiredService<ISecretStore>()` were left *outside* it. A reviewer proved this is just as fatal — injecting a throw at that exact point turned the same canary, `LoopbackGuardTerminatesTests.An_exposed_binding_is_allowed_once_auth_is_on`, from green to red, with the host exiting instead of serving for its required 8 seconds. `BackgroundService`'s `StopHost` default does not care whether the escaping exception came from a network call or from DI resolution. Everything that can throw — scope creation and every `GetRequiredService` included — now lives inside the `try`.
+
+Add this discriminating test to `tests/Noof.Ledger.Telegram.Tests/TelegramPollingServiceTests.cs`, directly before the closing brace of the test class:
+
+```csharp
+    // Commit a069aae moved the token fetch inside the try but left scope creation and the
+    // ISecretStore resolution outside it. An exception thrown while resolving a dependency is
+    // exactly as fatal to the host as one thrown by the token fetch itself - BackgroundService's
+    // default ExceptionBehavior is StopHost - so this must be swallowed and reported as Failed
+    // the same way. A mock configured to throw would prove the same thing less directly than a
+    // fake that actually behaves like a broken container.
+    [Fact]
+    public async Task A_DI_resolution_failure_while_creating_the_scope_is_reported_as_failed_without_throwing()
+    {
+        var clientFactory = Substitute.For<ITelegramBotClientFactory>();
+        var service = new TelegramPollingService(
+            new ThrowingScopeFactory(),
+            clientFactory,
+            new TelegramClientHandle(),
+            new ConfigurationBuilder().Build(),
+            TimeProvider.System,
+            NullLogger<TelegramPollingService>.Instance);
+
+        var result = await service.RunTickAsync(TestContext.Current.CancellationToken);
+
+        result.Should().Be(TelegramPollResult.Failed);
+        clientFactory.DidNotReceive().Create(Arg.Any<string>());
+    }
+
+    sealed class ThrowingScopeFactory : IServiceScopeFactory
+    {
+        public IServiceScope CreateScope() => new ThrowingScope();
+
+        sealed class ThrowingScope : IServiceScope
+        {
+            public IServiceProvider ServiceProvider { get; } = new ThrowingProvider();
+
+            public void Dispose() { }
+        }
+
+        sealed class ThrowingProvider : IServiceProvider
+        {
+            public object? GetService(Type serviceType) =>
+                serviceType == typeof(ISecretStore)
+                    ? throw new InvalidOperationException("the container cannot resolve ISecretStore")
+                    : null;
+        }
+    }
+```
 
 - [ ] **Step 33: Run green**
 
@@ -5334,7 +5586,7 @@ Expected: all green.
 
 #### Stage 7 — wire the Host, prove the token never reaches a log
 
-- [ ] **Step 34: Wire `Program.cs` (without the log filter yet — that omission is deliberate, see Step 35)**
+- [ ] **Step 34: Wire `Program.cs` (without redacting the client's logging yet — that omission is deliberate, see Step 35)**
 
 Open `src/Noof.Ledger.Host/Program.cs`. Add these two `using` directives (alphabetically, among the existing `Noof.Ledger.*` ones):
 
@@ -5404,6 +5656,37 @@ public class TelegramHttpClientLoggingTests
         lines.Should().NotContain(line => line.Contains(token));
     }
 
+    // AddFilter("System.Net.Http.HttpClient.telegram", LogLevel.None) is a suppression, not a
+    // removal: a more specific configured category wins over a filter on a shorter prefix. An
+    // operator troubleshooting "why isn't my bot receiving messages" reaching for
+    // Logging:LogLevel:System.Net.Http.HttpClient.telegram.LogicalHandler is exactly the kind of
+    // configuration a filter-only fix cannot survive - the token must stay out of the log even
+    // when that category is explicitly turned back on.
+    [Fact]
+    public async Task No_captured_log_line_contains_the_token_even_when_configuration_reenables_the_nested_logging_category()
+    {
+        const string token = "123456:AAProbeTopSecretBotToken";
+        var lines = new ConcurrentQueue<string>();
+
+        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Auth:Mode", "Off");
+            builder.UseSetting("Database:MigrateOnStartup", "false");
+            builder.UseSetting("ConnectionStrings:Ledger",
+                "Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none;Timeout=2");
+            builder.UseSetting("Logging:LogLevel:System.Net.Http.HttpClient.telegram.LogicalHandler", "Information");
+            builder.ConfigureLogging(logging => logging.AddProvider(new CapturingLoggerProvider(lines)));
+            builder.ConfigureTestServices(services =>
+                services.AddHttpClient("telegram").ConfigurePrimaryHttpMessageHandler(() => new StubHandler()));
+        });
+
+        var client = factory.Services.GetRequiredService<IHttpClientFactory>().CreateClient("telegram");
+        await client.GetAsync($"http://example.invalid/bot{token}/getMe", TestContext.Current.CancellationToken);
+
+        lines.Should().NotContain(line => line.Contains(token),
+            "a more specific configured category must not be able to re-enable the request-URI logger");
+    }
+
     sealed class StubHandler : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
@@ -5432,21 +5715,24 @@ public class TelegramHttpClientLoggingTests
 Run: `dotnet test --project tests/Noof.Ledger.Host.Tests/Noof.Ledger.Host.Tests.csproj`
 Expected: FAILS. The stub handler means no real socket is ever opened (no network dependency in this test), but `IHttpClientFactory`'s default logging handler still logs the request URI — token included — at Information level before the request is even sent, and `CapturingLoggerProvider.IsEnabled` accepts everything.
 
-- [ ] **Step 37: Add the log filter**
+- [ ] **Step 37: Remove the logging handlers from the named client's pipeline**
 
-In `src/Noof.Ledger.Host/Program.cs`, right after the line added in Step 34:
+In `src/Noof.Ledger.Host/Program.cs`, replace the line added in Step 34:
 
 ```csharp
-builder.Services.AddHttpClient("telegram");
-builder.Logging.AddFilter("System.Net.Http.HttpClient.telegram", LogLevel.None);
+// A log-level filter is a suppression a more specific configured category can override at
+// runtime - Logging:LogLevel:System.Net.Http.HttpClient.telegram.LogicalHandler beats a filter on
+// the shorter prefix and puts the full request URI, bot token included, at Information. Removing
+// the logging handlers from the pipeline instead means there is nothing left to re-enable.
+builder.Services.AddHttpClient("telegram").RemoveAllLoggers();
 ```
 
-The filter is matched by category prefix, so it silences both `System.Net.Http.HttpClient.telegram.LogicalHandler` and `...ClientHandler` — the two loggers `IHttpClientFactory` creates per named client — with one line.
+> **Plan defect, found by a later security review and fixed above.** The version originally drafted here was `builder.Logging.AddFilter("System.Net.Http.HttpClient.telegram", LogLevel.None)`. A filter is matched by category prefix, so it silenced both `System.Net.Http.HttpClient.telegram.LogicalHandler` and `...ClientHandler` — but a reviewer added a **more specific** category through configuration, `Logging:LogLevel:System.Net.Http.HttpClient.telegram.LogicalHandler`, and the full request URL — including the live bot token — appeared at Information level: `Start processing HTTP request GET http://.../bot123456:AAProbeToken.../getMe`. That is an ordinary troubleshooting step for an operator asking "why isn't my bot receiving messages", not an edge case. `IHttpClientBuilder.RemoveAllLoggers()` (confirmed present on this target framework, in `Microsoft.Extensions.Http` — the `"telegram"` client is already registered through `IHttpClientFactory` via `AddHttpClient`, which is exactly what the extension targets) takes the logging handlers out of the pipeline entirely instead of silencing them, so there is nothing left for configuration to re-enable. The failing test added to Step 35 above (`No_captured_log_line_contains_the_token_even_when_configuration_reenables_the_nested_logging_category`) is the reviewer's defeat case, made permanent.
 
 - [ ] **Step 38: Run it green**
 
 Run: `dotnet test --project tests/Noof.Ledger.Host.Tests/Noof.Ledger.Host.Tests.csproj`
-Expected: all green.
+Expected: all green, including both `TelegramHttpClientLoggingTests`.
 
 > **Side effect worth knowing about, not fixing here.** Every existing `Noof.Ledger.Host.Tests` test that boots a `WebApplicationFactory<Program>` (all of `BootTests.cs`, `LoginEndpointTests.cs`, ...) now also starts `TelegramPollingService` in the background, which calls `ISecretStore.GetAsync` against whatever connection string that test configured — including the deliberately-unreachable one in `BootTests`. `ISecretStore.GetAsync` is contractually "never throws" (see its doc comment in the locked ports), so this should degrade to `Missing`/`Unreadable` and return `Idle` rather than blow up — but if that guarantee is ever violated by the real `EfSecretStore`, it will surface here first, as a flaky or slow `Host.Tests` run, not as an obvious Telegram bug.
 
@@ -5476,7 +5762,7 @@ Nothing in this step edits the acknowledgement message with a real amount — th
 - [ ] **Step 41: Commit**
 
 ```bash
-git add tests/Noof.Ledger.Telegram.Tests src/Noof.Ledger.Telegram src/Noof.Ledger.Application/Chat tests/Noof.Ledger.Host.Tests/TelegramHttpClientLoggingTests.cs src/Noof.Ledger.Host/Program.cs Directory.Packages.props NoofLedger.slnx tests/Noof.Ledger.Architecture.Tests/ProjectReferenceTests.cs
+git add tests/Noof.Ledger.Telegram.Tests src/Noof.Ledger.Telegram src/Noof.Ledger.Application/Chat src/Noof.Ledger.Application/Secrets/ISecretStore.cs src/Noof.Ledger.Persistence/Secrets/EfSecretStore.cs tests/Noof.Ledger.Persistence.Tests/EfSecretStoreTests.cs tests/Noof.Ledger.Host.Tests/TelegramHttpClientLoggingTests.cs src/Noof.Ledger.Host/Program.cs Directory.Packages.props NoofLedger.slnx tests/Noof.Ledger.Architecture.Tests/ProjectReferenceTests.cs
 git commit -m "$(cat <<'EOF'
 feat(telegram): long-polling bot with an owner allowlist and a durable offset
 
