@@ -55,6 +55,15 @@ public class ProjectReferenceTests
     }
 
     [Fact]
+    public void Telegram_package_references_are_exactly_its_allowed_set()
+    {
+        Packages("Noof.Ledger.Telegram").Should().BeEquivalentTo(
+            "Telegram.Bot",
+            "Microsoft.Extensions.Http",
+            "Microsoft.Extensions.Hosting.Abstractions");
+    }
+
+    [Fact]
     public void Web_has_no_program_cs()
     {
         var web = Path.Combine(RepoRoot.Find().FullName, "src", "Noof.Ledger.Web");

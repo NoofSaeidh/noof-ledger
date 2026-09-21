@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Auth;
 using Noof.Ledger.Application.Capture;
+using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Host.Auth;
 using Noof.Ledger.Host.Cli;
@@ -14,6 +15,7 @@ using Noof.Ledger.Persistence;
 using Noof.Ledger.Persistence.Auth;
 using Noof.Ledger.Persistence.Capture;
 using Noof.Ledger.Persistence.Secrets;
+using Noof.Ledger.Telegram;
 using Noof.Ledger.Web.Components;
 
 if (UserCommand.TryParse(args, out var cliUsername))
@@ -65,6 +67,17 @@ if (!cookieMode)
 
 builder.Services.AddAuthorization();
 builder.Services.AddCascadingAuthenticationState();
+
+builder.Services.AddHttpClient("telegram");
+builder.Logging.AddFilter("System.Net.Http.HttpClient.telegram", LogLevel.None);
+
+builder.Services.AddSingleton<TelegramClientHandle>();
+builder.Services.AddSingleton<ITelegramBotClientFactory, TelegramBotClientFactory>();
+builder.Services.AddSingleton<IChatNotifier, TelegramChatNotifier>();
+builder.Services.AddScoped<TelegramOwnerGate>();
+builder.Services.AddScoped<TelegramUpdateOffsetStore>();
+builder.Services.AddScoped<ITelegramUpdateRouter, TelegramUpdateRouter>();
+builder.Services.AddHostedService<TelegramPollingService>();
 
 var app = builder.Build();
 
