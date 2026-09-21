@@ -397,8 +397,8 @@ public class QuotedAmountTests
     // this test shipped with both rows byte-identical and silently tested nothing but ASCII
     // space. Never paste a raw special-whitespace glyph into this codebase; escape it.
     [Theory]
-    [InlineData("11 700,50")]
-    [InlineData("11 700,50")]
+    [InlineData("11\u2009700,50")]
+    [InlineData("11\u00A0700,50")]
     public void Thin_and_non_breaking_space_thousands_separators_are_stripped(string quote)
     {
         var rawText = $"аренда {quote} eur";
@@ -465,7 +465,7 @@ public static class QuotedAmount
     // copies of U+0020, silently defeating the handling this comment describes. Verified by
     // compiling and running this exact file: with the escapes below, a real U+2009/U+00A0
     // grouped quote resolves correctly; with three literal spaces it does not.
-    static readonly char[] SpaceGroupers = [' ', ' ', ' '];
+    static readonly char[] SpaceGroupers = ['\u2009', '\u00A0', '\u202F'];
 
     static readonly CurrencyCode[] KnownCurrencies =
     [
@@ -600,14 +600,12 @@ public static class QuotedAmount
 - [ ] **Step 17: Run the tests and watch them pass**
 
 Run: `dotnet test --project tests/Noof.Ledger.Domain.Tests/Noof.Ledger.Domain.Tests.csproj`
-Expected: PASS (17 new test cases across the facts and theories above, plus everything from Step 12 still green).
+Expected: PASS (16 new test cases across the facts and theories above, plus everything from Step 12 still green).
 
 Then confirm the whole solution still builds and no architecture rule regressed — this task adds files to `Noof.Ledger.Domain` but no package references, so `Domain_has_no_package_references` in `tests/Noof.Ledger.Architecture.Tests/ProjectReferenceTests.cs` must still pass:
 
 Run: `dotnet build NoofLedger.slnx` — Expected: `Build succeeded`, `0 Warning(s)`, `0 Error(s)`.
 Run: `dotnet test --project tests/Noof.Ledger.Architecture.Tests/Noof.Ledger.Architecture.Tests.csproj` — Expected: PASS, all architecture tests green including `Domain_has_no_package_references`.
-
-(Do not use `dotnet test --project`/`--solution` for either check — see the reviewer note above the steps: both currently report `Zero tests ran`/exit 5 in this repo regardless of whether the underlying tests pass.)
 
 - [ ] **Step 18: Commit**
 
