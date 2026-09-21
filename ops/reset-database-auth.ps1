@@ -73,7 +73,7 @@ finally {
     $env:PGPASSWORD = ''
 }
 
-$connection = "Host=127.0.0.1;Port=5432;Database=postgres;Username=postgres;Password=$password;Include Error Detail=true"
+$connection = "Host=127.0.0.1;Port=5432;Database=postgres;Username=postgres;Password=$password"
 
 $dataRoot = Join-Path $env:LOCALAPPDATA 'NoofLedger'
 New-Item -ItemType Directory -Force -Path $dataRoot | Out-Null

@@ -25,4 +25,22 @@ public class LedgerConnectionStringTests
         LedgerConnectionString.Resolve(null).Should().Contain("Database=noof_ledger")
             .And.NotContain("Database=postgres");
     }
+
+    [Fact]
+    public void Error_detail_is_stripped_so_parameter_values_cannot_reach_an_exception_message()
+    {
+        var resolved = LedgerConnectionString.Resolve(
+            "Host=example;Database=noof_ledger;Include Error Detail=true");
+
+        resolved.Should().NotContain("Include Error Detail",
+            "Npgsql puts parameter values into exception text when this is on, and Phase 1 flows secrets through EF");
+    }
+
+    [Fact]
+    public void A_connection_string_without_error_detail_is_returned_unchanged()
+    {
+        const string plain = "Host=example;Database=noof_ledger;Username=someone";
+
+        LedgerConnectionString.Resolve(plain).Should().Be(plain);
+    }
 }
