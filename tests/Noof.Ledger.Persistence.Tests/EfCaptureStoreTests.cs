@@ -176,6 +176,49 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
         (await verify.CategorizationJobs.CountAsync(TestContext.Current.CancellationToken)).Should().Be(0);
     }
 
+    // ICaptureStore.CaptureAsync promises idempotency on (ChatId, MessageId). A plain sequential
+    // replay test (above) cannot tell "idempotent" from "the loser throws a raw 23505 that a caller
+    // happens not to hit" - only genuine concurrency does. This forces it the same way the owner-claim
+    // race test does: hold the winning insert open inside an uncommitted transaction so the second
+    // caller's insert must block on the database lock, not race past it, before either result is
+    // observed.
+    [Fact]
+    public async Task Concurrent_CaptureAsync_calls_for_the_same_chat_and_message_let_exactly_one_caller_insert()
+    {
+        await using var dbA = await fixture.CreateContextAsync();
+        await dbA.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await RemoveSeededDefaultWalletAsync(dbA, TestContext.Current.CancellationToken);
+        dbA.Wallets.Add(DefaultWallet());
+        await dbA.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var optionsB = new DbContextOptionsBuilder<LedgerDbContext>()
+            .UseNpgsql(dbA.Database.GetConnectionString()!)
+            .Options;
+        await using var dbB = new LedgerDbContext(optionsB);
+
+        var storeA = new EfCaptureStore(dbA, new FakeTimeProvider());
+        var storeB = new EfCaptureStore(dbB, new FakeTimeProvider());
+        var message = NewMessage();
+
+        await using var txA = await dbA.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
+
+        var idA = await storeA.CaptureAsync(message, "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        var idBTask = storeB.CaptureAsync(message, "Europe/Belgrade", TestContext.Current.CancellationToken);
+        var finished = await Task.WhenAny(idBTask, Task.Delay(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+
+        finished.Should().NotBeSameAs(idBTask,
+            "the second capture's insert must block on the first's uncommitted row, not race past it undetected");
+
+        await txA.CommitAsync(TestContext.Current.CancellationToken);
+
+        var idB = await idBTask;
+
+        idB.Should().Be(idA, "both callers captured the identical (ChatId, MessageId); the loser must return the winner's id, not throw");
+        (await dbA.Transactions.CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
+        (await dbA.CategorizationJobs.CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
+    }
+
     [Fact]
     public async Task AttachBotMessageAsync_stamps_the_bot_message_id_onto_the_row()
     {

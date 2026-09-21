@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Capture;
 using Noof.Ledger.Domain;
+using Npgsql;
 
 namespace Noof.Ledger.Persistence.Capture;
 
@@ -8,9 +9,7 @@ public sealed class EfCaptureStore(LedgerDbContext db, TimeProvider timeProvider
 {
     public async Task<Guid> CaptureAsync(CapturedMessage message, string timeZoneId, CancellationToken cancellationToken)
     {
-        var existing = await db.Transactions.SingleOrDefaultAsync(
-            t => t.TelegramChatId == message.ChatId && t.TelegramMessageId == message.MessageId,
-            cancellationToken);
+        var existing = await FindExistingAsync(message, cancellationToken);
 
         if (existing is not null)
             return existing.Id;
@@ -24,7 +23,7 @@ public sealed class EfCaptureStore(LedgerDbContext db, TimeProvider timeProvider
         var now = timeProvider.GetUtcNow();
         var transactionId = Guid.NewGuid();
 
-        db.Transactions.Add(new Transaction
+        var transaction = new Transaction
         {
             Id = transactionId,
             WalletId = wallet.Id,
@@ -35,9 +34,8 @@ public sealed class EfCaptureStore(LedgerDbContext db, TimeProvider timeProvider
             TelegramChatId = message.ChatId,
             TelegramMessageId = message.MessageId,
             CreatedAt = now,
-        });
-
-        db.CategorizationJobs.Add(new CategorizationJob
+        };
+        var job = new CategorizationJob
         {
             Id = Guid.NewGuid(),
             TransactionId = transactionId,
@@ -46,12 +44,41 @@ public sealed class EfCaptureStore(LedgerDbContext db, TimeProvider timeProvider
             RunAfter = now,
             CreatedAt = now,
             UpdatedAt = now,
-        });
+        };
+        db.Transactions.Add(transaction);
+        db.CategorizationJobs.Add(job);
 
-        await db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            return transactionId;
+        }
+        catch (DbUpdateException ex) when (IsDuplicateCaptureViolation(ex))
+        {
+            // Another concurrent call for the same (ChatId, MessageId) committed first. Ours never
+            // did; detach both rows so the re-read below goes back to the database instead of
+            // returning these uncommitted, never-persisted entities from the identity map.
+            db.Entry(transaction).State = EntityState.Detached;
+            db.Entry(job).State = EntityState.Detached;
 
-        return transactionId;
+            var winner = await FindExistingAsync(message, cancellationToken)
+                ?? throw new InvalidOperationException(
+                    "A unique-constraint violation on capture reported a winner that cannot be found.");
+            return winner.Id;
+        }
     }
+
+    Task<Transaction?> FindExistingAsync(CapturedMessage message, CancellationToken cancellationToken) =>
+        db.Transactions.SingleOrDefaultAsync(
+            t => t.TelegramChatId == message.ChatId && t.TelegramMessageId == message.MessageId,
+            cancellationToken);
+
+    static bool IsDuplicateCaptureViolation(DbUpdateException ex) =>
+        ex.InnerException is PostgresException
+        {
+            SqlState: PostgresErrorCodes.UniqueViolation,
+            ConstraintName: "IX_transactions_telegram_chat_id_telegram_message_id",
+        };
 
     public async Task AttachBotMessageAsync(Guid transactionId, int botMessageId, CancellationToken cancellationToken)
     {
