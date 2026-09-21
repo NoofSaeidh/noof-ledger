@@ -7,8 +7,7 @@ namespace Noof.Ledger.Telegram;
 public sealed class TelegramUpdateRouter(
     ICaptureStore captureStore,
     IChatNotifier chatNotifier,
-    TelegramOwnerGate ownerGate,
-    TimeProvider timeProvider)
+    TelegramOwnerGate ownerGate)
     : ITelegramUpdateRouter
 {
     public const string ReceiptAcknowledgement = "Saved. I'll add the amount once it's categorised.";
@@ -27,7 +26,13 @@ public sealed class TelegramUpdateRouter(
         if (message.Text is not { Length: > 0 } text)
             return;
 
-        var captured = new CapturedMessage(message.Chat.Id, message.Id, text, timeProvider.GetUtcNow());
+        // message.Date is when Telegram received it from the sender, not when we got around to
+        // processing it -- an outage can queue a message for hours, and every queued message must
+        // keep its own moment so time_zone_id buckets it into the correct local day later.
+        // Message.Date deserialises as DateTime with Kind=Utc (confirmed against Telegram.Bot
+        // 22.10.3.1's UnixDateTimeConverter), so this offset is genuinely zero, not just labelled so.
+        var sentAt = new DateTimeOffset(message.Date);
+        var captured = new CapturedMessage(message.Chat.Id, message.Id, text, sentAt);
         var transactionId = await captureStore.CaptureAsync(captured, timeZoneId, cancellationToken);
 
         var botMessageId = await chatNotifier.SendAsync(message.Chat.Id, ReceiptAcknowledgement, cancellationToken);
