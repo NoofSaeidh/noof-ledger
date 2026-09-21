@@ -267,3 +267,42 @@ domain, or Azure, would be the fallback). Do that spike before writing anything 
 Second unknown, and it interacts with the first: **cold-start latency** of `dotnet10` for a function
 invoked a few dozen times a day. Because the retry budget is undocumented, a slow cold start is a
 correctness question rather than a latency curiosity. SnapStart is available on `dotnet10` if needed.
+
+### P1-6 addendum — two follow-up decisions, 2026-09-21
+
+**Why AWS rather than Azure**, since the $0 holds on both and the cost is not the reason:
+
+1. **Function URL removes a trap.** A research brief recommended Lambda *plus API Gateway* and asserted
+   $0, citing only Lambda's pricing. API Gateway's HTTP API free tier is **12 months**, not permanent, so
+   that architecture would have started billing in year two. A Function URL puts no gateway in the path.
+2. **AWS's .NET 10 story has no contradiction.** `dotnet10` is a GA managed runtime with a published
+   deprecation date. Microsoft's own pages disagree with each other — the functions-versions table marks
+   .NET 10 GA while the Visual Studio section on the same page still calls it preview — and .NET 10 will
+   not run on the classic Linux Consumption plan at all, only on Flex Consumption.
+3. **The free grants are unambiguous on AWS.** Lambda 1M requests + 400k GB-seconds, DynamoDB 25 WCU /
+   25 RCU / 25 GB in provisioned mode, both permanent. Flex Consumption's grant is **250k executions +
+   100k GB-seconds** — a quarter of the figure two briefs quoted, because they cited the *classic*
+   Consumption grant that the required plan does not use. Azure's overage rates render as `$-`
+   placeholders and could not be established at all.
+
+One reason was **discarded** rather than kept: the comparison of DynamoDB's per-item expiry against Cosmos
+Table API's table-level expiry is irrelevant when everything shares one 90-day lifetime. Recorded so it is
+not resurrected as justification later.
+
+**Whether the cloud function sends the "saved" acknowledgement: deferred to after the spike.**
+
+In the v1 shape the function only receives and stores, so **the bot token never leaves the PC** and the
+settled secrets rule survives untouched; what sits in AWS is two random strings that decrypt nothing. The
+price is that the acknowledgement arrives late — when the machine returns and drains — instead of in
+seconds. Making it instant requires putting the bot token in AWS, which is a real secret leaving the
+encrypted store.
+
+The operator chose to build v1 without it, see how the delay feels in practice, and decide then. Build
+accordingly: the relay must not be structured so that adding a cloud-side reply later means reshaping it.
+
+**Order of work: Phase 1B first, the relay after.** Verified that this creates no rework — Phase 1B lives
+downstream of capture, in the queue and the worker, and barely touches `TelegramPollingService`, which is
+the class the relay rewrites. The relay also cannot start until there is an AWS account and a throwaway
+bot to spike against, and Phase 1B has no such dependency. The deciding reason is neither: until Phase 1B
+exists, a captured message never becomes a categorised expense, so there is very little to lose by being
+away.
