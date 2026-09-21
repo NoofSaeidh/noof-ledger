@@ -3322,6 +3322,12 @@ using Noof.Ledger.Persistence.Capture;
 
 namespace Noof.Ledger.Persistence.Tests;
 
+> **The database is not empty after `MigrateAsync` here.** Task 3 seeds a wallet and twenty
+> categories through `HasData`, and `ix_wallets_single_default` permits only one default wallet — so
+> a test that migrates and then inserts its own `IsDefault = true` wallet fails with a `23505` unique
+> violation, not with the assertion it was written for. Every test in this class calls
+> `RemoveSeededDefaultWalletAsync` immediately after `MigrateAsync`.
+
 [Collection("postgres")]
 public class EfCaptureStoreTests(PostgresFixture fixture)
 {
@@ -3332,6 +3338,14 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
         Currency = CurrencyCode.Eur,
         IsDefault = true,
     };
+
+    // Task 3 seeds one default wallet through HasData, and ix_wallets_single_default makes a second
+    // one a 23505 unique violation. Every test below therefore clears the seeded row before adding
+    // the wallet it wants. Call this after MigrateAsync and before any Wallets.Add.
+    static async Task RemoveSeededDefaultWalletAsync(LedgerDbContext db) =>
+        await db.Database.ExecuteSqlAsync(
+            $"DELETE FROM wallets WHERE is_default",
+            TestContext.Current.CancellationToken);
 
     static CapturedMessage NewMessage(long chatId = 1, int messageId = 100, DateTimeOffset? sentAt = null) =>
         new(chatId, messageId, "coffee 3.50", sentAt ?? DateTimeOffset.UnixEpoch);
