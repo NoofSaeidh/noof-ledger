@@ -37,6 +37,57 @@ public sealed class SettingsSecretsTests(CookieModeHostFixture fixture) : PageTe
     }
 
     [Fact]
+    public async Task Saving_a_blank_value_is_refused_and_the_secret_stays_missing()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/settings/secrets");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var status = Page.Locator($"#status-{SecretKeys.TelegramOwnerChatId}");
+        await Expect(status).ToContainTextAsync("Not set");
+
+        // No FillAsync call: the field starts empty, which is exactly the "clicked Save without
+        // typing anything" scenario the review proved stores state Present with "".
+        await Page.Locator($"#save-{SecretKeys.TelegramOwnerChatId}").ClickAsync();
+
+        // Storing an empty value as Present would reject every chat AND leave the owner-claim
+        // recovery path disarmed, silently.
+        await Expect(status).ToContainTextAsync("Not set");
+        await Expect(Page.Locator($"#error-{SecretKeys.TelegramOwnerChatId}")).ToBeVisibleAsync();
+
+        var stored = await fixture.ReadStoredSecretAsync(SecretKeys.TelegramOwnerChatId, TestContext.Current.CancellationToken);
+        stored.Should().BeNull("a blank save must leave no row at all, not a Present row holding an empty string");
+    }
+
+    [Fact]
+    public async Task Saving_trims_surrounding_whitespace_before_storing()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/settings/secrets");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var padded = $"   123456:e2e-trim-{Guid.NewGuid():N}   ";
+        var status = Page.Locator($"#status-{SecretKeys.TelegramBotToken}");
+
+        await RetryUntilAsync(async () =>
+        {
+            await Page.Locator($"#secret-{SecretKeys.TelegramBotToken}").FillAsync(padded);
+            await Page.Locator($"#save-{SecretKeys.TelegramBotToken}").ClickAsync();
+            await Expect(status).ToContainTextAsync("Set", new() { Timeout = 2_000 });
+        });
+
+        var stored = await fixture.ReadStoredSecretAsync(SecretKeys.TelegramBotToken, TestContext.Current.CancellationToken);
+        stored.Should().Be(padded.Trim(),
+            "an untrimmed leading space or trailing newline makes every call using this token 404 with only an opaque log line to show for it");
+    }
+
+    [Fact]
     public async Task No_captured_log_line_contains_a_value_submitted_through_this_page()
     {
         if (fixture.DatabaseUnavailable)

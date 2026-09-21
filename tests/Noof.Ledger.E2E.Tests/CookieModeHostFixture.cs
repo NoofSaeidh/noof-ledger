@@ -1,6 +1,13 @@
 using System.Diagnostics;
-using Npgsql;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Noof.Ledger.Application.Secrets;
+using Noof.Ledger.Host.Startup;
+using Noof.Ledger.Persistence;
+using Noof.Ledger.Persistence.Secrets;
 using Noof.Ledger.TestKit;
+using Npgsql;
 
 namespace Noof.Ledger.E2E.Tests;
 
@@ -17,6 +24,37 @@ public sealed class CookieModeHostFixture : IAsyncLifetime
     public string BaseUrl => host.BaseUrl;
 
     public IReadOnlyList<string> CapturedOutputLines => host.CapturedOutputLines;
+
+    // Reads back what the browser-driven save actually persisted, bypassing the UI (which by
+    // design never shows a saved secret's plaintext -- see SecretsPageSourceTests). Talks to the
+    // same clone database and the same DPAPI-protected key ring directory
+    // (Program.cs: %LocalApplicationData%\NoofLedger\dp-keys) the spawned host process itself uses,
+    // so decrypting a value the host encrypted moments earlier just works: DPAPI is scoped to the
+    // current Windows user, not to a process, and both this test and the host run as that user.
+    public async Task<string?> ReadStoredSecretAsync(string key, CancellationToken cancellationToken)
+    {
+        // DataProtectionSetup.Configure calls ProtectKeysWithDpapi, which is Windows-only -- this
+        // whole suite (like the app it drives) already only ever runs on Windows, so this guard is
+        // just what tells the platform-compatibility analyzer that, rather than a real fallback.
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException("This suite only runs on Windows, same as the app.");
+
+        var contextOptions = new DbContextOptionsBuilder<LedgerDbContext>()
+            .UseNpgsql(DatabaseSettings.For(cloneDatabaseName))
+            .Options;
+        await using var db = new LedgerDbContext(contextOptions);
+
+        var keyRingDirectory = new DirectoryInfo(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NoofLedger", "dp-keys"));
+        var services = new ServiceCollection();
+        DataProtectionSetup.Configure(services, keyRingDirectory);
+        await using var dataProtectionServices = services.BuildServiceProvider();
+        var dataProtection = dataProtectionServices.GetRequiredService<IDataProtectionProvider>();
+
+        var store = new EfSecretStore(db, dataProtection, TimeProvider.System);
+        var result = await store.GetAsync(key, cancellationToken);
+        return result.Value;
+    }
 
     public async ValueTask InitializeAsync()
     {
