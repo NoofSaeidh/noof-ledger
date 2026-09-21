@@ -16,6 +16,8 @@ public sealed class CookieModeHostFixture : IAsyncLifetime
 
     public string BaseUrl => host.BaseUrl;
 
+    public IReadOnlyList<string> CapturedOutputLines => host.CapturedOutputLines;
+
     public async ValueTask InitializeAsync()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
