@@ -1455,7 +1455,7 @@ public class SeedDataTests(PostgresFixture fixture)
 - [ ] **Step 4: Run the tests**
 
 Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj`
-Expected: the eight `CaptureModelTests` PASS. `MigrationContractTests.The_model_has_no_pending_changes` now **FAILS** — correct, the model changed and no migration exists yet; it comes back in Step 7. `LineItemMoneyMappingTests` and `SeedDataTests` also **FAIL** — correct, and for a *different, real* reason this time: they hit an actual (throwaway) PostgreSQL database via `MigrateAsync`, but no migration exists to create `wallets`/`categories`/`line_items`, so PostgreSQL raises `relation "..." does not exist`. This is the failing-first step for both — they go green in Step 8, once Step 7 gives them a migration to run against.
+Expected: the eight `CaptureModelTests` PASS. `MigrationContractTests.The_model_has_no_pending_changes` now **FAILS** — correct, the model changed and no migration exists yet; it comes back in Step 7. **Every test that calls `MigrateAsync` also FAILS here — around twenty of them, including all of `EfUserStoreTests`.** Expect `InvalidOperationException: ... has pending changes`, NOT the PostgreSQL `relation "..." does not exist` you might predict. EF Core 10 raises `PendingModelChangesWarning` as an error *inside* `MigrateAsync`, before it opens a connection, so a changed-but-unmigrated model fails every migrating test rather than only the one that asserts about pending changes. This is expected and has a single cause; do not start debugging `EfUserStoreTests`. All of it clears in Step 7 when the migration exists.
 
 - [ ] **Step 5: Drop `MoneyProbeEntity`**
 
@@ -1612,12 +1612,13 @@ Expected: both tests PASS. Each test calls `fixture.CreateContextAsync()`, which
 `SchemaSnapshotTests.cs` is failing right now (it has been since Step 4 — every model change since then diverges from the committed snapshot). Regenerate the file deliberately rather than eyeballing a truncated assertion diff: temporarily edit `tests/Noof.Ledger.Persistence.Tests/SchemaSnapshotTests.cs`, adding one line right after `var actual = Normalise(...)`:
 
 ```csharp
-        File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "schema.expected.sql"), actual); // TEMPORARY
+        File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..",
+            "tests", "Noof.Ledger.Persistence.Tests", "schema.expected.sql"), actual); // TEMPORARY
 ```
 
 Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj --filter "SchemaSnapshotTests"`
 
-`AppContext.BaseDirectory` at test run time is the build output directory (e.g. `tests/Noof.Ledger.Persistence.Tests/bin/Debug/net10.0/`); three `..` segments walk back up to the project directory, so this writes straight to the source-controlled file regardless of which machine or configuration runs it (note: reading `SnapshotPath` — `AppContext.BaseDirectory` with no `..` — as the existing code does is correct for that read; it works only because the `.csproj`'s `CopyToOutputDirectory` keeps the output copy in sync with the source one on every build). **Delete the temporary line** immediately after running it once.
+**This repo does not use the SDK-default output layout.** `Directory.Build.props` sets `<ArtifactsPath>` to the repo-root `artifacts` folder, so `AppContext.BaseDirectory` at test run time is `artifacts/bin/Noof.Ledger.Persistence.Tests/debug/` — two levels below the repo root, not three below a project directory. Three `..` segments therefore land on `artifacts/schema.expected.sql` and the source file is never touched, with no error to tell you so. Four `..` reach the repo root, and the explicit path segments go the rest of the way (note: reading `SnapshotPath` — `AppContext.BaseDirectory` with no `..` — as the existing code does is correct for that read; it works only because the `.csproj`'s `CopyToOutputDirectory` keeps the output copy in sync with the source one on every build). **Delete the temporary line** immediately after running it once.
 
 Run the same filtered command again: Expected: PASS, since the committed file and the generated script now agree.
 
