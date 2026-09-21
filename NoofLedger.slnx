@@ -11,6 +11,7 @@
     <Project Path="src/Noof.Ledger.Web/Noof.Ledger.Web.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj" />
     <Project Path="tests/Noof.Ledger.Architecture.Tests/Noof.Ledger.Architecture.Tests.csproj" />
     <Project Path="tests/Noof.Ledger.Domain.Tests/Noof.Ledger.Domain.Tests.csproj" />
     <Project Path="tests/Noof.Ledger.Host.Tests/Noof.Ledger.Host.Tests.csproj" />
