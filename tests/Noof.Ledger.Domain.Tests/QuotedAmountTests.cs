@@ -118,4 +118,48 @@ public class QuotedAmountTests
         resolved.Should().BeTrue();
         money.Should().Be(new Money(250m, CurrencyCode.Rsd));
     }
+
+    // A quote that occurs verbatim as a SUBSTRING of a larger number is not the same claim as a
+    // quote that occurs as its own number. "500" inside "1500" is a fragment the model mis-bounded,
+    // not the figure it actually saw -- exactly what this gate exists to catch, per the review that
+    // found it: rawText.Contains alone blocks an invented figure but not a mis-bounded one.
+    [Fact]
+    public void A_quote_that_is_only_a_fragment_of_a_larger_number_fails()
+    {
+        var resolved = QuotedAmount.TryResolve("кофе 1500 рсд", "500", "RSD", out var money, out var failure);
+
+        resolved.Should().BeFalse();
+        money.Should().Be(default(Money));
+        failure.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void A_quote_that_is_only_the_leading_digits_of_a_larger_number_fails()
+    {
+        var resolved = QuotedAmount.TryResolve("кофе 1500 рсд", "1", "RSD", out var money, out var failure);
+
+        resolved.Should().BeFalse();
+        money.Should().Be(default(Money));
+        failure.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void A_quote_that_is_a_fragment_of_a_hyphenated_date_fails()
+    {
+        var resolved = QuotedAmount.TryResolve("оплата 2026-09-21 300", "2026", "RSD", out var money, out var failure);
+
+        resolved.Should().BeFalse();
+        money.Should().Be(default(Money));
+        failure.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void A_quote_with_two_separators_of_the_same_kind_is_not_a_single_well_formed_number()
+    {
+        var resolved = QuotedAmount.TryResolve("заметка 1.2.3 конец", "1.2.3", "RSD", out var money, out var failure);
+
+        resolved.Should().BeFalse();
+        money.Should().Be(default(Money));
+        failure.Should().NotBeEmpty();
+    }
 }

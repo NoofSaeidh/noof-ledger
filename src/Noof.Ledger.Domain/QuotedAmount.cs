@@ -36,9 +36,21 @@ public static class QuotedAmount
             return false;
         }
 
-        // Verbatim check against the quote exactly as given -- before any normalisation. This
-        // is the entire safety property this type exists to enforce; see the test file's trap.
-        if (string.IsNullOrEmpty(rawText) || !rawText.Contains(amountQuote, StringComparison.Ordinal))
+        // Verbatim AND boundary check against the quote exactly as given -- before any
+        // normalisation. This is the entire safety property this type exists to enforce; see the
+        // test file's trap. rawText.Contains alone blocks a figure the model invented, but not one
+        // it mis-bounded: "500" is a true substring of "1500", so a naive Contains would let the
+        // model claim a quote of "500" against raw text that actually says 1500. A boundary is
+        // therefore required on both sides of a matching occurrence: a digit obviously continues
+        // the same number, and so do '.' and ',' (the two characters this parser itself treats as
+        // separators -- a quote flanked by either might really be a longer number with the digits
+        // on the other side of that separator left out) and '-' (a quote flanked by it might really
+        // be one segment of a hyphenated date, e.g. "2026" in "2026-09-21"). Any other character,
+        // including whitespace and the start/end of the string, is a genuine boundary. Because a
+        // quote can legitimately occur more than once (see
+        // A_quote_repeated_in_the_raw_text_still_resolves), this accepts if ANY occurrence has valid
+        // boundaries on both sides, not only the first.
+        if (string.IsNullOrEmpty(rawText) || !OccursAsWholeNumber(rawText, amountQuote))
         {
             failure = $"Quote \"{amountQuote}\" does not occur verbatim in the raw text.";
             return false;
@@ -74,6 +86,18 @@ public static class QuotedAmount
         if (!candidate.All(c => char.IsAsciiDigit(c) || c is '.' or ','))
         {
             failure = $"Amount quote \"{quote}\" is not a plain number.";
+            return false;
+        }
+
+        // A single well-formed number has at most one decimal point and, per the separator rule
+        // below, at most one grouping mark -- this parser only ever treats ONE occurrence of '.'
+        // and ONE occurrence of ',' as meaningful (whichever is rightmost becomes the decimal
+        // point when both are present). Two dots with no comma, as in "1.2.3", has no unambiguous
+        // reading: the old code silently kept only the last dot as decimal and discarded the
+        // first, inventing "12.3" out of a quote that was never a single number to begin with.
+        if (candidate.Count(c => c == '.') > 1 || candidate.Count(c => c == ',') > 1)
+        {
+            failure = $"Amount quote \"{quote}\" is not a single well-formed number.";
             return false;
         }
 
@@ -118,6 +142,26 @@ public static class QuotedAmount
 
         failure = string.Empty;
         return true;
+    }
+
+    static bool IsNumberBoundaryChar(char c) => char.IsAsciiDigit(c) || c is '.' or ',' or '-';
+
+    static bool OccursAsWholeNumber(string rawText, string quote)
+    {
+        var searchFrom = 0;
+        while (true)
+        {
+            var index = rawText.IndexOf(quote, searchFrom, StringComparison.Ordinal);
+            if (index < 0)
+                return false;
+
+            var before = index == 0 || !IsNumberBoundaryChar(rawText[index - 1]);
+            var after = index + quote.Length == rawText.Length || !IsNumberBoundaryChar(rawText[index + quote.Length]);
+            if (before && after)
+                return true;
+
+            searchFrom = index + 1;
+        }
     }
 
     static bool TryParseCurrency(string? code, out CurrencyCode currency, out string failure)
