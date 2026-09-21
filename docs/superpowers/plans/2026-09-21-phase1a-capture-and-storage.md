@@ -4121,12 +4121,28 @@ git commit -m "feat(capture): EfCaptureStore writes the transaction and its job 
 - Modify: `tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj`
 - Create: `tests/Noof.Ledger.Persistence.Tests/EfJobQueueTests.cs`
 - Create: `src/Noof.Ledger.Application/Jobs/IJobQueue.cs`
+- Create: `src/Noof.Ledger.Application/Jobs/JobCompletionOutcome.cs`
 - Create: `src/Noof.Ledger.Persistence/Jobs/EfJobQueue.cs`
 
 **Interfaces:**
-- Creates, because nothing earlier in this plan does: `IJobQueue` in `Noof.Ledger.Application.Jobs`, with the exact five members below. The file-structure table lists it, but no task delivered it — verified by `grep -rn "IJobQueue"` returning nothing before this task. Its shape is fully dictated by the `EfJobQueue` implementation given here, so no design judgement is involved.
+- Creates, because nothing earlier in this plan does: `IJobQueue` in `Noof.Ledger.Application.Jobs`, with the exact five members below, and the `JobCompletionOutcome` enum (`Applied`, `NotOwned`) its three completion members return. The file-structure table lists `IJobQueue`, but no task delivered it — verified by `grep -rn "IJobQueue"` returning nothing before this task. Its shape is fully dictated by the `EfJobQueue` implementation given here, so no design judgement is involved.
 - Consumes (in place from earlier tasks in this plan — the Domain model and Application ports for the capture path, and the Persistence configuration + migration for it): `IJobQueue` in `Noof.Ledger.Application.Jobs` with the exact five members below; `CategorizationJob` and `JobStatus` in `Noof.Ledger.Domain`; `LedgerDbContext.CategorizationJobs` (a `DbSet<CategorizationJob>`) mapped, following the same style as `AppUserConfiguration`, to table `categorization_jobs` with snake_case columns `id, transaction_id, status, attempt_count, run_after, claimed_at, claimed_by, last_error, created_at, updated_at`, already migrated.
-- Produces: `EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, int maxAttempts) : IJobQueue` in namespace `Noof.Ledger.Persistence.Jobs`. **Not wired into DI anywhere** — `Program.cs` and `UserCommand.cs` are untouched by this task, the same way `EfUserStore`'s own task (Task 8, phase0b) left its DI registration to a later host-wiring task. Whoever builds the worker that calls this queue also reads `Jobs:MaxAttempts` from configuration and passes it into the constructor.
+- Produces: `EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, int maxAttempts) : IJobQueue` in namespace `Noof.Ledger.Persistence.Jobs`. **Not wired into DI anywhere** — `Program.cs` and `UserCommand.cs` are untouched by this task, the same way `EfUserStore`'s own task (Task 8, phase0b) left its DI registration to a later host-wiring task. Whoever builds the worker that calls this queue also reads `Jobs:MaxAttempts` from configuration and passes it into the constructor, and must pass its own stable `workerId` into every completion call — see the closing-review callout under Step 4 below for why.
+
+**`IJobQueue`'s exact five members, closing-review shape (write it this way from the start, not the narrower shape that appears further down this task's own draft text):**
+
+```csharp
+public interface IJobQueue
+{
+    Task<CategorizationJob?> ClaimAsync(string workerId, TimeSpan lease, CancellationToken cancellationToken);
+    Task<JobCompletionOutcome> SucceedAsync(Guid jobId, string workerId, CancellationToken cancellationToken);
+    Task<JobCompletionOutcome> RetryAsync(Guid jobId, string workerId, DateTimeOffset runAfter, string error, CancellationToken cancellationToken);
+    Task<JobCompletionOutcome> FailAsync(Guid jobId, string workerId, string error, CancellationToken cancellationToken);
+    Task<int> ReleaseExpiredLeasesAsync(DateTimeOffset now, CancellationToken cancellationToken);
+}
+```
+
+`SucceedAsync`, `RetryAsync` and `FailAsync` all take the calling worker's id and report whether their update actually applied — see the closing-review callout after `EfJobQueue`'s listing below for why an unfenced three-argument version of these verbs is a real bug, not a hypothetical one.
 
 > **If your repo doesn't have `categorization_jobs` under that exact name when you reach this task**, an earlier task named it differently. That is not a reason to redesign anything here — every SQL string in `EfJobQueue.cs` below is a self-contained literal; find-and-replace the table/column names in those five strings and everything else in this task is unaffected. The very first test you run (Step 3) will fail loudly with `relation "categorization_jobs" does not exist` if this is the case, so you cannot silently get it wrong.
 
@@ -4278,11 +4294,75 @@ public class EfJobQueueTests(PostgresFixture fixture)
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
 
-        await queue.SucceedAsync(job.Id, TestContext.Current.CancellationToken);
+        var outcome = await queue.SucceedAsync(job.Id, "worker-a", TestContext.Current.CancellationToken);
 
+        outcome.Should().Be(JobCompletionOutcome.Applied);
         var reloaded = await db.CategorizationJobs.AsNoTracking()
             .SingleAsync(j => j.Id == job.Id, TestContext.Current.CancellationToken);
         reloaded.Status.Should().Be(JobStatus.Succeeded);
+    }
+
+    [Fact]
+    public async Task A_stale_workers_late_retry_after_its_lease_was_reclaimed_does_not_resurrect_the_job()
+    {
+        // Reproduces the closing-review interleaving: worker-a claims with a short lease, the clock
+        // advances past it, ReleaseExpiredLeasesAsync hands it to worker-b, worker-b succeeds, and
+        // only then does worker-a's late RetryAsync arrive. Before the ownership guard this UPDATE had
+        // no status/claimed_by check at all and flipped the row straight back to Pending with a
+        // pushed-out run_after even though worker-b had already finished it.
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var queue = new EfJobQueue(db, time, maxAttempts: 8);
+        var job = NewJob(time.GetUtcNow().AddMinutes(-1));
+        db.CategorizationJobs.Add(job);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(1), TestContext.Current.CancellationToken);
+        time.Advance(TimeSpan.FromMinutes(2));
+        var released = await queue.ReleaseExpiredLeasesAsync(time.GetUtcNow(), TestContext.Current.CancellationToken);
+        released.Should().Be(1, "worker-a's one-minute lease is two minutes stale by now");
+        await queue.ClaimAsync("worker-b", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
+        var succeedOutcome = await queue.SucceedAsync(job.Id, "worker-b", TestContext.Current.CancellationToken);
+        succeedOutcome.Should().Be(JobCompletionOutcome.Applied);
+
+        var lateRetryOutcome = await queue.RetryAsync(
+            job.Id, "worker-a", time.GetUtcNow().AddMinutes(1), "worker-a's late failure", TestContext.Current.CancellationToken);
+
+        lateRetryOutcome.Should().Be(JobCompletionOutcome.NotOwned);
+        var reloaded = await db.CategorizationJobs.AsNoTracking()
+            .SingleAsync(j => j.Id == job.Id, TestContext.Current.CancellationToken);
+        reloaded.Status.Should().Be(JobStatus.Succeeded, "worker-b's completion must survive worker-a's late retry");
+        reloaded.ClaimedBy.Should().Be("worker-b");
+        reloaded.LastError.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_stale_workers_late_fail_after_its_lease_was_reclaimed_does_not_override_the_new_owner()
+    {
+        // The FailAsync variant of the same defect: a released job's new claim must not be knocked
+        // straight to Failed by the original worker's late failure report.
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var queue = new EfJobQueue(db, time, maxAttempts: 8);
+        var job = NewJob(time.GetUtcNow().AddMinutes(-1));
+        db.CategorizationJobs.Add(job);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(1), TestContext.Current.CancellationToken);
+        time.Advance(TimeSpan.FromMinutes(2));
+        await queue.ReleaseExpiredLeasesAsync(time.GetUtcNow(), TestContext.Current.CancellationToken);
+        await queue.ClaimAsync("worker-b", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
+
+        var outcome = await queue.FailAsync(job.Id, "worker-a", "worker-a's late failure", TestContext.Current.CancellationToken);
+
+        outcome.Should().Be(JobCompletionOutcome.NotOwned);
+        var reloaded = await db.CategorizationJobs.AsNoTracking()
+            .SingleAsync(j => j.Id == job.Id, TestContext.Current.CancellationToken);
+        reloaded.Status.Should().Be(JobStatus.Claimed, "worker-b still owns this job; worker-a's late fail must not touch it");
+        reloaded.ClaimedBy.Should().Be("worker-b");
+        reloaded.LastError.Should().BeNull();
     }
 
     [Fact]
@@ -4298,8 +4378,9 @@ public class EfJobQueueTests(PostgresFixture fixture)
         await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
         var nextRunAfter = time.GetUtcNow().AddMinutes(1);
 
-        await queue.RetryAsync(job.Id, nextRunAfter, "boom", TestContext.Current.CancellationToken);
+        var outcome = await queue.RetryAsync(job.Id, "worker-a", nextRunAfter, "boom", TestContext.Current.CancellationToken);
 
+        outcome.Should().Be(JobCompletionOutcome.Applied);
         var reloaded = await db.CategorizationJobs.AsNoTracking()
             .SingleAsync(j => j.Id == job.Id, TestContext.Current.CancellationToken);
         reloaded.Status.Should().Be(JobStatus.Pending, "attempt 1 of a 2-attempt cap still has a retry left");
@@ -4320,12 +4401,13 @@ public class EfJobQueueTests(PostgresFixture fixture)
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
-        await queue.RetryAsync(job.Id, time.GetUtcNow().AddMinutes(1), "first failure", TestContext.Current.CancellationToken);
+        await queue.RetryAsync(job.Id, "worker-a", time.GetUtcNow().AddMinutes(1), "first failure", TestContext.Current.CancellationToken);
         time.Advance(TimeSpan.FromMinutes(2));
         await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
 
-        await queue.RetryAsync(job.Id, time.GetUtcNow().AddMinutes(1), "second failure", TestContext.Current.CancellationToken);
+        var outcome = await queue.RetryAsync(job.Id, "worker-a", time.GetUtcNow().AddMinutes(1), "second failure", TestContext.Current.CancellationToken);
 
+        outcome.Should().Be(JobCompletionOutcome.Applied);
         var reloaded = await db.CategorizationJobs.AsNoTracking()
             .SingleAsync(j => j.Id == job.Id, TestContext.Current.CancellationToken);
         reloaded.Status.Should().Be(JobStatus.Failed, "attempt 2 of a 2-attempt cap has no retries left");
@@ -4334,7 +4416,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
     }
 
     [Fact]
-    public async Task Failing_a_job_marks_it_failed_unconditionally()
+    public async Task Failing_a_job_this_worker_owns_marks_it_failed()
     {
         await using var db = await fixture.CreateContextAsync();
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
@@ -4345,8 +4427,9 @@ public class EfJobQueueTests(PostgresFixture fixture)
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
 
-        await queue.FailAsync(job.Id, "not a transaction", TestContext.Current.CancellationToken);
+        var outcome = await queue.FailAsync(job.Id, "worker-a", "not a transaction", TestContext.Current.CancellationToken);
 
+        outcome.Should().Be(JobCompletionOutcome.Applied);
         var reloaded = await db.CategorizationJobs.AsNoTracking()
             .SingleAsync(j => j.Id == job.Id, TestContext.Current.CancellationToken);
         reloaded.Status.Should().Be(JobStatus.Failed);
@@ -4446,14 +4529,23 @@ public sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, in
         return claimed.SingleOrDefault();
     }
 
-    public Task SucceedAsync(Guid jobId, CancellationToken cancellationToken) =>
-        db.Database.ExecuteSqlRawAsync(
-            "UPDATE categorization_job SET status = 2, updated_at = @now WHERE id = @jobId",
-            [new NpgsqlParameter("now", timeProvider.GetUtcNow()), new NpgsqlParameter("jobId", jobId)],
+    public async Task<JobCompletionOutcome> SucceedAsync(Guid jobId, string workerId, CancellationToken cancellationToken)
+    {
+        var rows = await db.Database.ExecuteSqlRawAsync(
+            "UPDATE categorization_job SET status = 2, updated_at = @now WHERE id = @jobId AND claimed_by = @workerId AND status = 1",
+            [
+                new NpgsqlParameter("now", timeProvider.GetUtcNow()),
+                new NpgsqlParameter("jobId", jobId),
+                new NpgsqlParameter("workerId", workerId),
+            ],
             cancellationToken);
 
-    public Task RetryAsync(Guid jobId, DateTimeOffset runAfter, string error, CancellationToken cancellationToken) =>
-        db.Database.ExecuteSqlRawAsync(
+        return ToOutcome(rows);
+    }
+
+    public async Task<JobCompletionOutcome> RetryAsync(Guid jobId, string workerId, DateTimeOffset runAfter, string error, CancellationToken cancellationToken)
+    {
+        var rows = await db.Database.ExecuteSqlRawAsync(
             """
             UPDATE categorization_job
             SET status = CASE WHEN attempt_count >= @maxAttempts THEN 3 ELSE 0 END,
@@ -4462,7 +4554,7 @@ public sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, in
                 claimed_by = NULL,
                 last_error = @error,
                 updated_at = @now
-            WHERE id = @jobId
+            WHERE id = @jobId AND claimed_by = @workerId AND status = 1
             """,
             [
                 new NpgsqlParameter("maxAttempts", maxAttempts),
@@ -4470,14 +4562,30 @@ public sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, in
                 new NpgsqlParameter("error", error),
                 new NpgsqlParameter("now", timeProvider.GetUtcNow()),
                 new NpgsqlParameter("jobId", jobId),
+                new NpgsqlParameter("workerId", workerId),
             ],
             cancellationToken);
 
-    public Task FailAsync(Guid jobId, string error, CancellationToken cancellationToken) =>
-        db.Database.ExecuteSqlRawAsync(
-            "UPDATE categorization_job SET status = 3, last_error = @error, updated_at = @now WHERE id = @jobId",
-            [new NpgsqlParameter("error", error), new NpgsqlParameter("now", timeProvider.GetUtcNow()), new NpgsqlParameter("jobId", jobId)],
+        return ToOutcome(rows);
+    }
+
+    public async Task<JobCompletionOutcome> FailAsync(Guid jobId, string workerId, string error, CancellationToken cancellationToken)
+    {
+        var rows = await db.Database.ExecuteSqlRawAsync(
+            "UPDATE categorization_job SET status = 3, last_error = @error, updated_at = @now WHERE id = @jobId AND claimed_by = @workerId AND status = 1",
+            [
+                new NpgsqlParameter("error", error),
+                new NpgsqlParameter("now", timeProvider.GetUtcNow()),
+                new NpgsqlParameter("jobId", jobId),
+                new NpgsqlParameter("workerId", workerId),
+            ],
             cancellationToken);
+
+        return ToOutcome(rows);
+    }
+
+    static JobCompletionOutcome ToOutcome(int rowsAffected) =>
+        rowsAffected > 0 ? JobCompletionOutcome.Applied : JobCompletionOutcome.NotOwned;
 
     public Task<int> ReleaseExpiredLeasesAsync(DateTimeOffset now, CancellationToken cancellationToken) =>
         db.Database.ExecuteSqlRawAsync(
@@ -4486,6 +4594,8 @@ public sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, in
             cancellationToken);
 }
 ```
+
+> **Closing-review fix (2026-09-21): completion is fenced by ownership, not just by id.** As originally drafted above, `SucceedAsync`/`RetryAsync`/`FailAsync` were `UPDATE ... WHERE id = @jobId` with no guard on `status` or `claimed_by`, and the interface didn't even accept a `workerId`. A reviewer proved this resurrects finished work on real PostgreSQL: worker A claims with a one-minute lease, the clock advances two minutes, `ReleaseExpiredLeasesAsync` hands the job to worker B, worker B calls `SucceedAsync` and the job is `Succeeded` — then worker A's late `RetryAsync` (or `FailAsync`) arrives and mutates the row anyway, because nothing ever checked that A still owned it. All three verbs now add `AND claimed_by = @workerId AND status = 1` to their `WHERE` clause and return a new `JobCompletionOutcome` (`Applied` or `NotOwned`) computed from `ExecuteSqlRawAsync`'s own rows-affected count, so a caller whose update touched zero rows gets a value it can act on and log instead of a silent no-op. `IJobQueue`'s three completion members gained a `workerId` parameter and a `Task<JobCompletionOutcome>` return type as part of this fix — write the interface with that shape from Step 1 rather than the two-member-narrower version elsewhere in this task's earlier draft text. Proven by three new facts in `EfJobQueueTests.cs`: `A_stale_workers_late_retry_after_its_lease_was_reclaimed_does_not_resurrect_the_job`, `A_stale_workers_late_fail_after_its_lease_was_reclaimed_does_not_override_the_new_owner`, and `Succeeding_a_job_this_worker_no_longer_owns_is_reported_as_not_owned_and_leaves_the_row_alone` — each fails with `Expected outcome to be JobCompletionOutcome.NotOwned, but found JobCompletionOutcome.Applied` when the `WHERE` clause is reverted to `id = @jobId` alone, confirmed by actually reverting and rerunning against real Postgres, not by inspection.
 
 > **Postgres clause order matters here.** `FOR UPDATE SKIP LOCKED` must come *after* `LIMIT`, not before — `SELECT ... FOR UPDATE SKIP LOCKED LIMIT 1` is a syntax error. This is exactly backwards from how people say it out loud ("grab one, locking, skip what's taken"), which is the easy way to get it wrong from memory.
 
@@ -4496,14 +4606,14 @@ public sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, in
 - [ ] **Step 5: Run the tests**
 
 Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj`
-Expected: all green, including the 8 new `EfJobQueueTests` facts. The concurrency test (`Concurrent_claims_against_one_pending_job_...`) should complete in well under the 5-second guard — if it takes close to 5 seconds, that's `Task.WhenAny` hitting the `Task.Delay` branch, meaning `SKIP LOCKED` isn't doing its job; go back to Step 4 before moving on.
+Expected: all green, including the 11 `EfJobQueueTests` facts (8 original plus the 3 closing-review ownership-fencing facts added under Step 4's callout). The concurrency test (`Concurrent_claims_against_one_pending_job_...`) should complete in well under the 5-second guard — if it takes close to 5 seconds, that's `Task.WhenAny` hitting the `Task.Delay` branch, meaning `SKIP LOCKED` isn't doing its job; go back to Step 4 before moving on.
 
 Then run the full suite once to confirm nothing else broke: `dotnet test --solution NoofLedger.slnx`
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Directory.Packages.props tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj tests/Noof.Ledger.Persistence.Tests/EfJobQueueTests.cs src/Noof.Ledger.Persistence/Jobs/EfJobQueue.cs
+git add Directory.Packages.props tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj tests/Noof.Ledger.Persistence.Tests/EfJobQueueTests.cs src/Noof.Ledger.Application/Jobs/IJobQueue.cs src/Noof.Ledger.Application/Jobs/JobCompletionOutcome.cs src/Noof.Ledger.Persistence/Jobs/EfJobQueue.cs
 git commit -m "feat(persistence): EfJobQueue with SKIP LOCKED claiming and an attempt-capped retry"
 ```
 ### Task 8: Telegram — the poller, the owner allowlist, and the reply

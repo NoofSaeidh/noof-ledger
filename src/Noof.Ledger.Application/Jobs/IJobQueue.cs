@@ -10,13 +10,17 @@ public interface IJobQueue
     // when nothing is pending and due.
     Task<CategorizationJob?> ClaimAsync(string workerId, TimeSpan lease, CancellationToken cancellationToken);
 
-    Task SucceedAsync(Guid jobId, CancellationToken cancellationToken);
+    // Every completion verb below only affects a job that is still Claimed by this exact workerId -
+    // claimed_by and status both participate in the WHERE clause. A worker whose lease was released
+    // and reclaimed by someone else gets JobCompletionOutcome.NotOwned instead of silently mutating
+    // whatever the new owner has already done to the row; the caller must log that and stop, not retry.
+    Task<JobCompletionOutcome> SucceedAsync(Guid jobId, string workerId, CancellationToken cancellationToken);
 
     // Returns the job to Pending at runAfter, unless the job is already at the attempt cap,
     // in which case it goes straight to Failed instead and runAfter is ignored.
-    Task RetryAsync(Guid jobId, DateTimeOffset runAfter, string error, CancellationToken cancellationToken);
+    Task<JobCompletionOutcome> RetryAsync(Guid jobId, string workerId, DateTimeOffset runAfter, string error, CancellationToken cancellationToken);
 
-    Task FailAsync(Guid jobId, string error, CancellationToken cancellationToken);
+    Task<JobCompletionOutcome> FailAsync(Guid jobId, string workerId, string error, CancellationToken cancellationToken);
 
     // Returns claimed jobs whose lease (RunAfter) has passed to Pending. Intended to run on
     // every poll tick, never as a startup sweep - a startup sweep would steal live work from

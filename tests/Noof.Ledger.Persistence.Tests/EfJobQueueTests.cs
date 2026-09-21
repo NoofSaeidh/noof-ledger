@@ -1,6 +1,7 @@
 using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
+using Noof.Ledger.Application.Jobs;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Jobs;
 
@@ -142,11 +143,104 @@ public class EfJobQueueTests(PostgresFixture fixture)
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
 
-        await queue.SucceedAsync(job.Id, TestContext.Current.CancellationToken);
+        var outcome = await queue.SucceedAsync(job.Id, "worker-a", TestContext.Current.CancellationToken);
 
+        outcome.Should().Be(JobCompletionOutcome.Applied);
         var reloaded = await db.CategorizationJobs.AsNoTracking()
             .SingleAsync(j => j.Id == job.Id, TestContext.Current.CancellationToken);
         reloaded.Status.Should().Be(JobStatus.Succeeded);
+    }
+
+    [Fact]
+    public async Task Succeeding_a_job_this_worker_no_longer_owns_is_reported_as_not_owned_and_leaves_the_row_alone()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var queue = new EfJobQueue(db, time, maxAttempts: 8);
+        var transactionId = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
+        var job = NewJob(transactionId, time.GetUtcNow().AddMinutes(-1));
+        db.CategorizationJobs.Add(job);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(1), TestContext.Current.CancellationToken);
+        time.Advance(TimeSpan.FromMinutes(2));
+        await queue.ReleaseExpiredLeasesAsync(time.GetUtcNow(), TestContext.Current.CancellationToken);
+        await queue.ClaimAsync("worker-b", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
+
+        var outcome = await queue.SucceedAsync(job.Id, "worker-a", TestContext.Current.CancellationToken);
+
+        outcome.Should().Be(JobCompletionOutcome.NotOwned,
+            "worker-a's lease already expired and was reclaimed by worker-b before this call arrived");
+        var reloaded = await db.CategorizationJobs.AsNoTracking()
+            .SingleAsync(j => j.Id == job.Id, TestContext.Current.CancellationToken);
+        reloaded.Status.Should().Be(JobStatus.Claimed, "worker-a's stale success must not touch worker-b's claim");
+        reloaded.ClaimedBy.Should().Be("worker-b");
+    }
+
+    [Fact]
+    public async Task A_stale_workers_late_retry_after_its_lease_was_reclaimed_does_not_resurrect_the_job()
+    {
+        // Reproduces the reviewer's interleaving: worker-a claims with a short lease, the clock
+        // advances past it, ReleaseExpiredLeasesAsync hands it to worker-b, worker-b succeeds, and
+        // only then does worker-a's late RetryAsync arrive. Before this fix that UPDATE had no
+        // ownership guard at all and would flip the row straight back to Pending with a pushed-out
+        // run_after even though worker-b had already finished it - a third worker would then claim
+        // and redo work that already succeeded.
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var queue = new EfJobQueue(db, time, maxAttempts: 8);
+        var transactionId = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
+        var job = NewJob(transactionId, time.GetUtcNow().AddMinutes(-1));
+        db.CategorizationJobs.Add(job);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(1), TestContext.Current.CancellationToken);
+        time.Advance(TimeSpan.FromMinutes(2));
+        var released = await queue.ReleaseExpiredLeasesAsync(time.GetUtcNow(), TestContext.Current.CancellationToken);
+        released.Should().Be(1, "worker-a's one-minute lease is two minutes stale by now");
+        await queue.ClaimAsync("worker-b", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
+        var succeedOutcome = await queue.SucceedAsync(job.Id, "worker-b", TestContext.Current.CancellationToken);
+        succeedOutcome.Should().Be(JobCompletionOutcome.Applied);
+
+        var lateRetryOutcome = await queue.RetryAsync(
+            job.Id, "worker-a", time.GetUtcNow().AddMinutes(1), "worker-a's late failure", TestContext.Current.CancellationToken);
+
+        lateRetryOutcome.Should().Be(JobCompletionOutcome.NotOwned);
+        var reloaded = await db.CategorizationJobs.AsNoTracking()
+            .SingleAsync(j => j.Id == job.Id, TestContext.Current.CancellationToken);
+        reloaded.Status.Should().Be(JobStatus.Succeeded, "worker-b's completion must survive worker-a's late retry");
+        reloaded.ClaimedBy.Should().Be("worker-b");
+        reloaded.LastError.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_stale_workers_late_fail_after_its_lease_was_reclaimed_does_not_override_the_new_owner()
+    {
+        // The FailAsync variant the reviewer called out: a released job's new claim must not be
+        // knocked straight to Failed by the original worker's late failure report.
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var queue = new EfJobQueue(db, time, maxAttempts: 8);
+        var transactionId = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
+        var job = NewJob(transactionId, time.GetUtcNow().AddMinutes(-1));
+        db.CategorizationJobs.Add(job);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(1), TestContext.Current.CancellationToken);
+        time.Advance(TimeSpan.FromMinutes(2));
+        await queue.ReleaseExpiredLeasesAsync(time.GetUtcNow(), TestContext.Current.CancellationToken);
+        await queue.ClaimAsync("worker-b", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
+
+        var outcome = await queue.FailAsync(job.Id, "worker-a", "worker-a's late failure", TestContext.Current.CancellationToken);
+
+        outcome.Should().Be(JobCompletionOutcome.NotOwned);
+        var reloaded = await db.CategorizationJobs.AsNoTracking()
+            .SingleAsync(j => j.Id == job.Id, TestContext.Current.CancellationToken);
+        reloaded.Status.Should().Be(JobStatus.Claimed, "worker-b still owns this job; worker-a's late fail must not touch it");
+        reloaded.ClaimedBy.Should().Be("worker-b");
+        reloaded.LastError.Should().BeNull();
     }
 
     [Fact]
@@ -163,8 +257,9 @@ public class EfJobQueueTests(PostgresFixture fixture)
         await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
         var nextRunAfter = time.GetUtcNow().AddMinutes(1);
 
-        await queue.RetryAsync(job.Id, nextRunAfter, "boom", TestContext.Current.CancellationToken);
+        var outcome = await queue.RetryAsync(job.Id, "worker-a", nextRunAfter, "boom", TestContext.Current.CancellationToken);
 
+        outcome.Should().Be(JobCompletionOutcome.Applied);
         var reloaded = await db.CategorizationJobs.AsNoTracking()
             .SingleAsync(j => j.Id == job.Id, TestContext.Current.CancellationToken);
         reloaded.Status.Should().Be(JobStatus.Pending, "attempt 1 of a 2-attempt cap still has a retry left");
@@ -186,12 +281,13 @@ public class EfJobQueueTests(PostgresFixture fixture)
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
-        await queue.RetryAsync(job.Id, time.GetUtcNow().AddMinutes(1), "first failure", TestContext.Current.CancellationToken);
+        await queue.RetryAsync(job.Id, "worker-a", time.GetUtcNow().AddMinutes(1), "first failure", TestContext.Current.CancellationToken);
         time.Advance(TimeSpan.FromMinutes(2));
         await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
 
-        await queue.RetryAsync(job.Id, time.GetUtcNow().AddMinutes(1), "second failure", TestContext.Current.CancellationToken);
+        var outcome = await queue.RetryAsync(job.Id, "worker-a", time.GetUtcNow().AddMinutes(1), "second failure", TestContext.Current.CancellationToken);
 
+        outcome.Should().Be(JobCompletionOutcome.Applied);
         var reloaded = await db.CategorizationJobs.AsNoTracking()
             .SingleAsync(j => j.Id == job.Id, TestContext.Current.CancellationToken);
         reloaded.Status.Should().Be(JobStatus.Failed, "attempt 2 of a 2-attempt cap has no retries left");
@@ -200,7 +296,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
     }
 
     [Fact]
-    public async Task Failing_a_job_marks_it_failed_unconditionally()
+    public async Task Failing_a_job_this_worker_owns_marks_it_failed()
     {
         await using var db = await fixture.CreateContextAsync();
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
@@ -212,8 +308,9 @@ public class EfJobQueueTests(PostgresFixture fixture)
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
 
-        await queue.FailAsync(job.Id, "not a transaction", TestContext.Current.CancellationToken);
+        var outcome = await queue.FailAsync(job.Id, "worker-a", "not a transaction", TestContext.Current.CancellationToken);
 
+        outcome.Should().Be(JobCompletionOutcome.Applied);
         var reloaded = await db.CategorizationJobs.AsNoTracking()
             .SingleAsync(j => j.Id == job.Id, TestContext.Current.CancellationToken);
         reloaded.Status.Should().Be(JobStatus.Failed);
