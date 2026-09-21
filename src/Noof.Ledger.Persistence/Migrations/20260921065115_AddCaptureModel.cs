@@ -11,6 +11,51 @@ namespace Noof.Ledger.Persistence.Migrations;
 /// <inheritdoc />
 public partial class AddCaptureModel : Migration
 {
+    // These rows are starting data the operator owns (renames, re-parents — see P1-1), not reference
+    // data EF owns. HasData/InsertData would make them part of the model snapshot, so a later
+    // migration that merely touches an unrelated seed value would regenerate UpdateData/DeleteData
+    // for ALL of them — silently overwriting an operator rename, or failing to boot against the
+    // Restrict FK from line_items.category_id / categories.parent_id. Raw SQL keeps the model
+    // ignorant of these rows entirely; ON CONFLICT (id) DO NOTHING makes re-running this migration's
+    // Up() safe against a database that already has them (id is the row's real identity here — a
+    // fixed, hand-assigned GUID — and its uniqueness exists from CREATE TABLE, unlike the slug unique
+    // index which this same migration creates later).
+    internal const string SeedTopLevelCategoriesSql = """
+        INSERT INTO public.categories (id, is_active, name_en, name_ru, parent_id, slug) VALUES
+            ('00000000-0000-0000-0001-000000000001', TRUE, 'Groceries', 'Продукты', NULL, 'groceries'),
+            ('00000000-0000-0000-0001-000000000002', TRUE, 'Food & Drink', 'Еда и напитки', NULL, 'food-drink'),
+            ('00000000-0000-0000-0001-000000000003', TRUE, 'Transport', 'Транспорт', NULL, 'transport'),
+            ('00000000-0000-0000-0001-000000000004', TRUE, 'Housing', 'Жильё', NULL, 'housing'),
+            ('00000000-0000-0000-0001-000000000005', TRUE, 'Utilities', 'Коммунальные услуги', NULL, 'utilities'),
+            ('00000000-0000-0000-0001-000000000006', TRUE, 'Health', 'Здоровье', NULL, 'health'),
+            ('00000000-0000-0000-0001-000000000007', TRUE, 'Shopping', 'Покупки', NULL, 'shopping'),
+            ('00000000-0000-0000-0001-000000000008', TRUE, 'Entertainment', 'Развлечения', NULL, 'entertainment'),
+            ('00000000-0000-0000-0001-000000000009', TRUE, 'Travel', 'Путешествия', NULL, 'travel'),
+            ('00000000-0000-0000-0001-000000000010', TRUE, 'Education', 'Образование', NULL, 'education'),
+            ('00000000-0000-0000-0001-000000000011', TRUE, 'Subscriptions', 'Подписки', NULL, 'subscriptions'),
+            ('00000000-0000-0000-0001-000000000012', TRUE, 'Gifts & Donations', 'Подарки и пожертвования', NULL, 'gifts-donations'),
+            ('00000000-0000-0000-0001-000000000013', TRUE, 'Fees & Charges', 'Комиссии и сборы', NULL, 'fees-charges'),
+            ('00000000-0000-0000-0001-000000000014', TRUE, 'Personal Care', 'Личная гигиена', NULL, 'personal-care'),
+            ('00000000-0000-0000-0001-000000000015', TRUE, 'Other', 'Прочее', NULL, 'other')
+        ON CONFLICT (id) DO NOTHING;
+        """;
+
+    internal const string SeedDefaultWalletSql = """
+        INSERT INTO public.wallets (id, currency, is_default, name)
+        VALUES ('00000000-0000-0000-0000-000000000001', 'RSD', TRUE, 'Main Wallet')
+        ON CONFLICT (id) DO NOTHING;
+        """;
+
+    internal const string SeedSubCategoriesSql = """
+        INSERT INTO public.categories (id, is_active, name_en, name_ru, parent_id, slug) VALUES
+            ('00000000-0000-0000-0001-000000000016', TRUE, 'Restaurants', 'Рестораны', '00000000-0000-0000-0001-000000000002', 'restaurants'),
+            ('00000000-0000-0000-0001-000000000017', TRUE, 'Coffee', 'Кофе', '00000000-0000-0000-0001-000000000002', 'coffee'),
+            ('00000000-0000-0000-0001-000000000018', TRUE, 'Fuel', 'Топливо', '00000000-0000-0000-0001-000000000003', 'fuel'),
+            ('00000000-0000-0000-0001-000000000019', TRUE, 'Public Transport', 'Общественный транспорт', '00000000-0000-0000-0001-000000000003', 'public-transport'),
+            ('00000000-0000-0000-0001-000000000020', TRUE, 'Clothing', 'Одежда', '00000000-0000-0000-0001-000000000007', 'clothing')
+        ON CONFLICT (id) DO NOTHING;
+        """;
+
     /// <inheritdoc />
     protected override void Up(MigrationBuilder migrationBuilder)
     {
@@ -207,47 +252,11 @@ public partial class AddCaptureModel : Migration
                     onDelete: ReferentialAction.Cascade);
             });
 
-        migrationBuilder.InsertData(
-            schema: "public",
-            table: "categories",
-            columns: new[] { "id", "is_active", "name_en", "name_ru", "parent_id", "slug" },
-            values: new object[,]
-            {
-                { new Guid("00000000-0000-0000-0001-000000000001"), true, "Groceries", "Продукты", null, "groceries" },
-                { new Guid("00000000-0000-0000-0001-000000000002"), true, "Food & Drink", "Еда и напитки", null, "food-drink" },
-                { new Guid("00000000-0000-0000-0001-000000000003"), true, "Transport", "Транспорт", null, "transport" },
-                { new Guid("00000000-0000-0000-0001-000000000004"), true, "Housing", "Жильё", null, "housing" },
-                { new Guid("00000000-0000-0000-0001-000000000005"), true, "Utilities", "Коммунальные услуги", null, "utilities" },
-                { new Guid("00000000-0000-0000-0001-000000000006"), true, "Health", "Здоровье", null, "health" },
-                { new Guid("00000000-0000-0000-0001-000000000007"), true, "Shopping", "Покупки", null, "shopping" },
-                { new Guid("00000000-0000-0000-0001-000000000008"), true, "Entertainment", "Развлечения", null, "entertainment" },
-                { new Guid("00000000-0000-0000-0001-000000000009"), true, "Travel", "Путешествия", null, "travel" },
-                { new Guid("00000000-0000-0000-0001-000000000010"), true, "Education", "Образование", null, "education" },
-                { new Guid("00000000-0000-0000-0001-000000000011"), true, "Subscriptions", "Подписки", null, "subscriptions" },
-                { new Guid("00000000-0000-0000-0001-000000000012"), true, "Gifts & Donations", "Подарки и пожертвования", null, "gifts-donations" },
-                { new Guid("00000000-0000-0000-0001-000000000013"), true, "Fees & Charges", "Комиссии и сборы", null, "fees-charges" },
-                { new Guid("00000000-0000-0000-0001-000000000014"), true, "Personal Care", "Личная гигиена", null, "personal-care" },
-                { new Guid("00000000-0000-0000-0001-000000000015"), true, "Other", "Прочее", null, "other" }
-            });
+        migrationBuilder.Sql(SeedTopLevelCategoriesSql);
 
-        migrationBuilder.InsertData(
-            schema: "public",
-            table: "wallets",
-            columns: new[] { "id", "currency", "is_default", "name" },
-            values: new object[] { new Guid("00000000-0000-0000-0000-000000000001"), "RSD", true, "Main Wallet" });
+        migrationBuilder.Sql(SeedDefaultWalletSql);
 
-        migrationBuilder.InsertData(
-            schema: "public",
-            table: "categories",
-            columns: new[] { "id", "is_active", "name_en", "name_ru", "parent_id", "slug" },
-            values: new object[,]
-            {
-                { new Guid("00000000-0000-0000-0001-000000000016"), true, "Restaurants", "Рестораны", new Guid("00000000-0000-0000-0001-000000000002"), "restaurants" },
-                { new Guid("00000000-0000-0000-0001-000000000017"), true, "Coffee", "Кофе", new Guid("00000000-0000-0000-0001-000000000002"), "coffee" },
-                { new Guid("00000000-0000-0000-0001-000000000018"), true, "Fuel", "Топливо", new Guid("00000000-0000-0000-0001-000000000003"), "fuel" },
-                { new Guid("00000000-0000-0000-0001-000000000019"), true, "Public Transport", "Общественный транспорт", new Guid("00000000-0000-0000-0001-000000000003"), "public-transport" },
-                { new Guid("00000000-0000-0000-0001-000000000020"), true, "Clothing", "Одежда", new Guid("00000000-0000-0000-0001-000000000007"), "clothing" }
-            });
+        migrationBuilder.Sql(SeedSubCategoriesSql);
 
         migrationBuilder.CreateIndex(
             name: "IX_categories_parent_id",

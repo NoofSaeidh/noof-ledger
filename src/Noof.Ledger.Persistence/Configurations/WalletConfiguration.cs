@@ -22,13 +22,5 @@ internal sealed class WalletConfiguration : IEntityTypeConfiguration<Wallet>
             .HasConversion(c => c.Value, v => new CurrencyCode(v));
 
         builder.Property(w => w.IsDefault).HasColumnName("is_default").IsRequired();
-
-        builder.HasData(new Wallet
-        {
-            Id = Guid.Parse("00000000-0000-0000-0000-000000000001"),
-            Name = "Main Wallet",
-            Currency = CurrencyCode.Rsd,
-            IsDefault = true,
-        });
     }
 }

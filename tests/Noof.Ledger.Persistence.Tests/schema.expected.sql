@@ -101,54 +101,6 @@ CREATE TABLE public.line_items (
 );
 
 
-INSERT INTO public.categories (id, is_active, name_en, name_ru, parent_id, slug)
-VALUES ('00000000-0000-0000-0001-000000000001', TRUE, 'Groceries', 'Продукты', NULL, 'groceries');
-INSERT INTO public.categories (id, is_active, name_en, name_ru, parent_id, slug)
-VALUES ('00000000-0000-0000-0001-000000000002', TRUE, 'Food & Drink', 'Еда и напитки', NULL, 'food-drink');
-INSERT INTO public.categories (id, is_active, name_en, name_ru, parent_id, slug)
-VALUES ('00000000-0000-0000-0001-000000000003', TRUE, 'Transport', 'Транспорт', NULL, 'transport');
-INSERT INTO public.categories (id, is_active, name_en, name_ru, parent_id, slug)
-VALUES ('00000000-0000-0000-0001-000000000004', TRUE, 'Housing', 'Жильё', NULL, 'housing');
-INSERT INTO public.categories (id, is_active, name_en, name_ru, parent_id, slug)
-VALUES ('00000000-0000-0000-0001-000000000005', TRUE, 'Utilities', 'Коммунальные услуги', NULL, 'utilities');
-INSERT INTO public.categories (id, is_active, name_en, name_ru, parent_id, slug)
-VALUES ('00000000-0000-0000-0001-000000000006', TRUE, 'Health', 'Здоровье', NULL, 'health');
-INSERT INTO public.categories (id, is_active, name_en, name_ru, parent_id, slug)
-VALUES ('00000000-0000-0000-0001-000000000007', TRUE, 'Shopping', 'Покупки', NULL, 'shopping');
-INSERT INTO public.categories (id, is_active, name_en, name_ru, parent_id, slug)
-VALUES ('00000000-0000-0000-0001-000000000008', TRUE, 'Entertainment', 'Развлечения', NULL, 'entertainment');
-INSERT INTO public.categories (id, is_active, name_en, name_ru, parent_id, slug)
-VALUES ('00000000-0000-0000-0001-000000000009', TRUE, 'Travel', 'Путешествия', NULL, 'travel');
-INSERT INTO public.categories (id, is_active, name_en, name_ru, parent_id, slug)
-VALUES ('00000000-0000-0000-0001-000000000010', TRUE, 'Education', 'Образование', NULL, 'education');
-INSERT INTO public.categories (id, is_active, name_en, name_ru, parent_id, slug)
-VALUES ('00000000-0000-0000-0001-000000000011', TRUE, 'Subscriptions', 'Подписки', NULL, 'subscriptions');
-INSERT INTO public.categories (id, is_active, name_en, name_ru, parent_id, slug)
-VALUES ('00000000-0000-0000-0001-000000000012', TRUE, 'Gifts & Donations', 'Подарки и пожертвования', NULL, 'gifts-donations');
-INSERT INTO public.categories (id, is_active, name_en, name_ru, parent_id, slug)
-VALUES ('00000000-0000-0000-0001-000000000013', TRUE, 'Fees & Charges', 'Комиссии и сборы', NULL, 'fees-charges');
-INSERT INTO public.categories (id, is_active, name_en, name_ru, parent_id, slug)
-VALUES ('00000000-0000-0000-0001-000000000014', TRUE, 'Personal Care', 'Личная гигиена', NULL, 'personal-care');
-INSERT INTO public.categories (id, is_active, name_en, name_ru, parent_id, slug)
-VALUES ('00000000-0000-0000-0001-000000000015', TRUE, 'Other', 'Прочее', NULL, 'other');
-
-
-INSERT INTO public.wallets (id, currency, is_default, name)
-VALUES ('00000000-0000-0000-0000-000000000001', 'RSD', TRUE, 'Main Wallet');
-
-
-INSERT INTO public.categories (id, is_active, name_en, name_ru, parent_id, slug)
-VALUES ('00000000-0000-0000-0001-000000000016', TRUE, 'Restaurants', 'Рестораны', '00000000-0000-0000-0001-000000000002', 'restaurants');
-INSERT INTO public.categories (id, is_active, name_en, name_ru, parent_id, slug)
-VALUES ('00000000-0000-0000-0001-000000000017', TRUE, 'Coffee', 'Кофе', '00000000-0000-0000-0001-000000000002', 'coffee');
-INSERT INTO public.categories (id, is_active, name_en, name_ru, parent_id, slug)
-VALUES ('00000000-0000-0000-0001-000000000018', TRUE, 'Fuel', 'Топливо', '00000000-0000-0000-0001-000000000003', 'fuel');
-INSERT INTO public.categories (id, is_active, name_en, name_ru, parent_id, slug)
-VALUES ('00000000-0000-0000-0001-000000000019', TRUE, 'Public Transport', 'Общественный транспорт', '00000000-0000-0000-0001-000000000003', 'public-transport');
-INSERT INTO public.categories (id, is_active, name_en, name_ru, parent_id, slug)
-VALUES ('00000000-0000-0000-0001-000000000020', TRUE, 'Clothing', 'Одежда', '00000000-0000-0000-0001-000000000007', 'clothing');
-
-
 CREATE INDEX "IX_categories_parent_id" ON public.categories (parent_id);
 
 

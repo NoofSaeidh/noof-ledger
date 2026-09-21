@@ -1090,14 +1090,6 @@ internal sealed class WalletConfiguration : IEntityTypeConfiguration<Wallet>
             .HasConversion(c => c.Value, v => new CurrencyCode(v));
 
         builder.Property(w => w.IsDefault).HasColumnName("is_default").IsRequired();
-
-        builder.HasData(new Wallet
-        {
-            Id = Guid.Parse("00000000-0000-0000-0000-000000000001"),
-            Name = "Main Wallet",
-            Currency = CurrencyCode.Rsd,
-            IsDefault = true,
-        });
     }
 }
 ```
@@ -1113,27 +1105,6 @@ namespace Noof.Ledger.Persistence.Configurations;
 
 internal sealed class CategoryConfiguration : IEntityTypeConfiguration<Category>
 {
-    static readonly Guid Groceries = Guid.Parse("00000000-0000-0000-0001-000000000001");
-    static readonly Guid FoodDrink = Guid.Parse("00000000-0000-0000-0001-000000000002");
-    static readonly Guid Transport = Guid.Parse("00000000-0000-0000-0001-000000000003");
-    static readonly Guid Housing = Guid.Parse("00000000-0000-0000-0001-000000000004");
-    static readonly Guid Utilities = Guid.Parse("00000000-0000-0000-0001-000000000005");
-    static readonly Guid Health = Guid.Parse("00000000-0000-0000-0001-000000000006");
-    static readonly Guid Shopping = Guid.Parse("00000000-0000-0000-0001-000000000007");
-    static readonly Guid Entertainment = Guid.Parse("00000000-0000-0000-0001-000000000008");
-    static readonly Guid Travel = Guid.Parse("00000000-0000-0000-0001-000000000009");
-    static readonly Guid Education = Guid.Parse("00000000-0000-0000-0001-000000000010");
-    static readonly Guid Subscriptions = Guid.Parse("00000000-0000-0000-0001-000000000011");
-    static readonly Guid GiftsDonations = Guid.Parse("00000000-0000-0000-0001-000000000012");
-    static readonly Guid FeesCharges = Guid.Parse("00000000-0000-0000-0001-000000000013");
-    static readonly Guid PersonalCare = Guid.Parse("00000000-0000-0000-0001-000000000014");
-    static readonly Guid Other = Guid.Parse("00000000-0000-0000-0001-000000000015");
-    static readonly Guid Restaurants = Guid.Parse("00000000-0000-0000-0001-000000000016");
-    static readonly Guid Coffee = Guid.Parse("00000000-0000-0000-0001-000000000017");
-    static readonly Guid Fuel = Guid.Parse("00000000-0000-0000-0001-000000000018");
-    static readonly Guid PublicTransport = Guid.Parse("00000000-0000-0000-0001-000000000019");
-    static readonly Guid Clothing = Guid.Parse("00000000-0000-0000-0001-000000000020");
-
     public void Configure(EntityTypeBuilder<Category> builder)
     {
         builder.ToTable("categories");
@@ -1153,43 +1124,11 @@ internal sealed class CategoryConfiguration : IEntityTypeConfiguration<Category>
             .WithMany()
             .HasForeignKey(c => c.ParentId)
             .OnDelete(DeleteBehavior.Restrict);
-
-        builder.HasData(
-            Seed(Groceries, null, "groceries", "Groceries", "Продукты"),
-            Seed(FoodDrink, null, "food-drink", "Food & Drink", "Еда и напитки"),
-            Seed(Transport, null, "transport", "Transport", "Транспорт"),
-            Seed(Housing, null, "housing", "Housing", "Жильё"),
-            Seed(Utilities, null, "utilities", "Utilities", "Коммунальные услуги"),
-            Seed(Health, null, "health", "Health", "Здоровье"),
-            Seed(Shopping, null, "shopping", "Shopping", "Покупки"),
-            Seed(Entertainment, null, "entertainment", "Entertainment", "Развлечения"),
-            Seed(Travel, null, "travel", "Travel", "Путешествия"),
-            Seed(Education, null, "education", "Education", "Образование"),
-            Seed(Subscriptions, null, "subscriptions", "Subscriptions", "Подписки"),
-            Seed(GiftsDonations, null, "gifts-donations", "Gifts & Donations", "Подарки и пожертвования"),
-            Seed(FeesCharges, null, "fees-charges", "Fees & Charges", "Комиссии и сборы"),
-            Seed(PersonalCare, null, "personal-care", "Personal Care", "Личная гигиена"),
-            Seed(Other, null, "other", "Other", "Прочее"),
-            Seed(Restaurants, FoodDrink, "restaurants", "Restaurants", "Рестораны"),
-            Seed(Coffee, FoodDrink, "coffee", "Coffee", "Кофе"),
-            Seed(Fuel, Transport, "fuel", "Fuel", "Топливо"),
-            Seed(PublicTransport, Transport, "public-transport", "Public Transport", "Общественный транспорт"),
-            Seed(Clothing, Shopping, "clothing", "Clothing", "Одежда"));
     }
-
-    static Category Seed(Guid id, Guid? parentId, string slug, string nameEn, string nameRu) => new()
-    {
-        Id = id,
-        ParentId = parentId,
-        Slug = slug,
-        NameEn = nameEn,
-        NameRu = nameRu,
-        IsActive = true,
-    };
 }
 ```
 
-> **Fixed GUIDs, not `Guid.NewGuid()`.** `HasData` bakes literal values into the migration at generation time. A random GUID here would change every time `migrations add` re-runs against the same model, and a child's `ParentId` must point at a value that is stable across runs. Verified directly against EF Core 10 with a throwaway self-referencing entity: EF genuinely topologically sorts `InsertData` rows by FK dependency when generating the migration — a child declared *and* keyed numerically *before* its parent still comes out after it in the generated `InsertData` call. You do not need to declare parents before children in the `HasData(...)` call above (this list already does, which is good practice regardless, but the ordering below is not what makes the migration safe).
+> **No `HasData` here — deliberately, and this is a correction, not the original design (2026-09-21, closing review).** A first draft of this task seeded the wallet and the twenty categories through `HasData` on both configurations, the way `AppUser`'s absence of seed data left no precedent to warn against it. That draft never shipped past this repo checkout, but it was wrong: P1-1 (`docs/OPEN-QUESTIONS.md`) settles that categories are data the *operator* renames and re-parents, not reference data the *application* owns. `HasData` makes seeded rows part of the EF model snapshot, so every later migration diffs against them — a migration that merely tunes one category's `NameEn` (Phase 1B) would regenerate `UpdateData` for that row and silently overwrite an operator rename on `dotnet ef database update`; a migration that removes a seeded category would emit `DeleteData`, which fails against the `Restrict` foreign keys from `line_items.category_id` and `categories.parent_id` and — with `Database:MigrateOnStartup` defaulting to `true` — stops the application from booting. `HasData`/`InsertData` is for reference data EF owns; this is starting data the operator owns, and the two need different mechanisms. The fix moves the seed into the migration itself as raw, idempotent SQL (`ON CONFLICT (id) DO NOTHING` — see Step 7 below), which keeps the model, and therefore every future migration's diff, permanently ignorant of these twenty-one rows.
 
 Create `src/Noof.Ledger.Persistence/Configurations/MerchantConfiguration.cs`:
 
@@ -1588,12 +1527,95 @@ Expected: everything builds. `LineItemMoneyMappingTests` and `SeedDataTests` sti
 dotnet ef migrations add AddCaptureModel --project src/Noof.Ledger.Persistence --startup-project src/Noof.Ledger.Persistence
 ```
 
-This diffs the current model (seven new entities + seed data, `MoneyProbeEntity` gone) against the last snapshot in one shot, so the generated `Up` contains one `DropTable("money_probe_entities")`, seven `CreateTable`s, the three indexes from Step 3, and `InsertData` calls for the one wallet and twenty categories. **The file will have a block-scoped namespace and fail the build with `IDE0161`.** Convert `namespace Noof.Ledger.Persistence.Migrations { ... }` to the file-scoped `namespace Noof.Ledger.Persistence.Migrations;`, exactly as `InitialCreate.cs` and `AddAppUser.cs` already do. Leave the paired `.Designer.cs` and the regenerated `LedgerDbContextModelSnapshot.cs` untouched — both carry `// <auto-generated />`.
+This diffs the current model (seven new entities, `MoneyProbeEntity` gone — no seed data, since neither `WalletConfiguration` nor `CategoryConfiguration` calls `HasData`, per the callout above) against the last snapshot in one shot, so the generated `Up` contains one `DropTable("money_probe_entities")`, seven `CreateTable`s and the three indexes from Step 3. **The file will have a block-scoped namespace and fail the build with `IDE0161`.** Convert `namespace Noof.Ledger.Persistence.Migrations { ... }` to the file-scoped `namespace Noof.Ledger.Persistence.Migrations;`, exactly as `InitialCreate.cs` and `AddAppUser.cs` already do. Leave the paired `.Designer.cs` and the regenerated `LedgerDbContextModelSnapshot.cs` untouched — both carry `// <auto-generated />`.
+
+Then hand-add the seed the model no longer owns. Inside the `AddCaptureModel` class, above `Up`, add three `internal const string` raw SQL literals — one for the fifteen top-level categories, one for the default wallet, one for the five sub-categories (split this way so the sub-categories' `parent_id` values reference rows already committed by the first statement) — each ending in `ON CONFLICT (id) DO NOTHING`. `id` is the conflict target because these rows carry fixed, hand-assigned GUIDs that already function as their real identity, and — unlike the unique index on `slug`, which this same migration creates later, after the seed — the primary key on `id` exists from `CreateTable`, so no reordering is needed:
+
+```csharp
+    internal const string SeedTopLevelCategoriesSql = """
+        INSERT INTO public.categories (id, is_active, name_en, name_ru, parent_id, slug) VALUES
+            ('00000000-0000-0000-0001-000000000001', TRUE, 'Groceries', 'Продукты', NULL, 'groceries'),
+            -- ...the remaining fourteen top-level categories, same shape...
+            ('00000000-0000-0000-0001-000000000015', TRUE, 'Other', 'Прочее', NULL, 'other')
+        ON CONFLICT (id) DO NOTHING;
+        """;
+
+    internal const string SeedDefaultWalletSql = """
+        INSERT INTO public.wallets (id, currency, is_default, name)
+        VALUES ('00000000-0000-0000-0000-000000000001', 'RSD', TRUE, 'Main Wallet')
+        ON CONFLICT (id) DO NOTHING;
+        """;
+
+    internal const string SeedSubCategoriesSql = """
+        INSERT INTO public.categories (id, is_active, name_en, name_ru, parent_id, slug) VALUES
+            ('00000000-0000-0000-0001-000000000016', TRUE, 'Restaurants', 'Рестораны', '00000000-0000-0000-0001-000000000002', 'restaurants'),
+            -- ...the remaining four sub-categories, same shape...
+            ('00000000-0000-0000-0001-000000000020', TRUE, 'Clothing', 'Одежда', '00000000-0000-0000-0001-000000000007', 'clothing')
+        ON CONFLICT (id) DO NOTHING;
+        """;
+```
+
+In `Up`, right after the `CreateTable("line_items", ...)` call (the model's seven tables must all exist before the sub-categories' foreign key and the seed's own FK checks are satisfied), call `migrationBuilder.Sql(SeedTopLevelCategoriesSql);`, then `migrationBuilder.Sql(SeedDefaultWalletSql);`, then `migrationBuilder.Sql(SeedSubCategoriesSql);` — in that order. `Down` needs no corresponding change: it already drops `categories` and `wallets` wholesale, which removes the seeded rows along with everything else.
+
+These three constants are `internal`, not `private` — add `<InternalsVisibleTo Include="Noof.Ledger.Persistence.Tests" />` to `Noof.Ledger.Persistence.csproj` (a new `<ItemGroup>`, no prior use of `InternalsVisibleTo` exists in this repo) so `SeedDataTests.cs` (Step 8A below) can re-run the exact production SQL — a hand-copied duplicate in the test would drift silently and prove nothing about the actual migration.
 
 - [ ] **Step 8: Run `LineItemMoneyMappingTests` and `SeedDataTests` and watch them go green**
 
 Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj --filter "LineItemMoneyMappingTests|SeedDataTests"`
 Expected: all five tests PASS now that the migration exists to create the tables `fixture.CreateContextAsync()` + `MigrateAsync` need. This closes the red/green loop opened in Step 3/4: red because the table didn't exist, green because it now does and the mapping written in Step 3 is correct.
+
+- [ ] **Step 8A: Add the two tests that prove the seed is idempotent, not just present**
+
+`SeedDataTests` above proves the twenty-one rows exist after one migration. It says nothing about what happens the second time the seed runs — which is the entire reason Step 7 uses raw SQL with `ON CONFLICT (id) DO NOTHING` instead of `HasData`. Add these two `[Fact]`s to `tests/Noof.Ledger.Persistence.Tests/SeedDataTests.cs`, after `Coffee_lands_in_a_seeded_category`:
+
+```csharp
+    [Fact]
+    public async Task Reapplying_the_seed_insert_leaves_the_row_counts_unchanged()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+
+        var categoryCountBefore = await db.Categories.CountAsync(TestContext.Current.CancellationToken);
+
+        var act = async () =>
+        {
+            await db.Database.ExecuteSqlRawAsync(AddCaptureModel.SeedTopLevelCategoriesSql, TestContext.Current.CancellationToken);
+            await db.Database.ExecuteSqlRawAsync(AddCaptureModel.SeedDefaultWalletSql, TestContext.Current.CancellationToken);
+            await db.Database.ExecuteSqlRawAsync(AddCaptureModel.SeedSubCategoriesSql, TestContext.Current.CancellationToken);
+        };
+
+        await act.Should().NotThrowAsync("the seed insert must be safe to run against a database that already has these rows");
+
+        (await db.Categories.CountAsync(TestContext.Current.CancellationToken)).Should().Be(categoryCountBefore);
+        (await db.Wallets.CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task An_operators_rename_survives_the_seed_insert_running_again()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+
+        var coffee = await db.Categories.SingleAsync(c => c.Slug == "coffee", TestContext.Current.CancellationToken);
+        coffee.NameEn = "Espresso Bar";
+        coffee.NameRu = "Эспрессо-бар";
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await db.Database.ExecuteSqlRawAsync(AddCaptureModel.SeedSubCategoriesSql, TestContext.Current.CancellationToken);
+
+        var reloaded = await db.Categories.AsNoTracking()
+            .SingleAsync(c => c.Slug == "coffee", TestContext.Current.CancellationToken);
+
+        reloaded.NameEn.Should().Be("Espresso Bar",
+            "the migration mechanism running again must not overwrite an operator's rename");
+        reloaded.NameRu.Should().Be("Эспрессо-бар",
+            "the migration mechanism running again must not overwrite an operator's rename");
+    }
+```
+
+Add `using Noof.Ledger.Persistence.Migrations;` to the file's usings. Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj --filter "SeedDataTests"` — expected: all five tests PASS, because Step 7 already wrote the migration with `ON CONFLICT (id) DO NOTHING`.
+
+> **Why the reload uses `AsNoTracking()`, and what proves this test is real.** `coffee` is still in the change tracker from the `SaveChangesAsync` a few lines above; querying `db.Categories.SingleAsync(...)` again without `AsNoTracking()` would return that same tracked instance from EF's identity map regardless of what the reapplied SQL did to the row in Postgres — a tautology, not a round trip. And the discriminating power is in the `ON CONFLICT` clause specifically, not merely in "some raw SQL": verified directly against this exact test by temporarily changing `SeedSubCategoriesSql`'s conflict clause from `DO NOTHING` to `DO UPDATE SET name_en = excluded.name_en, name_ru = excluded.name_ru` (the shape a `HasData`-sourced `UpdateData` would produce) — `reloaded.NameEn` came back as `"Coffee"`, not `"Espresso Bar"`, failing the assertion. Restored immediately after confirming the failure; do not leave `DO UPDATE` in the committed migration.
 
 - [ ] **Step 9: Write the failing write-once test**
 
@@ -1750,8 +1772,8 @@ Open `tests/Noof.Ledger.Persistence.Tests/schema.expected.sql` and confirm by ey
 - `categorization_jobs` has an index on `(status, run_after)`.
 - `line_items.amount` is `numeric(19,4)` and `line_items.currency` is `character varying(3) NOT NULL`.
 - `transactions.status`, `merchants.kind`, `line_items.categorized_by` and `categorization_jobs.status` are all plain `integer` columns — not a Postgres native enum type, not `smallint`, not `text`. This is the one EF/Npgsql mapping mistake Step 3's callout warns about; it is otherwise invisible outside this file and the `Enum_columns_persist_as_plain_integers_...` test.
-- `INSERT INTO wallets` (one row) and `INSERT INTO categories` (twenty rows, including one with `'Кофе'`) appear — `GenerateCreateScript()` includes `HasData` seed rows, since seeding is part of the model, not just of a migration.
-- No trigger or function text appears anywhere — confirms the write-once guard is genuinely invisible to this gate, which is why Steps 9–12 exist.
+- **No `INSERT INTO wallets` or `INSERT INTO categories` appear anywhere.** `GenerateCreateScript()` renders the *model* (tables, columns, constraints, indexes, and any `HasData`), not migration history — and neither `WalletConfiguration` nor `CategoryConfiguration` calls `HasData` (see the callout in Step 3). The twenty-one seed rows exist only as raw SQL inside `AddCaptureModel.Up()`, which is exactly why this golden-DDL gate cannot see them and `SeedDataTests` (Step 8A) has to prove them behaviourally instead.
+- No trigger, function, or seed `INSERT` text appears anywhere — confirms both the write-once guard and the category/wallet seed are genuinely invisible to this gate, which is why Steps 8A and 9–12 exist.
 
 - [ ] **Step 14: Apply the migration everywhere and run the full suite**
 
@@ -3571,11 +3593,12 @@ using Noof.Ledger.Persistence.Capture;
 
 namespace Noof.Ledger.Persistence.Tests;
 
-> **The database is not empty after `MigrateAsync` here.** Task 3 seeds a wallet and twenty
-> categories through `HasData`, and `ix_wallets_single_default` permits only one default wallet — so
-> a test that migrates and then inserts its own `IsDefault = true` wallet fails with a `23505` unique
-> violation, not with the assertion it was written for. Every test in this class calls
-> `RemoveSeededDefaultWalletAsync` immediately after `MigrateAsync`.
+> **The database is not empty after `MigrateAsync` here.** Task 3's migration seeds a wallet and
+> twenty categories via raw SQL (not `HasData` — see the callout in Task 3, Step 3), and
+> `ix_wallets_single_default` permits only one default wallet — so a test that migrates and then
+> inserts its own `IsDefault = true` wallet fails with a `23505` unique violation, not with the
+> assertion it was written for. Every test in this class calls `RemoveSeededDefaultWalletAsync`
+> immediately after `MigrateAsync`.
 
 [Collection("postgres")]
 public class EfCaptureStoreTests(PostgresFixture fixture)
@@ -3588,9 +3611,9 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
         IsDefault = true,
     };
 
-    // Task 3 seeds one default wallet through HasData, and ix_wallets_single_default makes a second
-    // one a 23505 unique violation. Every test below therefore clears the seeded row before adding
-    // the wallet it wants. Call this after MigrateAsync and before any Wallets.Add.
+    // Task 3's migration seeds one default wallet via raw SQL, and ix_wallets_single_default makes
+    // a second one a 23505 unique violation. Every test below therefore clears the seeded row before
+    // adding the wallet it wants. Call this after MigrateAsync and before any Wallets.Add.
     static async Task RemoveSeededDefaultWalletAsync(LedgerDbContext db) =>
         await db.Database.ExecuteSqlAsync(
             $"DELETE FROM wallets WHERE is_default",
