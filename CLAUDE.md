@@ -22,6 +22,8 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
 
 **Effort levels.** Do not use high or xhigh effort for small tasks. `low` for mechanical work, `medium` for ordinary implementation, `high`/`xhigh` reserved for the architecture- and correctness-critical reasoning that justifies opus in the first place.
 
+**The final review of a completed implementation runs on Fable 5.1** (`model: "fable"`), not on the family that wrote the code. Models in one family share blind spots: a reviewer drawn from the same family tends to miss exactly what the implementer missed, and agreement between them is weak evidence. A different family is the cheapest independence available. This applies to the review that closes a phase or a plan — per-task reviews stay on sonnet.
+
 **Anti-patterns — do not do these:**
 - Running a test suite on opus. That is a haiku task; the model is not what makes tests pass.
 - Using xhigh effort to rename a variable, fix a typo, or add a using directive.
