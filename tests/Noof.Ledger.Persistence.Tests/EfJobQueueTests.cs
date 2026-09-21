@@ -351,4 +351,40 @@ public class EfJobQueueTests(PostgresFixture fixture)
             .SingleAsync(j => j.Id == stillLeased.Id, TestContext.Current.CancellationToken);
         reloadedStillLeased.Status.Should().Be(JobStatus.Claimed, "its lease has not expired yet");
     }
+
+    [Fact]
+    public async Task RetryAsync_rejects_a_non_UTC_runAfter_with_a_clear_message_instead_of_an_Npgsql_failure()
+    {
+        // Before this guard, a non-UTC runAfter reached Npgsql unvalidated and failed three layers
+        // down with "Cannot write DateTimeOffset with Offset=02:00:00 to PostgreSQL type 'timestamp
+        // with time zone'" - confirmed by reproducing it against real Postgres. That message names
+        // neither the parameter nor the actual contract. This guard fires before any SQL is sent.
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var queue = new EfJobQueue(db, time, maxAttempts: 8);
+        var nonUtc = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.FromHours(2));
+
+        var act = () => queue.RetryAsync(Guid.NewGuid(), "worker-a", nonUtc, "boom", TestContext.Current.CancellationToken);
+
+        var assertion = await act.Should().ThrowAsync<ArgumentException>();
+        assertion.WithMessage("*UTC*");
+        assertion.And.ParamName.Should().Be("runAfter");
+    }
+
+    [Fact]
+    public async Task ReleaseExpiredLeasesAsync_rejects_a_non_UTC_now_with_a_clear_message_instead_of_an_Npgsql_failure()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var queue = new EfJobQueue(db, time, maxAttempts: 8);
+        var nonUtc = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.FromHours(2));
+
+        var act = () => queue.ReleaseExpiredLeasesAsync(nonUtc, TestContext.Current.CancellationToken);
+
+        var assertion = await act.Should().ThrowAsync<ArgumentException>();
+        assertion.WithMessage("*UTC*");
+        assertion.And.ParamName.Should().Be("now");
+    }
 }

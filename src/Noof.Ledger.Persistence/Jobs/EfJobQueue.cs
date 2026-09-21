@@ -56,6 +56,8 @@ public sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, in
 
     public async Task<JobCompletionOutcome> RetryAsync(Guid jobId, string workerId, DateTimeOffset runAfter, string error, CancellationToken cancellationToken)
     {
+        RequireUtc(runAfter, nameof(runAfter));
+
         var rows = await db.Database.ExecuteSqlRawAsync(
             """
             UPDATE categorization_jobs
@@ -98,9 +100,24 @@ public sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, in
     static JobCompletionOutcome ToOutcome(int rowsAffected) =>
         rowsAffected > 0 ? JobCompletionOutcome.Applied : JobCompletionOutcome.NotOwned;
 
-    public Task<int> ReleaseExpiredLeasesAsync(DateTimeOffset now, CancellationToken cancellationToken) =>
-        db.Database.ExecuteSqlRawAsync(
+    public Task<int> ReleaseExpiredLeasesAsync(DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        RequireUtc(now, nameof(now));
+
+        return db.Database.ExecuteSqlRawAsync(
             "UPDATE categorization_jobs SET status = 0, claimed_at = NULL, claimed_by = NULL, updated_at = @now WHERE status = 1 AND run_after <= @now",
             [new NpgsqlParameter("now", now)],
             cancellationToken);
+    }
+
+    // Postgres timestamptz has no offset of its own - Npgsql rejects a non-UTC DateTimeOffset only
+    // once it tries to write it, three layers below this method, with a message that names neither
+    // the parameter nor the actual rule ("Cannot write DateTimeOffset with Offset=... to PostgreSQL
+    // type 'timestamp with time zone'"). Guarding here instead makes the UTC-only contract fail
+    // loudly at the call site, with the parameter name and the reason, before any SQL is sent.
+    static void RequireUtc(DateTimeOffset value, string paramName)
+    {
+        if (value.Offset != TimeSpan.Zero)
+            throw new ArgumentException($"must be UTC (Offset == TimeSpan.Zero), but was {value.Offset}.", paramName);
+    }
 }

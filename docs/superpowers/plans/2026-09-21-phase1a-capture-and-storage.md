@@ -3373,6 +3373,7 @@ git commit -m "feat(web): secrets settings page - gated, unprerendered, and prov
 - Create: `src/Noof.Ledger.Persistence/Capture/EfCaptureStore.cs`
 - Create: `tests/Noof.Ledger.Persistence.Tests/ThrowsBeforeCommitInterceptor.cs`
 - Create: `tests/Noof.Ledger.Persistence.Tests/EfCaptureStoreTests.cs`
+- Create: `tests/Noof.Ledger.Persistence.Tests/CapturedMessageTests.cs`
 - Create: `src/Noof.Ledger.Host/Startup/CaptureTimeZoneGuard.cs`
 - Create: `tests/Noof.Ledger.Host.Tests/CaptureTimeZoneGuardTests.cs`
 - Modify: `Directory.Packages.props`
@@ -3412,7 +3413,46 @@ Create `src/Noof.Ledger.Application/Capture/CapturedMessage.cs`:
 ```csharp
 namespace Noof.Ledger.Application.Capture;
 
-public sealed record CapturedMessage(long ChatId, int MessageId, string Text, DateTimeOffset SentAt);
+public sealed record CapturedMessage(long ChatId, int MessageId, string Text, DateTimeOffset SentAt)
+{
+    public DateTimeOffset SentAt { get; init; } = SentAt.Offset == TimeSpan.Zero
+        ? SentAt
+        : throw new ArgumentException($"must be UTC (Offset == TimeSpan.Zero), but was {SentAt.Offset}.", nameof(SentAt));
+}
+```
+
+> **Closing-review fix (2026-09-21): `SentAt` rejects a non-UTC offset at construction.** As originally drafted above, `CapturedMessage` was a plain positional record with no validation — a non-UTC `SentAt` was accepted silently here and only failed much later, inside `EfCaptureStore.CaptureAsync`'s `SaveChangesAsync`, with an Npgsql message ("Cannot write DateTimeOffset with Offset=... to PostgreSQL type 'timestamp with time zone'") that names neither `CapturedMessage` nor `SentAt`. Overriding the auto-generated `SentAt` property with a validating initializer that still reads from the primary constructor parameter (the pattern used here) fails immediately at the one place every caller constructs this value, with a message that names the parameter and the actual rule.
+
+Create `tests/Noof.Ledger.Persistence.Tests/CapturedMessageTests.cs`, proven red first — before the validating initializer above exists, the first fact reports "Expected a System.ArgumentException to be thrown, but no exception was thrown":
+
+```csharp
+using AwesomeAssertions;
+using Noof.Ledger.Application.Capture;
+
+namespace Noof.Ledger.Persistence.Tests;
+
+public class CapturedMessageTests
+{
+    [Fact]
+    public void Constructing_with_a_non_UTC_SentAt_throws_immediately_instead_of_failing_later_at_the_database()
+    {
+        var nonUtc = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.FromHours(2));
+
+        var act = () => new CapturedMessage(1, 100, "coffee 3.50", nonUtc);
+
+        act.Should().Throw<ArgumentException>().WithMessage("*UTC*").And.ParamName.Should().Be("SentAt");
+    }
+
+    [Fact]
+    public void Constructing_with_a_UTC_SentAt_succeeds()
+    {
+        var utc = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+
+        var message = new CapturedMessage(1, 100, "coffee 3.50", utc);
+
+        message.SentAt.Should().Be(utc);
+    }
+}
 ```
 
 Create `src/Noof.Ledger.Application/Capture/ICaptureStore.cs`:
@@ -4109,7 +4149,7 @@ Run: `dotnet test --solution NoofLedger.slnx`
 Expected: all green.
 
 ```bash
-git add src/Noof.Ledger.Application/Capture src/Noof.Ledger.Persistence/Capture src/Noof.Ledger.Host/Startup/CaptureTimeZoneGuard.cs src/Noof.Ledger.Host/Program.cs src/Noof.Ledger.Host/appsettings.json tests/Noof.Ledger.Persistence.Tests/EfCaptureStoreTests.cs tests/Noof.Ledger.Persistence.Tests/ThrowsBeforeCommitInterceptor.cs tests/Noof.Ledger.Persistence.Tests/PostgresFixture.cs tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj tests/Noof.Ledger.Host.Tests/CaptureTimeZoneGuardTests.cs Directory.Packages.props
+git add src/Noof.Ledger.Application/Capture src/Noof.Ledger.Persistence/Capture src/Noof.Ledger.Host/Startup/CaptureTimeZoneGuard.cs src/Noof.Ledger.Host/Program.cs src/Noof.Ledger.Host/appsettings.json tests/Noof.Ledger.Persistence.Tests/EfCaptureStoreTests.cs tests/Noof.Ledger.Persistence.Tests/CapturedMessageTests.cs tests/Noof.Ledger.Persistence.Tests/ThrowsBeforeCommitInterceptor.cs tests/Noof.Ledger.Persistence.Tests/PostgresFixture.cs tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj tests/Noof.Ledger.Host.Tests/CaptureTimeZoneGuardTests.cs Directory.Packages.props
 git commit -m "feat(capture): EfCaptureStore writes the transaction and its job together, or neither"
 ```
 
@@ -4468,6 +4508,38 @@ public class EfJobQueueTests(PostgresFixture fixture)
             .SingleAsync(j => j.Id == stillLeased.Id, TestContext.Current.CancellationToken);
         reloadedStillLeased.Status.Should().Be(JobStatus.Claimed, "its lease has not expired yet");
     }
+
+    [Fact]
+    public async Task RetryAsync_rejects_a_non_UTC_runAfter_with_a_clear_message_instead_of_an_Npgsql_failure()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var queue = new EfJobQueue(db, time, maxAttempts: 8);
+        var nonUtc = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.FromHours(2));
+
+        var act = () => queue.RetryAsync(Guid.NewGuid(), "worker-a", nonUtc, "boom", TestContext.Current.CancellationToken);
+
+        var assertion = await act.Should().ThrowAsync<ArgumentException>();
+        assertion.WithMessage("*UTC*");
+        assertion.And.ParamName.Should().Be("runAfter");
+    }
+
+    [Fact]
+    public async Task ReleaseExpiredLeasesAsync_rejects_a_non_UTC_now_with_a_clear_message_instead_of_an_Npgsql_failure()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var queue = new EfJobQueue(db, time, maxAttempts: 8);
+        var nonUtc = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.FromHours(2));
+
+        var act = () => queue.ReleaseExpiredLeasesAsync(nonUtc, TestContext.Current.CancellationToken);
+
+        var assertion = await act.Should().ThrowAsync<ArgumentException>();
+        assertion.WithMessage("*UTC*");
+        assertion.And.ParamName.Should().Be("now");
+    }
 }
 ```
 
@@ -4587,13 +4659,25 @@ public sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, in
     static JobCompletionOutcome ToOutcome(int rowsAffected) =>
         rowsAffected > 0 ? JobCompletionOutcome.Applied : JobCompletionOutcome.NotOwned;
 
-    public Task<int> ReleaseExpiredLeasesAsync(DateTimeOffset now, CancellationToken cancellationToken) =>
-        db.Database.ExecuteSqlRawAsync(
+    public Task<int> ReleaseExpiredLeasesAsync(DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        RequireUtc(now, nameof(now));
+
+        return db.Database.ExecuteSqlRawAsync(
             "UPDATE categorization_job SET status = 0, claimed_at = NULL, claimed_by = NULL, updated_at = @now WHERE status = 1 AND run_after <= @now",
             [new NpgsqlParameter("now", now)],
             cancellationToken);
+    }
+
+    static void RequireUtc(DateTimeOffset value, string paramName)
+    {
+        if (value.Offset != TimeSpan.Zero)
+            throw new ArgumentException($"must be UTC (Offset == TimeSpan.Zero), but was {value.Offset}.", paramName);
+    }
 }
 ```
+
+> **Closing-review fix (2026-09-21): a non-UTC `runAfter`/`now` is rejected loudly at the call site, not three layers down inside Npgsql.** `RetryAsync`'s `runAfter` and `ReleaseExpiredLeasesAsync`'s `now` are both caller-supplied `DateTimeOffset` values written straight into a `timestamptz` parameter. Proven against real Postgres: passing a `DateTimeOffset` with `Offset = +02:00` into either method, as originally drafted above (no guard), throws `System.ArgumentException: Cannot write DateTimeOffset with Offset=02:00:00 to PostgreSQL type 'timestamp with time zone'` from inside Npgsql's parameter writer — a real exception, but one whose `ParamName` is `"value"`, not `"runAfter"` or `"now"`, and whose message names neither this method nor the actual rule. `RequireUtc` runs first in both methods now and throws its own `ArgumentException` — same exception type, but with the correct `ParamName` and a message that says "must be UTC" — before any SQL is sent, so a caller with a debugger or a log line sees the real cause immediately instead of an opaque driver-level failure. This is a **loud-rejection** policy, not silent normalisation: a non-UTC value reaching this boundary means some upstream code is doing local-time arithmetic where it should be doing instant arithmetic, and converting it away quietly would hide that bug instead of surfacing it. Proven by two new facts in `EfJobQueueTests.cs` — `RetryAsync_rejects_a_non_UTC_runAfter_with_a_clear_message_instead_of_an_Npgsql_failure` and `ReleaseExpiredLeasesAsync_rejects_a_non_UTC_now_with_a_clear_message_instead_of_an_Npgsql_failure` — each asserting `ParamName` specifically, since asserting only "throws `ArgumentException`" would pass even without this guard (Npgsql already throws that type; only the parameter name and message distinguish an intentional contract from an implementation detail leaking through).
 
 > **Closing-review fix (2026-09-21): completion is fenced by ownership, not just by id.** As originally drafted above, `SucceedAsync`/`RetryAsync`/`FailAsync` were `UPDATE ... WHERE id = @jobId` with no guard on `status` or `claimed_by`, and the interface didn't even accept a `workerId`. A reviewer proved this resurrects finished work on real PostgreSQL: worker A claims with a one-minute lease, the clock advances two minutes, `ReleaseExpiredLeasesAsync` hands the job to worker B, worker B calls `SucceedAsync` and the job is `Succeeded` — then worker A's late `RetryAsync` (or `FailAsync`) arrives and mutates the row anyway, because nothing ever checked that A still owned it. All three verbs now add `AND claimed_by = @workerId AND status = 1` to their `WHERE` clause and return a new `JobCompletionOutcome` (`Applied` or `NotOwned`) computed from `ExecuteSqlRawAsync`'s own rows-affected count, so a caller whose update touched zero rows gets a value it can act on and log instead of a silent no-op. `IJobQueue`'s three completion members gained a `workerId` parameter and a `Task<JobCompletionOutcome>` return type as part of this fix — write the interface with that shape from Step 1 rather than the two-member-narrower version elsewhere in this task's earlier draft text. Proven by three new facts in `EfJobQueueTests.cs`: `A_stale_workers_late_retry_after_its_lease_was_reclaimed_does_not_resurrect_the_job`, `A_stale_workers_late_fail_after_its_lease_was_reclaimed_does_not_override_the_new_owner`, and `Succeeding_a_job_this_worker_no_longer_owns_is_reported_as_not_owned_and_leaves_the_row_alone` — each fails with `Expected outcome to be JobCompletionOutcome.NotOwned, but found JobCompletionOutcome.Applied` when the `WHERE` clause is reverted to `id = @jobId` alone, confirmed by actually reverting and rerunning against real Postgres, not by inspection.
 
@@ -4606,7 +4690,7 @@ public sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, in
 - [ ] **Step 5: Run the tests**
 
 Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj`
-Expected: all green, including the 11 `EfJobQueueTests` facts (8 original plus the 3 closing-review ownership-fencing facts added under Step 4's callout). The concurrency test (`Concurrent_claims_against_one_pending_job_...`) should complete in well under the 5-second guard — if it takes close to 5 seconds, that's `Task.WhenAny` hitting the `Task.Delay` branch, meaning `SKIP LOCKED` isn't doing its job; go back to Step 4 before moving on.
+Expected: all green, including the 13 `EfJobQueueTests` facts (8 original, 3 closing-review ownership-fencing facts added under Step 4's first callout, and 2 closing-review UTC-guard facts added under Step 4's second callout). The concurrency test (`Concurrent_claims_against_one_pending_job_...`) should complete in well under the 5-second guard — if it takes close to 5 seconds, that's `Task.WhenAny` hitting the `Task.Delay` branch, meaning `SKIP LOCKED` isn't doing its job; go back to Step 4 before moving on.
 
 Then run the full suite once to confirm nothing else broke: `dotnet test --solution NoofLedger.slnx`
 
