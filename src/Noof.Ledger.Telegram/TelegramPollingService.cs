@@ -45,11 +45,11 @@ public sealed class TelegramPollingService(
 
     public async Task<TelegramPollResult> RunTickAsync(CancellationToken cancellationToken)
     {
-        using var scope = scopeFactory.CreateScope();
-        var secretStore = scope.ServiceProvider.GetRequiredService<ISecretStore>();
-
         try
         {
+            using var scope = scopeFactory.CreateScope();
+            var secretStore = scope.ServiceProvider.GetRequiredService<ISecretStore>();
+
             var secret = await secretStore.GetAsync(SecretKeys.TelegramBotToken, cancellationToken);
 
             if (secret.State is not SecretState.Present)
@@ -69,6 +69,10 @@ public sealed class TelegramPollingService(
             var timeZoneId = configuration["Capture:TimeZone"] ?? "Europe/Belgrade";
             var pollingSeconds = int.TryParse(configuration["Telegram:PollingSeconds"], out var seconds) ? seconds : 30;
 
+            // clientHandle.Current is always assigned above whenever secret.Value != activeToken,
+            // and that branch is guaranteed to have run at least once by this point: activeToken
+            // starts null and secret.State is Present here, so the very first successful tick sets it
+            // before this line is ever reached.
             var updates = await clientHandle.Current!.GetUpdates(
                 offset: offset,
                 timeout: pollingSeconds,

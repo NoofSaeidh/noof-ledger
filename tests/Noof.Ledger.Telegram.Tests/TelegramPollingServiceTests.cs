@@ -199,4 +199,48 @@ public class TelegramPollingServiceTests
         second.Should().Be(TelegramPollResult.Processed);
         await client.Received(2).SendRequest(Arg.Any<GetUpdatesRequest>(), Arg.Any<CancellationToken>());
     }
+
+    // Commit a069aae moved the token fetch inside the try but left scope creation and the
+    // ISecretStore resolution outside it. An exception thrown while resolving a dependency is
+    // exactly as fatal to the host as one thrown by the token fetch itself - BackgroundService's
+    // default ExceptionBehavior is StopHost - so this must be swallowed and reported as Failed
+    // the same way. A mock configured to throw would prove the same thing less directly than a
+    // fake that actually behaves like a broken container.
+    [Fact]
+    public async Task A_DI_resolution_failure_while_creating_the_scope_is_reported_as_failed_without_throwing()
+    {
+        var clientFactory = Substitute.For<ITelegramBotClientFactory>();
+        var service = new TelegramPollingService(
+            new ThrowingScopeFactory(),
+            clientFactory,
+            new TelegramClientHandle(),
+            new ConfigurationBuilder().Build(),
+            TimeProvider.System,
+            NullLogger<TelegramPollingService>.Instance);
+
+        var result = await service.RunTickAsync(TestContext.Current.CancellationToken);
+
+        result.Should().Be(TelegramPollResult.Failed);
+        clientFactory.DidNotReceive().Create(Arg.Any<string>());
+    }
+
+    sealed class ThrowingScopeFactory : IServiceScopeFactory
+    {
+        public IServiceScope CreateScope() => new ThrowingScope();
+
+        sealed class ThrowingScope : IServiceScope
+        {
+            public IServiceProvider ServiceProvider { get; } = new ThrowingProvider();
+
+            public void Dispose() { }
+        }
+
+        sealed class ThrowingProvider : IServiceProvider
+        {
+            public object? GetService(Type serviceType) =>
+                serviceType == typeof(ISecretStore)
+                    ? throw new InvalidOperationException("the container cannot resolve ISecretStore")
+                    : null;
+        }
+    }
 }
