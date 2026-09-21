@@ -6,7 +6,7 @@
 
 **Architecture:** Phase 1A wrote a transaction and a queued job atomically and stopped there. 1B drains that queue. A `BackgroundService` claims a job, loads the raw text and the live category tree, asks Claude for a structured proposal through strict tool use, **verifies every amount against the raw text before a number exists in C#**, resolves merchants through a write-once alias table that is the sole authority on identity, writes line items in one database transaction under a precedence predicate, and edits the Telegram reply. The dashboard reads it back through a read-model port so the UI project never sees EF.
 
-**Tech Stack:** .NET 10 · C# · EF Core 10 + Npgsql · PostgreSQL 18 · **Anthropic 12.49.0** (official C# SDK, MIT, GA) · Telegram.Bot 22.10.3.1 · Blazor Server (RCL + Host) · xUnit v3 on Microsoft Testing Platform · AwesomeAssertions · NSubstitute
+**Tech Stack:** .NET 10 · C# · EF Core 10 + Npgsql · PostgreSQL 18 · **Anthropic 12.49.0** (official C# SDK, MIT, GA), consumed through **`Microsoft.Extensions.AI.Abstractions` 10.5.1** (`IChatClient`) rather than the SDK's native `Messages.Create` surface · Telegram.Bot 22.10.3.1 · Blazor Server (RCL + Host) · xUnit v3 on Microsoft Testing Platform · AwesomeAssertions · NSubstitute
 
 **Spec:** `docs/superpowers/specs/2026-09-19-noof-finance-design.md` · decisions in `docs/OPEN-QUESTIONS.md` ("Phase 1 decisions — taken 2026-09-21") · deferred work in `docs/BACKLOG.md` · predecessor plan `docs/superpowers/plans/2026-09-21-phase1a-capture-and-storage.md`
 
@@ -33,18 +33,21 @@ Each was established by running something, not by recollection. They are recorde
 
 | Fact | How it was established | Consequence |
 |---|---|---|
-| `MessageCreateParams.Temperature` is `[Obsolete]` | Compiled against the real package; `Temperature = 0.0` produced `error CS0618` under `TreatWarningsAsErrors` | **Never set temperature.** Determinism comes from the enum-constrained schema, not from a sampling parameter. The docs also state a value other than `1.0` is rejected with a 400 on models after Opus 4.6 |
-| The typed `InputSchema` initializer has only `Type`, `Properties`, `Required` | `new InputSchema { AdditionalProperties = false }` produced `error CS0117` | `strict: true` requires `"additionalProperties": false`, so **every tool schema must be built as raw JSON** through `InputSchema.FromRawUnchecked(...)`. The schema is not compiler-checked; a test asserts its shape instead |
+| `ChatOptions.Temperature` compiles, unlike the SDK's `[Obsolete]` `MessageCreateParams.Temperature` | Compiled both ways; the raw one produced `error CS0618` under `TreatWarningsAsErrors` | **Never set temperature anyway.** Determinism comes from the schema-constrained response format, not a sampling parameter. `AnthropicOptions` has no `Temperature` property for the same reason |
+| A raw `JsonElement` schema reaches the wire verbatim through `Microsoft.Extensions.AI` | Captured the outgoing HTTP body against a stub handler: our schema arrived unchanged, `additionalProperties: false`, `enum` and `minItems` included | `CategorizationSchema` returns a `JsonElement`. No `InputSchema`, no `FromRawUnchecked`. The schema is not compiler-checked; a test asserts its shape instead |
 | `AnthropicApiException` exposes only `StatusCode`, `ErrorType`, `Message` | `.Error`, `.Type`, `.Body`, `.Headers`, `.RequestID` each produced `error CS1061` | Terminal-vs-transient classification is built from the status code alone |
 | `client.Models.List()` returns `Task<ModelListPage>` | Compiled; `await foreach` over the call does not bind | Await first, then iterate `page.Items` |
-| Response content blocks have no `.ToParam()` | Compiled; each variant is reconstructed by hand | The tool loop rebuilds `ToolUseBlockParam` from `ToolUseBlock` explicitly |
-| A message turn CAN carry several content blocks | Second compile spike: `Content = new List<ContentBlockParam> { echo }` builds clean | The tool loop's assistant echo and tool-result turn are expressible. **A collection expression is not enough — the element type must be named**, `new List<ContentBlockParam> { ... }` |
-| `client.Messages.Create(params, cancellationToken)` takes a token | Second compile spike | Cancellation reaches the HTTP call, so host shutdown is not blocked by an in-flight model call |
+| `ChatResponseFormat.ForJsonSchema(schema, name, description)` lands as `output_config.format` | Captured body: `"output_config":{"format":{"type":"json_schema","schema":{...}}}` | This is Anthropic's GA structured-outputs mode and it **replaces strict tool use**. `strict` constrains a tool's *input*; our answer is the *response*, and `output_config` is its equivalent. No `strict` is emitted and none is needed |
+| A tool and a response format combine in one request | Captured body with both: one tool, `tool_choice {"type":"auto"}`, and the `output_config` block together | `list_merchants` stays a real tool the model may call; `record_spending` is answered, not called |
+| Declaring a tool in BOTH `ChatOptions.Tools` and `RawRepresentationFactory` sends it **twice** | Captured body had `tools` of length 2, same name | Found while trying to add `strict` through the raw hatch. **Never use `RawRepresentationFactory` for a tool the abstraction already declares.** A test asserts `tools` has length 1 |
+| The tool round trip works end to end through `IChatClient` | Ran it against a queued stub: turn 1 returned `FunctionCallContent` with a `CallId`, we answered with `new ChatMessage(ChatRole.Tool, [new FunctionResultContent(callId, json)])`, turn 2 returned the schema-constrained JSON as `response.Text` | The accumulated conversation is a plain `List<ChatMessage>`; nothing is reconstructed by hand |
+| Omitting `Tools` on the follow-up request removes them from the wire | Captured second body: no `tools` key at all, three messages (`user`, `assistant`, `user`) | The "one round trip only" rule is **structural**, not a counter: with no tools declared the model cannot ask again. Better than the forced `tool_choice` this plan first specified |
+| `chat.GetResponseAsync(messages, options, cancellationToken)` takes a token | Compiled and ran | Cancellation reaches the HTTP call, so host shutdown is not blocked by an in-flight model call |
 | `client.Models.List(cancellationToken)` does **not** compile | Second compile spike: `error CS1503: cannot convert from 'System.Threading.CancellationToken' to 'Anthropic.Models.Models.ModelListParams?'` | The probe must call `client.Models.List(null, cancellationToken)`. The obvious spelling is the wrong one |
-| `ToolUseBlock.Input` is `IReadOnlyDictionary<string, JsonElement>` | Compiled | Deserialise with `JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(input))` |
+| Exceptions are **not** wrapped by the abstraction | Ran 401, 429 and 529 through a stub: `AnthropicUnauthorizedException`, `AnthropicRateLimitException`, `Anthropic5xxException`, each with `StatusCode` and `ErrorType` | Terminal-vs-transient classification is unchanged by the switch, and 529 surfaces as its numeric status |
 | `Anthropic` 12.49.0 has no `NU1903`/`NU1904` advisory | `dotnet restore --force` with `NuGetAuditMode=all` fetched the live advisory database and produced none | The package can be added without suppressions |
 | The package's dependencies are `Microsoft.Extensions.AI.Abstractions`, `System.Net.ServerSentEvents`, `System.Text.Json` | nuget.org registration API | The architecture test's exact-package assertion for `Noof.Ledger.Ai` lists only `Anthropic`; the three arrive transitively |
-| Structured outputs and strict tool use are GA — no beta header | platform.claude.com/docs/en/build-with-claude/structured-outputs | No `anthropic-beta` header anywhere in this plan |
+| Structured outputs (JSON outputs) and tool use are GA — no beta header | platform.claude.com/docs/en/build-with-claude/structured-outputs, confirmed by the captured body carrying none | No `anthropic-beta` header anywhere in this plan |
 | Constrained decoding guarantees **shape**, never **semantics** | Same page, stated explicitly | An enum-constrained `category_slug` is guaranteed to be one of ours; an `amount_quote` is guaranteed to be a string and nothing more. Hence `QuotedAmount` |
 | Citations — the only API feature that guarantees verbatim text — returns 400 when combined with structured outputs | Same page | There is no way to have the API itself certify the quote. Verification in C# is not a belt-and-braces choice; it is the only option |
 | Prompt caching needs **4096 tokens minimum on Haiku 4.5** | platform.claude.com pricing/caching pages | Our system prompt plus category list is far below that. Caching would silently never engage. **Do not build it** |
@@ -333,7 +336,7 @@ public sealed class AnthropicOptions
 
 ### The tool schema, once
 
-Built by `CategorizationSchema.BuildRecordSpending(...)` and `CategorizationSchema.BuildListMerchants()`, handed to the SDK through `InputSchema.FromRawUnchecked`. `known_merchant_id` is present **only** when there is at least one hint — an empty `enum` is not a valid schema.
+Built by `CategorizationSchema.BuildRecordSpending(...)` and `CategorizationSchema.BuildListMerchants()`, both returning a `JsonElement`. `BuildRecordSpending`'s output goes to `ChatResponseFormat.ForJsonSchema(...)` as the **response** schema — `record_spending` is answered, not called as a tool; `BuildListMerchants`' output goes to a raw-schema `AIFunctionDeclaration`, the one real tool this plan declares. `known_merchant_id` is present **only** when there is at least one hint — an empty `enum` is not a valid schema.
 
 ```json
 {
@@ -1207,7 +1210,7 @@ EOF
 
 ---
 
-### Task 2: The Ai project — options, the tool schema, and the prompt
+### Task 2: The Ai project — options, the response schema, and the prompt
 
 **Files:**
 - Modify: `Directory.Packages.props` — add `<PackageVersion Include="Anthropic" Version="12.49.0" />`
@@ -1234,13 +1237,15 @@ public sealed class AnthropicOptions
 
 public static class CategorizationSchema
 {
-    // The input_schema BODY only (type/additionalProperties/required/properties), suitable for
-    // InputSchema.FromRawUnchecked(...) — not a full Tool. AnthropicCategorizer (a later task)
-    // supplies the tool's name and description when it builds the actual request.
-    public static IReadOnlyDictionary<string, JsonElement> BuildRecordSpending(
+    // The schema BODY only (type/additionalProperties/required/properties), as a JsonElement ready
+    // for ChatResponseFormat.ForJsonSchema(...) (record_spending) or a raw-schema
+    // AIFunctionDeclaration's JsonSchema (list_merchants). AnthropicCategorizer (Task 3) supplies
+    // each one's name and description when it builds the actual request — this type only ever
+    // returns the schema body, never a name, a description, or an SDK type.
+    public static JsonElement BuildRecordSpending(
         IReadOnlyList<CategoryOption> categories, IReadOnlyList<MerchantOption> merchantHints);
 
-    public static IReadOnlyDictionary<string, JsonElement> BuildListMerchants();
+    public static JsonElement BuildListMerchants();
 }
 
 public static class CategorizationPrompt
@@ -1253,20 +1258,21 @@ public static class CategorizationPrompt
         string rawText, IReadOnlyList<CategoryOption> categories, IReadOnlyList<MerchantOption> merchantHints);
 }
 ```
-- Consumes (locked, from `Noof.Ledger.Application.Categorization`, shipped by an earlier 1B task — **not present in the repo yet** if this task is run out of order; if you hit "type or namespace `CategoryOption`/`MerchantOption` could not be found", that earlier task hasn't landed, this one didn't break anything): `CategoryOption(string Slug, string NameEn, string NameRu, string? ParentSlug)`, `MerchantOption(Guid Id, string DisplayName)` — both reproduced verbatim in the plan's "The contract" section, lines 105 and 108.
+- Consumes (locked, from `Noof.Ledger.Application.Categorization`, shipped by an earlier 1B task — **not present in the repo yet** if this task is run out of order; if you hit "type or namespace `CategoryOption`/`MerchantOption` could not be found", that earlier task hasn't landed, this one didn't break anything): `CategoryOption(string Slug, string NameEn, string NameRu, string? ParentSlug)`, `MerchantOption(Guid Id, string DisplayName)` — both reproduced verbatim in the plan's "The contract" section.
 - Consumes (locked, from `Noof.Ledger.Domain`, shipped in Phase 0): `CurrencyCode` — its five statics `Eur`, `Rsd`, `Usd`, `Rub`, `Kzt`, each exposing `.Value` as the three-letter code.
 
 **Read first, before writing anything:** `src/Noof.Ledger.Domain/CurrencyCode.cs` (already read for this task — the five statics and their `.Value` property are exactly what feeds the `currency` enum); `Directory.Packages.props` and `src/Noof.Ledger.Ai/Noof.Ledger.Ai.csproj` (both read — `Noof.Ledger.Ai.csproj` currently has zero `PackageReference` items, only the two `ProjectReference`s to `Application` and `Domain`); `NoofLedger.slnx` (its `/tests/` folder is alphabetical — `Architecture.Tests`, `Domain.Tests`, `Host.Tests`, `Persistence.Tests`, `Telegram.Tests`, `TestKit` — and `Noof.Ledger.Ai.Tests` sorts *before* `Architecture.Tests` ("Ai" < "Ar"), so it becomes the new first entry, not the last).
 
 **Locked design decisions** (the contract leaves these open; once this task's tests are green they are load-bearing for Task 3, which is the schema's only other consumer):
 
-1. **`CategorizationSchema` returns the schema body, not a `Tool`.** `BuildRecordSpending`/`BuildListMerchants` both return `IReadOnlyDictionary<string, JsonElement>` — the literal `{"type": "object", ...}` shape shown in the contract's "The tool schema, once" section, ready for `InputSchema.FromRawUnchecked(...)`. Neither method knows the string `"record_spending"` or `"list_merchants"` as a tool *name* — that plus each tool's top-level `"description"` is assembled by `AnthropicCategorizer` in Task 3, which is the only place the SDK's `Tool` type is touched. Keeping schema-building free of the SDK's types is what makes it testable with zero mocking.
-2. **`known_merchant_id` is inserted between `category_slug` and `merchant_quote`, never appended last.** The contract's example schema (line ~342) shows that exact position. It is built by composing an ordered `List<KeyValuePair<string, JsonNode?>>` before wrapping it in one `JsonObject`, specifically so a conditional `Add` in the middle of the list lands the property in the right position — appending after `merchant_quote` was built first would silently reorder it and still be schema-valid JSON, which is exactly the kind of drift a byte-shape test exists to catch.
+1. **`CategorizationSchema` returns a `JsonElement`, not a `Tool`, not a dictionary.** `BuildRecordSpending`/`BuildListMerchants` both return the literal `{"type": "object", ...}` shape, ready to be handed straight to `ChatResponseFormat.ForJsonSchema(schema, name, description)` or wrapped in a raw-schema `AIFunctionDeclaration`. This is a change from an earlier draft of this task, written against the SDK's native tool-use surface, which returned `IReadOnlyDictionary<string, JsonElement>` for `InputSchema.FromRawUnchecked(...)`. **The operator asked for the `Microsoft.Extensions.AI` layer instead** (`IChatClient`, proved by capturing the actual HTTP body against a stub handler — see Task 3's fact list) — `ChatResponseFormat.ForJsonSchema` and `AIFunctionDeclaration.JsonSchema` both take a single `JsonElement`, so the dictionary wrapper this method used to return no longer has a consumer. Neither method knows the string `"record_spending"` or `"list_merchants"` as a name, nor a top-level `"description"` — both are supplied by `AnthropicCategorizer` in Task 3, which is the only place SDK/abstraction types are touched. Keeping schema-building free of any SDK or abstraction type is what makes it testable with zero mocking, exactly as before.
+2. **`known_merchant_id` is inserted between `category_slug` and `merchant_quote`, never appended last.** Built by composing an ordered `List<KeyValuePair<string, JsonNode?>>` before wrapping it in one `JsonObject`, specifically so a conditional `Add` in the middle of the list lands the property in the right position — appending after `merchant_quote` was built first would silently reorder it and still be schema-valid JSON, which is exactly the kind of drift a byte-shape test exists to catch.
 3. **`known_merchant_id`'s enum values are `Guid.ToString()` in the default `"D"` format** (lowercase, hyphenated, no braces) — the same format `Guid.Parse` round-trips without a style argument, which is what `AnthropicCategorizer` will need to do with the model's answer.
-4. **The two schemas use different top-level key orders on purpose, and both are copied verbatim from the contract.** `BuildRecordSpending`'s root and its line-item object both order keys `type, additionalProperties, required, properties`. `BuildListMerchants` orders them `type, additionalProperties, properties, required` — that is the literal order the contract's second JSON block uses for `list_merchants`'s `input_schema`. This is not a bug to "fix" for consistency: JSON object key order carries no semantic meaning to the API, and the contract is reproduced exactly rather than tidied.
-5. **Exact-shape tests compare parsed structure, not raw bytes.** `Dictionary<string, JsonElement>` enumeration order for a handful of never-removed keys is stable in the current CLR but is an implementation detail, not a documented guarantee — pinning a test to the literal serialized string of the *outer* dictionary would be one .NET update away from a false failure. Tests instead reserialize the returned dictionary and compare with `JsonNode.DeepEquals` against a parsed expected literal: `DeepEquals` ignores member order within a JSON *object* (correct — key order is not part of the schema's meaning) but is order-sensitive within a JSON *array* (correct — `enum`/`required` order is part of what a test should pin, even though the API itself doesn't care, because a silent reorder of `required` is exactly the kind of change this suite exists to catch). Separately, a same-inputs-twice string-equality test pins that repeated calls are internally consistent, which is the literal reading of "byte-identical" the contract asks for.
-6. **`CategorizationPrompt.System` is a compile-time `const` raw string literal.** Because it is `const`, it is structurally incapable of containing a live category slug or a live merchant id — those can only ever appear in the *user* turn, built per-request by `BuildUserTurn`. This is the mechanical enforcement of "the prompt must not also try to enforce the list in prose": there is no code path by which live data could leak into `System` even by accident.
-7. **No multilingual-prompting technique is invented.** Anthropic publishes no guidance for mixed Russian/English input as of this writing (checked as part of this plan's research). The five `<example>` blocks in `System` are themselves bilingual — that is the entire strategy, recorded as a comment on `System` rather than as an invented technique.
+4. **The two schemas use different top-level key orders on purpose.** `BuildRecordSpending`'s root and its line-item object both order keys `type, additionalProperties, required, properties`. `BuildListMerchants` orders them `type, additionalProperties, properties, required`. This is not a bug to "fix" for consistency: JSON object key order carries no semantic meaning to the API.
+5. **Exact-shape tests compare parsed structure, not raw bytes.** Tests reserialize the returned `JsonElement` (via `.GetRawText()`, parsed back into a `JsonNode`) and compare with `JsonNode.DeepEquals` against a parsed expected literal: `DeepEquals` ignores member order within a JSON *object* but is order-sensitive within a JSON *array* (`enum`/`required` order is pinned on purpose). Separately, a same-inputs-twice string-equality test on `.GetRawText()` pins that repeated calls are internally consistent — the literal reading of "byte-identical output for identical input."
+6. **`CategorizationPrompt.System` is a compile-time `const` raw string literal.** Because it is `const`, it is structurally incapable of containing a live category slug or a live merchant id — those can only ever appear in the *user* turn, built per-request by `BuildUserTurn`. Unchanged from the strict-tool-use draft: this part of the design never depended on which SDK surface calls it.
+7. **No multilingual-prompting technique is invented.** Anthropic publishes no guidance for mixed Russian/English input as of this writing. The five `<example>` blocks in `System` are themselves bilingual — that is the entire strategy, recorded as a comment on `System` rather than as an invented technique.
+8. **`CategorizationSchema`'s output round-trips through `JsonSerializer.Deserialize<JsonElement>` unchanged.** New relative to the strict-tool-use draft, because the schema is now handed to the API as a `JsonElement` directly rather than reassembled from a dictionary — a test asserts that serialising and re-deserialising the returned `JsonElement` produces the same structure, which is the property `ChatResponseFormat.ForJsonSchema` actually relies on at the call site.
 
 ---
 
@@ -1302,7 +1308,7 @@ This is a package-only change with nothing to test-first — same category as Ta
 - [ ] **Step 2: Build and confirm the package restores cleanly**
 
 Run: `dotnet build src/Noof.Ledger.Ai/Noof.Ledger.Ai.csproj`
-Expected: `Build succeeded`, `0 Warning(s)`, `0 Error(s)`. Per the plan's verified-facts table, `Anthropic` 12.49.0 has no `NU1903`/`NU1904` advisory as of the check that produced that table, so `NuGetAuditMode=all` does not block this restore.
+Expected: `Build succeeded`, `0 Warning(s)`, `0 Error(s)`. `Anthropic` 12.49.0 brings `Microsoft.Extensions.AI.Abstractions` 10.5.1 transitively (plus `System.Net.ServerSentEvents` and `System.Text.Json`) — none of the three are written as `<PackageReference>` lines in this `.csproj`, and none need to be; `NuGetAuditMode=all` does not block this restore.
 
 - [ ] **Step 3: Add `AnthropicOptions`**
 
@@ -1325,8 +1331,13 @@ public sealed class AnthropicOptions
 
     public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(90);
 
-    // There is no Temperature property and there must not be one: it is [Obsolete] in the SDK and
-    // a compile error under TreatWarningsAsErrors.
+    // There is no Temperature property and there must not be one. Microsoft.Extensions.AI's
+    // ChatOptions.Temperature exists and would compile, unlike the raw SDK's
+    // MessageCreateParams.Temperature (which is [Obsolete] and a compile error under
+    // TreatWarningsAsErrors) — but it is never set either. Determinism here comes from the
+    // JSON-schema-constrained response format, not from a sampling parameter, and giving this
+    // options type a Temperature property would invite someone to "tune" a call that is supposed
+    // to be deterministic by construction.
 }
 ```
 
@@ -1395,7 +1406,13 @@ Expected: `Build succeeded`; the runner reports zero tests found. That is not a 
 
 ```bash
 git add Directory.Packages.props src/Noof.Ledger.Ai/Noof.Ledger.Ai.csproj src/Noof.Ledger.Ai/AnthropicOptions.cs tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj tests/Noof.Ledger.Ai.Tests/xunit.runner.json NoofLedger.slnx
-git commit -m "chore(ai): Anthropic package, AnthropicOptions, and the Ai.Tests project"
+git commit -m "$(cat <<'EOF'
+chore(ai): Anthropic package, AnthropicOptions, and the Ai.Tests project
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01NXaWFvgT296G5WzxGuuN3m
+EOF
+)"
 ```
 
 ---
@@ -1533,7 +1550,7 @@ public class CategorizationSchemaTests
     [Fact]
     public void Additional_properties_false_appears_at_every_object_level_of_record_spending()
     {
-        var json = JsonSerializer.Serialize(CategorizationSchema.BuildRecordSpending(Categories, OneHint));
+        var json = CategorizationSchema.BuildRecordSpending(Categories, OneHint).GetRawText();
 
         CountOccurrences(json, "\"additionalProperties\":false").Should().Be(2);
     }
@@ -1541,7 +1558,7 @@ public class CategorizationSchemaTests
     [Fact]
     public void Additional_properties_false_appears_on_list_merchants()
     {
-        var json = JsonSerializer.Serialize(CategorizationSchema.BuildListMerchants());
+        var json = CategorizationSchema.BuildListMerchants().GetRawText();
 
         CountOccurrences(json, "\"additionalProperties\":false").Should().Be(1);
     }
@@ -1556,8 +1573,8 @@ public class CategorizationSchemaTests
     [InlineData("pattern")]
     public void No_unsupported_json_schema_keyword_appears_anywhere(string forbidden)
     {
-        var recordSpending = JsonSerializer.Serialize(CategorizationSchema.BuildRecordSpending(Categories, OneHint));
-        var listMerchants = JsonSerializer.Serialize(CategorizationSchema.BuildListMerchants());
+        var recordSpending = CategorizationSchema.BuildRecordSpending(Categories, OneHint).GetRawText();
+        var listMerchants = CategorizationSchema.BuildListMerchants().GetRawText();
 
         recordSpending.Should().NotContain(forbidden);
         listMerchants.Should().NotContain(forbidden);
@@ -1566,7 +1583,7 @@ public class CategorizationSchemaTests
     [Fact]
     public void Every_minItems_value_is_zero_or_one()
     {
-        var json = JsonSerializer.Serialize(CategorizationSchema.BuildRecordSpending(Categories, OneHint));
+        var json = CategorizationSchema.BuildRecordSpending(Categories, OneHint).GetRawText();
 
         foreach (Match match in Regex.Matches(json, "\"minItems\":(\\d+)"))
             match.Groups[1].Value.Should().BeOneOf("0", "1");
@@ -1575,18 +1592,27 @@ public class CategorizationSchemaTests
     [Fact]
     public void Same_inputs_produce_byte_identical_json_twice()
     {
-        var first = JsonSerializer.Serialize(CategorizationSchema.BuildRecordSpending(Categories, OneHint));
-        var second = JsonSerializer.Serialize(
-            CategorizationSchema.BuildRecordSpending([.. Categories], [.. OneHint]));
+        var first = CategorizationSchema.BuildRecordSpending(Categories, OneHint).GetRawText();
+        var second = CategorizationSchema.BuildRecordSpending([.. Categories], [.. OneHint]).GetRawText();
 
         first.Should().Be(second);
     }
 
-    static JsonElement LineItemProperties(IReadOnlyDictionary<string, JsonElement> schema) =>
-        schema["properties"].GetProperty("items").GetProperty("items").GetProperty("properties");
+    [Fact]
+    public void Schema_round_trips_through_JsonElement_deserialization_unchanged()
+    {
+        // The schema is handed to ChatResponseFormat.ForJsonSchema as a JsonElement directly, not
+        // reassembled from a dictionary — this pins the property that call site actually relies on.
+        var schema = CategorizationSchema.BuildRecordSpending(Categories, OneHint);
+        var roundTripped = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(schema));
 
-    static JsonNode Reserialize(IReadOnlyDictionary<string, JsonElement> schema) =>
-        JsonNode.Parse(JsonSerializer.Serialize(schema))!;
+        JsonNode.DeepEquals(JsonNode.Parse(roundTripped.GetRawText()), JsonNode.Parse(schema.GetRawText())).Should().BeTrue();
+    }
+
+    static JsonElement LineItemProperties(JsonElement schema) =>
+        schema.GetProperty("properties").GetProperty("items").GetProperty("items").GetProperty("properties");
+
+    static JsonNode Reserialize(JsonElement schema) => JsonNode.Parse(schema.GetRawText())!;
 
     static int CountOccurrences(string haystack, string needle)
     {
@@ -1620,9 +1646,10 @@ using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Ai;
 
-// Raw JSON Schema, not the SDK's typed InputSchema: strict mode needs "additionalProperties": false
-// at every object level, and the typed initializer has no way to say that — new InputSchema
-// { AdditionalProperties = false } is CS0117 against the real 12.49.0 package.
+// Raw JSON Schema, built as a JsonElement rather than through a typed builder or reflection:
+// ChatResponseFormat.ForJsonSchema and a raw-schema AIFunctionDeclaration both need
+// "additionalProperties": false at every object level, which is easiest to guarantee by building
+// the JsonObject tree directly and controlling every key by hand.
 public static class CategorizationSchema
 {
     static readonly string[] CurrencyCodes =
@@ -1634,7 +1661,7 @@ public static class CategorizationSchema
         CurrencyCode.Kzt.Value,
     ];
 
-    public static IReadOnlyDictionary<string, JsonElement> BuildRecordSpending(
+    public static JsonElement BuildRecordSpending(
         IReadOnlyList<CategoryOption> categories, IReadOnlyList<MerchantOption> merchantHints)
     {
         var properties = new List<KeyValuePair<string, JsonNode?>>
@@ -1701,10 +1728,10 @@ public static class CategorizationSchema
             },
         };
 
-        return ToElementDictionary(root);
+        return ToElement(root);
     }
 
-    public static IReadOnlyDictionary<string, JsonElement> BuildListMerchants()
+    public static JsonElement BuildListMerchants()
     {
         var root = new JsonObject
         {
@@ -1714,13 +1741,13 @@ public static class CategorizationSchema
             ["required"] = new JsonArray(),
         };
 
-        return ToElementDictionary(root);
+        return ToElement(root);
     }
 
-    static IReadOnlyDictionary<string, JsonElement> ToElementDictionary(JsonObject root)
+    static JsonElement ToElement(JsonObject root)
     {
         using var document = JsonDocument.Parse(root.ToJsonString());
-        return document.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone());
+        return document.RootElement.Clone();
     }
 }
 ```
@@ -1728,13 +1755,19 @@ public static class CategorizationSchema
 - [ ] **Step 10: Run the tests and watch them pass**
 
 Run: `dotnet test --project tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj`
-Expected: PASS. The runner counts theory rows individually, so `CategorizationSchemaTests` reports **18** cases (11 facts plus the 7 rows of `No_unsupported_json_schema_keyword_appears_anywhere`). A smaller number means a test was dropped; a larger one means you added one — reconcile either way rather than assuming this plan's count is stale.
+Expected: PASS. The runner counts theory rows individually, so `CategorizationSchemaTests` reports **19** cases (12 facts plus the 7 rows of `No_unsupported_json_schema_keyword_appears_anywhere`) — one more than a strict-tool-use draft of this test would have had, because of the new round-trip fact. A smaller number means a test was dropped; a larger one means you added one — reconcile either way rather than assuming this plan's count is stale.
 
 - [ ] **Step 11: Commit**
 
 ```bash
 git add src/Noof.Ledger.Ai/CategorizationSchema.cs tests/Noof.Ledger.Ai.Tests/CategorizationSchemaTests.cs
-git commit -m "feat(ai): CategorizationSchema — strict raw JSON Schema for record_spending and list_merchants"
+git commit -m "$(cat <<'EOF'
+feat(ai): CategorizationSchema — raw JSON Schema as a JsonElement for record_spending and list_merchants
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01NXaWFvgT296G5WzxGuuN3m
+EOF
+)"
 ```
 
 ---
@@ -1850,29 +1883,33 @@ namespace Noof.Ledger.Ai;
 
 public static class CategorizationPrompt
 {
-    // A role sentence "focuses Claude's behavior" (platform.claude.com structured-outputs /
-    // system-prompts guidance) — the categories, the hints and the message itself are variable
-    // input and belong in the user turn built by BuildUserTurn, never in this constant.
+    // A role sentence "focuses Claude's behavior" — the categories, the hints and the message
+    // itself are variable input and belong in the user turn built by BuildUserTurn, never in this
+    // constant. Under Microsoft.Extensions.AI this string becomes ChatOptions.Instructions, which
+    // the captured request body confirms lands as the request's "system" field — the same field
+    // the raw SDK's MessageCreateParams.System would have used, so this text needed no rewriting
+    // for the switch away from strict tool use.
     //
-    // The closed set of category_slug values is enforced by CategorizationSchema's enum, which is
-    // Anthropic's recommended mechanism for a closed label set. This prompt exists to explain what
-    // each category MEANS so a line item lands under the right one; it deliberately never repeats
-    // "choose only from this list" in prose, since a live slug could not even appear here — System
-    // is a compile-time const, so it cannot embed data from the current request.
+    // The closed set of category_slug values is enforced by CategorizationSchema's enum via the
+    // response format, which is Anthropic's recommended mechanism for a closed label set. This
+    // prompt exists to explain what each category MEANS so a line item lands under the right one;
+    // it deliberately never repeats "choose only from this list" in prose, since a live slug could
+    // not even appear here — System is a compile-time const, so it cannot embed data from the
+    // current request.
     //
     // Messages arrive in Russian and English, sometimes both in one message. Anthropic publishes no
     // multilingual-prompting guidance as of this writing, so no technique is invented for it beyond
     // the bilingual examples below — that is the whole strategy: show, not instruct.
     public const string System = """
         You record spending from a personal expense message so it can be reviewed later. You read
-        one message at a time and propose the tool call that records what it says, nothing more.
+        one message at a time and answer with the spending it describes, nothing more.
 
         Each category you are offered has a slug, an English name, a Russian name, and may have a
         parent category. Use the names to understand what each slug means — everyday food and
         drink, transport, household bills, and so on — so a line item lands under the slug whose
-        meaning actually matches it. You do not choose the set of allowed slugs; the tool only
-        accepts one of the slugs you were given, so pick by meaning and let the tool reject anything
-        else.
+        meaning actually matches it. You do not choose the set of allowed slugs; your answer only
+        accepts one of the slugs you were given, so pick by meaning and let the schema reject
+        anything else.
 
         For every amount: copy it out of the message character for character, exactly as written.
         Never convert digits, never add or remove separators, never add a currency symbol, and never
@@ -1884,37 +1921,38 @@ public static class CategorizationPrompt
         has a stated amount. If a merchant is named and it matches one of the known merchants you
         were given, set known_merchant_id to that merchant's id instead of merchant_quote. If a
         merchant is named but matches no known merchant, copy its name into merchant_quote character
-        for character, the same rule as amounts. If no merchant is named, leave both empty.
+        for character, the same rule as amounts. If no merchant is named, leave both empty. If a
+        merchant is named and you are unsure whether it is already known, you may call
+        list_merchants to check the full list before answering.
 
         <examples>
         <example>
         Message: "кофе 250 рсд"
-        Call record_spending with one item: description "coffee", amount_quote "250", currency
-        "RSD", category_slug the one whose meaning is everyday food and drink, no merchant.
+        Answer with one item: description "coffee", amount_quote "250", currency "RSD",
+        category_slug the one whose meaning is everyday food and drink, no merchant.
         </example>
         <example>
         Message: "продукты 3400 рсд молоко хлеб сыр"
-        Call record_spending with one item: description "groceries: milk, bread, cheese",
-        amount_quote "3400", currency "RSD", category_slug the one whose meaning is groceries, no
-        merchant. There is one stated amount, so there is one line, even though three goods are
-        named.
+        Answer with one item: description "groceries: milk, bread, cheese", amount_quote "3400",
+        currency "RSD", category_slug the one whose meaning is groceries, no merchant. There is one
+        stated amount, so there is one line, even though three goods are named.
         </example>
         <example>
         Message: "taxi 1200 rsd"
-        Call record_spending with one item: description "taxi", amount_quote "1200", currency
-        "RSD", category_slug the one whose meaning is transport, no merchant.
+        Answer with one item: description "taxi", amount_quote "1200", currency "RSD",
+        category_slug the one whose meaning is transport, no merchant.
         </example>
         <example>
         Message: "Lidl 45.30 eur продукты, потом кофе 2.50 eur"
-        Call record_spending with two items. First: description "groceries", amount_quote "45.30",
-        currency "EUR", category_slug the one whose meaning is groceries, merchant_quote "Lidl"
-        (or known_merchant_id instead, if Lidl is already a known merchant). Second: description
+        Answer with two items. First: description "groceries", amount_quote "45.30", currency
+        "EUR", category_slug the one whose meaning is groceries, merchant_quote "Lidl" (or
+        known_merchant_id instead, if Lidl is already a known merchant). Second: description
         "coffee", amount_quote "2.50", currency "EUR", category_slug the one whose meaning is
         everyday food and drink, no merchant. Two purchases with two stated amounts make two lines.
         </example>
         <example>
         Message: "заняла у Маши 5000 рсд"
-        Do not call record_spending. The message states an amount but describes a loan received,
+        Answer with no items at all. The message states an amount but describes a loan received,
         not a purchase — there is nothing here to categorise as spending.
         </example>
         </examples>
@@ -1948,6 +1986,8 @@ public static class CategorizationPrompt
 }
 ```
 
+> **Wording note.** `System`'s references to "Call record_spending" from a strict-tool-use draft were rewritten to "Answer with" throughout, and one sentence about `list_merchants` was added ("you may call list_merchants to check the full list before answering") — under the new approach `record_spending` is not a tool the model calls, it is the JSON answer itself, constrained by the response format; only `list_merchants` remains a real tool. `CategorizationPromptTests` does not pin the literal word "Call" or "Answer with" anywhere, so this rewrite does not change what the existing test assertions check.
+
 - [ ] **Step 15: Run the tests and watch them pass**
 
 Run: `dotnet test --project tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj`
@@ -1957,7 +1997,13 @@ Expected: PASS, all facts from Stage 1 and Stage 2 green.
 
 ```bash
 git add src/Noof.Ledger.Ai/CategorizationPrompt.cs tests/Noof.Ledger.Ai.Tests/CategorizationPromptTests.cs
-git commit -m "feat(ai): CategorizationPrompt — the system prompt, examples, and per-request rendering"
+git commit -m "$(cat <<'EOF'
+feat(ai): CategorizationPrompt — the system prompt, examples, and per-request rendering
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01NXaWFvgT296G5WzxGuuN3m
+EOF
+)"
 ```
 
 ---
@@ -1967,17 +2013,11 @@ git commit -m "feat(ai): CategorizationPrompt — the system prompt, examples, a
 - [ ] **Step 17: Run the full solution suite**
 
 Run: `dotnet test --solution NoofLedger.slnx`
-Expected: all green, and the assembly list in the output includes `Noof.Ledger.Ai.Tests` — if it does not appear at all, Step 4's `NoofLedger.slnx` edit did not land (the exact trap `tests/Noof.Ledger.E2E.Tests` is already caught in by staying outside the solution file — see the callout in Step 4). No commit here; this step is verification only, and Steps 6/11/16 already committed everything this task changed.
+Expected: all green, and the assembly list in the output includes `Noof.Ledger.Ai.Tests` — if it does not appear at all, Step 4's `NoofLedger.slnx` edit did not land. No commit here; this step is verification only, and Steps 6/11/16 already committed everything this task changed.
 
 ---
 
-## CONTRACT GAP
-
-- The plan's "Verified facts this plan is built on" table states: *"The architecture test's exact-package assertion for `Noof.Ledger.Ai` lists only `Anthropic`; the three [transitive dependencies] arrive transitively."* This implies an eventual `Noof.Ledger.Architecture.Tests` fact analogous to `Telegram_package_references_are_exactly_its_allowed_set` (1A Task 8, Stage 0) that pins `Packages("Noof.Ledger.Ai")` to `["Anthropic"]`. As of this task's `Read first` check, `tests/Noof.Ledger.Architecture.Tests/ProjectReferenceTests.cs` has no such assertion for `Noof.Ledger.Ai` today (only `Domain`, `Application`, and `Web` have dedicated package-set facts; `Telegram` was the only project added since). This task's Files list, as given to me, does not include `tests/Noof.Ledger.Architecture.Tests/ProjectReferenceTests.cs`, so it is left untouched here rather than invented. **CLOSED: Task 9 owns it.** Its Step 1 adds `Ai_package_references_are_exactly_its_allowed_set`, pinning `Packages("Noof.Ledger.Ai")` to `["Anthropic"]`, alongside the other architecture rules that close the phase. Nothing is needed here.
-
----
-
-### Task 3: The Anthropic client — the call, the one tool loop, and what counts as terminal
+### Task 3: The categoriser — one `IChatClient` call, one optional tool round trip, and what counts as terminal
 
 **Files:**
 - Create: `src/Noof.Ledger.Ai/AnthropicClientFactory.cs`
@@ -1992,8 +2032,21 @@ Expected: all green, and the assembly list in the output includes `Noof.Ledger.A
 **Interfaces:**
 
 *Consumes, in place from earlier tasks in this plan:*
-- `ISecretStore`, `SecretResult`, `SecretState`, `SecretKeys.AnthropicApiKey` — `Noof.Ledger.Application.Secrets`, unchanged, read in full above.
-- `ICategorizer`, `CategorizationRequest`, `CategorizationProposal`, `ProposedLineItem`, `MerchantOption`, `ModelCallException`, `ModelFailureKind` — `Noof.Ledger.Application.Categorization`, exact shapes from the plan's contract section, reproduced here because this task's implementer sees only this file:
+- `ISecretStore`, `SecretResult`, `SecretState`, `SecretKeys.AnthropicApiKey` — `Noof.Ledger.Application.Secrets`, unchanged:
+  ```csharp
+  public interface ISecretStore
+  {
+      Task<SecretResult> GetAsync(string key, CancellationToken cancellationToken);
+      Task<SecretStatus> GetStatusAsync(string key, CancellationToken cancellationToken);
+      Task SetAsync(string key, string plaintext, CancellationToken cancellationToken);
+      Task<bool> TrySetIfMissingAsync(string key, string plaintext, CancellationToken cancellationToken);
+  }
+
+  public readonly record struct SecretResult(SecretState State, string? Value);
+  public enum SecretState { Present = 0, Missing = 1, Unreadable = 2 }
+  public static class SecretKeys { public const string AnthropicApiKey = "anthropic-api-key"; /* ... */ }
+  ```
+- `ICategorizer`, `CategorizationRequest`, `CategorizationProposal`, `ProposedLineItem`, `MerchantOption`, `ModelCallException`, `ModelFailureKind` — `Noof.Ledger.Application.Categorization`, exact shapes from the plan's contract section:
   ```csharp
   public interface ICategorizer
   {
@@ -2006,7 +2059,7 @@ Expected: all green, and the assembly list in the output includes `Noof.Ledger.A
       string RawText,
       IReadOnlyList<CategoryOption> Categories,
       IReadOnlyList<MerchantOption> MerchantHints,
-    IReadOnlyList<MerchantOption> AllMerchants);
+      IReadOnlyList<MerchantOption> AllMerchants);
 
   public sealed record ProposedLineItem(
       string Description, string AmountQuote, string CurrencyCode, string CategorySlug,
@@ -2032,53 +2085,47 @@ Expected: all green, and the assembly list in the output includes `Noof.Ledger.A
       Task<ProbeResult> ProbeAsync(CancellationToken cancellationToken);
   }
   ```
-- `AnthropicOptions` — `Noof.Ledger.Ai`, exact shape from the plan contract (one `Model`, one `MaxTokens`, one `Timeout`, deliberately no `Temperature`):
-  ```csharp
-  public sealed class AnthropicOptions
-  {
-      public string Model { get; init; } = "claude-haiku-4-5-20251001";
-      public int MaxTokens { get; init; } = 2048;
-      public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(90);
-  }
-  ```
-- `Anthropic` 12.49.0, already restorable per the plan's fact table, already `<PackageReference>`d by `src/Noof.Ledger.Ai/Noof.Ledger.Ai.csproj` — this task assumes an earlier task in this plan added it; Step 0 below is a read-only check, not a redesign, if that assumption is wrong.
-- `tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj` — created by Task 2, presumed to already carry `ProjectReference`s to `Noof.Ledger.Ai` (and transitively `Application`/`Domain`) and `PackageReference`s to `AwesomeAssertions` and `xunit.v3.mtp-v2`, the same shape every other test project in this repo uses. Step 0 checks this; it is not this task's job to create the project.
+- `AnthropicOptions` — `Noof.Ledger.Ai` (Task 2, no `Temperature` property): `Model`, `MaxTokens`, `Timeout`.
+- `CategorizationSchema.BuildRecordSpending(...)`, `CategorizationSchema.BuildListMerchants()` — both return `JsonElement` (Task 2).
+- `CategorizationPrompt.System` (const), `CategorizationPrompt.BuildUserTurn(rawText, categories, merchantHints)` (Task 2).
+- `Anthropic` 12.49.0, already restorable, already `<PackageReference>`d by `src/Noof.Ledger.Ai/Noof.Ledger.Ai.csproj` (Task 2). Brings `Microsoft.Extensions.AI.Abstractions` 10.5.1 transitively — this task is the first to actually use it.
 
-**This task assumes, and does not itself define, two Task 2 members it calls.** They are not given anywhere in the plan's contract section, only described by one line each in the file-structure table ("The raw JSON Schema, built from live slugs and merchant ids" / "The system prompt text, in one place, asserted by test"). This task's code below calls them as:
+*Facts this task is built on, established by capturing the actual HTTP body the `Microsoft.Extensions.AI` layer sends against a stub handler — not read in documentation. Do not contradict them and do not re-verify them:*
+
 ```csharp
-namespace Noof.Ledger.Ai;
+using Anthropic;
+using Microsoft.Extensions.AI;
 
-public static class CategorizationSchema
-{
-    public static IReadOnlyDictionary<string, JsonElement> BuildRecordSpending(
-        IReadOnlyList<CategoryOption> categories, IReadOnlyList<MerchantOption> merchantHints);
-
-    public static IReadOnlyDictionary<string, JsonElement> BuildListMerchants();
-}
-
-public static class CategorizationPrompt
-{
-    public static string Build(CategorizationRequest request);
-}
+AnthropicClient raw = new() { ApiKey = keyFromDatabase, HttpClient = injected, MaxRetries = 0, Timeout = ... };
+IChatClient chat = raw.AsIChatClient(options.Model);
 ```
-**This is recorded under `## CONTRACT GAP` at the end of this file, not silently assumed as settled** — whoever implements Task 2 must either match this shape or this task's Step 5/6 need a one-line adjustment to match Task 2's actual shape. Nothing else in this task depends on Task 2's internals: the small `canonicalize_merchant` tool schema (behaviour item 2) is built locally, inline, inside `AnthropicCategorizer.cs`, specifically so this task's second call path does not carry a second unverified assumption about `CategorizationSchema`'s surface.
+
+1. A raw JSON Schema (a `JsonElement`) passes through `ChatResponseFormat.ForJsonSchema(schema, name, description)` verbatim, and through a subclass of the abstract `AIFunctionDeclaration` (which has an overridable `JsonElement JsonSchema`) for a tool declared from raw JSON. The captured body contained the schema unchanged, `additionalProperties: false`, `enum` and `minItems` included.
+2. `ChatResponseFormat.ForJsonSchema(...)` lands as `"output_config": {"format": {"type": "json_schema", "schema": { ... }}}` — Anthropic's GA structured-outputs mode. This is what constrains the final answer and **replaces strict tool use**: the answer is the response text, and `output_config` is the response-side equivalent of a tool's `strict`. **No `strict` field is emitted and none is needed.**
+3. Tools and `ResponseFormat` combine in one request: a capture with `Tools = [list_merchants]`, `ToolMode = Auto` and `ResponseFormat` produced exactly one tool, `tool_choice {"type":"auto"}`, and the `output_config` block together. `record_spending` is **not** a tool — only `list_merchants` is.
+4. `ChatToolMode.RequireAny`/`ChatToolMode.RequireSpecific(name)` land as `tool_choice {"type":"any"}`/`{"type":"tool","name":...}` — not used by this task, recorded because `ChatToolMode.Auto` (used below) is the one that matters here.
+5. **TRAP, verified:** declaring a tool in both `ChatOptions.Tools` and `ChatOptions.RawRepresentationFactory` sends it **twice** — a captured body had `tools` of length 2 for one tool. This task never touches `RawRepresentationFactory`; tools are declared through `Tools` only.
+6. Exceptions are **not** wrapped by the layer. With `MaxRetries = 0`: HTTP 401 throws `Anthropic.Exceptions.AnthropicUnauthorizedException`, 429 throws `AnthropicRateLimitException`, 529 throws `Anthropic5xxException`, all deriving from `AnthropicApiException`, which exposes only `StatusCode` (`HttpStatusCode`; 529 shows as the numeric value), `ErrorType` (`Anthropic.Models.ErrorType`) and `Message` — `.Error`, `.Body`, `.Headers`, `.RequestID` do **not** exist.
+7. The answer arrives as JSON **text**: `response.Messages` carry a `TextContent` whose `Text` is the schema-constrained JSON. A tool call arrives as `FunctionCallContent` with `CallId`, `Name`, `IDictionary<string, object?> Arguments`; it is answered with `FunctionResultContent(callId, result)` in a `ChatMessage` with `ChatRole.Tool`, then `GetResponseAsync` is called again with the accumulated `IList<ChatMessage>`.
+8. `MessageCreateParams.Temperature` (the raw SDK surface) is `[Obsolete]`. `ChatOptions.Temperature` exists on the `Microsoft.Extensions.AI` surface and compiles, but it is never set here — determinism comes from the schema-constrained response, not a sampling parameter (same reasoning `AnthropicOptions.cs`'s comment gives).
+9. `client.Models.List(cancellationToken)` does **not** compile — the first parameter is `ModelListParams?`; the call is `client.Models.List(null, cancellationToken)`. Unaffected by the `IChatClient` switch: `AnthropicKeyProbe` still calls the raw `AnthropicClient` directly, never a chat abstraction, because listing models has nothing to do with chat.
 
 *Produces, for Task 7 (the worker) and Task 8 (the settings page) to consume:*
-- `IAnthropicClientFactory` / `AnthropicClientFactory` — `Noof.Ledger.Ai`.
-- `AnthropicCategorizer : ICategorizer` — `Noof.Ledger.Ai`. **Not wired into DI anywhere by this task** — the same deferral pattern Task 7 of Phase 1A used for `EfJobQueue`. Whoever wires the host (a later task) registers `builder.Services.AddHttpClient("anthropic")`, `AnthropicOptions` from configuration, `IAnthropicClientFactory`, `ICategorizer`, and `ISecretProbe` (keyed or multiply-registered, matching however Task 8 expects to find the Anthropic probe specifically).
-- `AnthropicKeyProbe : ISecretProbe` — `Noof.Ledger.Ai`.
+- `IAnthropicClientFactory` / `AnthropicClientFactory` — `Noof.Ledger.Ai`. **Unchanged in shape from a strict-tool-use draft**: it still only ever builds and returns the raw `Anthropic.AnthropicClient`. The conversion to `IChatClient` (`raw.AsIChatClient(options.Model)`) happens at each call site inside `AnthropicCategorizer`, not inside the factory — this is what keeps the factory's constructor and its one member identical regardless of which SDK surface a caller wants, and is the reason Task 7's `Program.cs` registration needs no change (see `## Ripple`).
+- `AnthropicCategorizer : ICategorizer` — `Noof.Ledger.Ai`. **Not wired into DI anywhere by this task** — the same deferral pattern Task 7 of Phase 1A used for `EfJobQueue`.
+- `AnthropicKeyProbe : ISecretProbe` — `Noof.Ledger.Ai`. Unchanged: still calls the raw client's `Models.List`.
 
 ---
 
 ## Locked design decisions
 
-**1. A fresh `AnthropicClient` is built on every call, from whatever key is in `ISecretStore` right now.** No caching, no "rebuild only if the key changed" tracking. `TelegramClientHandle` (`src/Noof.Ledger.Telegram/TelegramClientHandle.cs`) caches its bot client because Telegram's polling loop holds a client open across many long-poll requests and only needs to swap it when the token changes underneath a running loop. Anthropic calls are one request/response each, `MaxRetries = 0`, no persistent connection state lives on `AnthropicClient` itself — the actual socket pooling is `HttpClient`'s job, and that `HttpClient` is still resolved once via `IHttpClientFactory` per the usual named-client lifetime rules. Constructing a new `AnthropicClient` wrapper around it costs an object allocation, not a connection. Given that, a cache-plus-invalidation layer is complexity bought for a benefit that doesn't exist here, and "rebuild every time" trivially satisfies "rebuild when the key changes" as a special case.
+**1. A fresh `AnthropicClient` is built on every call, from whatever key is in `ISecretStore` right now.** No caching, no "rebuild only if the key changed" tracking — unaffected by the `IChatClient` switch, since the client being wrapped is the same raw `AnthropicClient` either way. Anthropic calls are one request/response each, `MaxRetries = 0`, no persistent connection state lives on `AnthropicClient` itself; the actual socket pooling is `HttpClient`'s job via `IHttpClientFactory`. Constructing a new `AnthropicClient` wrapper (and calling `.AsIChatClient(...)` on it) costs an object allocation, not a connection.
 
-**2. The `"anthropic"` named `HttpClient` does *not* get `.RemoveAllLoggers()`.** `Program.cs` removes all loggers from `"telegram"` because the bot token is a path segment in the request URI (`.../bot{token}/getMe`), and the framework's default `LoggingHttpMessageHandler`/`LoggingScopeHttpMessageHandler` logs the request URI at `Information` — a category override two configuration keys deep (`Logging:LogLevel:System.Net.Http.HttpClient.telegram.LogicalHandler`) can re-enable exactly that at runtime, so the only removal that survives an operator's future config change is removing the handlers outright. The Anthropic SDK sends the key as the `x-api-key` request header, never in the URI or the query string, and .NET's default HTTP client logging handlers do not log header contents (Information level logs method + URI only; header values are not emitted by `LoggingHttpMessageHandler` at any built-in level without an explicit opt-in this code never adds). So there is no realistic path from "someone raises a log category" to "the key appears in a log line," and keeping the default logging on the Anthropic client is worth more than it costs: request/response logging at Information is exactly what an operator debugging "why did categorisation fail" would want. Decision: default logging stays on for `"anthropic"`.
+**2. The `"anthropic"` named `HttpClient` does *not* get `.RemoveAllLoggers()`.** The SDK sends the key as the `x-api-key` request header regardless of which abstraction sits on top, never in the URI or query string, and .NET's default HTTP client logging handlers do not log header contents at any built-in level without an explicit opt-in this code never adds. Default logging stays on for `"anthropic"` — unchanged reasoning from the strict-tool-use draft.
 
-**3. The tool loop runs at most twice, period — never a third request under any response shape.** First call offers `record_spending` and `list_merchants` with `ToolChoiceAny`. If it comes back with `list_merchants`, exactly one follow-up call is sent with `ToolChoiceTool { Name = "record_spending" }`. Whatever the second call returns — `record_spending` (success), `list_merchants` again (a model or a test stub ignoring the forced choice), garbage, nothing — the method returns or throws; it never sends a third request. The code below enforces this structurally: there is exactly one call site for the first request and exactly one call site for the follow-up request, and neither is inside a loop.
+**3. The tool loop runs at most twice, period — never a third request under any response shape.** The first call offers `list_merchants` via `Tools = [listMerchantsTool]` and `ToolMode = ChatToolMode.Auto`, alongside `ResponseFormat` for `record_spending`. If it answers directly (JSON text matching the schema), that is the proposal. If it calls `list_merchants` instead, exactly one follow-up call is sent — **with no `Tools` at all**, only `ResponseFormat` — so nothing but a JSON answer is possible from the model on that second call; there is no forced-tool-choice mechanism needed because there is no tool left to choose. Whatever the second call returns — a JSON answer (success), a stray tool-use the model produced anyway despite none being offered, garbage, nothing — the method returns or throws; it never sends a third request. The code enforces this structurally: there is exactly one call site for the first request and exactly one call site for the follow-up, and neither is inside a loop. This is a change from a strict-tool-use draft's `ToolChoiceTool { Name = "record_spending" }`, which forced a specific *tool*; here `record_spending` was never a tool to force a choice onto, so omitting `Tools` entirely is what plays the same structural role.
 
-**4. Status-code classification is a pure function of `(int)ex.StatusCode`, not `ErrorType`.** `AnthropicApiException` exposes only `StatusCode`, `ErrorType`, `Message` (proven by compiling — `.Error`, `.Type`, `.Body`, `.Headers`, `.RequestID` all failed with `CS1061`). `ErrorType` is a string the API controls and could change wording without a status-code change; the status code is the contractual, versioned signal.
+**4. Status-code classification is a pure function of `(int)ex.StatusCode`, not `ErrorType`.** `AnthropicApiException` exposes only `StatusCode`, `ErrorType`, `Message` — unaffected by the `IChatClient` switch, since exceptions are not wrapped by the `Microsoft.Extensions.AI` layer at all (fact 6 above) and surface exactly as the raw SDK throws them. `ErrorType` is a string the API controls and could change wording without a status-code change; the status code is the contractual, versioned signal.
 
   | Status | Kind | Why |
   |---|---|---|
@@ -2092,13 +2139,21 @@ public static class CategorizationPrompt
   | 409 Conflict | Transient | Anthropic uses this for transient state conflicts, not a client bug |
   | 429 Too Many Requests | Transient | Rate limit; a later attempt has a different clock |
   | 5xx (500, 529 overloaded, etc.) | Transient | Anthropic's own outage, not this request's fault |
-  | Anything else not listed | Transient | Defaults to "retry later" — treating an unrecognised code as permanently fatal is the wrong failure mode for a code this app has never seen before |
+  | Anything else not listed | Transient | Defaults to "retry later" |
 
-**5. `ProposedLineItem.CurrencyCode` is deserialised from the JSON field `"currency"`, not `"currency_code"`.** The record's C# property is `CurrencyCode` but the tool schema's field (plan contract, "The tool schema, once") is `"currency"`. A `JsonNamingPolicy.SnakeCaseLower`-based deserialisation would produce `"currency_code"` and silently leave `CurrencyCode` at its default (`null!`, a NullReferenceException waiting to happen, or a bind failure depending on how it's wired) — it would not error loudly. This task deserialises through a private DTO in `AnthropicCategorizer.cs` with explicit `[JsonPropertyName]` attributes per field instead of a naming policy, specifically so this mismatch is spelled out once, by name, rather than relying on a convention that is wrong for exactly this one field.
+**5. `ProposedLineItem.CurrencyCode` is deserialised from the JSON field `"currency"`, not `"currency_code"`.** Unchanged: the answer's JSON still uses the field names `CategorizationSchema` declared, regardless of transport. Deserialisation goes through a private DTO with explicit `[JsonPropertyName]` attributes per field, not a naming-policy convention.
 
-**6. Both SDK calls take the `CancellationToken`, and the two spellings are not symmetrical.** A second compile spike settled this after this task was first drafted. `await client.Messages.Create(request, cancellationToken)` compiles. `await client.Models.List(cancellationToken)` does **not** — the first parameter is `ModelListParams?`, so the call is `await client.Models.List(null, cancellationToken)` and the obvious spelling is the wrong one (`error CS1503`). Thread the token through both: an in-flight model call must not outlive host shutdown, and `AnthropicOptions.Timeout` bounds the call but does not cancel it.
+**6. `record_spending` is not a `Tool` — it is the response format.** Only `list_merchants` is declared through `ChatOptions.Tools`, as a raw-schema `AIFunctionDeclaration`. `record_spending`'s schema (`CategorizationSchema.BuildRecordSpending(...)`) is handed to `ChatResponseFormat.ForJsonSchema(schema, "record_spending", description)` on every call this method makes, first and follow-up alike, so the model is always constrained to answer in that shape the moment it isn't calling `list_merchants`.
 
-**7. `list_merchants`'s answer is built from `request.AllMerchants`.** *(This decision originally said `MerchantHints` and was overturned while the plan was being assembled: answering with the hints the model had already been given and rejected makes the tool pointless, and `ProposalVerification` would then reject any id it learned from the tool. The contract gained `AllMerchants` for exactly this. The superseded reasoning is kept under `## CONTRACT GAP` because it is what found the flaw.)* The original note read: The `list_merchants` tool's own description says "List every merchant this ledger already knows," but `ICategorizer.ProposeAsync`'s only input is `CategorizationRequest`, whose `MerchantHints` is documented elsewhere in this plan as the *pre-filtered, at-most-10* result of `MerchantScan.Matches(rawText, aliases, 10)` — not the full directory. `AnthropicCategorizer` has no other source of merchant data and must not reach past its own constructor dependencies to get one (that would make `ICategorizer` secretly depend on `IMerchantDirectory`, which is not in its contract). This task answers `list_merchants` with exactly `request.MerchantHints`, serialised as JSON, and flags the mismatch rather than inventing a channel for "the full list" that the locked `ICategorizer` signature has no room for.
+**7. `canonicalize_merchant` is a separate call with its own tiny `ResponseFormat`, and offers no tools at all.** There is nothing to look up mid-call for canonicalisation — the full known-merchant list is already in the prompt — so unlike `ProposeAsync` there is only ever one request, never a follow-up.
+
+**8. No `Temperature` is ever set, on either call.** `ChatOptions.Temperature` compiles (unlike the raw SDK's `[Obsolete] MessageCreateParams.Temperature`), which is exactly why this has to be a design decision instead of a compile error catching it: nothing stops a future edit from adding it. `AnthropicOptions` has no `Temperature` property for the same reason (Task 2).
+
+**9. `list_merchants`'s answer is built from `request.AllMerchants`, never `request.MerchantHints`.** The hints are the handful the local scan already found and the model has already seen in the prompt; it only calls `list_merchants` when none of them fit, so answering with the same short list would make the tool pointless — and `ProposalVerification` would then reject any id it learned from the tool. `CategorizationRequest.AllMerchants` exists specifically to answer this tool.
+
+**10. `RawRepresentationFactory` is never used to add a tool.** Per fact 5 above (the TRAP), the only place a tool is declared is `ChatOptions.Tools`. If a future change needs to pass an Anthropic-specific option not exposed by the abstraction, it must not go through `RawRepresentationFactory` for anything that duplicates a tool already in `Tools`.
+
+**11. Both SDK calls take the `CancellationToken`.** `chat.GetResponseAsync(messages, options, cancellationToken)` compiles and threads the token through to the HTTP call. `client.Models.List(cancellationToken)` does **not** compile (`error CS1503`); the probe calls `client.Models.List(null, cancellationToken)`.
 
 ---
 
@@ -2109,9 +2164,9 @@ Run, and read the output before writing anything:
 grep -n "Anthropic" src/Noof.Ledger.Ai/Noof.Ledger.Ai.csproj Directory.Packages.props
 grep -rn "class AnthropicOptions" src/Noof.Ledger.Ai
 grep -n "PackageReference\|ProjectReference" tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj
-grep -rn "class CategorizationSchema\|class CategorizationPrompt" src/Noof.Ledger.Ai
+grep -rn "JsonElement BuildRecordSpending\|JsonElement BuildListMerchants\|class CategorizationPrompt" src/Noof.Ledger.Ai
 ```
-Expected: the `Anthropic` package reference and `AnthropicOptions` already exist (an earlier task's job); `Noof.Ledger.Ai.Tests.csproj` already references `Noof.Ledger.Ai`, `AwesomeAssertions`, and `xunit.v3.mtp-v2`. If `CategorizationSchema`/`CategorizationPrompt` are not yet present, Task 2 hasn't landed yet — stop and wait for it; this task's Step 5 code will not compile without them. If the test csproj is missing a package reference this task needs, add only that missing line, the same minimal way Phase 1A's Task 7 Step 1 added `Microsoft.Extensions.TimeProvider.Testing` — do not otherwise touch a file another task owns.
+Expected: the `Anthropic` package reference and `AnthropicOptions` already exist (Task 2's job); `Noof.Ledger.Ai.Tests.csproj` already references `Noof.Ledger.Ai`, `AwesomeAssertions`, and `xunit.v3.mtp-v2`. If `CategorizationSchema`/`CategorizationPrompt` are not yet present with the `JsonElement`-returning shape, Task 2 hasn't landed yet — stop and wait for it; this task's Step 5 code will not compile without them. If the test csproj is missing a package reference this task needs, add only that missing line — do not otherwise touch a file another task owns.
 
 - [ ] **Step 1: Write the HTTP stub and the canned responses**
 
@@ -2166,15 +2221,16 @@ Create `tests/Noof.Ledger.Ai.Tests/AnthropicResponses.cs`:
 namespace Noof.Ledger.Ai.Tests;
 
 // Real response shapes, kept in one place so every test reads from the same ground truth instead
-// of each hand-rolling its own JSON.
+// of each hand-rolling its own JSON. Under the response-format approach, a successful answer is a
+// plain assistant message whose one text block is the schema-constrained JSON — there is no
+// "tool_use" block for record_spending or canonicalize_merchant, unlike list_merchants, which
+// remains a genuine tool call in Anthropic's native shape.
 public static class AnthropicResponses
 {
-    public const string RecordSpendingToolUse = """
+    public const string RecordSpendingJsonAnswer = """
         {"id":"msg_01","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
-         "content":[{"type":"tool_use","id":"toolu_01","name":"record_spending","input":
-           {"items":[{"description":"Coffee","amount_quote":"3.50","currency":"EUR","category_slug":"food-drink"}]}}],
-         "stop_reason":"tool_use","stop_sequence":null,
-         "usage":{"input_tokens":123,"output_tokens":45}}
+         "content":[{"type":"text","text":"{\"items\":[{\"description\":\"Coffee\",\"amount_quote\":\"3.50\",\"currency\":\"EUR\",\"category_slug\":\"food-drink\"}]}"}],
+         "stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
         """;
 
     public const string ListMerchantsToolUse = """
@@ -2184,27 +2240,22 @@ public static class AnthropicResponses
          "usage":{"input_tokens":80,"output_tokens":10}}
         """;
 
-    public const string CanonicalizeMerchantToolUse = """
+    public const string CanonicalizeMerchantJsonAnswer = """
         {"id":"msg_03","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
-         "content":[{"type":"tool_use","id":"toolu_03","name":"canonicalize_merchant","input":
-           {"display_name":"Lidl"}}],
-         "stop_reason":"tool_use","stop_sequence":null,
+         "content":[{"type":"text","text":"{\"display_name\":\"Lidl\"}"}],
+         "stop_reason":"end_turn","stop_sequence":null,
          "usage":{"input_tokens":40,"output_tokens":8}}
         """;
 
-    public const string NoToolUseTextOnly = """
+    public const string NoAnswerAtAll = """
         {"id":"msg_04","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
-         "content":[{"type":"text","text":"Sorry, I can't help with that."}],
+         "content":[],
          "stop_reason":"end_turn","stop_sequence":null,
-         "usage":{"input_tokens":50,"output_tokens":12}}
+         "usage":{"input_tokens":50,"output_tokens":0}}
         """;
 
     public const string AuthenticationError = """
         {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}
-        """;
-
-    public const string OverloadedError = """
-        {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}
         """;
 
     public static string GenericError(string type, string message) =>
@@ -2243,10 +2294,10 @@ public class AnthropicCategorizerTests
     }
 
     [Fact]
-    public async Task Returns_the_proposal_when_the_first_turn_calls_record_spending()
+    public async Task Returns_the_proposal_when_the_first_turn_answers_with_JSON_text()
     {
         var (categorizer, handler) = Build();
-        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingToolUse);
+        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingJsonAnswer);
         var request = new CategorizationRequest("Coffee 3.50 EUR", Categories, NoMerchantHints, NoMerchantHints);
 
         var proposal = await categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
@@ -2256,44 +2307,52 @@ public class AnthropicCategorizerTests
         proposal.Items[0].AmountQuote.Should().Be("3.50");
         proposal.Items[0].CurrencyCode.Should().Be("EUR", "the JSON field is \"currency\", not \"currency_code\" — this is the mapping Locked Decision 5 exists for");
         proposal.Items[0].CategorySlug.Should().Be("food-drink");
-        handler.Requests.Should().ContainSingle("record_spending on the first turn must not trigger a follow-up call");
+        handler.Requests.Should().ContainSingle("a direct JSON answer on the first turn must not trigger a follow-up call");
     }
 
     [Fact]
-    public async Task Sends_ToolChoiceAny_and_strict_true_on_the_first_call()
+    public async Task Sends_json_schema_output_config_and_exactly_one_tool_on_the_first_call()
     {
         var (categorizer, handler) = Build();
-        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingToolUse);
+        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingJsonAnswer);
         var request = new CategorizationRequest("Coffee 3.50 EUR", Categories, NoMerchantHints, NoMerchantHints);
 
         await categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
 
         var sent = JsonDocument.Parse(handler.Requests[0].Body).RootElement;
-        sent.GetProperty("tool_choice").GetProperty("type").GetString().Should().Be("any");
-        foreach (var tool in sent.GetProperty("tools").EnumerateArray())
-            tool.GetProperty("strict").GetBoolean().Should().BeTrue();
-        sent.TryGetProperty("temperature", out _).Should().BeFalse("Temperature is [Obsolete] in the SDK and must never be set");
+        sent.GetProperty("output_config").GetProperty("format").GetProperty("type").GetString().Should().Be("json_schema");
+        var currencyEnum = sent.GetProperty("output_config").GetProperty("format").GetProperty("schema")
+            .GetProperty("properties").GetProperty("items").GetProperty("items").GetProperty("properties")
+            .GetProperty("currency").GetProperty("enum").EnumerateArray().Select(e => e.GetString());
+        currencyEnum.Should().BeEquivalentTo(["EUR", "RSD", "USD", "RUB", "KZT"]);
+
+        var tools = sent.GetProperty("tools");
+        tools.GetArrayLength().Should().Be(1, "guarding against the RawRepresentationFactory trap: a tool must never appear twice");
+        tools[0].GetProperty("name").GetString().Should().Be("list_merchants");
+        sent.GetProperty("tool_choice").GetProperty("type").GetString().Should().Be("auto");
+
+        sent.TryGetProperty("temperature", out _).Should().BeFalse("ChatOptions.Temperature must never be set");
     }
 
     [Fact]
     public async Task No_request_carries_an_anthropic_beta_header()
     {
         var (categorizer, handler) = Build();
-        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingToolUse);
+        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingJsonAnswer);
         var request = new CategorizationRequest("Coffee 3.50 EUR", Categories, NoMerchantHints, NoMerchantHints);
 
         await categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
 
         handler.Requests[0].Headers.Should().NotContainKey("anthropic-beta",
-            "structured outputs and strict tool use are GA per the plan's fact table — no beta header anywhere");
+            "structured outputs and tool use are GA — no beta header anywhere");
     }
 
     [Fact]
-    public async Task Answers_list_merchants_then_forces_record_spending_on_the_second_call()
+    public async Task Answers_list_merchants_then_sends_one_follow_up_that_offers_no_tools()
     {
         var (categorizer, handler) = Build();
         handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.ListMerchantsToolUse);
-        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingToolUse);
+        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingJsonAnswer);
         var hints = new List<MerchantOption> { new(Guid.Parse("11111111-1111-1111-1111-111111111111"), "Lidl") };
         var all = new List<MerchantOption>
         {
@@ -2305,10 +2364,11 @@ public class AnthropicCategorizerTests
         var proposal = await categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
 
         proposal.Items.Should().ContainSingle();
-        handler.Requests.Should().HaveCount(2, "the loop runs exactly once: one first call, one forced follow-up, never a third");
+        handler.Requests.Should().HaveCount(2, "the loop runs exactly once: one first call, one follow-up, never a third");
+
         var secondSent = JsonDocument.Parse(handler.Requests[1].Body).RootElement;
-        secondSent.GetProperty("tool_choice").GetProperty("type").GetString().Should().Be("tool");
-        secondSent.GetProperty("tool_choice").GetProperty("name").GetString().Should().Be("record_spending");
+        secondSent.TryGetProperty("tools", out _).Should().BeFalse(
+            "the follow-up call offers no tools at all, which is what structurally rules out a third list_merchants call");
 
         // The answer is the FULL directory. "Maxi" is deliberately absent from the hints, so a
         // regression that answers with request.MerchantHints instead of request.AllMerchants makes
@@ -2333,10 +2393,10 @@ public class AnthropicCategorizerTests
     }
 
     [Fact]
-    public async Task Neither_tool_on_the_first_turn_is_a_transient_failure()
+    public async Task Neither_JSON_nor_a_known_tool_call_on_the_first_turn_is_a_transient_failure()
     {
         var (categorizer, handler) = Build();
-        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.NoToolUseTextOnly);
+        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.NoAnswerAtAll);
         var request = new CategorizationRequest("what is this", Categories, NoMerchantHints, NoMerchantHints);
 
         var act = () => categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
@@ -2414,10 +2474,10 @@ public class AnthropicCategorizerTests
     }
 
     [Fact]
-    public async Task CanonicalizeMerchantAsync_sends_a_single_forced_call_and_returns_the_display_name()
+    public async Task CanonicalizeMerchantAsync_sends_a_single_call_with_json_schema_output_and_returns_the_display_name()
     {
         var (categorizer, handler) = Build();
-        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.CanonicalizeMerchantToolUse);
+        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.CanonicalizeMerchantJsonAnswer);
         var known = new List<MerchantOption> { new(Guid.NewGuid(), "Lidl Beograd") };
 
         var displayName = await categorizer.CanonicalizeMerchantAsync("lidl", known, TestContext.Current.CancellationToken);
@@ -2425,8 +2485,8 @@ public class AnthropicCategorizerTests
         displayName.Should().Be("Lidl");
         handler.Requests.Should().ContainSingle();
         var sent = JsonDocument.Parse(handler.Requests[0].Body).RootElement;
-        sent.GetProperty("tool_choice").GetProperty("type").GetString().Should().Be("tool");
-        sent.GetProperty("tool_choice").GetProperty("name").GetString().Should().Be("canonicalize_merchant");
+        sent.GetProperty("output_config").GetProperty("format").GetProperty("type").GetString().Should().Be("json_schema");
+        sent.TryGetProperty("tools", out _).Should().BeFalse("canonicalisation never offers a tool - it is a plain structured-output call");
     }
 
     sealed class StubSecretStore(SecretState state, string? value) : ISecretStore
@@ -2445,8 +2505,6 @@ public class AnthropicCategorizerTests
     }
 }
 ```
-
-> `SecretStatus` is referenced only to satisfy `ISecretStore`'s member list for `StubSecretStore` and is never constructed by these tests — if its exact shape differs from a no-arg-friendly type when you reach this step (it's produced by Task 4 of Phase 1A, not this task), the `throw new NotSupportedException(...)` body compiles regardless of what `SecretStatus` turns out to be, because the method never needs to construct one.
 
 Create `tests/Noof.Ledger.Ai.Tests/AnthropicKeyProbeTests.cs`:
 ```csharp
@@ -2545,7 +2603,7 @@ Expected: build errors — `AnthropicClientFactory`, `AnthropicCategorizer`, `An
 
 - [ ] **Step 3: Confirm the failure is the one you expect**
 
-Same command as Step 2. If the error is a Postgres/network error or anything other than "type or namespace not found" for the three new Ai types, stop and fix that first — a red test for the wrong reason proves nothing. This test project touches no database and no network by design (`ISecretStore` is a hand-written stub, not `EfSecretStore`), so there is nothing here that should fail for an infrastructure reason.
+Same command as Step 2. If the error is a Postgres/network error or anything other than "type or namespace not found" for the three new Ai types, stop and fix that first. This test project touches no database and no network by design.
 
 - [ ] **Step 4: `AnthropicClientFactory`**
 
@@ -2559,9 +2617,9 @@ namespace Noof.Ledger.Ai;
 
 public interface IAnthropicClientFactory
 {
-    // Never caches. See "Locked design decisions" item 1 in this task's plan section: a single
-    // request/response call gains nothing from a long-lived client the way Telegram's polling
-    // loop does, and rebuilding trivially picks up a key the operator just pasted into the UI.
+    // Never caches; always returns the raw client. Callers that want an IChatClient call
+    // raw.AsIChatClient(options.Model) themselves — AnthropicKeyProbe needs the raw client
+    // (Models.List), so the factory cannot commit to one abstraction for every caller.
     Task<AnthropicClient> CreateAsync(CancellationToken cancellationToken);
 }
 
@@ -2599,168 +2657,143 @@ public sealed class AnthropicClientFactory(
 Create `src/Noof.Ledger.Ai/AnthropicCategorizer.cs`:
 ```csharp
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Anthropic;
 using Anthropic.Exceptions;
-using Anthropic.Models.Messages;
+using Microsoft.Extensions.AI;
 using Noof.Ledger.Application.Categorization;
 
 namespace Noof.Ledger.Ai;
 
 public sealed class AnthropicCategorizer(IAnthropicClientFactory clientFactory, AnthropicOptions options) : ICategorizer
 {
+    const string RecordSpendingName = "record_spending";
+    const string RecordSpendingDescription = "Record every distinct spending line item found in the message.";
+
+    const string ListMerchantsName = "list_merchants";
+    const string ListMerchantsDescription =
+        "List every merchant this ledger already knows, with the id to use for each. " +
+        "Call this only if the message names a merchant that is not in the known merchants given to you, " +
+        "and you want to check whether it is already known under a different spelling.";
+
+    const string CanonicalizeMerchantName = "canonicalize_merchant";
+    const string CanonicalizeMerchantDescription = "The display name to store for this merchant.";
+
+    static readonly JsonElement CanonicalizeMerchantSchema = BuildCanonicalizeMerchantSchema();
+
     public async Task<CategorizationProposal> ProposeAsync(CategorizationRequest request, CancellationToken cancellationToken)
     {
-        var client = await clientFactory.CreateAsync(cancellationToken);
-        // System is a const: it can never carry a live slug or merchant id. Everything
-        // per-request - the category tree and the merchant hints - goes in the USER turn, which is
-        // what BuildUserTurn assembles. Sending request.RawText alone here would send the message
-        // with no categories at all, and the enum in the schema would be the model's only clue.
-        var systemPrompt = CategorizationPrompt.System;
+        var raw = await clientFactory.CreateAsync(cancellationToken);
+        var chat = raw.AsIChatClient(options.Model);
+
+        // System is the SAME across turns; per-request data - categories, hints - lives only in the
+        // user turn, built by CategorizationPrompt.BuildUserTurn. Instructions lands as the request's
+        // "system" per the captured HTTP body (fact 1/2 above).
         var userTurn = CategorizationPrompt.BuildUserTurn(request.RawText, request.Categories, request.MerchantHints);
+        var recordSpendingSchema = CategorizationSchema.BuildRecordSpending(request.Categories, request.MerchantHints);
+        var listMerchantsTool = new RawSchemaFunctionDeclaration(
+            ListMerchantsName, ListMerchantsDescription, CategorizationSchema.BuildListMerchants());
 
-        var recordSpendingTool = new Tool
+        var messages = new List<ChatMessage> { new(ChatRole.User, userTurn) };
+
+        var firstOptions = new ChatOptions
         {
-            Name = "record_spending",
-            Description = "Record every distinct spending line item found in the message.",
-            InputSchema = InputSchema.FromRawUnchecked(CategorizationSchema.BuildRecordSpending(request.Categories, request.MerchantHints)),
-            Strict = true,
+            MaxOutputTokens = options.MaxTokens,
+            Instructions = CategorizationPrompt.System,
+            Tools = [listMerchantsTool],
+            ToolMode = ChatToolMode.Auto,
+            ResponseFormat = ChatResponseFormat.ForJsonSchema(recordSpendingSchema, RecordSpendingName, RecordSpendingDescription),
         };
 
-        var listMerchantsTool = new Tool
-        {
-            Name = "list_merchants",
-            Description = "List every merchant this ledger already knows, with the id to use for each. " +
-                "Call this only if the message names a merchant that is not in the known merchants given to you, " +
-                "and you want to check whether it is already known under a different spelling.",
-            InputSchema = InputSchema.FromRawUnchecked(CategorizationSchema.BuildListMerchants()),
-            Strict = true,
-        };
+        var firstResponse = await CallAsync(chat, messages, firstOptions, cancellationToken);
 
-        var firstRequest = new MessageCreateParams
-        {
-            Model = options.Model,
-            MaxTokens = options.MaxTokens,
-            System = systemPrompt,
-            Tools = [recordSpendingTool, listMerchantsTool],
-            ToolChoice = new ToolChoiceAny(),
-            Messages = [new() { Role = Role.User, Content = userTurn }],
-        };
+        if (TryGetText(firstResponse, out var firstJson))
+            return ToProposal(firstJson);
 
-        var firstResponse = await CallAsync(client, firstRequest, cancellationToken);
-
-        if (TryGetToolUse(firstResponse, "record_spending", out var recordUse))
-            return ToProposal(recordUse);
-
-        if (!TryGetToolUse(firstResponse, "list_merchants", out var listUse))
+        if (!TryGetFunctionCall(firstResponse, ListMerchantsName, out var call))
         {
             throw new ModelCallException(
                 ModelFailureKind.Transient,
-                $"First turn produced neither record_spending nor list_merchants (stop_reason: {firstResponse.StopReason}).");
+                $"First turn produced neither a JSON answer nor a {ListMerchantsName} call (finish reason: {firstResponse.FinishReason}).");
         }
 
-        // The loop runs exactly once: this is the ONLY follow-up request this method ever sends,
-        // regardless of what it gets back. See Locked design decision 3.
         // AllMerchants, not MerchantHints: the hints are the handful the local scan already found
-        // and the model has seen them. It only calls this tool when none of them fit, so answering
-        // with the same short list would make the tool useless - which is exactly why the contract
-        // carries AllMerchants as a second, prompt-free field.
-        var merchantListJson = JsonSerializer.Serialize(request.AllMerchants);
-        var followUpRequest = new MessageCreateParams
+        // and the model has already seen. It only calls this tool when none of them fit, so
+        // answering with the same short list would make the tool pointless - which is exactly why
+        // the contract carries AllMerchants as a second, prompt-free field (Locked design decision 9).
+        messages.AddRange(firstResponse.Messages);
+        messages.Add(new ChatMessage(ChatRole.Tool,
+            [new FunctionResultContent(call.CallId, JsonSerializer.Serialize(request.AllMerchants))]));
+
+        // The loop runs exactly once: this is the ONLY follow-up request this method ever sends,
+        // regardless of what it gets back. No tools are offered this time - that is what
+        // structurally rules out a third request, rather than relying on the model to behave
+        // (Locked design decision 3).
+        var followUpOptions = new ChatOptions
         {
-            Model = options.Model,
-            MaxTokens = options.MaxTokens,
-            System = systemPrompt,
-            Tools = [recordSpendingTool, listMerchantsTool],
-            ToolChoice = new ToolChoiceTool { Name = "record_spending" },
-            Messages =
-            [
-                new() { Role = Role.User, Content = userTurn },
-                new()
-                {
-                    Role = Role.Assistant,
-                    Content = new List<ContentBlockParam>
-                    {
-                        new ToolUseBlockParam { ID = listUse.ID, Name = listUse.Name, Input = listUse.Input },
-                    },
-                },
-                new()
-                {
-                    Role = Role.User,
-                    Content = new List<ContentBlockParam>
-                    {
-                        new ToolResultBlockParam
-                        {
-                            ToolUseID = listUse.ID,
-                            Content = new List<ContentBlockParam> { new TextBlockParam { Text = merchantListJson } },
-                            IsError = false,
-                        },
-                    },
-                },
-            ],
+            MaxOutputTokens = options.MaxTokens,
+            Instructions = CategorizationPrompt.System,
+            ResponseFormat = ChatResponseFormat.ForJsonSchema(recordSpendingSchema, RecordSpendingName, RecordSpendingDescription),
         };
 
-        var followUpResponse = await CallAsync(client, followUpRequest, cancellationToken);
+        var followUpResponse = await CallAsync(chat, messages, followUpOptions, cancellationToken);
 
-        if (TryGetToolUse(followUpResponse, "record_spending", out var secondRecordUse))
-            return ToProposal(secondRecordUse);
+        if (TryGetText(followUpResponse, out var followUpJson))
+            return ToProposal(followUpJson);
 
         throw new ModelCallException(
             ModelFailureKind.Transient,
-            $"Second turn, forced to record_spending, still failed to produce it (stop_reason: {followUpResponse.StopReason}).");
+            $"Second turn, after answering {ListMerchantsName}, still produced no JSON answer (finish reason: {followUpResponse.FinishReason}).");
     }
 
     public async Task<string> CanonicalizeMerchantAsync(
         string merchantText, IReadOnlyList<MerchantOption> knownMerchants, CancellationToken cancellationToken)
     {
-        var client = await clientFactory.CreateAsync(cancellationToken);
+        var raw = await clientFactory.CreateAsync(cancellationToken);
+        var chat = raw.AsIChatClient(options.Model);
 
-        var tool = new Tool
+        var instructions =
+            $"""
+            Decide the display name to store for a merchant mentioned in a spending message. The
+            message named: "{merchantText}". If it is clearly the same merchant as one already
+            known, answer with THAT existing display name exactly, character for character.
+            Otherwise answer with a short, tidy display name for the new merchant.
+
+            Known merchants (id and display name, as JSON): {JsonSerializer.Serialize(knownMerchants)}
+            """;
+
+        var callOptions = new ChatOptions
         {
-            Name = "canonicalize_merchant",
-            Description = "Decide the display name to store for a merchant mentioned in a spending message. " +
-                "If it is clearly the same merchant as one already known, answer with THAT existing display name " +
-                "exactly, character for character. Otherwise answer with a short, tidy display name for the new merchant.",
-            InputSchema = InputSchema.FromRawUnchecked(BuildCanonicalizeMerchantSchema()),
-            Strict = true,
+            MaxOutputTokens = 256,
+            Instructions = instructions,
+            ResponseFormat = ChatResponseFormat.ForJsonSchema(
+                CanonicalizeMerchantSchema, CanonicalizeMerchantName, CanonicalizeMerchantDescription),
         };
 
-        var knownMerchantsJson = JsonSerializer.Serialize(knownMerchants);
-        var systemPrompt =
-            $"The message names a merchant: \"{merchantText}\". Known merchants (as JSON, id and display name): {knownMerchantsJson}";
+        var response = await CallAsync(chat, [new ChatMessage(ChatRole.User, merchantText)], callOptions, cancellationToken);
 
-        var createParams = new MessageCreateParams
-        {
-            Model = options.Model,
-            MaxTokens = 256,
-            System = systemPrompt,
-            Tools = [tool],
-            ToolChoice = new ToolChoiceTool { Name = "canonicalize_merchant" },
-            Messages = [new() { Role = Role.User, Content = merchantText }],
-        };
-
-        var response = await CallAsync(client, createParams, cancellationToken);
-
-        if (!TryGetToolUse(response, "canonicalize_merchant", out var toolUse))
+        if (!TryGetText(response, out var json))
         {
             throw new ModelCallException(
                 ModelFailureKind.Transient,
-                $"canonicalize_merchant did not produce a tool use (stop_reason: {response.StopReason}).");
+                $"{CanonicalizeMerchantName} produced no JSON answer (finish reason: {response.FinishReason}).");
         }
 
-        var payload = JsonSerializer.Deserialize<CanonicalizeMerchantPayload>(JsonSerializer.Serialize(toolUse.Input));
+        var payload = JsonSerializer.Deserialize<CanonicalizeMerchantPayload>(json);
         if (payload is null || string.IsNullOrWhiteSpace(payload.DisplayName))
-            throw new ModelCallException(ModelFailureKind.Transient, "canonicalize_merchant returned an empty display_name.");
+            throw new ModelCallException(ModelFailureKind.Transient, $"{CanonicalizeMerchantName} returned an empty display_name.");
 
         return payload.DisplayName;
     }
 
-    static async Task<Message> CallAsync(
-        Anthropic.AnthropicClient client, MessageCreateParams request, CancellationToken cancellationToken)
+    static async Task<ChatResponse> CallAsync(
+        IChatClient chat, IList<ChatMessage> messages, ChatOptions callOptions, CancellationToken cancellationToken)
     {
         try
         {
-            return await client.Messages.Create(request, cancellationToken);
+            return await chat.GetResponseAsync(messages, callOptions, cancellationToken);
         }
         catch (AnthropicApiException ex)
         {
@@ -2768,14 +2801,13 @@ public sealed class AnthropicCategorizer(IAnthropicClientFactory clientFactory, 
         }
         catch (TaskCanceledException ex)
         {
-            // AnthropicClient.Timeout (from AnthropicOptions) fires as a TaskCanceledException, the
-            // same exception type .NET uses for caller-requested cancellation. This layer cannot
-            // reliably tell the two apart from inside a static helper with no access to the
-            // original CancellationToken, so both are treated as transient here — a caller-driven
-            // cancellation (host shutdown) unwinds through ModelCallException.Transient rather than
-            // OperationCanceledException. The worker (Task 7) does not retry on host shutdown
-            // regardless, because the process is going down, so this does not change behaviour
-            // where it would matter.
+            // AnthropicClient's own Timeout (from AnthropicOptions) fires as a TaskCanceledException,
+            // the same type .NET uses for caller-requested cancellation. This layer cannot reliably
+            // tell the two apart from inside a static helper with no access to the original
+            // CancellationToken, so both are treated as transient here - a caller-driven cancellation
+            // (host shutdown) unwinds through ModelCallException.Transient rather than
+            // OperationCanceledException. The worker does not retry on host shutdown regardless,
+            // because the process is going down, so this does not change behaviour where it matters.
             throw new ModelCallException(ModelFailureKind.Transient, "The Anthropic call timed out or was cancelled.", ex);
         }
         catch (HttpRequestException ex)
@@ -2790,31 +2822,46 @@ public sealed class AnthropicCategorizer(IAnthropicClientFactory clientFactory, 
         _ => ModelFailureKind.Transient,
     };
 
-    static bool TryGetToolUse(Message response, string toolName, out ToolUseBlock toolUse)
+    static bool TryGetText(ChatResponse response, out string text)
     {
-        foreach (var block in response.Content)
+        var builder = new StringBuilder();
+        foreach (var message in response.Messages)
+        foreach (var content in message.Contents)
         {
-            if (block.TryPickToolUse(out var candidate) && candidate.Name == toolName)
+            if (content is TextContent textContent)
+                builder.Append(textContent.Text);
+        }
+
+        text = builder.ToString();
+        return text.Length > 0;
+    }
+
+    static bool TryGetFunctionCall(ChatResponse response, string name, out FunctionCallContent call)
+    {
+        foreach (var message in response.Messages)
+        foreach (var content in message.Contents)
+        {
+            if (content is FunctionCallContent candidate && candidate.Name == name)
             {
-                toolUse = candidate;
+                call = candidate;
                 return true;
             }
         }
 
-        toolUse = null!;
+        call = null!;
         return false;
     }
 
-    static CategorizationProposal ToProposal(ToolUseBlock toolUse)
+    static CategorizationProposal ToProposal(string json)
     {
-        var payload = JsonSerializer.Deserialize<RecordSpendingPayload>(JsonSerializer.Serialize(toolUse.Input));
+        var payload = JsonSerializer.Deserialize<RecordSpendingPayload>(json);
         if (payload is null)
-            throw new ModelCallException(ModelFailureKind.Transient, "record_spending returned an empty payload.");
+            throw new ModelCallException(ModelFailureKind.Transient, $"{RecordSpendingName} returned an empty payload.");
 
         return new CategorizationProposal([.. payload.Items.Select(i => i.ToProposedLineItem())]);
     }
 
-    static IReadOnlyDictionary<string, JsonElement> BuildCanonicalizeMerchantSchema()
+    static JsonElement BuildCanonicalizeMerchantSchema()
     {
         const string raw = """
             {
@@ -2826,13 +2873,35 @@ public sealed class AnthropicCategorizer(IAnthropicClientFactory clientFactory, 
               }
             }
             """;
-        return JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(raw)!;
+        using var document = JsonDocument.Parse(raw);
+        return document.RootElement.Clone();
+    }
+
+    // AIFunctionDeclaration is abstract in Microsoft.Extensions.AI.Abstractions; this is the minimal
+    // subclass needed to declare a tool from a raw JSON Schema instead of one generated by
+    // reflection. Declaration-only: it is never asked to invoke anything - FunctionCallContent is
+    // handled by hand in ProposeAsync's tool loop instead. See ## CONTRACT GAP: the exact base
+    // member list (whether Name/Description/JsonSchema are abstract vs. virtual, and whether a base
+    // constructor exists) is assumed from the fact that JsonSchema is "abstract ... overridable",
+    // not itself captured, and must be checked against the compiled package.
+    sealed class RawSchemaFunctionDeclaration : AIFunctionDeclaration
+    {
+        public RawSchemaFunctionDeclaration(string name, string description, JsonElement schema)
+        {
+            Name = name;
+            Description = description;
+            JsonSchema = schema;
+        }
+
+        public override string Name { get; }
+        public override string Description { get; }
+        public override JsonElement JsonSchema { get; }
     }
 
     // Deserialisation-only DTOs, private to this file: the JSON field names the tool schema
-    // promises ("currency", not "currency_code" — see Locked design decision 5) do not all match
-    // ProposedLineItem's C# property names, so this maps explicitly, field by field, rather than
-    // trusting a naming-policy convention that is wrong for exactly one field.
+    // promises ("currency", not "currency_code") do not all match ProposedLineItem's C# property
+    // names, so this maps explicitly, field by field, rather than trusting a naming-policy
+    // convention that is wrong for exactly one field.
     sealed record RecordSpendingPayload([property: JsonPropertyName("items")] IReadOnlyList<ProposedLineItemDto> Items);
 
     sealed record ProposedLineItemDto(
@@ -2852,15 +2921,12 @@ public sealed class AnthropicCategorizer(IAnthropicClientFactory clientFactory, 
 }
 ```
 
-> **This shape was spiked and compiles.** `Content = new List<ContentBlockParam> { ... }` is the proven
-> spelling for a multi-block assistant or tool-result turn against `Anthropic` 12.49.0 — see the fact
-> table at the top of the plan. Note the element type must be named: a bare collection expression does
-> not bind, because the target is a union rather than a list.
+> **This shape follows the captured HTTP body (facts 1–7 above), not a spike against the compiled `Microsoft.Extensions.AI.Abstractions` types themselves.** Member names for `ChatResponse` (`Messages`, `FinishReason`), `ChatMessage` (`Contents`, the `(ChatRole, IList<AIContent>)` constructor), and `AIFunctionDeclaration`'s exact override surface are standard shapes for that package version but were not individually captured the way the HTTP body was. If any of these fail to compile, that is exactly the signal to fix here, against the real package, not by changing what the tests expect — see `## CONTRACT GAP`.
 
 - [ ] **Step 6: Run the tests**
 
 Run: `dotnet test --project tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj`
-Expected: still red — `AnthropicKeyProbe` does not exist yet (Step 2's `AnthropicKeyProbeTests.cs` references it). Every `AnthropicCategorizerTests` fact should now compile and, if the multi-block `Content` shape from Step 5's callout compiles as written, pass. If it does not compile, this is exactly the signal the Step 5 callout describes — resolve it there before moving on, not by changing test expectations.
+Expected: still red — `AnthropicKeyProbe` does not exist yet (Step 2's `AnthropicKeyProbeTests.cs` references it). Every `AnthropicCategorizerTests` fact should now compile and, if Step 5's assumed member shapes compile as written, pass. If a member name is wrong, this is exactly the signal the callout above describes — resolve it against the compiled package before moving on, not by changing test expectations.
 
 - [ ] **Step 7: `AnthropicKeyProbe`**
 
@@ -2873,8 +2939,9 @@ using Noof.Ledger.Application.Secrets;
 namespace Noof.Ledger.Ai;
 
 // GET /v1/models costs no tokens — this is the only network call a "Test" button in the settings
-// page (Task 8) is allowed to trigger, and specifically why it is not implemented by sending a
-// trivial categorisation request instead.
+// page (Task 8) is allowed to trigger. Uses the raw AnthropicClient directly, never IChatClient:
+// listing models has nothing to do with chat, and the SDK's own Models.List is the only surface
+// for it either way.
 public sealed class AnthropicKeyProbe(IAnthropicClientFactory clientFactory) : ISecretProbe
 {
     public string SecretKey => SecretKeys.AnthropicApiKey;
@@ -2907,7 +2974,7 @@ public sealed class AnthropicKeyProbe(IAnthropicClientFactory clientFactory) : I
 - [ ] **Step 8: Run the full Ai test project**
 
 Run: `dotnet test --project tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj`
-Expected: all green — `AnthropicCategorizerTests` (11 facts: happy-path record_spending, first-call shape, no beta header, list_merchants-then-forced-record_spending, the double-list_merchants no-third-request guard, neither-tool-transient, the 11-row status-code `Theory`, missing-key, unreadable-key, key-never-leaks, canonicalize-merchant) and `AnthropicKeyProbeTests` (4 facts).
+Expected: all green — `AnthropicCategorizerTests` (11 facts: happy-path JSON answer, first-call shape incl. the trap-5 guard, no beta header, list_merchants-then-no-tools-follow-up, the double-list_merchants no-third-request guard, neither-JSON-nor-tool-transient, the 12-row status-code `Theory`, missing-key, unreadable-key, key-never-leaks, canonicalize-merchant) and `AnthropicKeyProbeTests` (4 facts).
 
 Then run the full solution once to confirm nothing else broke: `dotnet test --solution NoofLedger.slnx`
 
@@ -2915,7 +2982,13 @@ Then run the full solution once to confirm nothing else broke: `dotnet test --so
 
 ```bash
 git add src/Noof.Ledger.Ai/AnthropicClientFactory.cs src/Noof.Ledger.Ai/AnthropicCategorizer.cs src/Noof.Ledger.Ai/AnthropicKeyProbe.cs tests/Noof.Ledger.Ai.Tests/StubHttpMessageHandler.cs tests/Noof.Ledger.Ai.Tests/AnthropicResponses.cs tests/Noof.Ledger.Ai.Tests/AnthropicCategorizerTests.cs tests/Noof.Ledger.Ai.Tests/AnthropicKeyProbeTests.cs
-git commit -m "feat(ai): AnthropicCategorizer with a one-shot merchant-list loop and status-code failure classification"
+git commit -m "$(cat <<'EOF'
+feat(ai): AnthropicCategorizer on Microsoft.Extensions.AI — response-format JSON with a one-shot merchant-list tool round trip
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01NXaWFvgT296G5WzxGuuN3m
+EOF
+)"
 ```
 (If Step 0 required adding a package reference to `tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj`, add that file to the same commit.)
 
@@ -2923,15 +2996,9 @@ git commit -m "feat(ai): AnthropicCategorizer with a one-shot merchant-list loop
 
 ## CONTRACT GAP
 
-1. ~~`CategorizationSchema` / `CategorizationPrompt` static-method shapes assumed.~~ **CLOSED, and it was hiding a real bug.** Task 2 defines `CategorizationSchema.BuildRecordSpending(...)` / `BuildListMerchants()`, and for the prompt a `const System` plus `BuildUserTurn(rawText, categories, merchantHints)` — there is no `CategorizationPrompt.Build(request)`. This task originally called that non-existent method and put only `request.RawText` in the user turn, which would have sent the message to the model **with no category list at all**: the schema's enum would have been its only clue what the categories were. Both call sites are corrected above. The lesson is worth keeping: the compile error was the harmless half; the silently-missing prompt content was the expensive half, and only reading the two tasks against each other found it.
-
-2. ~~`list_merchants` answers with the hints rather than the full list.~~ **CLOSED by amending the contract**, which is the right place: `CategorizationRequest` now carries `AllMerchants` alongside `MerchantHints`, the worker fills it from `IMerchantDirectory.MerchantsAsync()`, and `ProposalVerification` validates `KnownMerchantId` against that full set rather than the hints — otherwise the tool would work and every answer it produced would then fail verification. The original reasoning is kept below because it is what found the flaw.
-
-**(original)** **`list_merchants`'s answer uses `request.MerchantHints`, not "the full merchant list."** The `list_merchants` tool's own description (plan contract, "The tool schema, once") says it lists "every merchant this ledger already knows." `ICategorizer.ProposeAsync`'s only input is `CategorizationRequest`, and its `MerchantHints` field is documented elsewhere in the plan as the output of `MerchantScan.Matches(rawText, aliases, 10)` — pre-filtered to matches that already occur in the raw text, capped at 10. There is no full-directory channel in `ICategorizer`'s locked signature. This task answers with `MerchantHints` as-is and flags the mismatch rather than quietly widening `ICategorizer`'s contract (which is out of this task's scope) or quietly under-delivering on the tool's stated purpose. Whoever owns Task 7 (the worker that builds `CategorizationRequest`) should decide, when they get there, whether `MerchantHints` needs to carry the full directory specifically when it's about to be offered as `list_merchants`'s answer, or whether `ICategorizer` needs a distinct source for that data.
-
-3. ~~The type accepted by a message's `Content` for a multi-block turn.~~ **CLOSED** by a second compile spike, which built exactly the assistant-echo plus tool-result shape this task assumed. `Content = new List<ContentBlockParam> { ... }` is correct. One detail the spike added: a bare collection expression is not enough — the element type must be named, because the target is a union rather than a list. Step 5's "spike this before trusting it" callout has been removed; it has been spiked.
-
-4. ~~Whether the SDK calls accept a `CancellationToken`.~~ **CLOSED** by a second compile spike: `Messages.Create(request, cancellationToken)` compiles, `Models.List(cancellationToken)` does not, and `Models.List(null, cancellationToken)` does. This task's code was updated accordingly; the fact table at the top of the plan carries both spellings.
+1. **`AIFunctionDeclaration`'s exact member list.** The established fact is "`AIFunctionDeclaration` is `abstract` with an overridable `JsonElement JsonSchema`" — proved by a captured HTTP body showing the schema passed through unchanged. This task's `RawSchemaFunctionDeclaration` additionally assumes `Name` and `Description` are each an overridable `string` property with no other required override, and that a plain parameterless-then-property-initialised subclass (no mandatory base constructor argument) compiles. If the real base type requires a constructor argument (e.g. a `protected AIFunctionDeclaration(string name)`), adjust `RawSchemaFunctionDeclaration`'s constructor accordingly — nothing else in this task depends on its internals beyond `Name`/`Description`/`JsonSchema` being readable back the way `AnthropicCategorizer` uses them.
+2. **`ChatMessage`'s multi-content constructor and `ChatResponse`'s member names.** `new ChatMessage(ChatRole.Tool, [new FunctionResultContent(...)])`, `response.Messages` (`IList<ChatMessage>`), `message.Contents` (`IEnumerable<AIContent>`), and `response.FinishReason` are the standard shapes for this package version but were not individually captured by the stub-handler run the way the request-body facts (1–9 in this task's Interfaces section) were. If any of these compile under a different name (e.g. `StopReason` instead of `FinishReason`), fix the reference here rather than reshaping the test expectations, per Step 5's callout.
+3. **`ChatOptions.Tools`' element type.** Assumed to be `IList<AITool>?` (or an equivalent collection type a collection expression can target) with `AIFunctionDeclaration` deriving from `AITool`. If `Tools` instead requires a different collection type or `AIFunctionDeclaration` requires an adapter to become an `AITool`, Step 5's `Tools = [listMerchantsTool]` line is the only line that needs to change.
 
 ---
 
