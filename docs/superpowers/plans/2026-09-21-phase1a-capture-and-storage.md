@@ -5266,13 +5266,13 @@ public sealed class TelegramPollingService(
         using var scope = scopeFactory.CreateScope();
         var secretStore = scope.ServiceProvider.GetRequiredService<ISecretStore>();
 
-        var secret = await secretStore.GetAsync(SecretKeys.TelegramBotToken, cancellationToken);
-
-        if (secret.State is not SecretState.Present)
-            return TelegramPollResult.Idle;
-
         try
         {
+            var secret = await secretStore.GetAsync(SecretKeys.TelegramBotToken, cancellationToken);
+
+            if (secret.State is not SecretState.Present)
+                return TelegramPollResult.Idle;
+
             if (secret.Value != activeToken)
             {
                 var client = clientFactory.Create(secret.Value!);
@@ -5322,6 +5322,8 @@ public sealed class TelegramPollingService(
 > `GetUpdates`/`DeleteWebhook` are extension methods living in the `Telegram.Bot` namespace — miss the `using Telegram.Bot;` and the errors read like the methods don't exist at all, which is misleading; the interface is right there, the namespace just isn't imported.
 >
 > **`TimeProvider` has no `Delay` method — confirmed by compiling against it, not assumed.** Reflecting the real .NET 10 `TimeProvider` type shows exactly five members: `GetUtcNow`, `GetLocalNow`, `GetTimestamp`, `GetElapsedTime`, `CreateTimer`. There is no instance or extension `Delay`. The testable, `FakeTimeProvider`-aware delay is the static overload `Task.Delay(TimeSpan delay, TimeProvider timeProvider, CancellationToken cancellationToken)` used above — writing `timeProvider.Delay(delay, stoppingToken)` instead is `CS1061` and fails the whole project's build. Nothing in `TelegramPollingServiceTests.cs` would catch this before the build itself does, since every test there drives `RunTickAsync` directly and never runs `ExecuteAsync` (see the "known, accepted gap" note under Step 30) — which is exactly why it is called out here explicitly rather than left to be discovered by a failed build in Step 33.
+>
+> **Plan defect, fixed above, and it is not merely theoretical.** The version of this method originally drafted here called `secretStore.GetAsync(SecretKeys.TelegramBotToken, cancellationToken)` *before* the `try`, not inside it. `EfSecretStore.GetAsync` (the real implementation this resolves to at runtime) does `await db.Secrets.FindAsync(...)` with no exception handling around connectivity failures — it throws when the database is unreachable, same as any other EF query. With the token fetch outside the `try`, that exception propagated out of `RunTickAsync`, out of `ExecuteAsync`'s loop, and into `BackgroundService`'s own exception handling, whose .NET default (`BackgroundServiceExceptionBehavior.StopHost`) stops the entire host. This is not a hypothetical: running the full `Noof.Ledger.Host.Tests` suite with the token fetch outside the `try` turned `LoopbackGuardTerminatesTests.An_exposed_binding_is_allowed_once_auth_is_on` — a Task-1–7 test that was green before this task started — red, because that test points the host at a deliberately dead connection string and expects it to keep running for 8 seconds; `TelegramPollingService`'s very first tick killed it instead. Moving the token fetch inside the `try` (shown above) fixed it: the token fetch is a tick failure like any other now, reported as `TelegramPollResult.Failed` rather than escaping.
 
 - [ ] **Step 33: Run green**
 
@@ -5363,10 +5365,13 @@ builder.Services.AddHostedService<TelegramPollingService>();
 
 Create `tests/Noof.Ledger.Host.Tests/TelegramHttpClientLoggingTests.cs`:
 
+> **Plan defect, fixed here.** The `using` list below was missing `Microsoft.AspNetCore.Hosting` — confirmed by compiling this exact file: without it, `builder.ConfigureLogging(...)` on the `IWebHostBuilder` fails with `CS1061`, because `ConfigureLogging` is an extension method declared in that namespace, not pulled in transitively by `Microsoft.AspNetCore.Mvc.Testing` or `Microsoft.AspNetCore.TestHost`.
+
 ```csharp
 using System.Collections.Concurrent;
 using System.Net;
 using AwesomeAssertions;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
