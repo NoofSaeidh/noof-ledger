@@ -2720,6 +2720,11 @@ Write the failing tests. Add to `tests/Noof.Ledger.Persistence.Tests/EfSecretSto
             $"UPDATE app_secret SET ciphertext = 'not-protected-text' WHERE key = {SecretKeys.TelegramBotToken}",
             TestContext.Current.CancellationToken);
 
+        // Raw SQL goes round the change tracker, so FindAsync would otherwise return the entity
+        // still cached from SetAsync and never see the corruption. Production never hits this:
+        // LedgerDbContext is scoped per request, so a corrupt row is always read from a fresh one.
+        db.ChangeTracker.Clear();
+
         var status = await store.GetStatusAsync(SecretKeys.TelegramBotToken, TestContext.Current.CancellationToken);
 
         status.State.Should().Be(SecretState.Unreadable);
