@@ -42,3 +42,6 @@ Thumbs.db
 
 # Test runner output
 TestResults/
+
+# Claude Code worktrees (full checkouts, never committed)
+.claude/worktrees/
