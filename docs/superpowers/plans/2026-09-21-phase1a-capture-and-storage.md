@@ -5666,6 +5666,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
+using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Telegram;
 using Telegram.Bot;
@@ -5676,7 +5678,8 @@ namespace Noof.Ledger.Telegram.Tests;
 
 public class TelegramPollingServiceTests
 {
-    static IServiceScopeFactory ScopeFactoryFor(ISecretStore secretStore, ITelegramUpdateRouter? router = null)
+    static IServiceScopeFactory ScopeFactoryFor(
+        ISecretStore secretStore, ITelegramUpdateRouter? router = null, IChatNotifier? chatNotifier = null)
     {
         var offsetStore = new TelegramUpdateOffsetStore(secretStore);
 
@@ -5685,6 +5688,8 @@ public class TelegramPollingServiceTests
         provider.GetService(typeof(TelegramUpdateOffsetStore)).Returns(offsetStore);
         if (router is not null)
             provider.GetService(typeof(ITelegramUpdateRouter)).Returns(router);
+        if (chatNotifier is not null)
+            provider.GetService(typeof(IChatNotifier)).Returns(chatNotifier);
 
         var scope = Substitute.For<IServiceScope>();
         scope.ServiceProvider.Returns(provider);
@@ -5713,9 +5718,13 @@ public class TelegramPollingServiceTests
     }
 
     static TelegramPollingService CreateService(
-        ISecretStore secretStore, ITelegramBotClientFactory clientFactory, TelegramClientHandle handle, ITelegramUpdateRouter? router = null) =>
+        ISecretStore secretStore,
+        ITelegramBotClientFactory clientFactory,
+        TelegramClientHandle handle,
+        ITelegramUpdateRouter? router = null,
+        IChatNotifier? chatNotifier = null) =>
         new(
-            ScopeFactoryFor(secretStore, router),
+            ScopeFactoryFor(secretStore, router, chatNotifier),
             clientFactory,
             handle,
             new ConfigurationBuilder().Build(),
@@ -5862,6 +5871,60 @@ public class TelegramPollingServiceTests
         second.Should().Be(TelegramPollResult.Processed);
         await client.Received(2).SendRequest(Arg.Any<GetUpdatesRequest>(), Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public async Task A_poison_update_is_skipped_after_repeated_failures_so_the_update_behind_it_still_gets_processed()
+    {
+        var secretStore = WithToken("tok1");
+        var poisonUpdate = new Update { Id = 10, Message = new Message { Id = 1, Chat = new Chat { Id = 111L }, Text = "a" } };
+        var laterUpdate = new Update { Id = 11, Message = new Message { Id = 2, Chat = new Chat { Id = 111L }, Text = "b" } };
+        var client = Substitute.For<ITelegramBotClient>();
+        client.SendRequest(Arg.Any<GetUpdatesRequest>(), Arg.Any<CancellationToken>()).Returns([poisonUpdate, laterUpdate]);
+        var clientFactory = Substitute.For<ITelegramBotClientFactory>();
+        clientFactory.Create("tok1").Returns(client);
+        var router = Substitute.For<ITelegramUpdateRouter>();
+        router.HandleAsync(poisonUpdate, Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Throws(new InvalidOperationException("no wallet is marked as the default"));
+        var chatNotifier = Substitute.For<IChatNotifier>();
+        var service = CreateService(secretStore, clientFactory, new TelegramClientHandle(), router, chatNotifier);
+
+        var first = await service.RunTickAsync(TestContext.Current.CancellationToken);
+        var second = await service.RunTickAsync(TestContext.Current.CancellationToken);
+        var third = await service.RunTickAsync(TestContext.Current.CancellationToken);
+
+        first.Should().Be(TelegramPollResult.Failed, "the poison update is still within its retry budget");
+        second.Should().Be(TelegramPollResult.Failed, "still within budget - nothing behind it may run yet");
+        third.Should().Be(TelegramPollResult.Processed, "attempts are exhausted, so the poller skips it and moves on");
+        await router.Received(3).HandleAsync(poisonUpdate, Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await router.Received(1).HandleAsync(laterUpdate, "Europe/Belgrade", Arg.Any<CancellationToken>());
+        await secretStore.Received(1).SetAsync(TelegramUpdateOffsetStore.Key, "12", Arg.Any<CancellationToken>());
+        await chatNotifier.Received(1).SendAsync(111L, Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task An_operator_notification_failure_does_not_prevent_the_poison_update_from_being_skipped()
+    {
+        var secretStore = WithToken("tok1");
+        var poisonUpdate = new Update { Id = 10, Message = new Message { Id = 1, Chat = new Chat { Id = 111L }, Text = "a" } };
+        var client = Substitute.For<ITelegramBotClient>();
+        client.SendRequest(Arg.Any<GetUpdatesRequest>(), Arg.Any<CancellationToken>()).Returns([poisonUpdate]);
+        var clientFactory = Substitute.For<ITelegramBotClientFactory>();
+        clientFactory.Create("tok1").Returns(client);
+        var router = Substitute.For<ITelegramUpdateRouter>();
+        router.HandleAsync(poisonUpdate, Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Throws(new InvalidOperationException("boom"));
+        var chatNotifier = Substitute.For<IChatNotifier>();
+        chatNotifier.SendAsync(Arg.Any<long>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Throws(new HttpRequestException("chat unreachable too"));
+        var service = CreateService(secretStore, clientFactory, new TelegramClientHandle(), router, chatNotifier);
+
+        await service.RunTickAsync(TestContext.Current.CancellationToken);
+        await service.RunTickAsync(TestContext.Current.CancellationToken);
+        var third = await service.RunTickAsync(TestContext.Current.CancellationToken);
+
+        third.Should().Be(TelegramPollResult.Processed, "the skip itself must not be undone by a failed notification");
+        await secretStore.Received(1).SetAsync(TelegramUpdateOffsetStore.Key, "11", Arg.Any<CancellationToken>());
+    }
 }
 ```
 
@@ -5885,8 +5948,10 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Secrets;
 using Telegram.Bot;
+using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 
 namespace Noof.Ledger.Telegram;
@@ -5902,11 +5967,17 @@ public sealed class TelegramPollingService(
     ILogger<TelegramPollingService> logger)
     : BackgroundService
 {
+    const string PoisonUpdateNotice =
+        "Sorry, I couldn't process this message after several attempts. I'm skipping it so newer messages aren't stuck behind it.";
+
     static readonly TimeSpan IdlePollInterval = TimeSpan.FromSeconds(5);
+    const int MaxUpdateAttempts = 3;
 
     string? activeToken;
     int? offset;
     int consecutiveFailures;
+    int? poisonUpdateId;
+    int poisonUpdateAttempts;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -5969,7 +6040,44 @@ public sealed class TelegramPollingService(
 
                 foreach (var update in updates)
                 {
-                    await router.HandleAsync(update, timeZoneId, cancellationToken);
+                    try
+                    {
+                        await router.HandleAsync(update, timeZoneId, cancellationToken);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        if (poisonUpdateId != update.Id)
+                        {
+                            poisonUpdateId = update.Id;
+                            poisonUpdateAttempts = 0;
+                        }
+                        poisonUpdateAttempts++;
+
+                        logger.LogError(ex, "Telegram update {UpdateId} failed on attempt {Attempt}/{MaxAttempts}",
+                            update.Id, poisonUpdateAttempts, MaxUpdateAttempts);
+
+                        if (poisonUpdateAttempts < MaxUpdateAttempts)
+                        {
+                            // Leave the offset where it is so this same update is retried on the
+                            // next tick, and stop here - anything behind it waits for its turn,
+                            // the same as it always has, until the attempt budget runs out.
+                            consecutiveFailures++;
+                            return TelegramPollResult.Failed;
+                        }
+
+                        logger.LogError(
+                            "Telegram update {UpdateId} failed {MaxAttempts} times; skipping it so later updates aren't blocked behind it",
+                            update.Id, MaxUpdateAttempts);
+                        await NotifyOperatorOfSkippedUpdateAsync(scope, update, cancellationToken);
+                        poisonUpdateId = null;
+                        poisonUpdateAttempts = 0;
+                    }
+
+                    // Reached both when HandleAsync succeeds and when it has just been given up on
+                    // as poison - either way this update is done with, and the offset moves past
+                    // it. Advancing past a poison update trades that one lost message for a queue
+                    // that keeps working; Telegram itself discards unconfirmed updates after 24
+                    // hours, so leaving the offset here forever loses every later message too.
                     offset = update.Id + 1;
                     await offsetStore.SetAsync(offset.Value, cancellationToken);
                 }
@@ -5981,12 +6089,30 @@ public sealed class TelegramPollingService(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             consecutiveFailures++;
-            logger.LogError(ex, "Telegram getUpdates failed; backing off and retrying");
+            logger.LogError(ex, "Telegram poll tick failed; backing off and retrying");
             return TelegramPollResult.Failed;
+        }
+    }
+
+    async Task NotifyOperatorOfSkippedUpdateAsync(IServiceScope scope, Update update, CancellationToken cancellationToken)
+    {
+        if (update.Message is not { } message)
+            return;
+
+        try
+        {
+            var chatNotifier = scope.ServiceProvider.GetRequiredService<IChatNotifier>();
+            await chatNotifier.SendAsync(message.Chat.Id, PoisonUpdateNotice, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Failed to notify the operator that Telegram update {UpdateId} was skipped", update.Id);
         }
     }
 }
 ```
+
+> **Closing-review fix (2026-09-21): one poisoned update no longer stalls the poller forever.** As originally drafted above, any exception from `router.HandleAsync` left the offset unadvanced with no bound on retries — the same update was refetched every tick, nothing behind it was ever processed, and the log blamed "getUpdates" even when the failure came from `HandleAsync`, `DeleteWebhook`, or DI resolution. This is reachable in ordinary operation, not hypothetical: unmarking the default wallet makes `EfCaptureStore.CaptureAsync` throw `InvalidOperationException` on every tick, forever, and Telegram discards unconfirmed updates after 24 hours — so the phase's "nothing is lost" guarantee silently stopped being true. **Policy chosen:** each update gets `MaxUpdateAttempts` (3) tries, one per poll tick, tracked by `poisonUpdateId`/`poisonUpdateAttempts` against the head of the batch; while attempts remain, the tick reports `Failed` and nothing behind the stuck update runs, exactly as before. Once attempts are exhausted, the poller (a) sends `PoisonUpdateNotice` to the update's own chat via `IChatNotifier` — swallowing and logging any failure from that send, since a broken notification must not re-stall the queue it exists to unstick — (b) logs the skip at `LogError`, and (c) **advances the offset past the poisoned update anyway**, trading that one message for a working queue, and continues processing whatever else is in the same batch. Advancing past it, rather than holding forever, was the deliberate call: Telegram's own 24-hour discard makes "hold forever" equivalent to "lose everything after it too," which is strictly worse, and only the operator's own chat — the one channel already built — can actually recover after that, so it gets told directly rather than through a log an unattended box will never surface. The `catch (Exception ex) when (ex is not OperationCanceledException)` message around the whole tick was also changed, from the misleading `"Telegram getUpdates failed"` (untrue whenever the throw came from anywhere else in the method) to `"Telegram poll tick failed"`. Proven by two new facts in `TelegramPollingServiceTests.cs`: `A_poison_update_is_skipped_after_repeated_failures_so_the_update_behind_it_still_gets_processed` (three ticks against a router that always throws for one update and succeeds for the next — the first two ticks report `Failed` and never touch the later update, the third reports `Processed`, has called the router for the later update, has advanced the offset past both, and has notified the chat once) and `An_operator_notification_failure_does_not_prevent_the_poison_update_from_being_skipped` (the skip still happens even when `IChatNotifier.SendAsync` itself throws).
 
 > `GetUpdates`/`DeleteWebhook` are extension methods living in the `Telegram.Bot` namespace — miss the `using Telegram.Bot;` and the errors read like the methods don't exist at all, which is misleading; the interface is right there, the namespace just isn't imported.
 >
