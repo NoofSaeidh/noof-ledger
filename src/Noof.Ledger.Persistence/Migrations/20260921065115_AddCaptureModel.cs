@@ -105,6 +105,10 @@ public partial class AddCaptureModel : Migration
             CREATE TRIGGER merchant_aliases_write_once_guard
                 BEFORE UPDATE OR DELETE ON public.merchant_aliases
                 FOR EACH ROW EXECUTE FUNCTION public.merchant_aliases_write_once();
+
+            CREATE TRIGGER merchant_aliases_no_truncate
+                BEFORE TRUNCATE ON public.merchant_aliases
+                FOR EACH STATEMENT EXECUTE FUNCTION public.merchant_aliases_write_once();
             """);
 
         migrationBuilder.CreateTable(
@@ -321,6 +325,7 @@ public partial class AddCaptureModel : Migration
 
         migrationBuilder.Sql(
             """
+            DROP TRIGGER IF EXISTS merchant_aliases_no_truncate ON public.merchant_aliases;
             DROP TRIGGER IF EXISTS merchant_aliases_write_once_guard ON public.merchant_aliases;
             DROP FUNCTION IF EXISTS public.merchant_aliases_write_once();
             """);

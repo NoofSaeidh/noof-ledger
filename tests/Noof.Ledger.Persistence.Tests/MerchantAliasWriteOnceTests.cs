@@ -51,4 +51,20 @@ public class MerchantAliasWriteOnceTests(PostgresFixture fixture)
         await act.Should().ThrowAsync<PostgresException>(
             "merchant_aliases is append-only; deleting history must be impossible even by direct SQL");
     }
+
+    [Fact]
+    public async Task Truncating_the_alias_table_is_rejected_by_the_database()
+    {
+        await using var db = await SeedAliasAsync(fixture);
+
+        var act = async () => await db.Database.ExecuteSqlAsync(
+            $"TRUNCATE merchant_aliases",
+            TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<PostgresException>(
+            "PostgreSQL never fires row-level triggers for TRUNCATE; a statement-level trigger must guard it separately");
+
+        var survivingCount = await db.MerchantAliases.CountAsync(TestContext.Current.CancellationToken);
+        survivingCount.Should().Be(1, "TRUNCATE must be rejected before it removes any rows, not merely raise after the fact");
+    }
 }
