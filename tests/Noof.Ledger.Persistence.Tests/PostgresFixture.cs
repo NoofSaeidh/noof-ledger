@@ -10,7 +10,7 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
-    public async Task<LedgerDbContext> CreateContextAsync()
+    public async Task<string> CreateEmptyDatabaseConnectionStringAsync()
     {
         var name = $"noof_test_{Guid.NewGuid():N}";
 
@@ -23,8 +23,15 @@ public sealed class PostgresFixture : IAsyncLifetime
 
         created.Add(name);
 
+        return DatabaseSettings.For(name);
+    }
+
+    public async Task<LedgerDbContext> CreateContextAsync()
+    {
+        var connectionString = await CreateEmptyDatabaseConnectionStringAsync();
+
         var options = new DbContextOptionsBuilder<LedgerDbContext>()
-            .UseNpgsql(DatabaseSettings.For(name))
+            .UseNpgsql(connectionString)
             .Options;
 
         return new LedgerDbContext(options);
@@ -57,7 +64,14 @@ public sealed class PostgresFixture : IAsyncLifetime
 
         foreach (var name in created)
         {
-            await using var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)", admin);
+            // DROP DATABASE waits on a Postgres checkpoint before it can remove the files. With
+            // dozens of throwaway databases created and dropped per run, that wait can exceed
+            // Npgsql's default 30s command timeout under load - observed directly via
+            // pg_stat_activity as wait_event = CheckpointDone, not a stuck or leaked connection.
+            await using var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)", admin)
+            {
+                CommandTimeout = 120,
+            };
             await drop.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
         }
     }

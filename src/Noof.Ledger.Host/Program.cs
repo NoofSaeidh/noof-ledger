@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Auth;
+using Noof.Ledger.Application.Capture;
 using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Host.Auth;
 using Noof.Ledger.Host.Cli;
@@ -11,6 +12,7 @@ using Noof.Ledger.Host.Endpoints;
 using Noof.Ledger.Host.Startup;
 using Noof.Ledger.Persistence;
 using Noof.Ledger.Persistence.Auth;
+using Noof.Ledger.Persistence.Capture;
 using Noof.Ledger.Persistence.Secrets;
 using Noof.Ledger.Web.Components;
 
@@ -24,6 +26,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 var authMode = builder.Configuration["Auth:Mode"] ?? "Off";
 var cookieMode = authMode.Equals("Cookie", StringComparison.OrdinalIgnoreCase);
+
+CaptureTimeZoneGuard.Resolve(builder.Configuration["Capture:TimeZone"] ?? "Europe/Belgrade");
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
@@ -40,6 +44,7 @@ builder.Services.AddDbContext<LedgerDbContext>(options =>
 builder.Services.AddSingleton<IPasswordHasher, PasswordHasherAdapter>();
 builder.Services.AddScoped<IUserStore, EfUserStore>();
 builder.Services.AddScoped<ISecretStore, EfSecretStore>();
+builder.Services.AddScoped<ICaptureStore, EfCaptureStore>();
 
 var authentication = builder.Services.AddAuthentication(
     cookieMode ? AuthSchemes.Cookie : AuthSchemes.LocalOwner);
