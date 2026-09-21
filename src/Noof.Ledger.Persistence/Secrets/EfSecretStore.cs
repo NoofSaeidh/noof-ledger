@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Secrets;
+using Npgsql;
 
 namespace Noof.Ledger.Persistence.Secrets;
 
@@ -62,6 +63,38 @@ public sealed class EfSecretStore(LedgerDbContext db, IDataProtectionProvider da
 
         await db.SaveChangesAsync(cancellationToken);
     }
+
+    public async Task<bool> TrySetIfMissingAsync(string key, string plaintext, CancellationToken cancellationToken)
+    {
+        var existing = await db.Secrets.FindAsync([key], cancellationToken);
+        if (existing is not null)
+            return false;
+
+        var secret = new AppSecret
+        {
+            Key = key,
+            Ciphertext = Protector(key).Protect(plaintext),
+            UpdatedAt = timeProvider.GetUtcNow(),
+        };
+        db.Secrets.Add(secret);
+
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateException ex) when (IsAppSecretPrimaryKeyViolation(ex))
+        {
+            // Another call won the race between our FindAsync and this SaveChangesAsync. That row
+            // is real; ours never committed. Detach it so a later read goes back to the database
+            // instead of returning this uncommitted, never-persisted entity from the identity map.
+            db.Entry(secret).State = EntityState.Detached;
+            return false;
+        }
+    }
+
+    static bool IsAppSecretPrimaryKeyViolation(DbUpdateException ex) =>
+        ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: "PK_app_secret" };
 
     IDataProtector Protector(string key) => dataProtection.CreateProtector($"Noof.Ledger.Secrets.{key}");
 }

@@ -153,4 +153,50 @@ public class EfSecretStoreTests(PostgresFixture fixture) : IDisposable
 
         status.State.Should().Be(SecretState.Unreadable);
     }
+
+    // TelegramOwnerGate.ClaimAsync relies on TrySetIfMissingAsync resolving this race
+    // deterministically: two chats messaging before any owner exists must not both succeed, and the
+    // loser must not see a raw PostgresException. A plain sequential test cannot observe the race at
+    // all - it would pass against the original read-then-write SetAsync just as easily as against a
+    // real compare-and-swap - so this forces genuine DB-level contention: chat 111 holds its insert
+    // open inside an uncommitted transaction, and chat 222's insert must block on it, not race past
+    // it, before we commit and observe the outcome.
+    [Fact]
+    public async Task Concurrent_TrySetIfMissingAsync_calls_for_the_same_key_let_exactly_one_caller_win()
+    {
+        await using var dbA = await fixture.CreateContextAsync();
+        await dbA.Database.MigrateAsync(TestContext.Current.CancellationToken);
+
+        var optionsB = new DbContextOptionsBuilder<LedgerDbContext>()
+            .UseNpgsql(dbA.Database.GetConnectionString()!)
+            .Options;
+        await using var dbB = new LedgerDbContext(optionsB);
+
+        var storeA = CreateStore(dbA);
+        var storeB = CreateStore(dbB);
+
+        await using var txA = await dbA.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
+
+        var claimedA = await storeA.TrySetIfMissingAsync(
+            SecretKeys.TelegramOwnerChatId, "111", TestContext.Current.CancellationToken);
+        claimedA.Should().BeTrue("chat 111 inserted first and still holds the row inside its open transaction");
+
+        var claimBTask = storeB.TrySetIfMissingAsync(
+            SecretKeys.TelegramOwnerChatId, "222", TestContext.Current.CancellationToken);
+        var finished = await Task.WhenAny(claimBTask, Task.Delay(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+
+        finished.Should().NotBeSameAs(claimBTask,
+            "chat 222's insert must block on the uncommitted row from chat 111, not race past it undetected");
+
+        await txA.CommitAsync(TestContext.Current.CancellationToken);
+
+        var claimedB = await claimBTask;
+
+        claimedB.Should().BeFalse("chat 111 already committed the key; chat 222 lost the race but must not throw");
+
+        var owner = await storeA.GetAsync(SecretKeys.TelegramOwnerChatId, TestContext.Current.CancellationToken);
+        owner.Should().Be(new SecretResult(SecretState.Present, "111"));
+
+        (await dbA.Secrets.CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
+    }
 }

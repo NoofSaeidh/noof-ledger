@@ -13,12 +13,29 @@ public class TelegramOwnerGateTests
         var secretStore = Substitute.For<ISecretStore>();
         secretStore.GetAsync(SecretKeys.TelegramOwnerChatId, Arg.Any<CancellationToken>())
             .Returns(new SecretResult(SecretState.Missing, null));
+        secretStore.TrySetIfMissingAsync(SecretKeys.TelegramOwnerChatId, "111", Arg.Any<CancellationToken>())
+            .Returns(true);
         var gate = new TelegramOwnerGate(secretStore);
 
         var allowed = await gate.IsAllowedAsync(111L, TestContext.Current.CancellationToken);
 
         allowed.Should().BeTrue();
-        await secretStore.Received(1).SetAsync(SecretKeys.TelegramOwnerChatId, "111", TestContext.Current.CancellationToken);
+        await secretStore.Received(1).TrySetIfMissingAsync(SecretKeys.TelegramOwnerChatId, "111", TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task Losing_the_claim_race_to_another_chat_is_rejected_not_an_error()
+    {
+        var secretStore = Substitute.For<ISecretStore>();
+        secretStore.GetAsync(SecretKeys.TelegramOwnerChatId, Arg.Any<CancellationToken>())
+            .Returns(new SecretResult(SecretState.Missing, null), new SecretResult(SecretState.Present, "222"));
+        secretStore.TrySetIfMissingAsync(SecretKeys.TelegramOwnerChatId, "111", Arg.Any<CancellationToken>())
+            .Returns(false);
+        var gate = new TelegramOwnerGate(secretStore);
+
+        var allowed = await gate.IsAllowedAsync(111L, TestContext.Current.CancellationToken);
+
+        allowed.Should().BeFalse("chat 222 committed first; 111 lost the race and is not the owner");
     }
 
     [Fact]
@@ -32,7 +49,7 @@ public class TelegramOwnerGateTests
         var allowed = await gate.IsAllowedAsync(111L, TestContext.Current.CancellationToken);
 
         allowed.Should().BeTrue();
-        await secretStore.DidNotReceive().SetAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await secretStore.DidNotReceive().TrySetIfMissingAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -46,7 +63,7 @@ public class TelegramOwnerGateTests
         var allowed = await gate.IsAllowedAsync(999L, TestContext.Current.CancellationToken);
 
         allowed.Should().BeFalse();
-        await secretStore.DidNotReceive().SetAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await secretStore.DidNotReceive().TrySetIfMissingAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
