@@ -1,4 +1,4 @@
-<!--
+﻿<!--
   Settings used ONLY by ops/inspect.ps1, passed with `jb inspectcode -s`. Deliberately not named
   NoofLedger.sln.DotSettings: that filename is the solution's shared layer, which Rider also reads,
   and raising these five inspections to ERROR there painted 84 findings red in the test projects -
@@ -9,8 +9,17 @@
 
   Dots inside an inspection id are escaped as _002E: MemberCanBePrivate.Global becomes
   MemberCanBePrivate_002EGlobal.
+
+  InconsistentNaming is off here, and that is a decision rather than a shrug. ReSharper's default
+  wants _underscore private fields; this repository does not use them, so the rule reported 25
+  findings nobody would ever act on. Correcting the policy through a PredefinedNamingRules entry did
+  not take effect through the CLI - tried in both the shared layer and this one, with caches cleared,
+  all 25 survived - so the convention lives in .editorconfig instead, as dotnet_naming_rule entries
+  the compiler enforces on every build and Rider reads too. Verified live by planting an _underscored
+  field and a non-Pascal static readonly and watching IDE1006 name both.
 -->
 <wpf:ResourceDictionary xml:space="preserve" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:s="clr-namespace:System;assembly=mscorlib" xmlns:ss="urn:shemas-jetbrains-com:settings-storage-xaml" xmlns:wpf="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
+	<s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=InconsistentNaming/@EntryIndexedValue">DO_NOT_SHOW</s:String>
 	<s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=MemberCanBePrivate_002EGlobal/@EntryIndexedValue">ERROR</s:String>
 	<s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=MemberCanBeInternal/@EntryIndexedValue">ERROR</s:String>
 	<s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=ClassCanBeSealed_002EGlobal/@EntryIndexedValue">ERROR</s:String>

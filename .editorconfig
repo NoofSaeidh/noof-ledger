@@ -27,6 +27,35 @@ dotnet_diagnostic.CA2263.severity = error
 # this needs GenerateDocumentationFile to fire at all.
 dotnet_diagnostic.IDE0005.severity = error
 
+# Naming, as this repository actually writes it rather than as any tool assumes. ReSharper's default
+# wants _underscore private fields and flagged 25 of ours; the convention lives here instead, where
+# the compiler enforces it on every build and Rider reads it too, rather than in a settings file only
+# one tool consults.
+dotnet_diagnostic.IDE1006.severity = error
+
+dotnet_naming_rule.private_constants_are_pascal_case.severity = error
+dotnet_naming_rule.private_constants_are_pascal_case.symbols = private_constants
+dotnet_naming_rule.private_constants_are_pascal_case.style = pascal_case
+dotnet_naming_symbols.private_constants.applicable_kinds = field
+dotnet_naming_symbols.private_constants.applicable_accessibilities = private
+dotnet_naming_symbols.private_constants.required_modifiers = const
+
+dotnet_naming_rule.private_static_readonly_are_pascal_case.severity = error
+dotnet_naming_rule.private_static_readonly_are_pascal_case.symbols = private_static_readonly
+dotnet_naming_rule.private_static_readonly_are_pascal_case.style = pascal_case
+dotnet_naming_symbols.private_static_readonly.applicable_kinds = field
+dotnet_naming_symbols.private_static_readonly.applicable_accessibilities = private
+dotnet_naming_symbols.private_static_readonly.required_modifiers = static, readonly
+
+dotnet_naming_rule.private_fields_are_camel_case.severity = error
+dotnet_naming_rule.private_fields_are_camel_case.symbols = private_fields
+dotnet_naming_rule.private_fields_are_camel_case.style = camel_case
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+
+dotnet_naming_style.camel_case.capitalization = camel_case
+dotnet_naming_style.pascal_case.capitalization = pascal_case
+
 # Every narrowing section is below this line. A property belongs to whichever section header
 # precedes it, so a repository-wide rule added below one of them silently becomes a rule about a
 # single directory - which reports nothing, and reads exactly like a rule with nothing to report.
