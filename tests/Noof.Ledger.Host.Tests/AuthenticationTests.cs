@@ -76,5 +76,13 @@ public class AuthenticationTests
 
         response.StatusCode.Should().Be(HttpStatusCode.OK,
             "a visitor who is not signed in yet must still be able to load the sign-in page in full");
+
+        // Asserting the status code alone is not enough, and that is not a hypothetical: an earlier
+        // version of this test did exactly that and passed while every asset came back 200 with an
+        // empty body, so the sign-in page rendered as unstyled serif text. A stylesheet that arrives
+        // empty is indistinguishable from one that never arrived, except that nothing reports it.
+        var body = await response.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken);
+        body.Length.Should().BeGreaterThan(200,
+            "an asset that answers 200 with nothing in it leaves the page silently unstyled");
     }
 }

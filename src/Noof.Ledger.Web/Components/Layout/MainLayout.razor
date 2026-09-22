@@ -1,5 +1,17 @@
 @inherits LayoutComponentBase
 
-<main class="page">
-    @Body
-</main>
+@* MudThemeProvider is the one provider here. MudBlazor documents that its providers "must render in
+   the same interactive render mode as the components that use them", and this layout renders
+   statically under per-page interactivity - so the popover, dialog and snackbar providers are
+   deliberately absent, and nothing in this app uses a popover, dialog, snackbar, tooltip or menu.
+   A theme is only a block of CSS variables, which static rendering emits perfectly well. *@
+<MudThemeProvider Theme="NoofTheme.Instance" IsDarkMode="true" />
+
+<MudLayout>
+    <NavBar />
+    <MudMainContent>
+        <MudContainer MaxWidth="MaxWidth.Large" Class="py-8">
+            @Body
+        </MudContainer>
+    </MudMainContent>
+</MudLayout>

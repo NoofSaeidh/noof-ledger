@@ -10,6 +10,7 @@ using Noof.Ledger.Host.Startup;
 using Noof.Ledger.Host.Workers;
 using Noof.Ledger.Persistence;
 using Noof.Ledger.Telegram;
+using Noof.Ledger.Web;
 using Noof.Ledger.Web.Components;
 
 if (UserCommand.TryParse(args, out var cliUsername))
@@ -22,6 +23,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
+
+builder.Services.AddNoofWeb();
 
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(CaptureTimeZoneGuard.Resolve(

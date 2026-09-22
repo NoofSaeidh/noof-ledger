@@ -1,0 +1,47 @@
+@inject NavigationManager Navigation
+
+<MudAppBar Elevation="0" Dense="true" Color="Color.Transparent" Class="noof-appbar">
+    <MudText Typo="Typo.h6" Class="noof-brand mr-8">noof&#8202;<span class="noof-brand-accent">ledger</span></MudText>
+
+    <AuthorizeView>
+        <Authorized>
+            @foreach (var link in Links)
+            {
+                <MudButton Href="@link.Href"
+                           StartIcon="@link.Icon"
+                           Color="@(IsCurrent(link.Href) ? Color.Primary : Color.Inherit)"
+                           Class="mr-2">
+                    @link.Label
+                </MudButton>
+            }
+
+            <MudSpacer />
+
+            <MudText Typo="Typo.body2" Class="mr-4 mud-text-secondary">@context.User.Identity?.Name</MudText>
+            @* POST, not a link: a GET sign-out is something any page you visit can trigger for you. *@
+            <form method="post" action="/account/logout">
+                <AntiforgeryToken />
+                <MudButton id="sign-out" ButtonType="ButtonType.Submit" Variant="Variant.Text"
+                           Color="Color.Inherit" StartIcon="@Icons.Material.Outlined.Logout">
+                    Sign out
+                </MudButton>
+            </form>
+        </Authorized>
+    </AuthorizeView>
+</MudAppBar>
+
+@code {
+    sealed record NavLinkSpec(string Href, string Label, string Icon);
+
+    static readonly NavLinkSpec[] Links =
+    [
+        new("/", "Dashboard", Icons.Material.Outlined.Insights),
+        new("/settings/secrets", "Secrets", Icons.Material.Outlined.Key),
+    ];
+
+    bool IsCurrent(string href)
+    {
+        var path = "/" + Navigation.ToBaseRelativePath(Navigation.Uri).Split('?')[0].TrimEnd('/');
+        return href == "/" ? path == "/" : path.StartsWith(href, StringComparison.Ordinal);
+    }
+}

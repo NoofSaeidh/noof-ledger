@@ -51,7 +51,11 @@ public class ProjectReferenceTests
     {
         Packages("Noof.Ledger.Web").Should().BeEquivalentTo(
             "Microsoft.AspNetCore.Components.Web",
-            "Microsoft.AspNetCore.Components.Authorization");
+            "Microsoft.AspNetCore.Components.Authorization",
+            // MudBlazor is a UI component library and belongs to exactly this assembly. It arrives
+            // here rather than silently: this list is the argument about a new UI dependency, and
+            // widening it is an edit somebody has to justify.
+            "MudBlazor");
     }
 
     [Fact]

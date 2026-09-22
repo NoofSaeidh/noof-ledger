@@ -4,11 +4,16 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
+    @* MudBlazor first, app.css second: ours exists to override, and a stylesheet cannot override one
+       that loads after it. No Roboto link - NoofTheme uses the machine's own fonts rather than make
+       this loopback-only app fetch a typeface from Google on every page load. *@
+    <link rel="stylesheet" href="@Assets["_content/MudBlazor/MudBlazor.min.css"]" />
     <link rel="stylesheet" href="@Assets["_content/Noof.Ledger.Web/app.css"]" />
     <HeadOutlet />
 </head>
 <body>
     <Routes />
     <script src="_framework/blazor.web.js"></script>
+    <script src="@Assets["_content/MudBlazor/MudBlazor.min.js"]"></script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Mvc;
 using Noof.Ledger.Application.Auth;
@@ -19,7 +19,24 @@ internal static class AccountEndpoints
 
     static readonly string ThrowawayHash = new PasswordHasherAdapter().Hash(ThrowawayUser, Guid.NewGuid().ToString());
 
-    public static void MapAccountEndpoints(this IEndpointRouteBuilder routes) =>
+    public static void MapAccountEndpoints(this IEndpointRouteBuilder routes)
+    {
+        MapLogin(routes);
+        MapLogout(routes);
+    }
+
+    // POST, not GET: a sign-out reachable by navigation is one any page you visit can trigger for
+    // you with an <img src>. The antiforgery token the app bar's form carries is what makes this
+    // a deliberate act. Authorization is left to the fallback policy - signing out when already
+    // signed out has nothing to do.
+    static void MapLogout(IEndpointRouteBuilder routes) =>
+        routes.MapPost("/account/logout", async (HttpContext context) =>
+        {
+            await context.SignOutAsync(AuthSchemes.Cookie);
+            return Results.Redirect("/account/login");
+        });
+
+    static void MapLogin(IEndpointRouteBuilder routes) =>
         // [FromForm] is what engages antiforgery validation here; it no longer also disambiguates
         // the route from the Blazor page (that's /account/login/submit's job now), so dropping it
         // would silently return 200 with no CSRF check instead of a routing error.
