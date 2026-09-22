@@ -25,6 +25,12 @@ public sealed class CookieModeHostFixture : IAsyncLifetime
 
     public IReadOnlyList<string> CapturedOutputLines => host.CapturedOutputLines;
 
+    // Lets a test seed rows directly into the same clone database the spawned host process reads
+    // from - the dashboard has nothing to save through the UI itself, unlike the secrets page, so
+    // this is the only way to get a categorised transaction in front of it without also building and
+    // running the categorisation worker inside this test.
+    public string ConnectionString => DatabaseSettings.For(cloneDatabaseName);
+
     // Reads back what the browser-driven save actually persisted, bypassing the UI (which by
     // design never shows a saved secret's plaintext -- see SecretsPageSourceTests). Talks to the
     // same clone database and the same DPAPI-protected key ring directory

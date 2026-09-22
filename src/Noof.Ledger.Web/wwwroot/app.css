@@ -10,3 +10,53 @@ body {
 .btn {
     padding: 0.4rem 0.8rem;
 }
+
+.transaction {
+    border: 1px solid #d0d0d0;
+    border-radius: 4px;
+    padding: 0.5rem 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.transaction .status {
+    font-weight: 600;
+}
+
+.transaction.status-failed .status,
+.note-failed {
+    color: #b00020;
+}
+
+.transaction.status-awaiting .status {
+    color: #8a6100;
+}
+
+.month-totals table {
+    border-collapse: collapse;
+    margin: 0 0 1rem;
+}
+
+.month-totals td {
+    padding: 0.2rem 0.75rem;
+}
+
+.month-totals td.amount {
+    text-align: right;
+}
+
+.test-ok {
+    color: #146c2e;
+}
+
+.test-fail {
+    color: #b00020;
+}
+
+.database-unavailable {
+    border: 1px solid #b00020;
+    background: #fdeceb;
+    color: #7a0016;
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    font-weight: 600;
+}

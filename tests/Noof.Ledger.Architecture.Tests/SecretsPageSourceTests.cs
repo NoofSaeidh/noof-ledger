@@ -29,4 +29,15 @@ public class SecretsPageSourceTests
     {
         SourceText().Should().Contain("autocomplete=\"off\"");
     }
+
+    [Fact]
+    public void Test_button_calls_the_probe_port_not_the_secret_store()
+    {
+        var source = SourceText();
+
+        source.Should().Contain("ProbeAsync(",
+            "the Test button must go through ISecretProbe, which structurally cannot hand back a plaintext secret");
+        source.Should().NotContain("GetAsync(",
+            "re-asserted here: wiring up the probe must not introduce a second path back to the plaintext secret");
+    }
 }

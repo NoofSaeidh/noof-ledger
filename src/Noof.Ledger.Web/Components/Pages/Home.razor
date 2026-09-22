@@ -1,6 +1,172 @@
 @page "/"
 @attribute [Authorize]
+@using System.Data.Common
+@using System.Globalization
+@using Noof.Ledger.Application.Reporting
+@using Noof.Ledger.Domain
+@inject ISpendingReadModel ReadModel
+
 <PageTitle>Ledger</PageTitle>
 
 <h1>Ledger</h1>
-<p>Nothing to show yet.</p>
+
+@if (databaseUnavailable)
+{
+    // Distinct from "no spending yet" (below): that means the database answered and there is
+    // nothing in it, this means the database never answered at all. PostgreSQL on this machine is
+    // Manual-start and sometimes simply isn't running, so this is an expected front-page state, not
+    // a crash - conflating the two would tell the operator "you have no spending" when the truth is
+    // "we don't know".
+    <p id="database-unavailable" class="database-unavailable">
+        Can't reach the database right now. Once PostgreSQL is running again, reload this page.
+    </p>
+}
+else
+{
+    <section>
+        <h2>Recent transactions</h2>
+        @if (recent.Count == 0)
+        {
+            <p>Nothing captured yet.</p>
+        }
+        else
+        {
+            @foreach (var transaction in recent)
+            {
+                <article id="txn-@transaction.Id" class="transaction @StatusClass(transaction.Status)">
+                    <header>
+                        <span class="wallet">@transaction.WalletName</span>
+                        <span class="when">@FormatOccurredAt(transaction)</span>
+                        <span class="status">@DescribeStatus(transaction.Status)</span>
+                    </header>
+                    <p class="raw">@transaction.RawText</p>
+                    @if (transaction.Status == TransactionStatus.Captured)
+                    {
+                        <p class="note">Awaiting categorisation - this message has not been read by the categoriser yet.</p>
+                    }
+                    else if (transaction.Status == TransactionStatus.Failed)
+                    {
+                        <p class="note note-failed">Categorisation failed. Nothing was recorded for this message.</p>
+                    }
+                    else
+                    {
+                        <ul>
+                            @foreach (var item in transaction.Items)
+                            {
+                                <li>
+                                    <span class="category">@(item.CategoryName ?? "Uncategorised")</span>
+                                    <span class="description">@item.Description</span>
+                                    @if (item.MerchantName is not null)
+                                    {
+                                        <span class="merchant">(@item.MerchantName)</span>
+                                    }
+                                    <span class="amount">@FormatMoney(item.Amount)</span>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </article>
+            }
+        }
+    </section>
+
+    <section class="month-totals">
+        <h2>This month (from @summaryFirstDay.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))</h2>
+        @if (currencyGroups.Count == 0)
+        {
+            <p>No spending recorded this month.</p>
+        }
+        else
+        {
+            @foreach (var group in currencyGroups)
+            {
+                <h3>@group.Currency</h3>
+                <table id="month-totals-@group.Currency">
+                    <tbody>
+                        @foreach (var total in group.Totals)
+                        {
+                            <tr>
+                                <td>@total.CategoryName</td>
+                                <td class="amount">@total.Amount.ToString("N2", CultureInfo.InvariantCulture)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        }
+    </section>
+}
+
+@code {
+    IReadOnlyList<RecentTransaction> recent = [];
+    IReadOnlyList<CurrencyGroup> currencyGroups = [];
+    DateOnly summaryFirstDay;
+    bool databaseUnavailable;
+
+    sealed record CurrencyGroup(string Currency, IReadOnlyList<MonthTotal> Totals);
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            recent = await ReadModel.RecentAsync(20, CancellationToken.None);
+
+            var summary = await ReadModel.ThisMonthAsync(CancellationToken.None);
+            summaryFirstDay = summary.FirstDay;
+            currencyGroups =
+            [
+                .. summary.Totals
+                    .GroupBy(t => t.Currency.Value)
+                    .OrderBy(g => g.Key, StringComparer.Ordinal)
+                    .Select(g => new CurrencyGroup(g.Key, [.. g.OrderBy(t => t.CategoryName, StringComparer.Ordinal)])),
+            ];
+        }
+        // Npgsql's own execution strategy (NpgsqlExecutionStrategy.ExecuteAsync) decides a connection
+        // failure is "likely transient" and re-throws it wrapped in a plain InvalidOperationException
+        // - with retry-on-failure never configured. So the type that actually crosses this await is
+        // the wrapper, not the DbException underneath it, and that is true against a real PostgreSQL
+        // that is briefly down, not just against a fake connection in a test. Matching on
+        // InvalidOperationException + a specific InnerException shape is one EF/Npgsql version away
+        // from silently not matching again, and the failure mode when it stops matching is a 500 on
+        // the front page - exactly what this exists to prevent. Walking the whole InnerException
+        // chain for a genuine DbException survives whatever EF wraps it in from here on, while still
+        // refusing to swallow an ordinary bug in this page (no DbException anywhere in the chain).
+        catch (Exception exception) when (IsDatabaseUnavailable(exception))
+        {
+            databaseUnavailable = true;
+        }
+    }
+
+    static bool IsDatabaseUnavailable(Exception exception) =>
+        exception is DbException
+        || (exception.InnerException is { } inner && IsDatabaseUnavailable(inner));
+
+    static string FormatMoney(Money money) =>
+        $"{money.Amount.ToString("N2", CultureInfo.InvariantCulture)} {money.Currency}";
+
+    // The row's own time zone, not the browser's and not the server's - decision P1-3. TimeZoneId is
+    // stamped from a known IANA id at capture time, so a failure to resolve it here is a genuine bug
+    // upstream, not a condition this page should mask.
+    static string FormatOccurredAt(RecentTransaction transaction)
+    {
+        var zone = TimeZoneInfo.FindSystemTimeZoneById(transaction.TimeZoneId);
+        var local = TimeZoneInfo.ConvertTime(transaction.OccurredAt, zone);
+        return local.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+    }
+
+    static string DescribeStatus(TransactionStatus status) => status switch
+    {
+        TransactionStatus.Captured => "Awaiting categorisation",
+        TransactionStatus.Completed => "Categorised",
+        TransactionStatus.Failed => "Categorisation failed",
+        _ => "Unknown",
+    };
+
+    static string StatusClass(TransactionStatus status) => status switch
+    {
+        TransactionStatus.Captured => "status-awaiting",
+        TransactionStatus.Completed => "status-completed",
+        TransactionStatus.Failed => "status-failed",
+        _ => "status-unknown",
+    };
+}

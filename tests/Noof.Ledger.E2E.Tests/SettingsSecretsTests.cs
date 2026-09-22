@@ -112,6 +112,67 @@ public sealed class SettingsSecretsTests(CookieModeHostFixture fixture) : PageTe
             "a secret value must never reach the console log");
     }
 
+    [Fact]
+    public async Task Testing_an_invalid_Anthropic_key_reports_failure_without_echoing_it()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+        if (!await AnthropicIsReachableAsync())
+            Assert.Skip("api.anthropic.com is not reachable from this machine.");
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/settings/secrets");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var fakeKey = $"sk-ant-invalid-{Guid.NewGuid():N}";
+        var status = Page.Locator($"#status-{SecretKeys.AnthropicApiKey}");
+
+        await RetryUntilAsync(async () =>
+        {
+            await Page.Locator($"#secret-{SecretKeys.AnthropicApiKey}").FillAsync(fakeKey);
+            await Page.Locator($"#save-{SecretKeys.AnthropicApiKey}").ClickAsync();
+            await Expect(status).ToContainTextAsync("Set", new() { Timeout = 2_000 });
+        });
+
+        var result = Page.Locator($"#test-result-{SecretKeys.AnthropicApiKey}");
+        await Page.Locator($"#test-{SecretKeys.AnthropicApiKey}").ClickAsync();
+        await Expect(result).ToBeVisibleAsync(new() { Timeout = 15_000 });
+
+        var message = await result.TextContentAsync() ?? string.Empty;
+        message.Should().NotBeEmpty();
+        message.Should().NotContain(fakeKey, "the probe's failure message must never echo the key it was testing");
+    }
+
+    [Fact]
+    public async Task A_secret_with_no_registered_probe_shows_no_Test_button()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/settings/secrets");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        // Phase 1B ships a probe for the Anthropic key only - the Telegram equivalent is backlog
+        // (see "What this plan deliberately does NOT do"). A row with no matching ISecretProbe must
+        // stay silent about it rather than showing a button that would always fail.
+        await Expect(Page.Locator($"#test-{SecretKeys.TelegramBotToken}")).Not.ToBeVisibleAsync();
+    }
+
+    static async Task<bool> AnthropicIsReachableAsync()
+    {
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            using var response = await client.GetAsync("https://api.anthropic.com/v1/models");
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     async Task SignInAsync()
     {
         await Page.GotoAsync(fixture.BaseUrl + "/");
