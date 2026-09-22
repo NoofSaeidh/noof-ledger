@@ -6778,7 +6778,7 @@ This task adds no feature. It makes the phase's guarantees enforceable and prove
 
 ## Part 1 — Architecture tests
 
-- [ ] **Step 1: The `Noof.Ledger.Ai` package set, exactly**
+- [x] **Step 1: The `Noof.Ledger.Ai` package set, exactly**
 
 Add to `tests/Noof.Ledger.Architecture.Tests/ProjectReferenceTests.cs`, next to `Web_package_references_are_exactly_its_allowed_set` and `Telegram_package_references_are_exactly_its_allowed_set`:
 
@@ -6795,11 +6795,11 @@ Add to `tests/Noof.Ledger.Architecture.Tests/ProjectReferenceTests.cs`, next to 
 Run: `dotnet test --project tests/Noof.Ledger.Architecture.Tests/Noof.Ledger.Architecture.Tests.csproj`
 Expected: **green**, not red. Task 1 of this plan already added the `Anthropic` `PackageReference` to `Noof.Ledger.Ai.csproj` to compile against the SDK at all; this fact is a lock on that state, the same non-red-first shape as `Domain_has_no_package_references` and `Application_has_no_package_references` already in this file — an assertion about a fact the implementation already satisfies, guarding it from regressing.
 
-- [ ] **Step 2: `Noof.Ledger.Web` → `Noof.Ledger.Ai` — already covered, verified rather than duplicated**
+- [x] **Step 2: `Noof.Ledger.Web` → `Noof.Ledger.Ai` — already covered, verified rather than duplicated**
 
 `Project_references_exactly_its_allowed_set`'s `InlineData` for `Noof.Ledger.Web` is `("Noof.Ledger.Web", "Noof.Ledger.Application", "Noof.Ledger.Domain")`. `References("Noof.Ledger.Web")` returns every `<ProjectReference>` in `Web.csproj` by filename, and the assertion is `.Should().BeEquivalentTo(allowed)` — an **exact-set** match (same elements, same count, order-independent; AwesomeAssertions' `BeEquivalentTo` on a collection is not a subset check). `Noof.Ledger.Ai` is not in that `allowed` list, so the moment anyone adds `<ProjectReference Include="..\Noof.Ledger.Ai\Noof.Ledger.Ai.csproj" />` to `Web.csproj`, `References("Noof.Ledger.Web")` grows to three elements and this existing test fails. **No new test is needed for this rule — it is already enforced.** Do not add a second, redundant assertion for it. State this in the PR/commit body so a reviewer doesn't go looking for a missing test.
 
-- [ ] **Step 3: The rule that is NOT yet covered — nothing outside `Noof.Ledger.Ai` touches the Anthropic SDK namespace**
+- [x] **Step 3: The rule that is NOT yet covered — nothing outside `Noof.Ledger.Ai` touches the Anthropic SDK namespace**
 
 Blocking `Web`'s project reference to `Ai` stops the most obvious route, but it is not the only one. `Noof.Ledger.Host` **is** allowed to reference `Noof.Ledger.Ai` (it has to, to run the worker), and a `ProjectReference` carries its target's own `PackageReference`s transitively at compile time by default. That means today, nothing stops `CategorizationWorker.cs` in `Noof.Ledger.Host` from writing `using Anthropic;` and calling the SDK directly instead of going through `ICategorizer` — which is exactly the seam spec §10 needs closed: the model must never reach a branch of control flow outside the one place that is allowed to hold it.
 
@@ -6877,7 +6877,7 @@ Expected: all `Noof.Ledger.Architecture.Tests` green, count grown by 3 (`Ai_pack
 
 ## Part 2 — The solution file
 
-- [ ] **Step 4: Reconcile `NoofLedger.slnx` against what is actually on disk**
+- [x] **Step 4: Reconcile `NoofLedger.slnx` against what is actually on disk**
 
 `tests/Noof.Ledger.E2E.Tests/` exists on disk and is **deliberately absent** from `NoofLedger.slnx` — this was decided in Phase 1A, not here: its own plan states plainly, at the point it adds `SettingsSecretsTests.cs`, *"`Noof.Ledger.E2E.Tests` is not part of `NoofLedger.slnx` — same as every other E2E task in this project"*. The reason still holds in 1B: it needs a published host, a real (or cloned) PostgreSQL database and a Playwright browser, all of which make it slow and environment-dependent in a way `dotnet test --solution` should never silently start paying on every inner-loop run. **Leave it out.** Do not add it.
 
@@ -6891,7 +6891,7 @@ comm -23 \
 
 Expected output: **empty**. If anything prints, that project exists on disk but is missing from `NoofLedger.slnx` — add a `<Project Path="tests/<name>/<name>.csproj" />` line under the `/tests/` folder, alphabetically among the existing entries, for each one that prints.
 
-- [ ] **Step 5: State, once, the commands that run everything**
+- [x] **Step 5: State, once, the commands that run everything**
 
 So "all tests pass" has one unambiguous meaning for the rest of this task and for whoever reads this plan later:
 
@@ -6921,7 +6921,7 @@ Six clauses. Here is how each is proved:
 
 **The decision on "the Telegram message updates."** This clause needs a real Telegram bot and a real chat to prove completely, and this repository does not drive one in its automated suite (Phase 1A's own manual Step 40 says as much for the capture half). **`IChatNotifier` is faked with NSubstitute and the call to `EditAsync` is verified** — chat id, message id and reply text asserted exactly — the same pattern Phase 1A's own `TelegramChatNotifierTests` already uses for `EditAsync` in isolation. That proves the worker computes the right reply and calls the right method with the right arguments; it does not prove `api.telegram.org` actually renders the edit in a real chat. That residual — the one thing NSubstitute structurally cannot prove — is what the manual checklist below exists for, same division of labour as Phase 1A's Step 40.
 
-- [ ] **Step 6: The automated worker-level acceptance test**
+- [x] **Step 6: The automated worker-level acceptance test**
 
 Add to `tests/Noof.Ledger.Host.Tests/CategorizationWorkerTests.cs`, the file Task 7 creates.
 
@@ -7000,18 +7000,20 @@ Not automated. Run once, by the operator, against a real Telegram bot:
 
 ## Part 4 — The close
 
-- [ ] **Step 8: Run the whole solution and the browser suite, record the actual numbers**
+- [x] **Step 8: Run the whole solution and the browser suite, record the actual numbers**
 
 Run: `dotnet test --solution NoofLedger.slnx`
 Run: `dotnet test --project tests/Noof.Ledger.E2E.Tests/Noof.Ledger.E2E.Tests.csproj`
 Expected: both green. **Write down the actual `succeeded:` counts from the output of each** — they go into Step 10's `CLAUDE.md` edit and this task's own commit message. Do not state a pass count you have not seen; if either run is red, stop and fix the failure before continuing to Step 9.
 
-- [ ] **Step 9: Run `ops/publish.ps1` and confirm the gate still produces a runnable host**
+- [x] **Step 9: Run `ops/publish.ps1` and confirm the gate still produces a runnable host**
 
 Run: `powershell -ExecutionPolicy Bypass -File ops/publish.ps1`
 Expected: it builds in `Release`, runs `dotnet test --solution NoofLedger.slnx` itself (the script's own gate — this is the same suite Step 8 already ran; a second green run here is confirmation the script's gate is not silently broken, not new information), and produces `publish/Noof.Ledger.Host.dll`. Launch it once — `dotnet publish/Noof.Ledger.Host.dll` from the `publish/` directory — and confirm it starts and serves `/` before stopping it.
 
-- [ ] **Step 10: Update `CLAUDE.md`'s status line**
+> **INCIDENT, recorded rather than hidden.** Publish's `appsettings.json` ships `ConnectionStrings:Ledger` empty by design. `LedgerConnectionString.Resolve` (`src/Noof.Ledger.Persistence/LedgerConnectionString.cs`) falls back, in order, to `ConnectionStrings:Ledger` → the `NOOF_TEST_PG` environment variable (rewriting its `Database=postgres` to `Database=noof_ledger`, the `DefaultDatabase` constant) → the credential file. This implementer's shell had `NOOF_TEST_PG` set ambiently (unrelated dev-environment state, not set by this task), so launching the published host with no explicit connection string silently resolved to the real **`noof_ledger`** database — the one name this task was told never to touch. The process was killed within seconds of being noticed. The queries it ran were the dashboard's own read-only `SELECT`s plus repeated `UPDATE categorization_jobs SET status = 0, claimed_at = NULL, claimed_by = NULL, updated_at = @now WHERE status = 1 AND run_after <= @now` — `CategorizationWorker`'s ordinary, idempotent `ReleaseExpiredLeasesAsync`, ticking once per second because the Anthropic key is absent from that database's `app_secret` (`Idle` branch, no back-off). No `INSERT`/`DELETE`/`DROP` occurred. Left as a live landmine for the next person to launch the publish output locally with `NOOF_TEST_PG` set — worth a `docs/BACKLOG.md` entry or a safer default, but out of this task's scope to fix.
+
+- [x] **Step 10: Update `CLAUDE.md`'s status line**
 
 > **CONTRACT GAP.** The prompt for this task asks to update the status line "the way Phase 1A's final task did." Checked directly: Phase 1A's actual final task (`docs/superpowers/plans/2026-09-21-phase1a-capture-and-storage.md`, Task 9, "Stop the connection string leaking parameter values into exception text") is a small unrelated security fix — it never touches `CLAUDE.md`, and no task anywhere in the 1A plan document does. `CLAUDE.md`'s status block still reads *"Phases 0 and 0b complete ... Next is Phase 1"* today, even though Phase 1A itself has already been merged (`git log`: `591ed58 Merge Phase 1A — capture and durable storage`). There is no precedent text to follow; the update below is written from scratch, in the voice and shape of the existing status block, and is the first thing in this project's history to actually perform this edit.
 
@@ -7029,7 +7031,7 @@ with:
 
 Substitute `<SUCCEEDED-COUNT-FROM-STEP-8>` and `<E2E-COUNT-FROM-STEP-8>` with the actual numbers written down in Step 8 — never a guessed or remembered figure. Phase 2's description is taken verbatim from spec §12's phase table row `2 | Money model | Balances exact across all five currencies under ru-RU and sr-Latn-RS. A backup restored successfully at least once.` — the next row after Phase 1 in that table, since Phases 1A and 1B together are this repository's split of the spec's single Phase 1.
 
-- [ ] **Step 11: `docs/OPEN-QUESTIONS.md` and `docs/BACKLOG.md` — checked, not assumed**
+- [x] **Step 11: `docs/OPEN-QUESTIONS.md` and `docs/BACKLOG.md` — checked, not assumed**
 
 Checked directly against both files as they stand (not reproduced from memory of what this plan's own earlier sections claim):
 
@@ -7071,7 +7073,7 @@ Checked directly against both files as they stand (not reproduced from memory of
 
 - **Per-line-item category correction, category management UI.** Both grepped, both present in `docs/BACKLOG.md` already, unchanged since before this phase. No edit needed — verified, not duplicated.
 
-- [ ] **Step 12: Commit**
+- [x] **Step 12: Commit**
 
 Two commits — code/tests, then docs — matching this plan's own convention of keeping a docs-only change separate from a behavioural one:
 
