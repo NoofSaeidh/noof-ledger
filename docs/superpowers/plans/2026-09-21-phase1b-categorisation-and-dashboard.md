@@ -4819,7 +4819,7 @@ public readonly record struct CurrencyCode { public string Value { get; } /* ToS
 
 ---
 
-- [ ] **Step 1: Add the `FakeTimeProvider` package reference to the Host test project**
+- [x] **Step 1: Add the `FakeTimeProvider` package reference to the Host test project**
 
 `Microsoft.Extensions.TimeProvider.Testing` is already pinned in `Directory.Packages.props` (version `10.10.0`, added in Phase 1A Task 7) but `tests/Noof.Ledger.Host.Tests/Noof.Ledger.Host.Tests.csproj` does not yet reference it — confirmed by reading the file (its only test packages are `AwesomeAssertions`, `Microsoft.AspNetCore.Mvc.Testing`, `NSubstitute`, `xunit.v3.mtp-v2`).
 
@@ -4838,7 +4838,7 @@ Edit `tests/Noof.Ledger.Host.Tests/Noof.Ledger.Host.Tests.csproj`:
 Run: `dotnet restore`
 Expected: restores with no errors.
 
-- [ ] **Step 2: Write the failing tests for `CategorizationReply`**
+- [x] **Step 2: Write the failing tests for `CategorizationReply`**
 
 Create `tests/Noof.Ledger.Host.Tests/CategorizationReplyTests.cs`:
 
@@ -4908,11 +4908,11 @@ public class CategorizationReplyTests
 Run: `dotnet test --project tests/Noof.Ledger.Host.Tests/Noof.Ledger.Host.Tests.csproj`
 Expected: build error — `The type or namespace name 'CategorizationReply' does not exist in the namespace 'Noof.Ledger.Host.Workers'` (the namespace itself does not exist yet either).
 
-- [ ] **Step 3: Confirm the failure is the one expected**
+- [x] **Step 3: Confirm the failure is the one expected**
 
 Re-run the same command and actually read the output — it must be a "type not found" compile error, not a Postgres connection error or an unrelated failure in another test file. If it is anything else, stop and fix that first.
 
-- [ ] **Step 4: Implement `CategorizationReply`**
+- [x] **Step 4: Implement `CategorizationReply`**
 
 Create `src/Noof.Ledger.Host/Workers/CategorizationReply.cs`:
 
@@ -4954,7 +4954,7 @@ public static class CategorizationReply
 Run: `dotnet test --project tests/Noof.Ledger.Host.Tests/Noof.Ledger.Host.Tests.csproj`
 Expected: the four `CategorizationReplyTests` facts pass.
 
-- [ ] **Step 5: Write the failing tests for `CategorizationWorkerOptions`**
+- [x] **Step 5: Write the failing tests for `CategorizationWorkerOptions`**
 
 Create `tests/Noof.Ledger.Host.Tests/CategorizationWorkerOptionsTests.cs`:
 
@@ -5013,7 +5013,7 @@ public class CategorizationWorkerOptionsTests
 Run: `dotnet test --project tests/Noof.Ledger.Host.Tests/Noof.Ledger.Host.Tests.csproj`
 Expected: build error — `The type or namespace name 'CategorizationWorkerOptions' could not be found`.
 
-- [ ] **Step 6: Implement `CategorizationWorkerOptions`**
+- [x] **Step 6: Implement `CategorizationWorkerOptions`**
 
 Create `src/Noof.Ledger.Host/Workers/CategorizationWorkerOptions.cs`:
 
@@ -5065,7 +5065,7 @@ public sealed class CategorizationWorkerOptions
 Run: `dotnet test --project tests/Noof.Ledger.Host.Tests/Noof.Ledger.Host.Tests.csproj`
 Expected: `CategorizationWorkerOptionsTests` all pass (10 facts: 1 defaults + 8 theory rows + 1 cap).
 
-- [ ] **Step 7: Write the failing tests for `CategorizationWorker`**
+- [x] **Step 7: Write the failing tests for `CategorizationWorker`**
 
 Create `tests/Noof.Ledger.Host.Tests/CategorizationWorkerTests.cs`:
 
@@ -5589,11 +5589,11 @@ public class CategorizationWorkerTests
 Run: `dotnet test --project tests/Noof.Ledger.Host.Tests/Noof.Ledger.Host.Tests.csproj`
 Expected: build error — `The type or namespace name 'CategorizationWorker' could not be found` and `The type or namespace name 'CategorizationTickResult' could not be found`.
 
-- [ ] **Step 8: Confirm the failure is the one expected**
+- [x] **Step 8: Confirm the failure is the one expected**
 
 Re-run the same command. It must be the compile error named above — not a runtime failure, not a Postgres error (none of these tests touch a real database; every dependency is an NSubstitute fake).
 
-- [ ] **Step 9: Implement `CategorizationWorker`**
+- [x] **Step 9: Implement `CategorizationWorker`**
 
 Create `src/Noof.Ledger.Host/Workers/CategorizationWorker.cs`:
 
@@ -5872,12 +5872,12 @@ public sealed class CategorizationWorker(
 Run: `dotnet test --project tests/Noof.Ledger.Host.Tests/Noof.Ledger.Host.Tests.csproj`
 Expected: all `CategorizationWorkerTests` facts pass (21 facts), plus the earlier `CategorizationReplyTests` and `CategorizationWorkerOptionsTests` still green.
 
-- [ ] **Step 10: Run the whole Host test project and confirm nothing else broke**
+- [x] **Step 10: Run the whole Host test project and confirm nothing else broke**
 
 Run: `dotnet test --project tests/Noof.Ledger.Host.Tests/Noof.Ledger.Host.Tests.csproj`
 Expected: all green, including the pre-existing `TelegramHttpClientLoggingTests`, `LoopbackGuardTerminatesTests`, `BootTests`, etc.
 
-- [ ] **Step 11: Wire `Program.cs`** (wiring code — exempt from TDD, but checked by the next step's test)
+- [x] **Step 11: Wire `Program.cs`** (wiring code — exempt from TDD, but checked by the next step's test)
 
 Edit `src/Noof.Ledger.Host/Program.cs`. Add these `using` directives near the top, alongside the existing ones:
 
@@ -5951,7 +5951,7 @@ builder.Services.AddHostedService(sp => new CategorizationWorker(
 
 > If `AnthropicCategorizer`, `EfCategoryCatalog`, `EfMerchantDirectory` or `EfCategorizationStore` land from Tasks 1/3/5 with a constructor shape other than the conventional `(LedgerDbContext[, TimeProvider])`/`(ISecretStore, AnthropicOptions)` this task assumes (see `CONTRACT GAP`), swap the matching `AddScoped<TInterface, TImplementation>()` line for a factory lambda the same way `IJobQueue`'s registration already is — everything else in this task is unaffected.
 
-- [ ] **Step 12: Write the confirming wiring tests**
+- [x] **Step 12: Write the confirming wiring tests**
 
 Create `tests/Noof.Ledger.Host.Tests/CategorizationWiringTests.cs`:
 
@@ -6016,12 +6016,12 @@ public class CategorizationWiringTests
 Run: `dotnet test --project tests/Noof.Ledger.Host.Tests/Noof.Ledger.Host.Tests.csproj`
 Expected: all three `CategorizationWiringTests` facts pass. If any registration is missing or misnamed, this fails with `InvalidOperationException: Unable to resolve service for type '...'` naming exactly which one.
 
-- [ ] **Step 13: Run the full solution**
+- [x] **Step 13: Run the full solution**
 
 Run: `dotnet test --solution NoofLedger.slnx`
 Expected: all green — nothing in Telegram, Persistence, Domain or the rest of Host regressed.
 
-- [ ] **Step 14: Commit**
+- [x] **Step 14: Commit**
 
 ```bash
 git add tests/Noof.Ledger.Host.Tests/Noof.Ledger.Host.Tests.csproj tests/Noof.Ledger.Host.Tests/CategorizationReplyTests.cs tests/Noof.Ledger.Host.Tests/CategorizationWorkerOptionsTests.cs tests/Noof.Ledger.Host.Tests/CategorizationWorkerTests.cs tests/Noof.Ledger.Host.Tests/CategorizationWiringTests.cs src/Noof.Ledger.Host/Workers/CategorizationReply.cs src/Noof.Ledger.Host/Workers/CategorizationWorkerOptions.cs src/Noof.Ledger.Host/Workers/CategorizationWorker.cs src/Noof.Ledger.Host/Program.cs
