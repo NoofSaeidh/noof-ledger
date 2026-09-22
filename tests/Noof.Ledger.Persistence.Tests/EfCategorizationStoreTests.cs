@@ -150,6 +150,41 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task Concurrent_ApplyAsync_calls_for_the_same_transaction_do_not_double_the_line_items()
+    {
+        // Reproduces the reviewer's scenario: a worker whose lease expired mid-job and a second
+        // host process both categorize the same transaction. Under READ COMMITTED, without a lock
+        // taken up front, both DELETEs see nothing to remove (neither has committed yet), both
+        // INSERTs succeed, and both COMMIT - two line items instead of one. Taking SELECT ... FOR
+        // UPDATE as the first statement inside ApplyAsync's transaction makes the second caller
+        // wait for the first to commit, then see (and replace) its rows, the same way
+        // EfJobQueueTests' concurrent-claim test proves SKIP LOCKED serializes ClaimAsync.
+        await using var dbA = await fixture.CreateContextAsync();
+        await dbA.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var (transactionId, categoryId, merchantId) = await SeedAsync(dbA, TestContext.Current.CancellationToken);
+
+        var connectionString = dbA.Database.GetConnectionString();
+        await using var dbB = new LedgerDbContext(
+            new DbContextOptionsBuilder<LedgerDbContext>().UseNpgsql(connectionString).Options);
+
+        var storeA = new EfCategorizationStore(dbA);
+        var storeB = new EfCategorizationStore(dbB);
+        var itemsA = new[] { new CategorizedLineItem("Coffee", new Money(3.50m, CurrencyCode.Eur), categoryId, merchantId) };
+        var itemsB = new[] { new CategorizedLineItem("Milk", new Money(1.20m, CurrencyCode.Eur), categoryId, merchantId) };
+
+        await Task.WhenAll(
+            storeA.ApplyAsync(transactionId, itemsA, TestContext.Current.CancellationToken),
+            storeB.ApplyAsync(transactionId, itemsB, TestContext.Current.CancellationToken));
+
+        await using var verify = new LedgerDbContext(
+            new DbContextOptionsBuilder<LedgerDbContext>().UseNpgsql(connectionString).Options);
+        var lines = await verify.LineItems.AsNoTracking()
+            .Where(l => l.TransactionId == transactionId).ToListAsync(TestContext.Current.CancellationToken);
+        lines.Should().ContainSingle(
+            "the two concurrent calls must serialize on the transaction row - whichever committed second replaces the first's line, it must not double it");
+    }
+
+    [Fact]
     public async Task ApplyAsync_is_idempotent_applying_the_same_result_twice_leaves_the_same_rows()
     {
         await using var db = await fixture.CreateContextAsync();

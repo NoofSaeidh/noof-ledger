@@ -19,6 +19,18 @@ public sealed class EfCategorizationStore(LedgerDbContext db) : ICategorizationS
     {
         await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
 
+        // Row lock, first statement inside the transaction. PostgreSQL runs READ COMMITTED, so
+        // without this a second concurrent ApplyAsync for the same transaction (a worker whose
+        // lease expired mid-job plus a second host process, say) would see nothing to DELETE
+        // (neither caller has committed yet), both INSERTs would succeed, and both would COMMIT -
+        // doubling the bill. FOR UPDATE makes the second caller block here until the first commits
+        // and releases the lock, so it then sees (and replaces) the first caller's rows instead of
+        // adding to them.
+        await db.Database.SqlQueryRaw<Guid>(
+            "SELECT id FROM transactions WHERE id = @transactionId FOR UPDATE",
+            new NpgsqlParameter("transactionId", transactionId))
+            .ToListAsync(cancellationToken);
+
         // The precedence predicate lives in the DELETE statement itself, not in an `if` around it -
         // a Rule- or User-authored line (2 or 4) is never eligible for deletion by a model re-run,
         // and there is nothing downstream that could forget to check that, because there is nothing
