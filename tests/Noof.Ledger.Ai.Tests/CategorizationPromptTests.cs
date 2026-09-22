@@ -16,6 +16,19 @@ public class CategorizationPromptTests
     }
 
     [Fact]
+    public void System_prompt_instructs_omitting_an_unstated_currency_rather_than_guessing()
+    {
+        CategorizationPrompt.System.Should().Contain("only when the message actually states one");
+        CategorizationPrompt.System.Should().Contain("leave currency out of your answer rather than choosing one");
+    }
+
+    [Fact]
+    public void System_prompt_has_an_example_with_no_stated_currency()
+    {
+        CategorizationPrompt.System.Should().Contain("The message names no currency");
+    }
+
+    [Fact]
     public void System_prompt_wraps_examples_in_the_examples_tag()
     {
         CategorizationPrompt.System.Should().Contain("<examples>");

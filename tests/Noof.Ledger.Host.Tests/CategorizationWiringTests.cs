@@ -51,5 +51,6 @@ public class CategorizationWiringTests
         options.MaxAttempts.Should().Be(8);
         options.MerchantHintLimit.Should().Be(10);
         options.MaxCanonicalizationsPerJob.Should().Be(3);
+        options.DefaultCurrency.Should().Be("RSD");
     }
 }

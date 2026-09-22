@@ -103,6 +103,7 @@ public sealed class LiveModelTests
             proposal,
             OfferedSlugs,
             offeredMerchantIds: [],
+            defaultCurrency: "RSD",
             out var items,
             out var failure);
 

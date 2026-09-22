@@ -39,7 +39,7 @@ public class CategorizationSchemaTests
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["description", "amount_quote", "currency", "category_slug"],
+                "required": ["description", "amount_quote", "category_slug"],
                 "properties": {
                   "description": { "type": "string", "description": "What was bought, as short plain text in the language of the message." },
                   "amount_quote": { "type": "string", "description": "The amount copied from the message character for character, exactly as written. Do not convert digits, do not add or remove separators, do not add a currency symbol, and never compute or sum anything. If the message does not state an amount for this line, do not produce the line." },
@@ -108,6 +108,22 @@ public class CategorizationSchemaTests
             .EnumerateArray().Select(e => e.GetString());
 
         currencies.Should().BeEquivalentTo(["EUR", "RSD", "USD", "RUB", "KZT"]);
+    }
+
+    [Fact]
+    public void Currency_is_a_property_but_is_not_required()
+    {
+        // The model must be able to answer "not stated" by omitting currency altogether — it is
+        // still constrained to one of the five codes whenever it does report one (see
+        // Currency_enum_is_the_five_CurrencyCode_statics), but it is never forced to invent a
+        // sixth answer for a message that states no currency at all.
+        var schema = CategorizationSchema.BuildRecordSpending(Categories, NoHints);
+
+        var lineItem = schema.GetProperty("properties").GetProperty("items").GetProperty("items");
+        var required = lineItem.GetProperty("required").EnumerateArray().Select(e => e.GetString());
+
+        required.Should().NotContain("currency");
+        LineItemProperties(schema).TryGetProperty("currency", out _).Should().BeTrue();
     }
 
     [Fact]

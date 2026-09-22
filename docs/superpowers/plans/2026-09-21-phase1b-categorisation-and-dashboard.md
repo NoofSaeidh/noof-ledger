@@ -130,10 +130,16 @@ public sealed record CategorizationRequest(
 // One line the model proposes. Nothing here is trusted: AmountQuote is a claim about the raw
 // text, CategorySlug is a claim about the offered list, and MerchantQuote is a claim about a
 // name that appears in the message. ProposalVerification turns claims into values.
+//
+// CurrencyCode is optional (Phase 1B follow-up, 2026-09-22): the response schema no longer
+// requires currency, because constrained decoding otherwise forces the model to invent a code
+// for a message that states none. Null or empty means "not stated"; ProposalVerification
+// substitutes CategorizationWorkerOptions.DefaultCurrency before resolving. A currency the model
+// DOES report is still validated exactly as before.
 public sealed record ProposedLineItem(
     string Description,
     string AmountQuote,
-    string CurrencyCode,
+    string? CurrencyCode,
     string CategorySlug,
     Guid? KnownMerchantId,
     string? MerchantQuote);
@@ -254,11 +260,18 @@ public static class ProposalVerification
     // Turns a proposal into resolved lines, or fails the whole proposal. Partial acceptance is
     // NOT offered: a bill with one unreadable amount must fail, because nothing downstream ever
     // re-reads the raw text and a half-recorded bill would look complete forever.
+    //
+    // defaultCurrency (Phase 1B follow-up, 2026-09-22) is substituted for any item whose
+    // CurrencyCode is null or empty, before that item reaches QuotedAmount.TryResolve, which is
+    // never modified and never told the difference between a real quote and a substitution. A
+    // currency the model did state is passed through unchanged and still validated exactly as
+    // before.
     public static bool TryResolve(
         string rawText,
         CategorizationProposal proposal,
         IReadOnlyCollection<string> offeredSlugs,
         IReadOnlyCollection<Guid> offeredMerchantIds,
+        string defaultCurrency,
         out IReadOnlyList<ResolvedLineItem> items,
         out string failure);
 }

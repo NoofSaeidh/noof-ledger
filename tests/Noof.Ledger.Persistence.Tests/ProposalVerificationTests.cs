@@ -7,15 +7,28 @@ namespace Noof.Ledger.Persistence.Tests;
 public class ProposalVerificationTests
 {
     static readonly Guid GroceryMerchantId = Guid.NewGuid();
+    const string DefaultCurrency = "RSD";
 
     static ProposedLineItem ValidItem(
         string description = "coffee",
         string amountQuote = "250",
-        string currency = "RSD",
+        string? currency = "RSD",
         string categorySlug = "groceries",
         Guid? knownMerchantId = null,
         string? merchantQuote = null) =>
         new(description, amountQuote, currency, categorySlug, knownMerchantId, merchantQuote);
+
+    static bool Resolve(
+        string rawText,
+        CategorizationProposal proposal,
+        out IReadOnlyList<ResolvedLineItem> items,
+        out string failure,
+        IReadOnlyCollection<string>? offeredSlugs = null,
+        IReadOnlyCollection<Guid>? offeredMerchantIds = null,
+        string defaultCurrency = DefaultCurrency) =>
+        ProposalVerification.TryResolve(
+            rawText, proposal, offeredSlugs ?? ["groceries"], offeredMerchantIds ?? [], defaultCurrency,
+            out items, out failure);
 
     [Fact]
     public void An_empty_item_list_resolves_to_no_spending_in_this_message()
@@ -26,8 +39,7 @@ public class ProposalVerificationTests
         // categorise here" - not a malformed one, so it must not fail verification.
         var proposal = new CategorizationProposal([]);
 
-        var resolved = ProposalVerification.TryResolve(
-            "заняла у Маши 5000 рсд", proposal, ["groceries"], [], out var items, out var failure);
+        var resolved = Resolve("заняла у Маши 5000 рсд", proposal, out var items, out var failure);
 
         resolved.Should().BeTrue(failure);
         items.Should().BeEmpty();
@@ -39,8 +51,7 @@ public class ProposalVerificationTests
     {
         var proposal = new CategorizationProposal([ValidItem()]);
 
-        var resolved = ProposalVerification.TryResolve(
-            "кофе 250 рсд", proposal, ["groceries"], [], out var items, out var failure);
+        var resolved = Resolve("кофе 250 рсд", proposal, out var items, out var failure);
 
         resolved.Should().BeTrue();
         failure.Should().BeEmpty();
@@ -49,12 +60,76 @@ public class ProposalVerificationTests
     }
 
     [Fact]
+    public void A_proposal_with_no_stated_currency_resolves_to_the_default()
+    {
+        var proposal = new CategorizationProposal([ValidItem(currency: null)]);
+
+        var resolved = Resolve("кофе 250", proposal, out var items, out var failure, defaultCurrency: "RSD");
+
+        resolved.Should().BeTrue(failure);
+        items.Should().ContainSingle().Which.Amount.Should().Be(new Money(250m, CurrencyCode.Rsd));
+    }
+
+    [Fact]
+    public void An_empty_string_currency_also_resolves_to_the_default()
+    {
+        // The model may answer with an empty string rather than omitting the field entirely -
+        // both mean "not stated" and both must land on the default, not be treated as a claimed
+        // (and then rejected) currency code.
+        var proposal = new CategorizationProposal([ValidItem(currency: "")]);
+
+        var resolved = Resolve("кофе 250", proposal, out var items, out var failure, defaultCurrency: "RSD");
+
+        resolved.Should().BeTrue(failure);
+        items.Should().ContainSingle().Which.Amount.Should().Be(new Money(250m, CurrencyCode.Rsd));
+    }
+
+    [Fact]
+    public void A_proposal_that_states_EUR_resolves_to_EUR_not_the_default()
+    {
+        // The default must never override a currency the model actually reported - only fill the
+        // gap when it reported none.
+        var proposal = new CategorizationProposal([ValidItem(currency: "EUR")]);
+
+        var resolved = Resolve("кофе 250 eur", proposal, out var items, out var failure, defaultCurrency: "RSD");
+
+        resolved.Should().BeTrue(failure);
+        items.Should().ContainSingle().Which.Amount.Should().Be(new Money(250m, CurrencyCode.Eur));
+    }
+
+    [Fact]
+    public void A_stated_currency_outside_the_five_is_still_rejected()
+    {
+        var proposal = new CategorizationProposal([ValidItem(currency: "GBP")]);
+
+        var resolved = Resolve("кофе 250 gbp", proposal, out var items, out var failure);
+
+        resolved.Should().BeFalse();
+        items.Should().BeEmpty();
+        failure.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void The_default_currency_never_relaxes_the_amount_gate()
+    {
+        // The currency relaxation changes nothing about the amount verification: an amount quote
+        // that does not occur verbatim in the raw text must still fail the whole proposal, whether
+        // or not a currency was stated.
+        var proposal = new CategorizationProposal([ValidItem(amountQuote: "999", currency: null)]);
+
+        var resolved = Resolve("кофе 250", proposal, out var items, out var failure, defaultCurrency: "RSD");
+
+        resolved.Should().BeFalse();
+        items.Should().BeEmpty();
+        failure.Should().NotBeEmpty();
+    }
+
+    [Fact]
     public void An_amount_quote_that_does_not_occur_verbatim_fails_the_whole_proposal()
     {
         var proposal = new CategorizationProposal([ValidItem(amountQuote: "999")]);
 
-        var resolved = ProposalVerification.TryResolve(
-            "кофе 250 рсд", proposal, ["groceries"], [], out var items, out var failure);
+        var resolved = Resolve("кофе 250 рсд", proposal, out var items, out var failure);
 
         resolved.Should().BeFalse();
         items.Should().BeEmpty();
@@ -70,8 +145,7 @@ public class ProposalVerificationTests
         // number, not a truncated quote.
         var proposal = new CategorizationProposal([ValidItem(amountQuote: "500")]);
 
-        var resolved = ProposalVerification.TryResolve(
-            "кофе 1500 рсд", proposal, ["groceries"], [], out var items, out var failure);
+        var resolved = Resolve("кофе 1500 рсд", proposal, out var items, out var failure);
 
         resolved.Should().BeFalse();
         items.Should().BeEmpty();
@@ -83,8 +157,7 @@ public class ProposalVerificationTests
     {
         var proposal = new CategorizationProposal([ValidItem(categorySlug: "not-offered")]);
 
-        var resolved = ProposalVerification.TryResolve(
-            "кофе 250 рсд", proposal, ["groceries"], [], out var items, out var failure);
+        var resolved = Resolve("кофе 250 рсд", proposal, out var items, out var failure);
 
         resolved.Should().BeFalse();
         items.Should().BeEmpty();
@@ -96,8 +169,7 @@ public class ProposalVerificationTests
     {
         var proposal = new CategorizationProposal([ValidItem(categorySlug: "GROCERIES")]);
 
-        var resolved = ProposalVerification.TryResolve(
-            "кофе 250 рсд", proposal, ["groceries"], [], out var items, out var failure);
+        var resolved = Resolve("кофе 250 рсд", proposal, out var items, out var failure);
 
         resolved.Should().BeTrue();
         failure.Should().BeEmpty();
@@ -109,8 +181,7 @@ public class ProposalVerificationTests
     {
         var proposal = new CategorizationProposal([ValidItem(knownMerchantId: GroceryMerchantId)]);
 
-        var resolved = ProposalVerification.TryResolve(
-            "кофе 250 рсд", proposal, ["groceries"], [], out var items, out var failure);
+        var resolved = Resolve("кофе 250 рсд", proposal, out var items, out var failure);
 
         resolved.Should().BeFalse();
         items.Should().BeEmpty();
@@ -122,8 +193,8 @@ public class ProposalVerificationTests
     {
         var proposal = new CategorizationProposal([ValidItem(knownMerchantId: GroceryMerchantId)]);
 
-        var resolved = ProposalVerification.TryResolve(
-            "кофе 250 рсд", proposal, ["groceries"], [GroceryMerchantId], out var items, out var failure);
+        var resolved = Resolve(
+            "кофе 250 рсд", proposal, out var items, out var failure, offeredMerchantIds: [GroceryMerchantId]);
 
         resolved.Should().BeTrue();
         failure.Should().BeEmpty();
@@ -136,8 +207,7 @@ public class ProposalVerificationTests
         var longDescription = new string('a', 600);
         var proposal = new CategorizationProposal([ValidItem(description: longDescription)]);
 
-        var resolved = ProposalVerification.TryResolve(
-            "кофе 250 рсд", proposal, ["groceries"], [], out var items, out var failure);
+        var resolved = Resolve("кофе 250 рсд", proposal, out var items, out var failure);
 
         resolved.Should().BeTrue();
         failure.Should().BeEmpty();
@@ -150,8 +220,7 @@ public class ProposalVerificationTests
         var longMerchant = new string('a', 300);
         var proposal = new CategorizationProposal([ValidItem(merchantQuote: longMerchant)]);
 
-        var resolved = ProposalVerification.TryResolve(
-            $"кофе 250 рсд у {longMerchant}", proposal, ["groceries"], [], out var items, out var failure);
+        var resolved = Resolve($"кофе 250 рсд у {longMerchant}", proposal, out var items, out var failure);
 
         resolved.Should().BeFalse();
         items.Should().BeEmpty();
@@ -166,8 +235,7 @@ public class ProposalVerificationTests
         // QuotedAmount requires for money closes that door for merchants too.
         var proposal = new CategorizationProposal([ValidItem(merchantQuote: "Ghost Store")]);
 
-        var resolved = ProposalVerification.TryResolve(
-            "кофе 250 рсд", proposal, ["groceries"], [], out var items, out var failure);
+        var resolved = Resolve("кофе 250 рсд", proposal, out var items, out var failure);
 
         resolved.Should().BeFalse();
         items.Should().BeEmpty();
@@ -179,8 +247,7 @@ public class ProposalVerificationTests
     {
         var proposal = new CategorizationProposal([ValidItem(merchantQuote: "Maxi")]);
 
-        var resolved = ProposalVerification.TryResolve(
-            "кофе 250 рсд у Maxi", proposal, ["groceries"], [], out var items, out var failure);
+        var resolved = Resolve("кофе 250 рсд у Maxi", proposal, out var items, out var failure);
 
         resolved.Should().BeTrue();
         failure.Should().BeEmpty();
@@ -198,8 +265,7 @@ public class ProposalVerificationTests
             ValidItem(description: "bad", amountQuote: "999"),
         ]);
 
-        var resolved = ProposalVerification.TryResolve(
-            "кофе 250 рсд", proposal, ["groceries"], [], out var items, out var failure);
+        var resolved = Resolve("кофе 250 рсд", proposal, out var items, out var failure);
 
         resolved.Should().BeFalse();
         items.Should().BeEmpty();

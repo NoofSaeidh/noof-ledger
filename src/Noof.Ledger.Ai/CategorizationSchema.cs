@@ -67,7 +67,7 @@ public static class CategorizationSchema
         {
             ["type"] = "object",
             ["additionalProperties"] = false,
-            ["required"] = new JsonArray("description", "amount_quote", "currency", "category_slug"),
+            ["required"] = new JsonArray("description", "amount_quote", "category_slug"),
             ["properties"] = new JsonObject(properties),
         };
 

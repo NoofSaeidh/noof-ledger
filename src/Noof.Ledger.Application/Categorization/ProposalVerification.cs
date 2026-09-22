@@ -12,6 +12,7 @@ public static class ProposalVerification
         CategorizationProposal proposal,
         IReadOnlyCollection<string> offeredSlugs,
         IReadOnlyCollection<Guid> offeredMerchantIds,
+        string defaultCurrency,
         out IReadOnlyList<ResolvedLineItem> items,
         out string failure)
     {
@@ -37,7 +38,12 @@ public static class ProposalVerification
             var item = proposal.Items[index];
             var label = $"Item {index + 1} (\"{item.Description}\")";
 
-            if (!QuotedAmount.TryResolve(rawText, item.AmountQuote, item.CurrencyCode, out var money, out var amountFailure))
+            // The model reports no currency for a message that never states one; QuotedAmount is
+            // not touched for this - it keeps validating whatever code it is handed exactly as
+            // before, real or substituted. Only the substitution happens here.
+            var currencyCode = string.IsNullOrEmpty(item.CurrencyCode) ? defaultCurrency : item.CurrencyCode;
+
+            if (!QuotedAmount.TryResolve(rawText, item.AmountQuote, currencyCode, out var money, out var amountFailure))
             {
                 failure = $"{label}: {amountFailure}";
                 return false;

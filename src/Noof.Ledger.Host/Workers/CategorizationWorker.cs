@@ -123,7 +123,8 @@ public sealed class CategorizationWorker(
             // it influenced would fail verification.
             var offeredMerchantIds = allMerchants.Select(merchant => merchant.Id).ToHashSet();
 
-            if (!ProposalVerification.TryResolve(sub.RawText, proposal, offeredSlugs, offeredMerchantIds, out var resolvedItems, out var failure))
+            if (!ProposalVerification.TryResolve(
+                sub.RawText, proposal, offeredSlugs, offeredMerchantIds, options.DefaultCurrency, out var resolvedItems, out var failure))
             {
                 await FailTerminallyAsync(jobQueue, store, notifier, job, subject, failure, cancellationToken);
                 return;

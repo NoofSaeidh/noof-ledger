@@ -18,6 +18,7 @@ public class CategorizationWorkerOptionsTests
         options.MerchantHintLimit.Should().Be(10);
         options.MaxCanonicalizationsPerJob.Should().Be(3);
         options.AccountCooldown.Should().Be(TimeSpan.FromMinutes(5));
+        options.DefaultCurrency.Should().Be("RSD");
     }
 
     [Theory]

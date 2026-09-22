@@ -255,7 +255,7 @@ public sealed class AnthropicCategorizer(IAnthropicClientFactory clientFactory, 
     sealed record ProposedLineItemDto(
         [property: JsonPropertyName("description")] string Description,
         [property: JsonPropertyName("amount_quote")] string AmountQuote,
-        [property: JsonPropertyName("currency")] string Currency,
+        [property: JsonPropertyName("currency")] string? Currency,
         [property: JsonPropertyName("category_slug")] string CategorySlug,
         [property: JsonPropertyName("known_merchant_id")] string? KnownMerchantId,
         [property: JsonPropertyName("merchant_quote")] string? MerchantQuote)

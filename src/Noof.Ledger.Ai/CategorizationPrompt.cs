@@ -37,6 +37,11 @@ public static class CategorizationPrompt
         never compute, round or sum anything — even when two lines obviously add up to a total the
         message also states. If the message does not clearly state an amount for a line, do not produce that line at all — an unreadable amount is not a zero and is not a guess.
 
+        Report a currency only when the message actually states one. If the message names no
+        currency at all, leave currency out of your answer rather than choosing one — a missing
+        currency is filled in later from a configured default, so guessing here would only replace
+        a correct default with a wrong guess.
+
         A message may name zero, one or several purchases. Produce one line item per purchase that
         has a stated amount. If a merchant is named and it matches one of the known merchants you
         were given, set known_merchant_id to that merchant's id instead of merchant_quote. If a
@@ -58,9 +63,10 @@ public static class CategorizationPrompt
         stated amount, so there is one line, even though three goods are named.
         </example>
         <example>
-        Message: "taxi 1200 rsd"
-        Answer with one item: description "taxi", amount_quote "1200", currency "RSD",
-        category_slug the one whose meaning is transport, no merchant.
+        Message: "taxi 1200"
+        Answer with one item: description "taxi", amount_quote "1200", category_slug the one
+        whose meaning is transport, no merchant. The message names no currency, so currency is
+        left out of the answer entirely — do not guess RSD, EUR or anything else.
         </example>
         <example>
         Message: "Lidl 45.30 eur продукты, потом кофе 2.50 eur"

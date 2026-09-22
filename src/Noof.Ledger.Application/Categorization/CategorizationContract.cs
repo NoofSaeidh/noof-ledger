@@ -18,10 +18,15 @@ public sealed record CategorizationRequest(
 // One line the model proposes. Nothing here is trusted: AmountQuote is a claim about the raw
 // text, CategorySlug is a claim about the offered list, and MerchantQuote is a claim about a
 // name that appears in the message. ProposalVerification turns claims into values.
+//
+// CurrencyCode is optional: the schema no longer forces the model to name a currency the message
+// never states (decision: currency is out of `required` in CategorizationSchema). Null or empty
+// means "not stated" and ProposalVerification substitutes the configured default before
+// resolving; a currency the model DOES report is still validated exactly as before.
 public sealed record ProposedLineItem(
     string Description,
     string AmountQuote,
-    string CurrencyCode,
+    string? CurrencyCode,
     string CategorySlug,
     Guid? KnownMerchantId,
     string? MerchantQuote);
