@@ -1,4 +1,5 @@
 using System.Net;
+using Anthropic;
 using AwesomeAssertions;
 using Noof.Ledger.Application.Secrets;
 
@@ -60,7 +61,65 @@ public class AnthropicKeyProbeTests
         handler.Requests.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task A_timed_out_call_probes_not_ok_instead_of_throwing()
+    {
+        // AnthropicOptions.Timeout expiring surfaces as TaskCanceledException - the same type a
+        // caller-requested cancellation uses. Before this fix, that type was not caught anywhere in
+        // ProbeAsync and escaped into the Blazor circuit, leaving the settings page's Testing flag
+        // stuck true and the button disabled until the page was reloaded.
+        var handler = new HttpClient(new ThrowingHttpMessageHandler(
+            () => new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout.")));
+        var factory = new AnthropicClientFactory(
+            new StubSecretStore(SecretState.Present, "sk-ant-test"), handler, new AnthropicOptions());
+        var probe = new AnthropicKeyProbe(factory);
+
+        var result = await probe.ProbeAsync(TestContext.Current.CancellationToken);
+
+        result.Ok.Should().BeFalse();
+        result.Message.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task An_unexpected_exception_from_the_client_factory_probes_not_ok_instead_of_throwing()
+    {
+        // IAnthropicClientFactory.CreateAsync throws InvalidOperationException for an unhandled
+        // SecretState - a defect this class already had a TODO comment about, and exactly the kind
+        // of surprise a "never throw" probe contract exists to absorb.
+        var factory = new ThrowingClientFactory(new InvalidOperationException("unhandled SecretState value"));
+        var probe = new AnthropicKeyProbe(factory);
+
+        var result = await probe.ProbeAsync(TestContext.Current.CancellationToken);
+
+        result.Ok.Should().BeFalse();
+        result.Message.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task The_api_key_never_appears_in_the_message_for_an_unexpected_failure()
+    {
+        const string secretKeyText = "sk-ant-VERY-SECRET-DO-NOT-LEAK-abc123";
+        var factory = new ThrowingClientFactory(
+            new InvalidOperationException($"boom while using key {secretKeyText}"));
+        var probe = new AnthropicKeyProbe(factory);
+
+        var result = await probe.ProbeAsync(TestContext.Current.CancellationToken);
+
+        result.Message.Should().NotContain(secretKeyText);
+    }
+
     static void JsonDocumentBodyShouldBeEmpty(string body) => body.Should().BeNullOrEmpty("GET /v1/models has no request body");
+
+    sealed class ThrowingHttpMessageHandler(Func<Exception> exceptionFactory) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw exceptionFactory();
+    }
+
+    sealed class ThrowingClientFactory(Exception exception) : IAnthropicClientFactory
+    {
+        public Task<AnthropicClient> CreateAsync(CancellationToken cancellationToken) => throw exception;
+    }
 
     sealed class StubSecretStore(SecretState state, string? value) : ISecretStore
     {

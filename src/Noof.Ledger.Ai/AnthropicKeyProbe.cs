@@ -33,5 +33,15 @@ public sealed class AnthropicKeyProbe(IAnthropicClientFactory clientFactory) : I
         {
             return new ProbeResult(false, "Could not reach Anthropic: a network error occurred.");
         }
+        // Exception-total by contract: the Test button's whole job is telling the operator whether
+        // this key works, never throwing into the Blazor circuit - a request timeout surfaces as
+        // TaskCanceledException, and the client factory can throw InvalidOperationException, neither
+        // caught above. The message here is a fixed string, not ex.Message: an unmodeled failure
+        // could originate anywhere in the SDK or transport and there is no way to prove in general
+        // that its message never echoes back request state such as the key itself.
+        catch (Exception)
+        {
+            return new ProbeResult(false, "The connection test failed unexpectedly.");
+        }
     }
 }

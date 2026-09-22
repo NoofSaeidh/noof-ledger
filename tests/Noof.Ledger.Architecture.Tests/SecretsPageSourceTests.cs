@@ -40,4 +40,17 @@ public class SecretsPageSourceTests
         source.Should().NotContain("GetAsync(",
             "re-asserted here: wiring up the probe must not introduce a second path back to the plaintext secret");
     }
+
+    [Fact]
+    public void The_in_flight_testing_flag_is_cleared_in_a_finally_block()
+    {
+        // AnthropicKeyProbe.ProbeAsync is exception-total and should never throw, but TestAsync
+        // must not depend on that alone: whatever the probe does, row.Testing must go back to
+        // false, or a surprise from a future probe implementation leaves the button permanently
+        // disabled until the page is reloaded.
+        var source = SourceText();
+
+        source.Should().Contain("finally",
+            "row.Testing must be reset in a finally block so it clears even if ProbeAsync somehow throws");
+    }
 }
