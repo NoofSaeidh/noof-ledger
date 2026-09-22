@@ -127,6 +127,37 @@ outside. It should assume only that it is *currently* loopback-bound.
 
 ---
 
+## A Test button for the Telegram bot token
+
+**Wanted.** The settings page's Anthropic key gets a Test button this phase (`ISecretProbe` /
+`AnthropicKeyProbe`, `GET /v1/models`, costs no tokens). The Telegram bot token has no equivalent -
+the spec (§9) names `getMe` for exactly this, and today the only way to learn a pasted Telegram
+token is bad is to watch the poller silently fail to start.
+
+**Why it is not scheduled.** Out of this phase's stated scope (Task 8 covers only the Anthropic
+key's Test button). `ISecretProbe` already exists as a port after this phase; a `TelegramKeyProbe`
+implementing it against `getMe` is a small, isolated addition with no schema or contract cost -
+ordinary work for any later phase.
+
+---
+
+## Merchant merge inbox for near-duplicate aliases
+
+**Wanted.** Spec §11: "A `pg_trgm word_similarity` sweep surfaces near-duplicates in a merge inbox
+- one click merges retroactively and revertibly, and rejected pairs are remembered permanently."
+
+**Why it is not in Phase 1B.** The alias table this needs - write-once, `Fold()`-keyed, the sole
+authority on merchant identity - ships this phase (`IMerchantDirectory`). The merge inbox is a
+read/write UI over rows that table already produces correctly; nothing about it changes the
+schema. It is explicitly Phase 7 (Governance) work in the spec's phase table, alongside the
+recategorization batch UI it shares page furniture with.
+
+**Until then.** A wrong canonicalisation on first sighting is permanent under write-once (a
+named, accepted trade-off - see spec §13 risk 4), with no UI yet to correct it short of a manual
+database edit.
+
+---
+
 # Closing the 24-hour capture gap — four researched options, none chosen
 
 Researched 2026-09-21 across three verification passes. The first survey's prices were challenged and
@@ -216,6 +247,32 @@ Verified floor, cheapest first. Watch the terms: the advertised prices usually a
 Windows-only and a certificate-protected key ring **cannot decrypt what DPAPI wrote**, so every stored
 secret must be re-entered; the Linux port is 2–4 days; and a public-repo finance application ends up on
 the open internet with no rate limiting on its login.
+
+## `LedgerConnectionString`'s `NOOF_TEST_PG` fallback is a landmine for a locally launched publish output
+
+**Symptom, hit while closing Phase 1B.** `ops/publish.ps1`'s published `appsettings.json` ships
+`ConnectionStrings:Ledger` empty by design (the operator fills it in on the real machine).
+`LedgerConnectionString.Resolve` falls back to the `NOOF_TEST_PG` environment variable when that's
+empty, rewriting its `Database=postgres` to `Database=noof_ledger` — the real database name. A dev
+shell with `NOOF_TEST_PG` already set (ordinary local test setup, unrelated to publishing) that then
+launches `publish/Noof.Ledger.Host.dll` directly connects to, and writes to, the operator's real
+database with no prompt and no warning. It happened during this phase's close: the process ran a
+handful of read-only dashboard queries plus repeated idempotent `ReleaseExpiredLeasesAsync` UPDATEs
+against `categorization_jobs` before being killed. No row was inserted, deleted, or dropped, but the
+near miss is the point.
+
+**Why it is not scheduled.** `NOOF_TEST_PG` existing at all is deliberate test-suite convenience
+(`docs/OPEN-QUESTIONS.md` / `ops/reset-database-auth.ps1`), and the fallback chain is reasonable for
+a test process. The unsafe case is specifically a human launching the **published output** directly
+in a shell that happens to have that variable set — an operator with a real deployment normally has
+`ConnectionStrings:Ledger` (or the credential file) configured and never hits the fallback at all.
+
+**The shape of a fix.** Either publish should refuse to fall back to `NOOF_TEST_PG` at all (it is a
+test-only signal, not a production one, and `Resolve` has no way to tell "test project" from
+"published host" apart today), or the published `appsettings.json` should set an environment name
+that makes the fallback chain visibly different in `Release`. Cheap once someone sits down with it;
+not attempted here because fixing it is a behavior change to shipped connection-resolution code, not
+this task's job of writing tests and docs.
 
 ## Two lessons about researching prices, kept deliberately
 
