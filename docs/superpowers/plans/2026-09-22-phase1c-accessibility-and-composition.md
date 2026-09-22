@@ -1066,7 +1066,21 @@ Requirement 4's explicit question — «Возможно ли добавить �
 
 Run: `dotnet new tool-manifest` then `dotnet tool install JetBrains.ReSharper.GlobalTools`
 
-Expected: `.config/dotnet-tools.json` exists and names the tool with a concrete version (2026.2.2 at time of writing). Commit the manifest — an unpinned tool is not a reproducible gate.
+Expected: `.config/dotnet-tools.json` exists and names the tool with a concrete version. Commit the manifest — an unpinned tool is not a reproducible gate.
+
+**Already verified while planning**, so do not re-discover it: version **2026.2.2** installs cleanly and its banner reports `Running on x64 OS ... .NET 10.0.12 under Microsoft Windows 10.0.26200`. Its real flag surface, read from `jb inspectcode --help` on this machine:
+
+| Flag | Note |
+|---|---|
+| `--output` / `-o` | file path, or `-` for stdout |
+| `--format` / `-f` | `Xml, Html, Text, Sarif` — **the default is Sarif, not Xml.** The script below parses XML, so `-f=Xml` is mandatory, not decorative. |
+| `--sEverity` / `-e` | `INFO, HINT, SUGGESTION, WARNING, ERROR`, default `SUGGESTION`. Spelled with the odd capital in the help text; **use the `-e` short form** rather than guessing the long form's case handling. |
+| `--settings` / `-s` | "default: Use R#'s solution shared settings if exists" — which means the committed `NoofLedger.sln.DotSettings` from Step 2 is picked up **automatically**. Do not pass `-s`. |
+| `--no-build` | present; requires the solution to be built already |
+| `--caches-home` | present |
+| `--swea` / `--no-swea` | solution-wide analysis, on by default. `MemberCanBePrivate.Global` *needs* it — never pass `--no-swea`. |
+
+There is no documented exit code for "findings were found", which is why the report is the gate.
 
 - [ ] **Step 2: Write the team-shared settings layer**
 
@@ -1100,7 +1114,7 @@ $report = Join-Path $reportDir 'report.xml'
 New-Item -ItemType Directory -Force -Path $reportDir | Out-Null
 
 dotnet tool restore
-dotnet jb inspectcode NoofLedger.slnx --output="$report" --format=Xml --severity=WARNING --caches-home="$reportDir/caches" --no-build
+dotnet jb inspectcode NoofLedger.slnx -o="$report" -f=Xml -e=WARNING --caches-home="$reportDir/caches" --no-build
 
 if (-not (Test-Path $report)) {
     Write-Error "inspectcode produced no report at $report"
@@ -1128,7 +1142,9 @@ Write-Host "No ERROR-severity findings."
 
 Run: `dotnet build NoofLedger.slnx` then `powershell -ExecutionPolicy Bypass -File ops/inspect.ps1`
 
-Three things are unverified and any of them may fail: whether `jb inspectcode` accepts a `.slnx`; whether it honours a `.sln.DotSettings` layer next to a `.slnx`; and what its XML element and attribute names actually are (the script above assumes `Issue` with `Severity`, `File`, `Line`, `TypeId`, `Message`).
+Two things remain unverified after the planning checks above, and either may fail: whether `jb inspectcode` accepts a `.slnx` at all, and what its XML element and attribute names actually are (the script assumes `Issue` with `Severity`, `File`, `Line`, `TypeId`, `Message`). The settings-layer question is answered — `--settings` defaults to the solution's shared layer, so Step 2's file is picked up without a flag.
+
+A useful debugging aid if severities look wrong: `--dumpIssuesTypes` (`-it`) prints the issue types the tool knows about, which is the fastest way to confirm an inspection id in `NoofLedger.sln.DotSettings` is spelled the way ReSharper expects.
 
 - **If it runs:** inspect `artifacts/inspect/report.xml` yourself, correct the XPath and attribute names in the script to match what the tool actually emits, and re-run until the script's output agrees with the report.
 - **If `.slnx` is rejected:** try pointing it at the individual `.csproj` files instead and adjust the script.
