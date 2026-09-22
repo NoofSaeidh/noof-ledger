@@ -1,6 +1,6 @@
 namespace Noof.Ledger.Ai;
 
-public sealed class AnthropicOptions
+internal sealed class AnthropicOptions
 {
     // Exactly one model property, deliberately. No AdviserModel, no EscalationModel, no
     // FallbackModel: making the type incapable of expressing a tier is stronger than choosing

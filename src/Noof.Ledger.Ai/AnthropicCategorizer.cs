@@ -9,7 +9,7 @@ using Noof.Ledger.Application.Categorization;
 
 namespace Noof.Ledger.Ai;
 
-public sealed class AnthropicCategorizer(IAnthropicClientFactory clientFactory, AnthropicOptions options) : ICategorizer
+internal sealed class AnthropicCategorizer(IAnthropicClientFactory clientFactory, AnthropicOptions options) : ICategorizer
 {
     const string RecordSpendingName = "record_spending";
     const string RecordSpendingDescription = "Record every distinct spending line item found in the message.";

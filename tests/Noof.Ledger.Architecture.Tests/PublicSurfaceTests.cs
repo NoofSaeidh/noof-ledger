@@ -53,11 +53,7 @@ public class PublicSurfaceTests
             "SecretResult", "SecretState", "SecretStatus",
         ],
         ["Noof.Ledger.Persistence"] = ["LedgerConnectionString", "PersistenceRegistration"],
-        ["Noof.Ledger.Ai"] =
-        [
-            "AnthropicCategorizer", "IAnthropicClientFactory", "AnthropicClientFactory",
-            "AnthropicKeyProbe", "AnthropicOptions", "CategorizationPrompt", "CategorizationSchema",
-        ],
+        ["Noof.Ledger.Ai"] = ["AiRegistration"],
         ["Noof.Ledger.Telegram"] =
         [
             "ITelegramBotClientFactory", "ITelegramUpdateRouter", "TelegramBackoff",

@@ -9,7 +9,7 @@ namespace Noof.Ledger.Ai;
 // ChatResponseFormat.ForJsonSchema and a raw-schema AIFunctionDeclaration both need
 // "additionalProperties": false at every object level, which is easiest to guarantee by building
 // the JsonObject tree directly and controlling every key by hand.
-public static class CategorizationSchema
+internal static class CategorizationSchema
 {
     static readonly string[] CurrencyCodes =
     [

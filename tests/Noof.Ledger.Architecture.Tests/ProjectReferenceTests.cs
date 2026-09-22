@@ -66,7 +66,11 @@ public class ProjectReferenceTests
     [Fact]
     public void Ai_package_references_are_exactly_its_allowed_set()
     {
-        Packages("Noof.Ledger.Ai").Should().BeEquivalentTo("Anthropic");
+        Packages("Noof.Ledger.Ai").Should().BeEquivalentTo(
+            "Anthropic",
+            "Microsoft.Extensions.DependencyInjection.Abstractions",
+            "Microsoft.Extensions.Configuration.Binder",
+            "Microsoft.Extensions.Http");
     }
 
     [Fact]
