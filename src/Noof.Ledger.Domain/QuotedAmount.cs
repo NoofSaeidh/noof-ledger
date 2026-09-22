@@ -8,13 +8,18 @@ public static class QuotedAmount
     // Telegram's iOS/Android clients sometimes auto-group a typed number with a thin space
     // (U+2009) or a non-breaking space (U+00A0 / U+202F) instead of a comma or dot. These are
     // always grouping marks, never a decimal separator, so they are stripped unconditionally.
-    // Written as explicit \u escapes, not literal glyphs: these three characters are visually
+    // U+0020 (an ordinary space) joins them for the same reason: it is how people actually type
+    // a grouped number in Russian ("1 500"), and it is no less a grouping mark than the other
+    // three -- omitting it let a message like "такси 1 500 рсд" resolve to the wrong figure
+    // (see QuotedAmountTests.A_number_grouped_with_an_ordinary_space_resolves). Written as
+    // explicit \u escapes, not literal glyphs: these four characters are visually
     // indistinguishable from a regular space (and from each other) in most editors and through
     // any copy-paste via markdown/JSON -- which is exactly how this array first shipped as three
     // copies of U+0020, silently defeating the handling this comment describes. Verified by
-    // compiling and running this exact file: with the escapes below, a real U+2009/U+00A0
-    // grouped quote resolves correctly; with three literal spaces it does not.
-    static readonly char[] SpaceGroupers = [' ', ' ', ' '];
+    // compiling and running this exact file: with the escapes below, a real
+    // U+2009/U+00A0/U+202F/U+0020 grouped quote resolves correctly; with four literal spaces
+    // it does not.
+    static readonly char[] SpaceGroupers = ['\u2009', '\u00A0', '\u202F', '\u0020'];
 
     static readonly CurrencyCode[] KnownCurrencies =
     [
@@ -146,6 +151,8 @@ public static class QuotedAmount
 
     static bool IsNumberBoundaryChar(char c) => char.IsAsciiDigit(c) || c is '.' or ',' or '-';
 
+    static bool IsGroupingSpace(char c) => Array.IndexOf(SpaceGroupers, c) >= 0;
+
     static bool OccursAsWholeNumber(string rawText, string quote)
     {
         var searchFrom = 0;
@@ -155,13 +162,47 @@ public static class QuotedAmount
             if (index < 0)
                 return false;
 
-            var before = index == 0 || !IsNumberBoundaryChar(rawText[index - 1]);
-            var after = index + quote.Length == rawText.Length || !IsNumberBoundaryChar(rawText[index + quote.Length]);
-            if (before && after)
+            if (HasBoundaryBefore(rawText, index) && HasBoundaryAfter(rawText, index, quote.Length))
                 return true;
 
             searchFrom = index + 1;
         }
+    }
+
+    // A grouping space (see SpaceGroupers) is whitespace to the eye but not a genuine break in
+    // the number: "500" inside "1 500" sits right after one. So a grouping space is not itself
+    // accepted as a boundary -- we look past it to the character beyond, and only that one
+    // decides. A digit there means the quote is a fragment of a longer grouped number; anything
+    // else (including the start of the string, or another grouping space) is a real boundary.
+    static bool HasBoundaryBefore(string rawText, int index)
+    {
+        if (index == 0)
+            return true;
+
+        var adjacent = rawText[index - 1];
+        if (IsNumberBoundaryChar(adjacent))
+            return false;
+
+        if (!IsGroupingSpace(adjacent))
+            return true;
+
+        return index < 2 || !char.IsAsciiDigit(rawText[index - 2]);
+    }
+
+    static bool HasBoundaryAfter(string rawText, int index, int quoteLength)
+    {
+        var afterIndex = index + quoteLength;
+        if (afterIndex == rawText.Length)
+            return true;
+
+        var adjacent = rawText[afterIndex];
+        if (IsNumberBoundaryChar(adjacent))
+            return false;
+
+        if (!IsGroupingSpace(adjacent))
+            return true;
+
+        return afterIndex + 1 >= rawText.Length || !char.IsAsciiDigit(rawText[afterIndex + 1]);
     }
 
     static bool TryParseCurrency(string? code, out CurrencyCode currency, out string failure)

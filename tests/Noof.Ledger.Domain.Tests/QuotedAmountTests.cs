@@ -162,4 +162,49 @@ public class QuotedAmountTests
         money.Should().Be(default(Money));
         failure.Should().NotBeEmpty();
     }
+
+    // An ordinary space ( ) is how people routinely type a grouped number in Russian --
+    // "1 500" for one thousand five hundred. Written as  , not a literal space in the
+    // string, per this file's convention: any grouping-space character asserted here must be an
+    // explicit escape so a later reader can tell at a glance which character is under test.
+    // Before the fix: a quote of "500" was wrongly ACCEPTED (the space read as a clean boundary,
+    // because IsNumberBoundaryChar never looked past a grouping space to the digit beyond it),
+    // and the correct quote "1 500" was wrongly REJECTED (TryParseAmount never stripped a plain
+    // space, so it failed the all-digits-or-separator check). Both are the defect.
+    [Fact]
+    public void A_fragment_split_off_by_an_ordinary_grouping_space_fails()
+    {
+        var resolved = QuotedAmount.TryResolve("такси 1 500 рсд", "500", "RSD", out var money, out var failure);
+
+        resolved.Should().BeFalse();
+        money.Should().Be(default(Money));
+        failure.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void A_number_grouped_with_an_ordinary_space_resolves()
+    {
+        var resolved = QuotedAmount.TryResolve("такси 1 500 рсд", "1 500", "RSD", out var money, out var failure);
+
+        resolved.Should().BeTrue();
+        money.Should().Be(new Money(1500m, CurrencyCode.Rsd));
+        failure.Should().BeEmpty();
+    }
+
+    // The search loop tries every occurrence of the quote and accepts if ANY has valid
+    // boundaries (see A_quote_repeated_in_the_raw_text_still_resolves). "500" occurs twice here:
+    // once as a fragment of "1 500" (must fail, per the two tests above) and once standing on its
+    // own. The standalone occurrence has genuine boundaries on both sides -- the space before it
+    // is preceded by a letter, not a digit -- so it must still be accepted. A model that quotes
+    // "500" meaning the freestanding figure should not be punished for a different number in the
+    // same message happening to end in the same digits.
+    [Fact]
+    public void A_standalone_occurrence_still_resolves_even_when_another_occurrence_is_a_grouped_fragment()
+    {
+        var resolved = QuotedAmount.TryResolve("такси 1 500 и кофе 500 рсд", "500", "RSD", out var money, out var failure);
+
+        resolved.Should().BeTrue();
+        money.Should().Be(new Money(500m, CurrencyCode.Rsd));
+        failure.Should().BeEmpty();
+    }
 }
