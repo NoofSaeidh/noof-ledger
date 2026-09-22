@@ -1,6 +1,15 @@
 <Router AppAssembly="typeof(Routes).Assembly">
     <Found Context="routeData">
-        <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(MainLayout)" />
+        @* Without NotAuthorized content, AuthorizeRouteView renders nothing at all - and a page that
+           disables prerendering then serves a completely blank document, which is what /settings/secrets
+           did. The cookie middleware already redirects an anonymous HTTP request, so what lands here is
+           the case it cannot catch: a session that ended while an interactive circuit was still open. *@
+        <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(MainLayout)">
+            <NotAuthorized>
+                <h1>Signed out</h1>
+                <p>This session has ended. <a href="/account/login">Sign in</a> to continue.</p>
+            </NotAuthorized>
+        </AuthorizeRouteView>
         <FocusOnNavigate RouteData="routeData" Selector="h1" />
     </Found>
 </Router>
