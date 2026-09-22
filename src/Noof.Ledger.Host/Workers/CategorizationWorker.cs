@@ -167,6 +167,16 @@ public sealed class CategorizationWorker(
 
             await store.ApplyAsync(job.TransactionId, categorizedItems, cancellationToken);
 
+            // From this line on, the transaction's line items and Completed status are already
+            // committed. Nothing past here may ever be treated as a job failure - that would run
+            // FailTerminallyAsync/HandleModelFailureAsync's last-attempt path and call
+            // store.MarkFailedAsync, flipping a Completed transaction back to Failed while its
+            // already-written line items stay in the table: the dashboard would then say nothing
+            // was recorded for that message while the month totals still counted it. A dropped
+            // Telegram edit or a SucceedAsync blip past this point is cosmetic to the job queue
+            // bookkeeping, not a reason to touch the transaction again, so both are caught locally
+            // instead of being allowed to reach the outer catch blocks below - each independently,
+            // so a dropped edit never prevents the SucceedAsync attempt that follows it.
             if (sub.BotMessageId is { } messageId)
             {
                 try
@@ -178,18 +188,24 @@ public sealed class CategorizationWorker(
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    // The money is already committed by ApplyAsync above. A dropped edit - message
-                    // deleted, token rotated, network blip - is cosmetic, not a reason to fail a job
-                    // whose real work is done.
                     logger.LogWarning(ex,
                         "Failed to edit Telegram message {MessageId} for job {JobId}; the categorization itself already succeeded",
                         messageId, job.Id);
                 }
             }
 
-            var succeedOutcome = await jobQueue.SucceedAsync(job.Id, workerId, cancellationToken);
-            if (succeedOutcome == JobCompletionOutcome.NotOwned)
-                logger.LogWarning("Job {JobId} was already reclaimed by another worker; not retrying", job.Id);
+            try
+            {
+                var succeedOutcome = await jobQueue.SucceedAsync(job.Id, workerId, cancellationToken);
+                if (succeedOutcome == JobCompletionOutcome.NotOwned)
+                    logger.LogWarning("Job {JobId} was already reclaimed by another worker; not retrying", job.Id);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex,
+                    "SucceedAsync failed for job {JobId} after its line items were already committed; the transaction is left as Completed",
+                    job.Id);
+            }
         }
         catch (ModelCallException ex)
         {

@@ -579,6 +579,41 @@ public class CategorizationWorkerTests
     }
 
     [Fact]
+    public async Task A_SucceedAsync_failure_after_the_write_already_committed_never_marks_the_transaction_failed()
+    {
+        // Reproduces the reviewer's scenario: ApplyAsync has already committed the line items and
+        // flipped the transaction to Completed. If SucceedAsync (or the chat notifier) throws after
+        // that - here on the job's last attempt - the old catch-all treated it as an ordinary
+        // transient failure and, on the last attempt, called MarkFailedAsync, flipping a Completed
+        // transaction back to Failed while its line items stayed in the table. The dashboard would
+        // then say nothing was recorded for that message while the month totals still counted it.
+        var jobQueue = Substitute.For<IJobQueue>();
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job(attemptCount: 8));
+        jobQueue.SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("db blip right after commit"));
+        jobQueue.RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(JobCompletionOutcome.Applied);
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine());
+        var notifier = Substitute.For<IChatNotifier>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer, notifier: notifier),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        var result = await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        result.Should().Be(CategorizationTickResult.Processed);
+        await store.Received(1).ApplyAsync(
+            TransactionId, Arg.Any<IReadOnlyList<CategorizedLineItem>>(), Arg.Any<CancellationToken>());
+        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+        await jobQueue.DidNotReceive().FailAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await jobQueue.DidNotReceive().RetryAsync(
+            Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public void CreateWorkerId_fits_the_128_character_claimed_by_column()
     {
         var id = CategorizationWorker.CreateWorkerId();
