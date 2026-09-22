@@ -1200,10 +1200,14 @@ if (-not (Test-Path $report)) {
     Write-Error "inspectcode produced no report at $report"
 }
 
-# InspectCode's own exit code does not reflect whether it found anything, so the report is the
-# gate. Verified by running it against a solution with known findings.
+# InspectCode exits 0 whether or not it found anything - verified on this solution - so the report
+# is the gate. An <Issue> carries no Severity of its own; severity lives on the <IssueType> it
+# names through TypeId, so the two have to be joined.
 [xml]$xml = Get-Content $report
-$errors = $xml.SelectNodes('//Issue[@Severity="ERROR"]')
+$severityOf = @{}
+foreach ($type in $xml.Report.IssueTypes.IssueType) { $severityOf[$type.Id] = $type.Severity }
+
+$errors = @($xml.SelectNodes('//Issue') | Where-Object { $severityOf[$_.TypeId] -eq 'ERROR' })
 
 foreach ($issue in $errors) {
     Write-Host "$($issue.File):$($issue.Line) $($issue.TypeId) $($issue.Message)"
@@ -1222,7 +1226,14 @@ Write-Host "No ERROR-severity findings."
 
 Run: `dotnet build NoofLedger.slnx` then `powershell -ExecutionPolicy Bypass -File ops/inspect.ps1`
 
-Two things remain unverified after the planning checks above, and either may fail: whether `jb inspectcode` accepts a `.slnx` at all, and what its XML element and attribute names actually are (the script assumes `Issue` with `Severity`, `File`, `Line`, `TypeId`, `Message`). The settings-layer question is answered — `--settings` defaults to the solution's shared layer, so Step 2's file is picked up without a flag.
+**Both remaining unknowns were settled before this task was handed over, by running the tool against this solution.** Do not re-litigate them; do check that what you see matches.
+
+- **`.slnx` works.** `jb inspectcode NoofLedger.slnx --no-build` inspected every project and wrote a report. It also confirmed the exit code is **0 even with findings present**, which is why the report and not `$LASTEXITCODE` is the gate.
+- **The report shape is not what this plan first assumed.** An `<Issue>` element carries `TypeId`, `File`, `Line`, `Offset` and `Message` — and **no `Severity` attribute at all.** Severity lives on `<IssueType Id="..." Severity="WARNING" .../>` inside a `<IssueTypes>` block near the top, so the script has to join the two through `TypeId`. The version above does; the original `//Issue[@Severity="ERROR"]` would have matched nothing forever and reported a clean sweep.
+
+One thing to expect on your first run: with only `-e=WARNING` and no shared settings layer, the accessibility inspections **will not appear**, because their default severity is `SUGGESTION`, below the floor. That is the point of Step 2 — after `NoofLedger.sln.DotSettings` raises them to `ERROR` they clear the floor and show up. If they still do not appear after Step 2, the inspection ids in that file are spelled wrong; `--dumpIssuesTypes` prints the ones the tool actually knows.
+
+For reference, the pre-settings baseline run found 42 issues at `WARNING` and above, none of them about accessibility: 18 `InconsistentNaming` (ReSharper wants `_camelCase` private fields, which this repository does not use), 12 `AccessToDisposedClosure`, 4 `FormatStringProblem`, 3 `RedundantSuppressNullableWarningExpression`, 2 `ParameterHidesPrimaryConstructorParameter`, 2 `NotAccessedPositionalProperty.Global`, 1 `UsingStatementResourceInitialization`. **None of those is this phase's business** — the gate is scoped to ERROR, and Step 2 puts only the accessibility inspections there. Leave the rest alone and let Task 9 record them.
 
 A useful debugging aid if severities look wrong: `--dumpIssuesTypes` (`-it`) prints the issue types the tool knows about, which is the fastest way to confirm an inspection id in `NoofLedger.sln.DotSettings` is spelled the way ReSharper expects.
 
