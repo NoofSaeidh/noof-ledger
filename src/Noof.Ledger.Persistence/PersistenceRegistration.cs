@@ -1,3 +1,4 @@
+﻿using System.Diagnostics.CodeAnalysis;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -16,6 +17,9 @@ using Noof.Ledger.Persistence.Secrets;
 
 namespace Noof.Ledger.Persistence;
 
+[SuppressMessage("Maintainability", "CA1515",
+    Justification = "The one public way into this assembly. Making it internal would leave every "
+        + "store unreachable from the Host, which is the opposite of what Phase 1C set out to do.")]
 public static class PersistenceRegistration
 {
     // maxJobAttempts is a parameter rather than a configuration key of its own so that EfJobQueue's

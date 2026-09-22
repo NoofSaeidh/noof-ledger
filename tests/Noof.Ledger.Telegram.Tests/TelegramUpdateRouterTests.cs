@@ -1,9 +1,7 @@
-using AwesomeAssertions;
-using NSubstitute;
+﻿using NSubstitute;
 using Noof.Ledger.Application.Capture;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Secrets;
-using Noof.Ledger.Telegram;
 using Telegram.Bot.Types;
 
 namespace Noof.Ledger.Telegram.Tests;

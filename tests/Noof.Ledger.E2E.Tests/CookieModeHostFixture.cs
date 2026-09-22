@@ -1,8 +1,7 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Host.Startup;
 using Noof.Ledger.Persistence;
 using Noof.Ledger.Persistence.Secrets;

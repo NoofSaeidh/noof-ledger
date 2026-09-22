@@ -1,7 +1,11 @@
+﻿using System.Diagnostics.CodeAnalysis;
 using Npgsql;
 
 namespace Noof.Ledger.Persistence;
 
+[SuppressMessage("Maintainability", "CA1515",
+    Justification = "Noof.Ledger.Host reads it twice: Program.cs resolves the connection string and "
+        + "UserCommand validates it eagerly to print a friendly CLI error before the host starts.")]
 public static class LedgerConnectionString
 {
     public const string DefaultDatabase = "noof_ledger";

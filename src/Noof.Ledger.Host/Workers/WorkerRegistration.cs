@@ -1,5 +1,4 @@
-using Microsoft.Extensions.DependencyInjection;
-
+﻿
 namespace Noof.Ledger.Host.Workers;
 
 internal static class WorkerRegistration

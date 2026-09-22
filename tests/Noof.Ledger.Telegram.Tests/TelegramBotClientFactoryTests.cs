@@ -1,6 +1,5 @@
-using AwesomeAssertions;
+﻿using AwesomeAssertions;
 using NSubstitute;
-using Noof.Ledger.Telegram;
 
 namespace Noof.Ledger.Telegram.Tests;
 

@@ -1,8 +1,12 @@
+﻿using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.DependencyInjection;
 using Noof.Ledger.Application.Chat;
 
 namespace Noof.Ledger.Telegram;
 
+[SuppressMessage("Maintainability", "CA1515",
+    Justification = "The one public type in this assembly, and the only way the Host can start the "
+        + "poller without naming TelegramPollingService or touching the bot token.")]
 public static class TelegramRegistration
 {
     const string HttpClientName = "telegram";

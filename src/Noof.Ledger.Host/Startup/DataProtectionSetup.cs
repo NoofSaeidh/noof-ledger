@@ -1,5 +1,4 @@
-using Microsoft.AspNetCore.DataProtection;
-using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.AspNetCore.DataProtection;
 
 namespace Noof.Ledger.Host.Startup;
 

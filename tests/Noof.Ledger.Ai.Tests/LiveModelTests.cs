@@ -1,6 +1,4 @@
-using Anthropic;
-using AwesomeAssertions;
-using Noof.Ledger.Ai;
+﻿using AwesomeAssertions;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Secrets;
 

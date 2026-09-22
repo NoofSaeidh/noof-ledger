@@ -1,5 +1,4 @@
-using AwesomeAssertions;
-using Microsoft.AspNetCore.DataProtection;
+﻿using AwesomeAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Noof.Ledger.Application.Auth;

@@ -1,8 +1,7 @@
-using System.Net;
+﻿using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Anthropic;
 using Anthropic.Exceptions;
 using Microsoft.Extensions.AI;
 using Noof.Ledger.Application.Categorization;

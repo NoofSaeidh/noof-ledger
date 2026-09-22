@@ -1,3 +1,4 @@
+﻿using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Noof.Ledger.Application.Categorization;
@@ -5,6 +6,9 @@ using Noof.Ledger.Application.Secrets;
 
 namespace Noof.Ledger.Ai;
 
+[SuppressMessage("Maintainability", "CA1515",
+    Justification = "The one public type in this assembly, and the only way the Host can register "
+        + "ICategorizer without naming an implementation or seeing the Anthropic SDK.")]
 public static class AiRegistration
 {
     const string HttpClientName = "anthropic";

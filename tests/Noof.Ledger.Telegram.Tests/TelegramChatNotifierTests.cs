@@ -1,6 +1,5 @@
-using AwesomeAssertions;
+﻿using AwesomeAssertions;
 using NSubstitute;
-using Noof.Ledger.Telegram;
 using Telegram.Bot;
 using Telegram.Bot.Requests;
 using Telegram.Bot.Types;
