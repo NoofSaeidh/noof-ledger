@@ -1015,6 +1015,10 @@ dotnet_diagnostic.CA1862.severity = error
 dotnet_diagnostic.CA1861.severity = error
 dotnet_diagnostic.CA2263.severity = error
 
+# An unused using is a dependency the file does not have. Task 3's implementer found these are
+# NOT currently caught despite EnforceCodeStyleInBuild - see Step 1a below for why.
+dotnet_diagnostic.IDE0005.severity = error
+
 [tests/**/*.cs]
 # Test names are sentences: Every_routable_page_declares_its_authorization. That is the convention
 # throughout this repository and it is deliberate.
@@ -1024,10 +1028,25 @@ dotnet_diagnostic.CA1707.severity = none
 dotnet_diagnostic.CA1515.severity = none
 ```
 
+- [ ] **Step 1a: Make `IDE0005` actually fire**
+
+Setting its severity is not enough, and this is a real trap. `IDE0005` is reported by the compiler rather than by an analyzer, and **it is silently inert during a build unless the project generates a documentation file** — a long-standing .NET SDK quirk. Task 3's implementer confirmed the symptom here: two genuinely unused `using` directives in `Program.cs` did not fail the build despite `EnforceCodeStyleInBuild=true`.
+
+Turning the documentation file on brings `CS1591` ("missing XML comment for publicly visible type or member") with it, which under `TreatWarningsAsErrors` would demand XML docs on every public member — exactly what `CLAUDE.md` §3 forbids. So suppress it in the same breath. In `Directory.Build.props`:
+
+```xml
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+```
+
+If this turns out to cost more than it is worth — for instance if the documentation file breaks the Razor or Host build in a way that is not a one-line fix — **drop `IDE0005` and this property, and say so**. It is the least important rule in this task; the accessibility rules are the point.
+
 - [ ] **Step 2: Build and read what it says**
 
 Run: `dotnet build NoofLedger.slnx`
-Expected: FAIL with `CA1515` on any `src` type that is still public without needing to be, plus `CA1852`, `CA1862`, `CA1861` and `CA2263` findings.
+Expected: FAIL with `CA1515` on any `src` type that is still public without needing to be, plus `CA1852`, `CA1862`, `CA1861`, `CA2263` and `IDE0005` findings.
+
+While you are here, delete the dead `<PackageVersion Include="TngTech.ArchUnitNET.xUnitV3" ... />` entry from `Directory.Packages.props` — no project references it, verified by grep. A pinned version for a package nobody uses is a maintenance claim on something that does not exist.
 
 - [ ] **Step 3: Fix every finding, or reject it in writing**
 
