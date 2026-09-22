@@ -16,10 +16,12 @@ public static class LedgerConnectionString
         if (!string.IsNullOrWhiteSpace(fromConfiguration))
             return WithoutErrorDetail(fromConfiguration);
 
-        var fromEnvironment = Environment.GetEnvironmentVariable("NOOF_TEST_PG");
-        if (!string.IsNullOrWhiteSpace(fromEnvironment))
-            return WithoutErrorDetail(ForDatabase(fromEnvironment, database));
-
+        // NOOF_TEST_PG is deliberately NOT consulted here. It is the test suites' variable, set
+        // machine-wide by ops/reset-database-auth.ps1 and pointing at the postgres database - and
+        // this method would rewrite it to name noof_ledger, the operator's real ledger. That turned
+        // a stray launch of the published host into a silent attachment to real financial data,
+        // which happened once during Phase 1B. Tests read the variable through
+        // Noof.Ledger.TestKit.DatabaseSettings instead, which is the only thing that should.
         if (File.Exists(CredentialFile))
         {
             var fromFile = File.ReadAllText(CredentialFile).Trim();
@@ -28,7 +30,7 @@ public static class LedgerConnectionString
         }
 
         throw new InvalidOperationException(
-            $"No PostgreSQL connection string. Set ConnectionStrings:Ledger, or NOOF_TEST_PG, or run " +
+            $"No PostgreSQL connection string. Set ConnectionStrings:Ledger, or run " +
             $"ops/reset-database-auth.ps1 to create {CredentialFile}.");
     }
 

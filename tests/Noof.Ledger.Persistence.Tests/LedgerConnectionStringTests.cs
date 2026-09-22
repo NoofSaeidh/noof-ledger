@@ -43,4 +43,32 @@ public class LedgerConnectionStringTests
 
         LedgerConnectionString.Resolve(plain).Should().Be(plain);
     }
+
+    [Fact]
+    public void The_test_suites_environment_variable_cannot_steer_the_application_at_a_database()
+    {
+        // NOOF_TEST_PG is set machine-wide by ops/reset-database-auth.ps1 and names the postgres
+        // database. Resolve used to read it and rewrite the name to noof_ledger, so launching the
+        // published host with no configured connection string silently attached the application to
+        // the operator's real ledger. It happened once, during Phase 1B, and cost nothing only
+        // because that database was still empty.
+        var restore = Environment.GetEnvironmentVariable("NOOF_TEST_PG");
+        Environment.SetEnvironmentVariable("NOOF_TEST_PG", "Host=from-the-env-var;Database=postgres;Username=none");
+
+        try
+        {
+            var act = () => LedgerConnectionString.Resolve(null, "database_that_does_not_exist");
+
+            // Either it falls through to the credential file, or there is no credential file and it
+            // throws - but the environment variable must never be what decides.
+            if (File.Exists(LedgerConnectionString.CredentialFile))
+                act().Should().NotContain("from-the-env-var");
+            else
+                act.Should().Throw<InvalidOperationException>();
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("NOOF_TEST_PG", restore);
+        }
+    }
 }
