@@ -8,7 +8,7 @@ wallets and currencies.
 
 > **Status: the capture path works end to end.** A message typed to the Telegram bot becomes a
 > categorised expense on the dashboard, with every figure computed by C# from the text you wrote.
-> 479 tests, all green — browser tests included.
+> 467 tests, all green — browser tests included.
 >
 > Still missing before it can carry a year of real spending: **balances** (there is no arithmetic
 > over wallets yet), **voice notes and receipt photos**, **currency exchange**, and — the one that
@@ -36,19 +36,18 @@ UI only: no `DbContext`, no EF types, no `HttpClient`, no `Program.cs`.
 
 ## Authentication
 
-Off by default, and honest about why. The app binds `127.0.0.1` on a machine that is only on while
-its owner is logged in. Against that owner, a login screen buys nothing — that principal already
-holds the database credentials.
+Always on. Cookie authentication is the only mode — a config toggle that can turn login off is one
+more thing that can be left in the wrong state, and simpler beats configurable here.
 
-`Auth:Mode` (`Off` | `Cookie`) selects **which handler is registered**; it never branches the
-middleware pipeline. Every routable page declares its authorization, and a test enumerates the
-pages to prove it: one that says nothing is a failure, and the sign-in page is the only one allowed
-to be anonymous. That rule exists because the convention had already drifted — a leftover template
-page was reachable without signing in, and nothing said so.
+Every routable page declares its authorization, and a test enumerates the pages to prove it: one
+that says nothing is a failure, and the sign-in page is the only one allowed to be anonymous. That
+rule exists because the convention had already drifted — a leftover template page was reachable
+without signing in, and nothing said so.
 
-The interlock that makes this safe: **if Kestrel binds anything but loopback while auth is off, the
-host logs the reason and exits.** The day you widen the binding to reach the dashboard from a
-phone, the app refuses to start until you turn auth on.
+The interlock that makes this safe regardless: **if Kestrel binds anything but loopback, the host
+logs the reason and exits — unconditionally, not only while auth is off.** The day you widen the
+binding to reach the dashboard from a phone, the app still refuses to start; loopback-only is
+enforced no matter what.
 
 ```
 Ledger.Host.exe user set-password <name>

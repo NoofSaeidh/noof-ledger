@@ -51,7 +51,9 @@ circuit. `AddCascadingAuthenticationState` alone does not revalidate it, and the
 secrets.
 
 **Status.** Flagged by the Phase 1 readiness audit and never investigated. Belongs with the hardening
-phase recorded in `OPEN-QUESTIONS.md`, or earlier if `Auth:Mode=Cookie` is ever switched on.
+phase recorded in `OPEN-QUESTIONS.md`. Cookie authentication is the only mode now
+(`docs/OPEN-QUESTIONS.md`, A1/A2 SUPERSEDED), so this is no longer conditional on a mode switch — it
+applies today.
 
 ---
 
@@ -101,8 +103,9 @@ these tests exists precisely because it runs against real PostgreSQL.
 scheme when something terminates TLS in front of it.
 
 **Why it is not scheduled.** Not reachable today: the app binds loopback only, nothing sits in front of
-it, and `LoopbackGuard` refuses a non-loopback bind unless cookie auth is on. The capture relay decided
-in `OPEN-QUESTIONS.md` P1-6 does not change that — the drain is outbound, so nothing proxies inbound.
+it, and `LoopbackGuard` refuses a non-loopback bind unconditionally now (`Auth:Mode` no longer exists;
+cookie authentication is the only mode). The capture relay decided in `OPEN-QUESTIONS.md` P1-6 does not
+change that — the drain is outbound, so nothing proxies inbound.
 
 **Why it is written down anyway.** `Program.cs` sets `CookieSecurePolicy.SameAsRequest`. Behind a
 TLS-terminating proxy the app sees plain HTTP and therefore ships the authentication cookie **without the

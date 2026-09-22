@@ -13,17 +13,6 @@ public class LoginEndpointTests
     static WebApplicationFactory<Program> CookieMode() =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
-            builder.UseSetting("Auth:Mode", "Cookie");
-            builder.UseSetting("Database:MigrateOnStartup", "false");
-            builder.UseSetting("ConnectionStrings:Ledger",
-                "Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none;Timeout=2");
-            builder.ConfigureServices(FakeUserStore.Register);
-        });
-
-    static WebApplicationFactory<Program> OffMode() =>
-        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
-        {
-            builder.UseSetting("Auth:Mode", "Off");
             builder.UseSetting("Database:MigrateOnStartup", "false");
             builder.UseSetting("ConnectionStrings:Ledger",
                 "Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none;Timeout=2");
@@ -86,24 +75,12 @@ public class LoginEndpointTests
     }
 
     [Fact]
-    public async Task A_valid_login_under_Auth_Mode_Off_does_not_500()
-    {
-        using var factory = OffMode();
-        using var client = factory.CreateClient(new() { AllowAutoRedirect = false });
-
-        var response = await LoginHelper.PostWithTokenAsync(client, "noof", "correct");
-
-        response.StatusCode.Should().Be(HttpStatusCode.Redirect);
-    }
-
-    [Fact]
     public async Task An_unknown_username_still_pays_the_verify_cost_exactly_once()
     {
         var counting = new CountingPasswordHasher(new PasswordHasherAdapter());
 
         using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
-            builder.UseSetting("Auth:Mode", "Cookie");
             builder.UseSetting("Database:MigrateOnStartup", "false");
             builder.UseSetting("ConnectionStrings:Ledger",
                 "Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none;Timeout=2");

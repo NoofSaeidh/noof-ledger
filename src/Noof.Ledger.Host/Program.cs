@@ -1,5 +1,4 @@
-﻿using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Hosting.Server;
+﻿using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Noof.Ledger.Ai;
 using Noof.Ledger.Application.Auth;
@@ -20,9 +19,6 @@ if (UserCommand.TryParse(args, out var cliUsername))
 
 var builder = WebApplication.CreateBuilder(args);
 
-var authMode = builder.Configuration["Auth:Mode"] ?? "Off";
-var cookieMode = authMode.Equals("Cookie", StringComparison.OrdinalIgnoreCase);
-
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
@@ -41,22 +37,14 @@ builder.Configuration.GetSection("Categorization").Bind(categorizationOptions);
 
 builder.Services.AddNoofPersistence(builder.Configuration, categorizationOptions.MaxAttempts);
 
-var authentication = builder.Services.AddAuthentication(
-    cookieMode ? AuthSchemes.Cookie : AuthSchemes.LocalOwner);
-
-authentication.AddCookie(AuthSchemes.Cookie, options =>
-{
-    options.LoginPath = "/account/login";
-    options.ExpireTimeSpan = TimeSpan.FromDays(180);
-    options.SlidingExpiration = true;
-    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
-});
-
-// LocalOwnerHandler authenticates every request as the owner with no credential check, so it must
-// not exist at all in Cookie mode; the cookie scheme, by contrast, is harmless whenever it isn't
-// the default, so it can stay registered in both modes.
-if (!cookieMode)
-    authentication.AddScheme<AuthenticationSchemeOptions, LocalOwnerHandler>(AuthSchemes.LocalOwner, null);
+builder.Services.AddAuthentication(AuthSchemes.Cookie)
+    .AddCookie(AuthSchemes.Cookie, options =>
+    {
+        options.LoginPath = "/account/login";
+        options.ExpireTimeSpan = TimeSpan.FromDays(180);
+        options.SlidingExpiration = true;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+    });
 
 builder.Services.AddAuthorization();
 builder.Services.AddCascadingAuthenticationState();
@@ -91,7 +79,7 @@ app.Lifetime.ApplicationStarted.Register(() =>
 
     try
     {
-        LoopbackGuard.AssertSafe([.. addresses ?? []], authMode);
+        LoopbackGuard.AssertSafe([.. addresses ?? []]);
     }
     catch (InvalidOperationException exposed)
     {

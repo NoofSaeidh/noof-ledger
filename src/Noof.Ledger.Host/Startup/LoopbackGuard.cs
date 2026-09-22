@@ -4,23 +4,16 @@ namespace Noof.Ledger.Host.Startup;
 
 internal static class LoopbackGuard
 {
-    public static void AssertSafe(IReadOnlyList<string> boundAddresses, string authMode)
+    public static void AssertSafe(IReadOnlyList<string> boundAddresses)
     {
-        // Enforce for every mode EXCEPT Cookie, rather than only for Off. An unrecognised mode
-        // string registers the no-auth handler in Program.cs, so skipping the check on anything
-        // we do not recognise would disable this interlock on a config typo — in exactly the
-        // case where there is no authentication at all.
-        if (string.Equals(authMode, "Cookie", StringComparison.OrdinalIgnoreCase))
-            return;
-
         var exposed = boundAddresses.Where(address => !IsLoopback(address)).ToArray();
 
         if (exposed.Length is 0)
             return;
 
         throw new InvalidOperationException(
-            $"Refusing to start: {string.Join(", ", exposed)} is reachable beyond this machine while " +
-            $"Auth:Mode={authMode}. Set Auth:Mode=Cookie and create a user with `Noof.Ledger.Host.exe user set-password <name>`.");
+            $"Refusing to start: {string.Join(", ", exposed)} is reachable beyond this machine. " +
+            "Noof Ledger binds loopback only, by design — there is no configuration to widen this.");
     }
 
     // Anything that is not demonstrably loopback is treated as exposed, so unparseable input

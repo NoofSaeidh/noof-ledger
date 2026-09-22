@@ -147,12 +147,16 @@ A freshly recreated ledger reads `0 | 0 | 0 | 1 | 20`.
 1. **Start it.** `.\publish\Noof.Ledger.Host.exe` — it binds loopback only and
    refuses to start otherwise. Open the address it prints.
 
-   `Auth:Mode` is `Off` by default, so there is no sign-in. If you set it to
-   `Cookie` you must first create a user — `noof_ledger` has **no user row** —
-   with `.\publish\Noof.Ledger.Host.exe user set-password noof`.
+   Authentication is always on. The first time, `noof_ledger` has **no user
+   row**, so create one with `.\publish\Noof.Ledger.Host.exe user set-password
+   noof` and sign in through the browser with that username and password. The
+   cookie it sets is what lets the rest of this checklist reload pages without
+   signing in again.
 
 2. **The dashboard answers.** `/` shows an empty month. Stop PostgreSQL and
-   reload: it must say it cannot reach the database, **not** return a 500. Start
+   reload: it must say it cannot reach the database, **not** return a 500 (the
+   cookie from step 1 is already valid, so this reload never touches the
+   database for authentication — only for the page's own data). Start
    PostgreSQL again.
 
 3. **Paste the secrets** at `/settings/secrets`: the Telegram bot token from

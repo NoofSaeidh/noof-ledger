@@ -86,7 +86,6 @@ public sealed class CookieModeHostFixture : IAsyncLifetime
 
             await host.StartAsync(publishDirectory, new Dictionary<string, string>
             {
-                ["Auth__Mode"] = "Cookie",
                 ["Database__MigrateOnStartup"] = "false",
                 ["ConnectionStrings__Ledger"] = cloneConnectionString,
             }, cancellationToken);

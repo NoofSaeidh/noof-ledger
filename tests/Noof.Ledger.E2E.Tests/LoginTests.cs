@@ -11,8 +11,8 @@ public sealed class LoginTests(CookieModeHostFixture fixture) : PageTest, IClass
         if (fixture.DatabaseUnavailable)
             Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
 
-        // Anonymous under Auth:Mode=Cookie redirects to /account/login - that is the start of the
-        // round trip, not a failure.
+        // Anonymous redirects to /account/login - that is the start of the round trip, not a
+        // failure.
         await Page.GotoAsync(fixture.BaseUrl + "/");
         await Page.WaitForURLAsync("**/account/login*");
 

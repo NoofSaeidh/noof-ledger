@@ -1,6 +1,6 @@
 namespace Noof.Ledger.E2E.Tests;
 
-public sealed class OffModeHostFixture : IAsyncLifetime
+public sealed class UnreachableDatabaseHostFixture : IAsyncLifetime
 {
     readonly HostProcess host = new();
 
@@ -13,7 +13,6 @@ public sealed class OffModeHostFixture : IAsyncLifetime
 
         await host.StartAsync(publishDirectory, new Dictionary<string, string>
         {
-            ["Auth__Mode"] = "Off",
             ["Database__MigrateOnStartup"] = "false",
             ["ConnectionStrings__Ledger"] = "Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none;Timeout=2",
         }, cancellationToken);

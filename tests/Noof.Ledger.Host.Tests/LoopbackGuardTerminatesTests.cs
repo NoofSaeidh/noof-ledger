@@ -9,9 +9,9 @@ public class LoopbackGuardTerminatesTests
     // host — the hosting layer catches it, logs it, and Kestrel keeps serving. Every other test of
     // the guard exercises the pure function, so nothing but this proves the process actually dies.
     [Fact]
-    public async Task An_exposed_binding_without_auth_terminates_the_host()
+    public async Task An_exposed_binding_terminates_the_host()
     {
-        using var host = StartHost("http://0.0.0.0:0", authMode: "Off");
+        using var host = StartHost("http://0.0.0.0:0");
 
         var exited = await WaitForExitAsync(host, TimeSpan.FromSeconds(30));
 
@@ -19,17 +19,7 @@ public class LoopbackGuardTerminatesTests
         host.ExitCode.Should().Be(1, "a safety refusal must be detectable by a service manager");
     }
 
-    [Fact]
-    public async Task An_exposed_binding_is_allowed_once_auth_is_on()
-    {
-        using var host = StartHost("http://0.0.0.0:0", authMode: "Cookie");
-
-        var exited = await WaitForExitAsync(host, TimeSpan.FromSeconds(8));
-
-        exited.Should().BeFalse("with auth enabled the same binding is legitimate");
-    }
-
-    static Process StartHost(string urls, string authMode)
+    static Process StartHost(string urls)
     {
         var start = new ProcessStartInfo("dotnet")
         {
@@ -39,7 +29,6 @@ public class LoopbackGuardTerminatesTests
             UseShellExecute = false,
         };
 
-        start.Environment["Auth__Mode"] = authMode;
         start.Environment["Database__MigrateOnStartup"] = "false";
         start.Environment["ConnectionStrings__Ledger"] =
             "Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none;Timeout=2";
@@ -67,7 +56,7 @@ public class LoopbackGuardTerminatesTests
     }
 
     // Kills the host when it outlives the wait. Without this a FAILING first test would leave a
-    // server bound to every interface with authentication disabled — the exact state under test.
+    // server bound to every interface — the exact state under test.
     static async Task<bool> WaitForExitAsync(Process host, TimeSpan timeout)
     {
         using var deadline = new CancellationTokenSource(timeout);
