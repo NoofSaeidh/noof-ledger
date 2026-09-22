@@ -5,7 +5,7 @@ using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Persistence.Categorization;
 
-public sealed class EfCategorizationStore(LedgerDbContext db) : ICategorizationStore
+internal sealed class EfCategorizationStore(LedgerDbContext db) : ICategorizationStore
 {
     public async Task<CategorizationSubject?> GetSubjectAsync(Guid transactionId, CancellationToken cancellationToken) =>
         await (

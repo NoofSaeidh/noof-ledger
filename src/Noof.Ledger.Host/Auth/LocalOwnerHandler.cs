@@ -5,7 +5,7 @@ using Microsoft.Extensions.Options;
 
 namespace Noof.Ledger.Host.Auth;
 
-public sealed class LocalOwnerHandler(
+internal sealed class LocalOwnerHandler(
     IOptionsMonitor<AuthenticationSchemeOptions> options,
     ILoggerFactory logger,
     UrlEncoder encoder)

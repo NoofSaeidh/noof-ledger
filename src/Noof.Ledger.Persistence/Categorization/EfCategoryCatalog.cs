@@ -3,7 +3,7 @@ using Noof.Ledger.Application.Categorization;
 
 namespace Noof.Ledger.Persistence.Categorization;
 
-public sealed class EfCategoryCatalog(LedgerDbContext db) : ICategoryCatalog
+internal sealed class EfCategoryCatalog(LedgerDbContext db) : ICategoryCatalog
 {
     public async Task<IReadOnlyList<CategoryEntry>> ActiveAsync(CancellationToken cancellationToken) =>
         await (

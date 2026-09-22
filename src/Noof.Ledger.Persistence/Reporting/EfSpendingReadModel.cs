@@ -6,7 +6,7 @@ using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Persistence.Reporting;
 
-public sealed class EfSpendingReadModel(LedgerDbContext db, TimeProvider timeProvider, TimeZoneInfo currentZone)
+internal sealed class EfSpendingReadModel(LedgerDbContext db, TimeProvider timeProvider, TimeZoneInfo currentZone)
     : ISpendingReadModel
 {
     internal const string UncategorisedLabel = "Uncategorised";

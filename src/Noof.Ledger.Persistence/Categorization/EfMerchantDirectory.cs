@@ -5,7 +5,7 @@ using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Persistence.Categorization;
 
-public sealed class EfMerchantDirectory(LedgerDbContext db, TimeProvider timeProvider) : IMerchantDirectory
+internal sealed class EfMerchantDirectory(LedgerDbContext db, TimeProvider timeProvider) : IMerchantDirectory
 {
     public async Task<IReadOnlyList<MerchantAliasEntry>> AliasesAsync(CancellationToken cancellationToken) =>
         await (

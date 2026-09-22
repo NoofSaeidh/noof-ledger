@@ -1,4 +1,4 @@
-using AwesomeAssertions;
+﻿using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Domain;
 
@@ -38,7 +38,7 @@ public class CaptureModelTests
             && i.Properties.Select(p => p.Name).SequenceEqual(new[] { nameof(Category.Slug) }));
 
         var fk = entity.GetForeignKeys().Single();
-        fk.PrincipalEntityType.ClrType.Should().Be(typeof(Category));
+        fk.PrincipalEntityType.ClrType.Should().Be<Category>();
         fk.Properties.Select(p => p.Name).Should().Equal(nameof(Category.ParentId));
         fk.DeleteBehavior.Should().Be(DeleteBehavior.Restrict);
     }

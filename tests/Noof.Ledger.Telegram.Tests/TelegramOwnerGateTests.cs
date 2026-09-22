@@ -1,7 +1,6 @@
-using AwesomeAssertions;
+﻿using AwesomeAssertions;
 using NSubstitute;
 using Noof.Ledger.Application.Secrets;
-using Noof.Ledger.Telegram;
 
 namespace Noof.Ledger.Telegram.Tests;
 

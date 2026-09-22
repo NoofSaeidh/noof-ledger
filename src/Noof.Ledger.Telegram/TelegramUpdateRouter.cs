@@ -4,7 +4,7 @@ using Telegram.Bot.Types;
 
 namespace Noof.Ledger.Telegram;
 
-public sealed class TelegramUpdateRouter(
+internal sealed class TelegramUpdateRouter(
     ICaptureStore captureStore,
     IChatNotifier chatNotifier,
     TelegramOwnerGate ownerGate)

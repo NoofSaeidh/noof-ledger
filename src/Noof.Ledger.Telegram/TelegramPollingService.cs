@@ -10,9 +10,9 @@ using Telegram.Bot.Types.Enums;
 
 namespace Noof.Ledger.Telegram;
 
-public enum TelegramPollResult { Idle, Processed, Failed }
+internal enum TelegramPollResult { Idle, Processed, Failed }
 
-public sealed class TelegramPollingService(
+internal sealed class TelegramPollingService(
     IServiceScopeFactory scopeFactory,
     ITelegramBotClientFactory clientFactory,
     TelegramClientHandle clientHandle,

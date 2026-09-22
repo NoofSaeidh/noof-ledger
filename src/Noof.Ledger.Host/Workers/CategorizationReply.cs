@@ -3,9 +3,9 @@ using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Host.Workers;
 
-public static class CategorizationReply
+internal static class CategorizationReply
 {
-    public sealed record ReplyLine(string Description, Money Amount, string CategoryName);
+    internal sealed record ReplyLine(string Description, Money Amount, string CategoryName);
 
     public static string ComposeSuccess(string walletName, IReadOnlyList<ReplyLine> lines)
     {

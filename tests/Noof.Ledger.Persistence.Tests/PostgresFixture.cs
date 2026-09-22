@@ -26,7 +26,7 @@ public sealed class PostgresFixture : IAsyncLifetime
         return DatabaseSettings.For(name);
     }
 
-    public async Task<LedgerDbContext> CreateContextAsync()
+    internal async Task<LedgerDbContext> CreateContextAsync()
     {
         var connectionString = await CreateEmptyDatabaseConnectionStringAsync();
 

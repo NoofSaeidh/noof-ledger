@@ -4,7 +4,7 @@ using Noof.Ledger.Application.Secrets;
 
 namespace Noof.Ledger.Ai;
 
-public interface IAnthropicClientFactory
+internal interface IAnthropicClientFactory
 {
     // Never caches; always returns the raw client. Callers that want an IChatClient call
     // raw.AsIChatClient(options.Model) themselves — AnthropicKeyProbe needs the raw client
@@ -12,7 +12,7 @@ public interface IAnthropicClientFactory
     Task<AnthropicClient> CreateAsync(CancellationToken cancellationToken);
 }
 
-public sealed class AnthropicClientFactory(
+internal sealed class AnthropicClientFactory(
     ISecretStore secretStore, HttpClient httpClient, AnthropicOptions options) : IAnthropicClientFactory
 {
     public async Task<AnthropicClient> CreateAsync(CancellationToken cancellationToken)

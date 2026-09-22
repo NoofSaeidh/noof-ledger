@@ -1,10 +1,10 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Secrets;
 
 namespace Noof.Ledger.Persistence;
 
-public class LedgerDbContext(DbContextOptions<LedgerDbContext> options) : DbContext(options)
+internal sealed class LedgerDbContext(DbContextOptions<LedgerDbContext> options) : DbContext(options)
 {
     public DbSet<AppUser> Users => Set<AppUser>();
     public DbSet<Wallet> Wallets => Set<Wallet>();

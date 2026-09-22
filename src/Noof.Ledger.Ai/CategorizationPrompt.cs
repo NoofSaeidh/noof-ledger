@@ -2,7 +2,7 @@ using Noof.Ledger.Application.Categorization;
 
 namespace Noof.Ledger.Ai;
 
-public static class CategorizationPrompt
+internal static class CategorizationPrompt
 {
     // A role sentence "focuses Claude's behavior" — the categories, the hints and the message
     // itself are variable input and belong in the user turn built by BuildUserTurn, never in this

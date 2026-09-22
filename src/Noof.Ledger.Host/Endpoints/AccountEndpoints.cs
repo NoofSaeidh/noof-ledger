@@ -7,7 +7,7 @@ using Noof.Ledger.Host.Auth;
 
 namespace Noof.Ledger.Host.Endpoints;
 
-public static class AccountEndpoints
+internal static class AccountEndpoints
 {
     static readonly AppUser ThrowawayUser = new()
     {

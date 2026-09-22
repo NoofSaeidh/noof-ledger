@@ -2,11 +2,18 @@
 
   <ItemGroup>
     <PackageReference Include="Anthropic" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Noof.Ledger.Application\Noof.Ledger.Application.csproj" />
     <ProjectReference Include="..\Noof.Ledger.Domain\Noof.Ledger.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Noof.Ledger.Ai.Tests" />
   </ItemGroup>
 
 </Project>

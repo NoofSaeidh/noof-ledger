@@ -1,28 +1,14 @@
 ﻿using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
-using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Ai;
 using Noof.Ledger.Application.Auth;
-using Noof.Ledger.Application.Capture;
-using Noof.Ledger.Application.Categorization;
-using Noof.Ledger.Application.Chat;
-using Noof.Ledger.Application.Jobs;
-using Noof.Ledger.Application.Reporting;
-using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Host.Auth;
 using Noof.Ledger.Host.Cli;
 using Noof.Ledger.Host.Endpoints;
 using Noof.Ledger.Host.Startup;
 using Noof.Ledger.Host.Workers;
 using Noof.Ledger.Persistence;
-using Noof.Ledger.Persistence.Auth;
-using Noof.Ledger.Persistence.Capture;
-using Noof.Ledger.Persistence.Categorization;
-using Noof.Ledger.Persistence.Jobs;
-using Noof.Ledger.Persistence.Reporting;
-using Noof.Ledger.Persistence.Secrets;
 using Noof.Ledger.Telegram;
 using Noof.Ledger.Web.Components;
 
@@ -37,24 +23,23 @@ var builder = WebApplication.CreateBuilder(args);
 var authMode = builder.Configuration["Auth:Mode"] ?? "Off";
 var cookieMode = authMode.Equals("Cookie", StringComparison.OrdinalIgnoreCase);
 
-CaptureTimeZoneGuard.Resolve(builder.Configuration["Capture:TimeZone"] ?? "Europe/Belgrade");
-
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton(CaptureTimeZoneGuard.Resolve(
+    builder.Configuration["Capture:TimeZone"] ?? "Europe/Belgrade"));
 
 var dataProtectionKeyRingDirectory = new DirectoryInfo(Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NoofLedger", "dp-keys"));
 DataProtectionSetup.Configure(builder.Services, dataProtectionKeyRingDirectory);
 
-builder.Services.AddDbContext<LedgerDbContext>(options =>
-    options.UseNpgsql(LedgerConnectionString.Resolve(builder.Configuration.GetConnectionString("Ledger"))));
-
 builder.Services.AddSingleton<IPasswordHasher, PasswordHasherAdapter>();
-builder.Services.AddScoped<IUserStore, EfUserStore>();
-builder.Services.AddScoped<ISecretStore, EfSecretStore>();
-builder.Services.AddScoped<ICaptureStore, EfCaptureStore>();
+
+var categorizationOptions = new CategorizationWorkerOptions();
+builder.Configuration.GetSection("Categorization").Bind(categorizationOptions);
+
+builder.Services.AddNoofPersistence(builder.Configuration, categorizationOptions.MaxAttempts);
 
 var authentication = builder.Services.AddAuthentication(
     cookieMode ? AuthSchemes.Cookie : AuthSchemes.LocalOwner);
@@ -76,88 +61,16 @@ if (!cookieMode)
 builder.Services.AddAuthorization();
 builder.Services.AddCascadingAuthenticationState();
 
-// A log-level filter is a suppression a more specific configured category can override at
-// runtime - Logging:LogLevel:System.Net.Http.HttpClient.telegram.LogicalHandler beats a filter on
-// the shorter prefix and puts the full request URI, bot token included, at Information. Removing
-// the logging handlers from the pipeline instead means there is nothing left to re-enable.
-builder.Services.AddHttpClient("telegram").RemoveAllLoggers();
+builder.Services.AddNoofTelegram();
 
-builder.Services.AddSingleton<TelegramClientHandle>();
-builder.Services.AddSingleton<ITelegramBotClientFactory, TelegramBotClientFactory>();
-builder.Services.AddSingleton<IChatNotifier, TelegramChatNotifier>();
-builder.Services.AddScoped<TelegramOwnerGate>();
-builder.Services.AddScoped<TelegramUpdateOffsetStore>();
-builder.Services.AddScoped<ITelegramUpdateRouter, TelegramUpdateRouter>();
-builder.Services.AddHostedService<TelegramPollingService>();
+builder.Services.AddNoofAi(builder.Configuration);
 
-var anthropicOptions = new AnthropicOptions();
-builder.Configuration.GetSection("Ai").Bind(anthropicOptions);
-builder.Services.AddSingleton(anthropicOptions);
-
-var categorizationOptions = new CategorizationWorkerOptions();
-builder.Configuration.GetSection("Categorization").Bind(categorizationOptions);
-builder.Services.AddSingleton(categorizationOptions);
-
-// AddHttpClient registers IHttpClientFactory, never an HttpClient - AnthropicClientFactory takes a
-// real client, so it has to be built through a lambda. Resolving HttpClient directly would fail at
-// the first request with a message that names neither this line nor the factory.
-//
-// RemoveAllLoggers for the same reason as the telegram client below: IHttpClientFactory's default
-// logging handlers redact header values via HttpClientFactoryOptions.ShouldRedactHeaderValue, but
-// that is a per-client options delegate reachable by anything that later calls
-// services.Configure<HttpClientFactoryOptions>("anthropic", ...) - the same class of "a more
-// specific configured override beats a filter" hazard as a log-level filter. x-api-key carries the
-// Anthropic key on every request; removing the logging handlers means there is nothing left for
-// such a change to re-expose.
-builder.Services.AddHttpClient("anthropic").RemoveAllLoggers();
-builder.Services.AddScoped<IAnthropicClientFactory>(sp => new AnthropicClientFactory(
-    sp.GetRequiredService<ISecretStore>(),
-    sp.GetRequiredService<IHttpClientFactory>().CreateClient("anthropic"),
-    sp.GetRequiredService<AnthropicOptions>()));
-
-builder.Services.AddScoped<ICategorizer, AnthropicCategorizer>();
-builder.Services.AddScoped<ICategoryCatalog, EfCategoryCatalog>();
-builder.Services.AddScoped<IMerchantDirectory, EfMerchantDirectory>();
-builder.Services.AddScoped<ICategorizationStore, EfCategorizationStore>();
-
-// The dashboard's only way into the database (Task 6) and the Test button's only way to reach the
-// model (Task 8). Both are consumed by Noof.Ledger.Web, which may never see a DbContext or an
-// HttpClient - registering them here is what keeps that rule true at runtime as well as at compile
-// time. ISecretProbe is registered as a collection because the page resolves IEnumerable<ISecretProbe>
-// and matches on SecretKey; a second probe (Telegram's getMe) is a later addition, not a change here.
-// EfSpendingReadModel takes the operator's current zone as a constructor argument, and nothing
-// registers a TimeZoneInfo - a bare AddScoped<,>() here resolves fine at startup and then throws
-// the first time the dashboard is opened. CaptureTimeZoneGuard.Resolve is the same call Program.cs
-// already makes at boot to validate Capture:TimeZone, so there is one definition of "our zone".
-builder.Services.AddScoped<ISpendingReadModel>(sp => new EfSpendingReadModel(
-    sp.GetRequiredService<LedgerDbContext>(),
-    sp.GetRequiredService<TimeProvider>(),
-    CaptureTimeZoneGuard.Resolve(builder.Configuration["Capture:TimeZone"] ?? "Europe/Belgrade")));
-builder.Services.AddScoped<ISecretProbe, AnthropicKeyProbe>();
-
-// EfJobQueue's maxAttempts is not a separate config value: it comes straight from
-// CategorizationWorkerOptions.MaxAttempts so the worker's own "is this the last attempt" check
-// (CategorizationWorker.HandleModelFailureAsync) can never disagree with what the queue itself
-// decides server-side.
-builder.Services.AddScoped<IJobQueue>(sp => new EfJobQueue(
-    sp.GetRequiredService<LedgerDbContext>(),
-    sp.GetRequiredService<TimeProvider>(),
-    sp.GetRequiredService<CategorizationWorkerOptions>().MaxAttempts));
-
-builder.Services.AddHostedService(sp => new CategorizationWorker(
-    sp.GetRequiredService<IServiceScopeFactory>(),
-    sp.GetRequiredService<TimeProvider>(),
-    sp.GetRequiredService<CategorizationWorkerOptions>(),
-    CategorizationWorker.CreateWorkerId(),
-    sp.GetRequiredService<ILogger<CategorizationWorker>>()));
+builder.Services.AddNoofWorkers(categorizationOptions);
 
 var app = builder.Build();
 
 if (builder.Configuration.GetValue("Database:MigrateOnStartup", true))
-{
-    using var scope = app.Services.CreateScope();
-    await scope.ServiceProvider.GetRequiredService<LedgerDbContext>().Database.MigrateAsync();
-}
+    await app.Services.MigrateNoofDatabaseAsync();
 
 app.UseAuthentication();
 app.UseAuthorization();
@@ -193,4 +106,4 @@ app.Lifetime.ApplicationStarted.Register(() =>
 
 app.Run();
 
-public partial class Program;
+internal partial class Program;

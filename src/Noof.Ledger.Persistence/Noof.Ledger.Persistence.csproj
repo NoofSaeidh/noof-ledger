@@ -7,6 +7,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Noof.Ledger.Persistence.Tests" />
+    <InternalsVisibleTo Include="Noof.Ledger.Host.Tests" />
+    <InternalsVisibleTo Include="Noof.Ledger.E2E.Tests" />
   </ItemGroup>
 
   <ItemGroup>

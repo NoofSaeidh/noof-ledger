@@ -1,4 +1,4 @@
-using AwesomeAssertions;
+﻿using AwesomeAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -6,7 +6,6 @@ using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Secrets;
-using Noof.Ledger.Telegram;
 using Telegram.Bot;
 using Telegram.Bot.Requests;
 using Telegram.Bot.Types;

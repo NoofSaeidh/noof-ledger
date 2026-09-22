@@ -11,4 +11,12 @@
     <ProjectReference Include="..\Noof.Ledger.Domain\Noof.Ledger.Domain.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Noof.Ledger.Telegram.Tests" />
+    <!-- ITelegramBotClientFactory and ITelegramUpdateRouter are internal now; NSubstitute proxies
+         them through Castle DynamicProxy, and Castle's generated proxy assembly needs its own grant
+         to touch an internal type on an assembly that isn't strong-named. -->
+    <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
+  </ItemGroup>
+
 </Project>

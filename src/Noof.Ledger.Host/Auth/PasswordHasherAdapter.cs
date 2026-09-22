@@ -4,7 +4,7 @@ using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Host.Auth;
 
-public sealed class PasswordHasherAdapter : IPasswordHasher
+internal sealed class PasswordHasherAdapter : IPasswordHasher
 {
     readonly PasswordHasher<AppUser> hasher = new();
 

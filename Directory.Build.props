@@ -6,6 +6,11 @@
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- IDE0005 is reported by the compiler, not by an analyzer, and stays silent during a build
+         unless a documentation file is generated. That file in turn demands XML comments on every
+         public member (CS1591), which CLAUDE.md section 3 forbids - hence the pairing. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
     <WarningsAsErrors>$(WarningsAsErrors);NU1903;NU1904</WarningsAsErrors>
     <NuGetAuditMode>all</NuGetAuditMode>
     <InvariantGlobalization>false</InvariantGlobalization>

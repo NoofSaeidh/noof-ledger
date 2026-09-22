@@ -8,7 +8,7 @@ namespace Noof.Ledger.Ai;
 // page (Task 8) is allowed to trigger. Uses the raw AnthropicClient directly, never IChatClient:
 // listing models has nothing to do with chat, and the SDK's own Models.List is the only surface
 // for it either way.
-public sealed class AnthropicKeyProbe(IAnthropicClientFactory clientFactory) : ISecretProbe
+internal sealed class AnthropicKeyProbe(IAnthropicClientFactory clientFactory) : ISecretProbe
 {
     public string SecretKey => SecretKeys.AnthropicApiKey;
 

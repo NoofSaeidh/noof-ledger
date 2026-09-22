@@ -3,3 +3,56 @@ root = true
 [*.cs]
 csharp_style_namespace_declarations = file_scoped
 dotnet_diagnostic.IDE0161.severity = error
+
+# Phase 1C requirement 1: "все классы интернал, если не нужны в других сборках".
+# CA1515 defaults to executable output kinds only, which would leave Persistence, Ai and Telegram -
+# the three assemblies this rule most needs to reach - silently unchecked.
+dotnet_diagnostic.CA1515.severity = error
+dotnet_code_quality.CA1515.output_kind = ConsoleApplication, DynamicallyLinkedLibrary
+
+# An internal type nobody derives from is sealed; this is free once the types above are internal.
+# CA1852 switches itself off for any assembly carrying InternalsVisibleTo, and Phase 1C gave one to
+# every assembly here - so without ignore_internalsvisibleto the rule is dead everywhere and looks
+# exactly like a rule with nothing to report. Confirmed by probe: it found nothing until this line.
+dotnet_diagnostic.CA1852.severity = error
+dotnet_code_quality.CA1852.ignore_internalsvisibleto = true
+
+# Cheap correctness rules that the AnalysisMode=All measurement showed cost fewer than a handful of
+# fixes each. Enabled by name rather than by turning on the whole rulebook - see docs/BACKLOG.md.
+dotnet_diagnostic.CA1862.severity = error
+dotnet_diagnostic.CA1861.severity = error
+dotnet_diagnostic.CA2263.severity = error
+
+# An unused using is a dependency the file does not have. See Directory.Build.props for why
+# this needs GenerateDocumentationFile to fire at all.
+dotnet_diagnostic.IDE0005.severity = error
+
+# Every narrowing section is below this line. A property belongs to whichever section header
+# precedes it, so a repository-wide rule added below one of them silently becomes a rule about a
+# single directory - which reports nothing, and reads exactly like a rule with nothing to report.
+
+[src/Noof.Ledger.Domain/**]
+# Domain and Application exist to be referenced. Their public types are the contract every other
+# assembly is written against, so "could this be internal?" has a standing answer of no. The list
+# is not unguarded - PublicSurfaceTests locks it, and adding to it is an edit a reviewer sees.
+dotnet_diagnostic.CA1515.severity = none
+
+[src/Noof.Ledger.Application/**]
+dotnet_diagnostic.CA1515.severity = none
+
+[src/Noof.Ledger.Persistence/Migrations/**]
+# EF scaffolds migration classes public, with their own using directives, and rewrites both on the
+# next scaffold. CLAUDE.md already exempts their generated companions from code style for the same
+# reason; a rule that argues with a code generator is a rule that loses every time it runs.
+dotnet_diagnostic.CA1515.severity = none
+dotnet_diagnostic.CA1861.severity = none
+dotnet_diagnostic.IDE0005.severity = none
+
+[tests/**]
+# Test names are sentences: Every_routable_page_declares_its_authorization. That is the convention
+# throughout this repository and it is deliberate.
+dotnet_diagnostic.CA1707.severity = none
+# A test project's fixtures and helpers are reached by the xUnit runner through reflection, and
+# several are public because xUnit requires it. Every test project is also OutputType=Exe under
+# Microsoft Testing Platform, so without this line CA1515 would fire on all of them by default.
+dotnet_diagnostic.CA1515.severity = none

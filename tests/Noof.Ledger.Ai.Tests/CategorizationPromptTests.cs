@@ -1,6 +1,5 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using AwesomeAssertions;
-using Noof.Ledger.Ai;
 using Noof.Ledger.Application.Categorization;
 
 namespace Noof.Ledger.Ai.Tests;

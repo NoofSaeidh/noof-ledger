@@ -1,7 +1,4 @@
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using Noof.Ledger.Application.Categorization;
+﻿using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Jobs;
 using Noof.Ledger.Application.Secrets;
@@ -9,9 +6,9 @@ using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Host.Workers;
 
-public enum CategorizationTickResult { Idle, Processed, Failed }
+internal enum CategorizationTickResult { Idle, Processed, Failed }
 
-public sealed class CategorizationWorker(
+internal sealed class CategorizationWorker(
     IServiceScopeFactory scopeFactory,
     TimeProvider timeProvider,
     CategorizationWorkerOptions options,
