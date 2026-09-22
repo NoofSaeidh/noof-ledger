@@ -63,7 +63,7 @@ Public top-level types per `src` project, counted from source:
 |---|---|---|---|
 | `Noof.Ledger.Domain` | 17 | 0 | 17 — unchanged, all genuinely cross assemblies |
 | `Noof.Ledger.Application` | 39 | 0 | 39 — unchanged, these *are* the contracts |
-| `Noof.Ledger.Persistence` | 16 (+ 13 already internal) | 11 | 3 + migrations |
+| `Noof.Ledger.Persistence` | 16, of which **12 are scanned** — the other 4 are EF migration classes, which `PublicSurfaceTests` excludes (+ 13 already internal) | 11 | 2 |
 | `Noof.Ledger.Ai` | 7 | 5 | 1 |
 | `Noof.Ledger.Telegram` | 11 | 9 | 1 |
 | `Noof.Ledger.Host` | 14 | 11 | 0 |
@@ -736,6 +736,11 @@ public class TelegramRegistrationTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton(TimeProvider.System);
+        // TelegramPollingService takes IConfiguration (it reads Capture:TimeZone per update). The
+        // Host always has one; a bare ServiceCollection does not, and GetServices<IHostedService>()
+        // constructs the service, so without this the test fails on a missing dependency rather
+        // than on the behaviour under test.
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
         services.AddScoped(_ => Substitute.For<ISecretStore>());
         services.AddScoped(_ => Substitute.For<Application.Capture.ICaptureStore>());
         services.AddNoofTelegram();
@@ -751,7 +756,15 @@ public class TelegramRegistrationTests
 }
 ```
 
-Before writing this, open `src/Noof.Ledger.Telegram/TelegramUpdateRouter.cs` and `TelegramPollingService.cs` and read their constructors; add whatever further substitutes they need to the `ServiceCollection` above so the test resolves. If a constructor dependency is a Host type, **stop** — that is a layering violation this plan did not anticipate, and it needs reporting rather than a workaround.
+Both constructors were read after this plan's first draft and the `ServiceCollection` above already covers them. For the record:
+
+- `TelegramUpdateRouter(ICaptureStore, IChatNotifier, TelegramOwnerGate)` — the last two come from `AddNoofTelegram` itself.
+- `TelegramPollingService(IServiceScopeFactory, ITelegramBotClientFactory, TelegramClientHandle, IConfiguration, TimeProvider, ILogger<TelegramPollingService>)`.
+- `TelegramBotClientFactory(IHttpClientFactory)` — satisfied by the `AddHttpClient` call inside `AddNoofTelegram`.
+
+No Host type appears in any of them, so the layering risk this plan flagged is closed. If you nonetheless find a constructor dependency that reaches into `Noof.Ledger.Host`, **stop** — that is a layering violation and it needs reporting, not a workaround.
+
+Note `TelegramUpdateRouter.ReceiptAcknowledgement` is a `public const` that `Telegram.Tests` asserts against; making the class `internal` keeps it reachable through `InternalsVisibleTo`.
 
 - [ ] **Step 2: Run it and watch it fail**
 
@@ -1071,7 +1084,7 @@ Rider names its settings layer after the solution's **base** name, which is why 
 
 Dots inside an inspection id are escaped as `_002E` — `MemberCanBePrivate.Global` becomes `MemberCanBePrivate_002EGlobal`. This file makes the same rules light up in Rider for anyone who opens the solution, which is most of the value even if Step 4 turns out to be infeasible.
 
-Add `*.DotSettings.user` to `.gitignore` if it is not already covered — the `.user` layer is personal.
+The personal `.user` layer is already ignored — `.gitignore` line 6 is `*.user`, verified — so no `.gitignore` change is needed here. The existing `NoofLedger.sln.DotSettings.user` names Rider 2026.2, which is the IDE version the pinned 2026.2.2 tool matches; that alignment is why the shared layer is expected to be understood by both.
 
 - [ ] **Step 3: Write the runner**
 
@@ -1262,5 +1275,5 @@ Use `superpowers:finishing-a-development-branch`. Do not merge without being tol
 
 - **Task 2 Step 7** — an internal `LedgerDbContext` may break `dotnet ef`. Mitigated by an explicit verification step with a stated fallback rather than a discovery mid-refactor.
 - **Task 7 Step 4** — three unverified assumptions about `jb inspectcode`. Mitigated by a written fallback that still delivers the Rider-side value.
-- **Task 4 Step 1** — `TelegramUpdateRouter`'s and `TelegramPollingService`'s constructor dependencies were not read while writing this plan. The step says to read them and to stop if one turns out to be a Host type.
+- ~~**Task 4 Step 1** — `TelegramUpdateRouter`'s and `TelegramPollingService`'s constructor dependencies were not read while writing this plan.~~ **Closed before execution.** Both were read; neither reaches into the Host. The one real finding was that `TelegramPollingService` takes `IConfiguration`, which a bare `ServiceCollection` does not provide — Task 4's test now registers one, which it would otherwise have failed on for the wrong reason.
 - **Task 6 Step 3** — the exact `CA1852`/`CA1862`/`CA1861`/`CA2263` findings were measured in aggregate (fewer than a handful each) but not read individually. The step's instruction is "fix or reject in writing", which is correct either way.
