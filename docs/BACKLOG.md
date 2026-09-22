@@ -449,3 +449,51 @@ Added to the `.slnx` at the operator's instruction, with both consequences accep
 `dotnet test --solution` now runs the browser suite too, so a plain test run needs Playwright's
 Chromium present and takes about 40 seconds longer, and the solution test count now includes those
 13. Every number in this repository's documentation counts the whole solution from here on.
+
+## The Persistence test suite takes 1m48s and nobody has found where it goes
+
+Measured 2026-09-22, deferred by the operator. Two plausible causes were tested and **both ruled
+out by measurement**, so the next person should not start from either:
+
+- **Not test concurrency.** `maxParallelThreads` at 4 and at 8 finish in the same time (1:48.5 vs
+  1:48.0). It is capped at 4 in `xunit.runner.json` because 16 — the default, one per CPU thread —
+  produced transient socket failures that failed the publish gate two runs in three, not because 4
+  is faster.
+- **Not replaying migrations.** `CreateContextAsync` creates an *empty* database and lets each test
+  run the whole migration chain, so cloning the already-migrated template instead looked like an
+  obvious win. It is not: 1:51 against 1:48, i.e. nothing. (It did expose a real defect — see the
+  entry about the template's missing trigger — so the experiment paid for itself anyway.)
+
+What is known: `CREATE DATABASE ... TEMPLATE` costs **240ms** measured serially, `DROP` about
+**50ms**, and there are 135 tests. That accounts for roughly 32 of the 108 seconds. **The other 76
+seconds are unaccounted for.** The next step is to instrument one test end to end — database
+creation, migration, EF model build, the test body, teardown — rather than guessing again.
+
+A classification of all 135 tests was done for a shared-database refactor: **74 could share** a
+database (they insert their own rows under fresh GUIDs and assert only on those), **61 genuinely
+cannot**. The blockers are architectural rather than sloppy: `EfJobQueue.ClaimAsync` scans the whole
+table with `FOR UPDATE SKIP LOCKED` and depends on being the only writer; `EfSpendingReadModel`
+aggregates across every row by design; `EfSecretStoreTests`, `EfUserStoreTests` and
+`MerchantAliasWriteOnceTests` reuse fixed natural keys (`SecretKeys.AnthropicApiKey`, `"noof"`,
+`"TEST MERCHANT"`) that would collide; `EfCaptureStoreTests` deletes the seeded default wallet that
+`WalletDefaultTests` depends on; and `SeedDataTests` renames the seeded coffee category its own
+sibling asserts on. So sharing buys a ~55% cut in database creations, not the ~95% the idea
+suggests — worth perhaps 18 of those 32 seconds, against a real risk of turning deterministic
+failures into timing-dependent ones.
+
+## The test template can silently drift from what migrations produce — fixed 2026-09-22
+
+`noof_ledger_test_template` is a long-lived database that tests clone. It is only ever migrated
+forward, so it carries whatever schema it had when each migration was first applied to it — and an
+*edit* to an already-applied migration never reaches it. That is exactly what happened with
+`merchant_aliases_no_truncate`: the template, and `noof_ledger` alongside it, spent a phase without
+the TRUNCATE guard while every freshly created database had it. Found by accident, because switching
+`CreateContextAsync` to clone the template made
+`MerchantAliasWriteOnceTests.Truncating_the_alias_table_is_rejected_by_the_database` fail — a true
+positive from an experiment that was measuring something else entirely.
+
+Both databases were dropped and recreated from migrations, and `CLAUDE.md` now carries the rule that
+caused it. What is still missing is a guard: nothing compares the template against a freshly
+migrated database, so the next drift will be found the same way — by luck. A test that migrates a
+scratch database and diffs `pg_dump --schema-only` against the template would close it, at the cost
+of one full migration run per suite execution.
