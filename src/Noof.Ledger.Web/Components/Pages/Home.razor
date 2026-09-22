@@ -48,6 +48,14 @@ else
                     {
                         <p class="note note-failed">Categorisation failed. Nothing was recorded for this message.</p>
                     }
+                    else if (transaction.Items.Count == 0)
+                    {
+                        // A Completed transaction with no line items is a real, positive read of
+                        // the message - the categoriser looked at it and found nothing to record
+                        // (a loan received, not a purchase, for example) - not a failure and not a
+                        // blank row that looks broken.
+                        <p class="note note-nothing-to-record">Read - nothing here looked like spending, so nothing was recorded.</p>
+                    }
                     else
                     {
                         <ul>

@@ -18,16 +18,20 @@ public class ProposalVerificationTests
         new(description, amountQuote, currency, categorySlug, knownMerchantId, merchantQuote);
 
     [Fact]
-    public void An_empty_item_list_fails()
+    public void An_empty_item_list_resolves_to_no_spending_in_this_message()
     {
+        // "заняла у Маши 5000 рсд" (a loan received, not a purchase) is the case that motivates
+        // this: the model is instructed to answer with no items at all, and the schema's minItems
+        // is 0 so it structurally CAN. An empty proposal is a valid, positive answer - "nothing to
+        // categorise here" - not a malformed one, so it must not fail verification.
         var proposal = new CategorizationProposal([]);
 
         var resolved = ProposalVerification.TryResolve(
-            "кофе 250 рсд", proposal, ["groceries"], [], out var items, out var failure);
+            "заняла у Маши 5000 рсд", proposal, ["groceries"], [], out var items, out var failure);
 
-        resolved.Should().BeFalse();
+        resolved.Should().BeTrue(failure);
         items.Should().BeEmpty();
-        failure.Should().NotBeEmpty();
+        failure.Should().BeEmpty();
     }
 
     [Fact]

@@ -129,6 +129,26 @@ public sealed class LiveModelTests
     }
 
     [Fact]
+    public async Task A_loan_received_is_not_spending_and_produces_no_items()
+    {
+        if (!LiveModelGate.TryGetApiKey(out var apiKey))
+            Assert.Skip(LiveModelGate.SkipMessage);
+
+        // The exact case that motivated Defect 1: "заняла у Маши 5000 рсд" states an amount but
+        // describes a loan received, not a purchase. CategorizationPrompt's system prompt
+        // instructs the model to answer with no items at all for this message, and
+        // CategorizationSchema now sets minItems 0 so the model is structurally free to do so.
+        // Before that fix the schema forced at least one item, and the model would quote "5000"
+        // into a fabricated spend line that ProposalVerification could not tell apart from a real
+        // one - money the operator borrowed recorded as money they spent.
+        const string rawText = "заняла у Маши 5000 рсд";
+        var proposal = await CreateCategorizer(apiKey)
+            .ProposeAsync(Request(rawText), TestContext.Current.CancellationToken);
+
+        proposal.Items.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task The_key_probe_reports_Ok_for_a_real_key()
     {
         if (!LiveModelGate.TryGetApiKey(out var apiKey))

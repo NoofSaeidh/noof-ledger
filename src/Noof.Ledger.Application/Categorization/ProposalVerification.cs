@@ -20,12 +20,15 @@ public static class ProposalVerification
         // "partial acceptance is not offered" true even when an earlier item individually verified
         // fine before a later one failed.
         items = [];
+        failure = string.Empty;
 
+        // Zero items is a real, positive answer - "nothing to categorise in this message" (a loan
+        // received, not a purchase) - not a malformed one. The schema's minItems is 0 for exactly
+        // this reason. Do not confuse this with the loop below failing partway through a non-empty
+        // proposal: that still fails the whole thing, which is what the sharp distinction between
+        // "empty" and "invalid" means in practice.
         if (proposal.Items.Count == 0)
-        {
-            failure = "Proposal has no items.";
-            return false;
-        }
+            return true;
 
         var resolved = new List<ResolvedLineItem>(proposal.Items.Count);
 

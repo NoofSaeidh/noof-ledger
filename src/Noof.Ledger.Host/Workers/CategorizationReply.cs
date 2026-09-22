@@ -23,6 +23,12 @@ public static class CategorizationReply
         $"I couldn't categorise this one for {walletName} automatically. It's saved, nothing is lost, " +
         "but you'll need to sort it out by hand for now.";
 
+    // Distinct from ComposeFailure on purpose: the categoriser read the message and reached a
+    // conclusion (a loan received, not a purchase, for example) - it did not fail. Wording this
+    // like a failure would tell the operator to go fix something that isn't broken.
+    public static string ComposeNothingToRecord(string walletName) =>
+        $"Read this for {walletName} — nothing here looks like spending, so nothing was recorded.";
+
     static string FormatLine(ReplyLine line) =>
         $"• {line.Description} — {FormatAmount(line.Amount.Amount)} {line.Amount.Currency} ({line.CategoryName})";
 

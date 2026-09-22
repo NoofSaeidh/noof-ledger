@@ -171,7 +171,9 @@ public sealed class CategorizationWorker(
             {
                 try
                 {
-                    var text = CategorizationReply.ComposeSuccess(sub.WalletName, replyLines);
+                    var text = replyLines.Count == 0
+                        ? CategorizationReply.ComposeNothingToRecord(sub.WalletName)
+                        : CategorizationReply.ComposeSuccess(sub.WalletName, replyLines);
                     await notifier.EditAsync(sub.TelegramChatId, messageId, text, cancellationToken);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)

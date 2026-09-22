@@ -219,6 +219,43 @@ public class CategorizationWorkerTests
     }
 
     [Fact]
+    public async Task A_proposal_with_no_items_completes_the_job_honestly_instead_of_recording_a_loan_as_spending()
+    {
+        // The defect this guards against: "заняла у Маши 5000 рсд" is a loan received, not a
+        // purchase. A model that (correctly, per the prompt) answers with zero items must succeed
+        // the job with zero line items, not be forced to invent one and not be treated as a
+        // failure either - both would misrepresent what actually happened.
+        var jobQueue = Substitute.For<IJobQueue>();
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
+        jobQueue.SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>()).Returns(JobCompletionOutcome.Applied);
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(rawText: "заняла у Маши 5000 рсд"));
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new CategorizationProposal([]));
+        var notifier = Substitute.For<IChatNotifier>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer, notifier: notifier),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        var result = await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        result.Should().Be(CategorizationTickResult.Processed);
+        await store.Received(1).ApplyAsync(
+            TransactionId, Arg.Is<IReadOnlyList<CategorizedLineItem>>(items => items.Count == 0), Arg.Any<CancellationToken>());
+        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+        await jobQueue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
+        await jobQueue.DidNotReceive().FailAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await jobQueue.DidNotReceive().RetryAsync(
+            Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await notifier.Received(1).EditAsync(
+            111L, 42,
+            Arg.Is<string>(text => text.Contains("nothing", StringComparison.OrdinalIgnoreCase)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task NotOwned_from_SucceedAsync_does_not_trigger_a_fallback_retry_or_fail()
     {
         var jobQueue = Substitute.For<IJobQueue>();

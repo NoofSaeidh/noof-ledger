@@ -81,7 +81,12 @@ public static class CategorizationSchema
                 ["items"] = new JsonObject
                 {
                     ["type"] = "array",
-                    ["minItems"] = 1,
+                    // 0, not 1: a message can genuinely describe zero purchases (a loan received,
+                    // not a purchase - see CategorizationPrompt's "заняла у Маши" example). Only 0
+                    // and 1 are valid values for minItems under this API's schema subset, and
+                    // requiring at least one item here would force the model to invent a spend it
+                    // was just told not to record.
+                    ["minItems"] = 0,
                     ["items"] = lineItem,
                 },
             },

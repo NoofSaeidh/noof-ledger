@@ -23,4 +23,15 @@ public class DashboardPageSourceTests
     {
         SourceText().Should().Contain("ISpendingReadModel");
     }
+
+    [Fact]
+    public void A_completed_transaction_with_no_line_items_reads_as_nothing_to_record_not_a_blank_list()
+    {
+        var source = SourceText();
+
+        source.Should().Contain("Items.Count == 0",
+            "a Completed transaction with zero line items means the categoriser read the message and " +
+            "found nothing to record (a loan received, not spending) - it must say so, not silently " +
+            "render an empty list that looks like a broken row");
+    }
 }

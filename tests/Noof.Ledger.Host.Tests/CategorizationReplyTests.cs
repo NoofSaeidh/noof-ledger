@@ -57,4 +57,16 @@ public class CategorizationReplyTests
             "I couldn't categorise this one for Cash automatically. It's saved, nothing is lost, " +
             "but you'll need to sort it out by hand for now.");
     }
+
+    [Fact]
+    public void Composes_the_nothing_to_record_text_distinctly_from_success_and_failure()
+    {
+        // A loan received ("заняла у Маши 5000 рсд") resolves with zero line items - a real,
+        // positive read of the message, not a failure. The operator must be able to tell this
+        // apart from ComposeFailure's "I couldn't categorise this" at a glance.
+        var text = CategorizationReply.ComposeNothingToRecord("Cash");
+
+        text.Should().Be("Read this for Cash — nothing here looks like spending, so nothing was recorded.");
+        text.Should().NotContain("couldn't categorise");
+    }
 }
