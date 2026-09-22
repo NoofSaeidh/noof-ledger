@@ -27,7 +27,7 @@ public sealed class CounterTests(CookieModeHostFixture fixture) : PageTest, ICla
         // case where the circuit is already live.
         await RetryUntilAsync(async () =>
         {
-            await Page.ClickAsync("button.btn");
+            await Page.ClickAsync("#counter-increment");
             await Expect(status).ToHaveTextAsync("Current count: 1", new() { Timeout = 2_000 });
         });
     }

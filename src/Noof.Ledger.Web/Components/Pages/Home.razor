@@ -9,101 +9,149 @@
 
 <PageTitle>Ledger</PageTitle>
 
-<h1>Ledger</h1>
+@* HtmlTag="h1" rather than Typo.h1: the document needs exactly one h1 for FocusOnNavigate and for
+   the smoke test, but Typo.h1 is display-sized type that would dwarf everything under it. *@
+<MudText HtmlTag="h1" Typo="Typo.h4" Class="mb-1">Ledger</MudText>
 
 @if (databaseUnavailable)
 {
-    // Distinct from "no spending yet" (below): that means the database answered and there is
-    // nothing in it, this means the database never answered at all. PostgreSQL on this machine is
-    // Manual-start and sometimes simply isn't running, so this is an expected front-page state, not
-    // a crash - conflating the two would tell the operator "you have no spending" when the truth is
-    // "we don't know".
-    <p id="database-unavailable" class="database-unavailable">
+    @* Distinct from "no spending yet" below: that means the database answered and there is nothing
+       in it, this means the database never answered at all. PostgreSQL on this machine is
+       Manual-start and sometimes simply isn't running, so this is an expected front-page state, not
+       a crash - conflating the two would say "you have no spending" when the truth is "we don't
+       know". *@
+    <MudAlert id="database-unavailable" Severity="Severity.Error" Variant="Variant.Outlined" Class="mt-6">
         Can't reach the database right now. Once PostgreSQL is running again, reload this page.
-    </p>
+    </MudAlert>
 }
 else
 {
-    <section>
-        <h2>Recent transactions</h2>
-        @if (recent.Count == 0)
-        {
-            <p>Nothing captured yet.</p>
-        }
-        else
-        {
-            @foreach (var transaction in recent)
-            {
-                <article id="txn-@transaction.Id" class="transaction @StatusClass(transaction.Status)">
-                    <header>
-                        <span class="wallet">@transaction.WalletName</span>
-                        <span class="when">@FormatOccurredAt(transaction)</span>
-                        <span class="status">@DescribeStatus(transaction.Status)</span>
-                    </header>
-                    <p class="raw">@transaction.RawText</p>
-                    @if (transaction.Status == TransactionStatus.Captured)
-                    {
-                        <p class="note">Awaiting categorisation - this message has not been read by the categoriser yet.</p>
-                    }
-                    else if (transaction.Status == TransactionStatus.Failed)
-                    {
-                        <p class="note note-failed">Categorisation failed. Nothing was recorded for this message.</p>
-                    }
-                    else if (transaction.Items.Count == 0)
-                    {
-                        // A Completed transaction with no line items is a real, positive read of
-                        // the message - the categoriser looked at it and found nothing to record
-                        // (a loan received, not a purchase, for example) - not a failure and not a
-                        // blank row that looks broken.
-                        <p class="note note-nothing-to-record">Read - nothing here looked like spending, so nothing was recorded.</p>
-                    }
-                    else
-                    {
-                        <ul>
-                            @foreach (var item in transaction.Items)
-                            {
-                                <li>
-                                    <span class="category">@(item.CategoryName ?? "Uncategorised")</span>
-                                    <span class="description">@item.Description</span>
-                                    @if (item.MerchantName is not null)
-                                    {
-                                        <span class="merchant">(@item.MerchantName)</span>
-                                    }
-                                    <span class="amount">@FormatMoney(item.Amount)</span>
-                                </li>
-                            }
-                        </ul>
-                    }
-                </article>
-            }
-        }
-    </section>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">
+        This month, from @summaryFirstDay.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+    </MudText>
 
-    <section class="month-totals">
-        <h2>This month (from @summaryFirstDay.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))</h2>
-        @if (currencyGroups.Count == 0)
-        {
-            <p>No spending recorded this month.</p>
-        }
-        else
-        {
+    @if (currencyGroups.Count == 0)
+    {
+        <MudPaper Outlined="true" Elevation="0" Class="pa-8 mb-8">
+            <MudText Typo="Typo.body1" Align="Align.Center" Class="mud-text-secondary">
+                No spending recorded this month.
+            </MudText>
+        </MudPaper>
+    }
+    else
+    {
+        <MudGrid Spacing="4" Class="mb-4">
             @foreach (var group in currencyGroups)
             {
-                <h3>@group.Currency</h3>
-                <table id="month-totals-@group.Currency">
-                    <tbody>
-                        @foreach (var total in group.Totals)
+                <MudItem xs="12" md="6">
+                    <MudPaper Outlined="true" Elevation="0" Class="pa-5 h-100">
+                        <MudText Typo="Typo.overline" Class="mud-text-secondary">@group.Currency this month</MudText>
+                        <MudText Typo="Typo.h4" Class="noof-amount">@FormatAmount(group.Total)</MudText>
+
+                        @* One category is not a distribution, so a ring of a single slice would be a
+                           decoration that says nothing. The table below is the real answer either
+                           way; the chart only earns its space once there is a shape to see. *@
+                        @if (group.Totals.Count > 1)
                         {
-                            <tr>
-                                <td>@total.CategoryName</td>
-                                <td class="amount">@total.Amount.ToString("N2", CultureInfo.InvariantCulture)</td>
-                            </tr>
+                            <div class="noof-chart">
+                                <MudChart T="double"
+                                          ChartType="ChartType.Donut"
+                                          ChartSeries="@group.Series"
+                                          ChartLabels="@group.Labels"
+                                          LegendPosition="Position.Right"
+                                          Height="220px" />
+                            </div>
                         }
-                    </tbody>
-                </table>
+
+                        <MudSimpleTable id="@($"month-totals-{group.Currency}")" Dense="true" Hover="true"
+                                        Elevation="0" Class="noof-totals-table mt-2">
+                            <tbody>
+                                @foreach (var total in group.Totals)
+                                {
+                                    <tr>
+                                        <td>@total.CategoryName</td>
+                                        <td class="noof-amount noof-numeric">@FormatAmount(total.Amount)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </MudSimpleTable>
+                    </MudPaper>
+                </MudItem>
             }
+        </MudGrid>
+    }
+
+    <MudText HtmlTag="h2" Typo="Typo.h6" Class="mt-8 mb-3">Recent transactions</MudText>
+
+    @if (recent.Count == 0)
+    {
+        <MudPaper Outlined="true" Elevation="0" Class="pa-8">
+            <MudText Typo="Typo.body1" Align="Align.Center" Class="mud-text-secondary">Nothing captured yet.</MudText>
+        </MudPaper>
+    }
+    else
+    {
+        @foreach (var transaction in recent)
+        {
+            <MudPaper id="@($"txn-{transaction.Id}")" Outlined="true" Elevation="0" Class="pa-4 mb-3">
+                <div class="noof-txn-header">
+                    <MudText Typo="Typo.body2">@transaction.WalletName</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@FormatOccurredAt(transaction)</MudText>
+                    <MudSpacer />
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                             Color="@StatusColour(transaction.Status)">
+                        @DescribeStatus(transaction.Status)
+                    </MudChip>
+                </div>
+
+                <MudText Typo="Typo.body1" Class="mt-2">@transaction.RawText</MudText>
+
+                @if (transaction.Status == TransactionStatus.Captured)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        Awaiting categorisation - this message has not been read by the categoriser yet.
+                    </MudText>
+                }
+                else if (transaction.Status == TransactionStatus.Failed)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Error">
+                        Categorisation failed. Nothing was recorded for this message.
+                    </MudText>
+                }
+                else if (transaction.Items.Count == 0)
+                {
+                    @* A Completed transaction with no line items is a real, positive read of the
+                       message - the categoriser looked at it and found nothing to record (a loan
+                       received, not a purchase, for example) - not a failure, and not a blank row
+                       that looks broken. *@
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        Read - nothing here looked like spending, so nothing was recorded.
+                    </MudText>
+                }
+                else
+                {
+                    <MudSimpleTable Dense="true" Elevation="0" Class="mt-2 noof-items-table">
+                        <tbody>
+                            @foreach (var item in transaction.Items)
+                            {
+                                <tr>
+                                    <td class="noof-item-category">@(item.CategoryName ?? "Uncategorised")</td>
+                                    <td>
+                                        @item.Description
+                                        @if (item.MerchantName is not null)
+                                        {
+                                            <span class="mud-text-secondary">&nbsp;&middot; @item.MerchantName</span>
+                                        }
+                                    </td>
+                                    <td class="noof-amount noof-numeric">@FormatMoney(item.Amount)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                }
+            </MudPaper>
         }
-    </section>
+    }
 }
 
 @code {
@@ -114,7 +162,15 @@ else
 
     readonly CancellationTokenSource cancellation = new();
 
-    sealed record CurrencyGroup(string Currency, IReadOnlyList<MonthTotal> Totals);
+    sealed record CurrencyGroup(string Currency, IReadOnlyList<MonthTotal> Totals)
+    {
+        public decimal Total => Totals.Sum(total => total.Amount);
+
+        public List<ChartSeries<double>> Series =>
+            [new() { Name = Currency, Data = new ChartData<double>([.. Totals.Select(total => (double)total.Amount)]) }];
+
+        public string[] Labels => [.. Totals.Select(total => total.CategoryName)];
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -127,9 +183,14 @@ else
             currencyGroups =
             [
                 .. summary.Totals
-                    .GroupBy(t => t.Currency.Value)
-                    .OrderBy(g => g.Key, StringComparer.Ordinal)
-                    .Select(g => new CurrencyGroup(g.Key, [.. g.OrderBy(t => t.CategoryName, StringComparer.Ordinal)])),
+                    .GroupBy(total => total.Currency.Value)
+                    .OrderBy(group => group.Key, StringComparer.Ordinal)
+                    .Select(group => new CurrencyGroup(group.Key,
+                    [
+                        .. group
+                            .OrderByDescending(total => total.Amount)
+                            .ThenBy(total => total.CategoryName, StringComparer.Ordinal),
+                    ])),
             ];
         }
         // Navigating away before the query returns cancels it via our own token, not a database
@@ -164,8 +225,9 @@ else
         exception is DbException
         || (exception.InnerException is { } inner && IsDatabaseUnavailable(inner));
 
-    static string FormatMoney(Money money) =>
-        $"{money.Amount.ToString("N2", CultureInfo.InvariantCulture)} {money.Currency}";
+    static string FormatAmount(decimal amount) => amount.ToString("N2", CultureInfo.InvariantCulture);
+
+    static string FormatMoney(Money money) => $"{FormatAmount(money.Amount)} {money.Currency}";
 
     // The row's own time zone, not the browser's and not the server's - decision P1-3. TimeZoneId is
     // stamped from a known IANA id at capture time, so a failure to resolve it here is a genuine bug
@@ -185,11 +247,11 @@ else
         _ => "Unknown",
     };
 
-    static string StatusClass(TransactionStatus status) => status switch
+    static Color StatusColour(TransactionStatus status) => status switch
     {
-        TransactionStatus.Captured => "status-awaiting",
-        TransactionStatus.Completed => "status-completed",
-        TransactionStatus.Failed => "status-failed",
-        _ => "status-unknown",
+        TransactionStatus.Captured => Color.Warning,
+        TransactionStatus.Completed => Color.Success,
+        TransactionStatus.Failed => Color.Error,
+        _ => Color.Default,
     };
 }

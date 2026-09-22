@@ -2,13 +2,19 @@
 @attribute [Authorize]
 @rendermode InteractiveServer
 
+@* Not a feature. This page is the only thing that proves the interactive server circuit is alive,
+   and now that the button is a MudButton it proves MudBlazor's interactive path works too - not
+   just that its stylesheet loaded. It is deliberately not in the navigation bar. *@
+
 <PageTitle>Counter</PageTitle>
 
-<h1>Counter</h1>
+<MudText HtmlTag="h1" Typo="Typo.h4" Class="mb-4">Counter</MudText>
 
 <p role="status">Current count: @count</p>
 
-<button class="btn" @onclick="Increment">Click me</button>
+<MudButton id="counter-increment" Variant="Variant.Filled" Color="Color.Primary" OnClick="Increment">
+    Click me
+</MudButton>
 
 @code {
     int count;

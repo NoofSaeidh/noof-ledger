@@ -11,8 +11,12 @@ namespace Noof.Ledger.Web;
 // page load, and not rendering properly with the network down. Neither is worth a typeface.
 internal static class NoofTheme
 {
-    const string SystemFonts =
-        "system-ui, -apple-system, 'Segoe UI Variable Text', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
+    // One family per element, never a comma-separated string: MudBlazor quotes each element as it
+    // builds the CSS variable, so "a, b, c" becomes the single family name 'a, b, c', which no
+    // machine has - and the whole app silently falls back to the browser's default serif. Nothing
+    // errors, nothing logs. ThemeTests holds this by checking the variable the app actually serves.
+    static readonly string[] SystemFonts =
+        ["system-ui", "-apple-system", "Segoe UI Variable Text", "Segoe UI", "Roboto", "Helvetica Neue", "Arial"];
 
     // Amounts line up column-wise only in a monospaced face, and a ledger whose figures do not line
     // up is harder to read than an unstyled one. Applied as a class from app.css rather than through
@@ -45,20 +49,20 @@ internal static class NoofTheme
         },
         Typography = new Typography
         {
-            Default = new DefaultTypography { FontFamily = [SystemFonts] },
-            H1 = new H1Typography { FontFamily = [SystemFonts], FontWeight = "600" },
-            H2 = new H2Typography { FontFamily = [SystemFonts], FontWeight = "600" },
-            H3 = new H3Typography { FontFamily = [SystemFonts], FontWeight = "600" },
-            H4 = new H4Typography { FontFamily = [SystemFonts], FontWeight = "600" },
-            H5 = new H5Typography { FontFamily = [SystemFonts], FontWeight = "600" },
-            H6 = new H6Typography { FontFamily = [SystemFonts], FontWeight = "600" },
-            Subtitle1 = new Subtitle1Typography { FontFamily = [SystemFonts] },
-            Subtitle2 = new Subtitle2Typography { FontFamily = [SystemFonts] },
-            Body1 = new Body1Typography { FontFamily = [SystemFonts] },
-            Body2 = new Body2Typography { FontFamily = [SystemFonts] },
-            Button = new ButtonTypography { FontFamily = [SystemFonts], TextTransform = "none" },
-            Caption = new CaptionTypography { FontFamily = [SystemFonts] },
-            Overline = new OverlineTypography { FontFamily = [SystemFonts] },
+            Default = new DefaultTypography { FontFamily = SystemFonts },
+            H1 = new H1Typography { FontFamily = SystemFonts, FontWeight = "600" },
+            H2 = new H2Typography { FontFamily = SystemFonts, FontWeight = "600" },
+            H3 = new H3Typography { FontFamily = SystemFonts, FontWeight = "600" },
+            H4 = new H4Typography { FontFamily = SystemFonts, FontWeight = "600" },
+            H5 = new H5Typography { FontFamily = SystemFonts, FontWeight = "600" },
+            H6 = new H6Typography { FontFamily = SystemFonts, FontWeight = "600" },
+            Subtitle1 = new Subtitle1Typography { FontFamily = SystemFonts },
+            Subtitle2 = new Subtitle2Typography { FontFamily = SystemFonts },
+            Body1 = new Body1Typography { FontFamily = SystemFonts },
+            Body2 = new Body2Typography { FontFamily = SystemFonts },
+            Button = new ButtonTypography { FontFamily = SystemFonts, TextTransform = "none" },
+            Caption = new CaptionTypography { FontFamily = SystemFonts },
+            Overline = new OverlineTypography { FontFamily = SystemFonts },
         },
         LayoutProperties = new LayoutProperties
         {

@@ -1,62 +1,110 @@
-body {
-    font-family: system-ui, sans-serif;
-    margin: 0;
+/* Everything here is what MudBlazor does not already do. Colours come from its theme variables
+   rather than literals, so NoofTheme stays the single place the palette is decided. */
+
+.noof-appbar {
+    border-bottom: 1px solid var(--mud-palette-divider);
+    backdrop-filter: blur(6px);
 }
 
-.page {
-    padding: 1rem 2rem;
+.noof-brand {
+    letter-spacing: -0.01em;
 }
 
-.btn {
-    padding: 0.4rem 0.8rem;
+.noof-brand-accent {
+    color: var(--mud-palette-primary);
 }
 
-.transaction {
-    border: 1px solid #d0d0d0;
-    border-radius: 4px;
-    padding: 0.5rem 1rem;
-    margin-bottom: 0.75rem;
+/* Figures line up column-wise only in a monospaced face, and a ledger whose numbers do not line up
+   is harder to read than an unstyled one. Tabular numerals keep the digits the same width in the
+   variable-width faces that have them. */
+.noof-amount {
+    font-family: 'Cascadia Mono', Consolas, 'SF Mono', 'Liberation Mono', monospace;
+    font-variant-numeric: tabular-nums;
 }
 
-.transaction .status {
-    font-weight: 600;
-}
-
-.transaction.status-failed .status,
-.note-failed {
-    color: #b00020;
-}
-
-.transaction.status-awaiting .status {
-    color: #8a6100;
-}
-
-.month-totals table {
-    border-collapse: collapse;
-    margin: 0 0 1rem;
-}
-
-.month-totals td {
-    padding: 0.2rem 0.75rem;
-}
-
-.month-totals td.amount {
+/* width:1% plus nowrap is the table idiom for "this column is as wide as its content"; without it
+   the browser splits the width evenly and the figures float in the middle of the card. */
+.noof-numeric {
     text-align: right;
+    white-space: nowrap;
+    width: 1%;
 }
 
-.test-ok {
-    color: #146c2e;
+.noof-txn-header,
+.noof-secret-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
 }
 
-.test-fail {
-    color: #b00020;
+.noof-totals-table td,
+.noof-items-table td {
+    border-bottom: none;
+    padding-top: 0.2rem;
+    padding-bottom: 0.2rem;
 }
 
-.database-unavailable {
-    border: 1px solid #b00020;
-    background: #fdeceb;
-    color: #7a0016;
-    border-radius: 4px;
-    padding: 0.75rem 1rem;
-    font-weight: 600;
+.noof-item-category {
+    color: var(--mud-palette-text-secondary);
+    white-space: nowrap;
+    width: 1%;
+}
+
+.noof-chart {
+    margin: 0.5rem 0 0.25rem;
+}
+
+.noof-secret-entry {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.noof-secret-entry .mud-input-control {
+    flex: 1 1 18rem;
+    margin-top: 0;
+}
+
+/* The sign-in form keeps native inputs, because its POST is what signs you in and a component that
+   may or may not emit a name attribute is not worth that risk. So the MudBlazor look has to be
+   borrowed by hand here - and only here. */
+.noof-login {
+    max-width: 24rem;
+    margin: 4rem auto 0;
+}
+
+.noof-login-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.noof-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.noof-field-label {
+    font-size: 0.8125rem;
+    color: var(--mud-palette-text-secondary);
+}
+
+.noof-input {
+    font: inherit;
+    color: var(--mud-palette-text-primary);
+    background: transparent;
+    border: 1px solid var(--mud-palette-lines-inputs, var(--mud-palette-divider));
+    border-radius: var(--mud-default-borderradius);
+    padding: 0.6rem 0.75rem;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.noof-input:focus {
+    outline: none;
+    border-color: var(--mud-palette-primary);
+    box-shadow: 0 0 0 1px var(--mud-palette-primary);
 }

@@ -3,11 +3,48 @@
 
 <PageTitle>Sign in</PageTitle>
 
-<h1>Sign in</h1>
+<div class="noof-login">
+    <MudPaper Outlined="true" Elevation="0" Class="pa-8">
+        <MudText HtmlTag="h1" Typo="Typo.h5" GutterBottom="true">Sign in</MudText>
 
-<form method="post" action="/account/login/submit">
-    <AntiforgeryToken />
-    <label>Username <input name="username" autocomplete="username" /></label>
-    <label>Password <input name="password" type="password" autocomplete="current-password" /></label>
-    <button type="submit">Sign in</button>
-</form>
+        @if (Failed is not null)
+        {
+            @* The endpoint has redirected here with ?failed=1 since Phase 0b and this page never read
+               it, so a wrong password returned an identical blank form and said nothing at all.
+               Which of the two was wrong is deliberately not said: naming it would turn this form
+               into a way to find out whether a username exists. *@
+            <MudAlert id="login-failed" Severity="Severity.Error" Variant="Variant.Outlined"
+                      Dense="true" Class="mb-6">
+                That username and password did not match.
+            </MudAlert>
+        }
+
+        @* Native inputs inside MudBlazor chrome, deliberately. This POST is what calls SignInAsync,
+           which needs an HttpContext an interactive circuit does not have, so the page stays static
+           SSR - and a component that may or may not emit a name attribute is not worth the risk on
+           the one page whose entire job is a form POST. *@
+        <form method="post" action="/account/login/submit" class="noof-login-form">
+            <AntiforgeryToken />
+
+            <label class="noof-field">
+                <span class="noof-field-label">Username</span>
+                <input name="username" autocomplete="username" class="noof-input" />
+            </label>
+
+            <label class="noof-field">
+                <span class="noof-field-label">Password</span>
+                <input name="password" type="password" autocomplete="current-password" class="noof-input" />
+            </label>
+
+            <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled"
+                       Color="Color.Primary" FullWidth="true" Class="mt-2">
+                Sign in
+            </MudButton>
+        </form>
+    </MudPaper>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "failed")]
+    public string? Failed { get; set; }
+}
