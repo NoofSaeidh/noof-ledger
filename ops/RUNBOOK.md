@@ -113,3 +113,99 @@ in `PostgresFixture`: the list of created databases was a plain `List<string>`
 mutated from parallel tests, and one failed drop used to abort the loop and skip
 every remaining database. Teardown now continues past a failure and ends by
 naming what it could not remove, pointing here.
+
+## Manual acceptance — the end-to-end check no test can do
+
+The automated suite never talks to Telegram or to Anthropic. Everything between
+"a person types a message" and "a figure appears on the dashboard" is verified
+here, by hand, once per phase. Budget ten minutes.
+
+**It costs real money** — a few tenths of a cent. Step 5 makes one live call to
+Claude Haiku. That is the point of the exercise; the eight tests that would do
+it automatically stay skipped precisely so a test run never spends anything.
+
+### Before you start
+
+```powershell
+pwsh -File ops/publish.ps1            # refuses to publish if a single test fails
+```
+
+Then confirm the database is in the state you think it is:
+
+```powershell
+$c = (Get-Content "$env:LOCALAPPDATA\NoofLedger\db.connection" -Raw).Trim()
+$p = @{}; foreach ($x in $c.Split(';')) { if ($x -match '^\s*([^=]+)=(.*)$') { $p[$Matches[1].Trim()] = $Matches[2].Trim() } }
+$env:PGPASSWORD = $p['Password']
+& 'C:\Program Files\PostgreSQL\18\bin\psql.exe' -h $p['Host'] -p $p['Port'] -U $p['Username'] -d noof_ledger -c `
+  "SELECT (SELECT count(*) FROM app_user) users, (SELECT count(*) FROM app_secret) secrets, (SELECT count(*) FROM transactions) txns, (SELECT count(*) FROM wallets) wallets, (SELECT count(*) FROM categories) cats;"
+```
+
+A freshly recreated ledger reads `0 | 0 | 0 | 1 | 20`.
+
+### The run
+
+1. **Start it.** `.\publish\Noof.Ledger.Host.exe` — it binds loopback only and
+   refuses to start otherwise. Open the address it prints.
+
+   `Auth:Mode` is `Off` by default, so there is no sign-in. If you set it to
+   `Cookie` you must first create a user — `noof_ledger` has **no user row** —
+   with `.\publish\Noof.Ledger.Host.exe user set-password noof`.
+
+2. **The dashboard answers.** `/` shows an empty month. Stop PostgreSQL and
+   reload: it must say it cannot reach the database, **not** return a 500. Start
+   PostgreSQL again.
+
+3. **Paste the secrets** at `/settings/secrets`: the Telegram bot token from
+   BotFather, and an Anthropic API key. Press **Test** beside the key — it calls
+   the models endpoint, which costs nothing, and says plainly whether the key
+   works. Neither value is ever echoed back to the page.
+
+4. **Claim the bot.** Message your bot once from Telegram. The first chat that
+   writes becomes the owner; every other chat is rejected from then on, before
+   its text is even read. The poller picks the token up within seconds — no
+   restart.
+
+5. **Send `кофе 250 рсд`.** Expect, in order:
+   - an immediate reply, *"Saved. I'll add the amount once it's categorised."*;
+   - within a few seconds, **that same message edited in place** to show 250 RSD,
+     a category, and the wallet.
+
+6. **Check the figure came from your text, not from the model.** Send
+   `такси 1 500 рсд`. It must read 1500, not 500 — the amount is verified
+   character-for-character against what you typed, and a space is a number
+   boundary. This is the check that failed in Phase 1B's closing review.
+
+7. **Check a message with no currency.** Send `обед 700`. It must be recorded as
+   RSD, the single hard default. Choosing it from Telegram is deferred; see
+   `docs/BACKLOG.md`.
+
+8. **The dashboard shows it.** Reload `/`. Both spends appear with this month's
+   totals per currency, never summed across currencies.
+
+### Afterwards
+
+Confirm the write-once guarantee is real rather than promised — this one was
+missing from the live database for a whole phase before anybody checked:
+
+```sql
+SELECT tgname FROM pg_trigger
+WHERE tgrelid = 'public.merchant_aliases'::regclass AND NOT tgisinternal;
+```
+
+Both `merchant_aliases_write_once_guard` and `merchant_aliases_no_truncate` must
+be listed. One alone means the database predates the migration that adds the
+second, and `TRUNCATE merchant_aliases` would succeed.
+
+### If something goes wrong
+
+- **No reply at all** — the bot token is wrong, or another process is polling the
+  same bot. Telegram gives updates to one poller.
+- **"Saved" but never edited** — the worker could not reach the model. Check the
+  console for an account-level failure (401/402/403); it stops claiming new jobs
+  for five minutes rather than burning the whole backlog's retry budget.
+- **Nothing at all after the machine was off** — Telegram discards unfetched
+  updates after 24 hours and a bot cannot read history. That is a property of the
+  platform, not a bug here; four researched options are costed in
+  `docs/BACKLOG.md`, none built, by decision.
+- **Leftover `noof_test_*` databases after a killed test run** —
+  `pwsh -File ops/clean-test-databases.ps1`.
