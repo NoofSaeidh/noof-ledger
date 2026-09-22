@@ -1,6 +1,6 @@
 namespace Noof.Ledger.Host.Startup;
 
-public static class CaptureTimeZoneGuard
+internal static class CaptureTimeZoneGuard
 {
     public static TimeZoneInfo Resolve(string configuredId)
     {

@@ -6,7 +6,7 @@ using Noof.Ledger.Persistence;
 
 namespace Noof.Ledger.Host.Cli;
 
-public static class UserCommand
+internal static class UserCommand
 {
     public static bool TryParse(string[] args, out string username)
     {

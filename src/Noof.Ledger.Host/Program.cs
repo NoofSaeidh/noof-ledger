@@ -39,7 +39,6 @@ builder.Services.AddSingleton<IPasswordHasher, PasswordHasherAdapter>();
 
 var categorizationOptions = new CategorizationWorkerOptions();
 builder.Configuration.GetSection("Categorization").Bind(categorizationOptions);
-builder.Services.AddSingleton(categorizationOptions);
 
 builder.Services.AddNoofPersistence(builder.Configuration, categorizationOptions.MaxAttempts);
 
@@ -67,12 +66,7 @@ builder.Services.AddNoofTelegram();
 
 builder.Services.AddNoofAi(builder.Configuration);
 
-builder.Services.AddHostedService(sp => new CategorizationWorker(
-    sp.GetRequiredService<IServiceScopeFactory>(),
-    sp.GetRequiredService<TimeProvider>(),
-    sp.GetRequiredService<CategorizationWorkerOptions>(),
-    CategorizationWorker.CreateWorkerId(),
-    sp.GetRequiredService<ILogger<CategorizationWorker>>()));
+builder.Services.AddNoofWorkers(categorizationOptions);
 
 var app = builder.Build();
 
@@ -113,4 +107,4 @@ app.Lifetime.ApplicationStarted.Register(() =>
 
 app.Run();
 
-public partial class Program;
+internal partial class Program;

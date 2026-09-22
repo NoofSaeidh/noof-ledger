@@ -9,9 +9,9 @@ using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Host.Workers;
 
-public enum CategorizationTickResult { Idle, Processed, Failed }
+internal enum CategorizationTickResult { Idle, Processed, Failed }
 
-public sealed class CategorizationWorker(
+internal sealed class CategorizationWorker(
     IServiceScopeFactory scopeFactory,
     TimeProvider timeProvider,
     CategorizationWorkerOptions options,

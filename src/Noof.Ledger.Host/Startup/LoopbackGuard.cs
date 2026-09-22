@@ -2,7 +2,7 @@ using System.Net;
 
 namespace Noof.Ledger.Host.Startup;
 
-public static class LoopbackGuard
+internal static class LoopbackGuard
 {
     public static void AssertSafe(IReadOnlyList<string> boundAddresses, string authMode)
     {

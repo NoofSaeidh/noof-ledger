@@ -1,6 +1,6 @@
 namespace Noof.Ledger.Host.Workers;
 
-public sealed class CategorizationWorkerOptions
+internal sealed class CategorizationWorkerOptions
 {
     // Several multiples of AnthropicOptions.Timeout's 90 seconds (Task 3), plus room for the DB
     // write and the Telegram edit, so a normal in-flight attempt never has its own lease reclaimed

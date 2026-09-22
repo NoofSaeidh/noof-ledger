@@ -57,13 +57,7 @@ public class PublicSurfaceTests
         ["Noof.Ledger.Telegram"] = ["TelegramRegistration"],
         ["Noof.Ledger.Fx"] = [],
         ["Noof.Ledger.Receipts"] = [],
-        ["Noof.Ledger.Host"] =
-        [
-            "AuthSchemes", "LocalOwnerHandler", "PasswordHasherAdapter", "UserCommand",
-            "AccountEndpoints", "Program", "CaptureTimeZoneGuard", "DataProtectionSetup",
-            "LoopbackGuard", "CategorizationReply", "CategorizationTickResult",
-            "CategorizationWorker", "CategorizationWorkerOptions",
-        ],
+        ["Noof.Ledger.Host"] = [],
     };
 
     [Theory]

@@ -3,7 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Noof.Ledger.Host.Startup;
 
-public static class DataProtectionSetup
+internal static class DataProtectionSetup
 {
     public static void Configure(IServiceCollection services, DirectoryInfo keyRingDirectory) =>
         services.AddDataProtection()
