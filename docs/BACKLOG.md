@@ -38,6 +38,10 @@ between 1 and 7 with no way to correct a single miscategorised item.
 is pinned by a test, so the precedence guard already knows a human outranks the model. The retrofit is
 a page, not a migration.
 
+**Partly taken by Phase 2 (2026-09-22).** A reply to the bot's echo (*"это не еда, а подарок"*) now
+corrects a record through the model. A one-click category change on a single line item in the
+dashboard is still this item.
+
 ---
 
 ## Revalidating authentication state for long-lived circuits
@@ -535,3 +539,25 @@ wide empty margins, which looks under-filled for a dashboard; on a laptop it is 
 honest fix is not a bigger number but a layout that uses the extra width — three cards across
 instead of two — and that is worth doing when there are more than two currencies to show.
 
+---
+
+## Editing a transaction in the dashboard
+
+**Wanted.** Change the amount, date, category or merchant of a record from the web UI, or cancel it
+there.
+
+**Why it is not in Phase 2.** Phase 2 makes Telegram the place to correct a record — reply, the
+Изменить button, or editing the original message — because that is where the operator already is when
+the echo arrives. The dashboard edit is a second surface over the same revision history.
+
+**Cost already paid.** `transaction_revisions` records every state, and `CategorizationAuthority.User`
+already outranks the model, so a dashboard edit is a page plus a revision row, not a schema change.
+
+---
+
+## Rolling back to an earlier revision
+
+**Wanted.** "Undo that correction" — restore the record as it was before the last change.
+
+**Why it is not in Phase 2.** Cancel/restore covers the case that matters most; `transaction_revisions`
+keeps every state so rollback needs no migration when it is built.

@@ -7,11 +7,11 @@ The spec was approved without answering these, so **each has taken its stated de
 |---|---|---|---|
 | Q1 | Postgres credential: Windows-integrated auth (SSPI) or a DPAPI-protected password file? | **Neither** — a generated password in a plaintext file outside the repo | Phase 1 |
 | Q3 | Write `%UserProfile%\.wslconfig`? WSL is running uncapped — 50% of RAM (~32 GB) + ~16 GB swap, and `ext4.vhdx` grows but never shrinks | **Not written** | Any time — unrelated to this project now containers are out |
-| Q4 | Canonical mid-rate source for RSD: `open.er-api.com` for all five currencies, or add NBS *srednji kurs* for RSD? | **`open.er-api.com`** for all five | Phase 5 |
+| Q4 | Canonical mid-rate source for RSD: `open.er-api.com` for all five currencies, or add NBS *srednji kurs* for RSD? | **`open.er-api.com`** for all five | Phase 7 (was 5) |
 | Q5 | Accept the larger Phase 1, or split it and accept rework? | **Larger Phase 1** — build the capture-path contracts once | Settled by approval |
-| Q6 | Move voice and receipts earlier than Phase 4? | **Keep at Phase 4** | Phase 2 |
-| Q7 | Send the top ~50 canonical merchant names as a prompt hint? Best single lever for canonicalisation consistency, but puts a slice of the shopping profile in each request | **No** | Phase 4 |
-| Q8 | OneDrive backup: dump only, or dump + Data Protection key ring? | **Dump only** — a restore means re-entering two secrets | Phase 8 |
+| Q6 | Move voice and receipts earlier than Phase 4? | ✅ **Answered 2026-09-22: voice moves to Phase 3**, right after natural-language capture; receipts stay later (Phase 6) | Settled |
+| Q7 | Send the top ~50 canonical merchant names as a prompt hint? Best single lever for canonicalisation consistency, but puts a slice of the shopping profile in each request | **No** | Phase 6 (was 4) |
+| Q8 | OneDrive backup: dump only, or dump + Data Protection key ring? | **Dump only** — a restore means re-entering two secrets | Phase 10 (was 8) |
 
 ## Why each default is safe to defer
 
@@ -23,7 +23,7 @@ The spec was approved without answering these, so **each has taken its stated de
 
 **Q5** — Settled by approving the spec.
 
-**Q6** — Dependency-driven: receipts need per-item categorisation (P1) and wallets/currencies (P2). Moving them earlier means building them twice.
+**Q6** — Answered. Voice never depended on wallets — it rode along with receipts. It is the operator's main capture path, so it follows directly after natural-language capture (`docs/superpowers/specs/2026-09-22-natural-language-capture.md`). Receipts keep their dependency on the money model.
 
 **Q7** — Reversible at zero cost; it is one prompt field. Worth revisiting once real canonicalisation quality is visible.
 
@@ -161,7 +161,7 @@ quietly dropped:**
    replies that it is saved and will be processed; the amount and balance appear when the message is
    edited after processing. The acceptance criterion's "still saves" holds — what is saved is the raw
    text, and nothing is ever lost.
-2. CLAUDE.md is absolute that no user-facing number originates from a model. **Resolution:
+2. *(Superseded 2026-09-22 by P2-1 below.)* CLAUDE.md is absolute that no user-facing number originates from a model. **Resolution:
    quote-and-verify, which the spec already describes at :159.** The model returns the *substring* it
    believes is the amount; C# asserts that substring occurs verbatim in the stored `raw_text` and then
    parses it itself with `decimal.Parse`. The number is therefore computed by C# from verified input,
@@ -355,3 +355,24 @@ documented limitation rather than a problem being solved — and the mitigations
 ready to pick up when the product is actually in daily use and the gap is felt rather than imagined.
 
 **Order of work is unaffected:** Phase 1B was always first, and remains so.
+
+---
+
+## Phase 2 decisions — taken 2026-09-22
+
+### P2-1 — quote-and-verify is removed; the safety is undo, not rejection
+
+The operator's words: *"не надо делать валидацию. просто в чат тг должен присылаться распознанный
+вариант. и его можно уже руками поправить. или написать как обработать. но главное его можно
+отменить и изменить. это важнее guarda"*.
+
+Quote-and-verify (P1-4 point 2) rejected every amount not written as digits — *"штуку евро"*,
+*"полтос"*, and most speech-to-text output. Voice is the main capture path, so the guard blocked the
+main use case. The model now interprets amounts and dates freely; the bot echoes the stored result
+with **Отменить** / **Изменить**; a reply in free text corrects it; every state is kept in
+`transaction_revisions`. The CLAUDE.md money rule keeps its force for reports, totals and balances,
+and no longer applies to capture. Full design:
+`docs/superpowers/specs/2026-09-22-natural-language-capture.md`.
+
+**Do not re-propose a validation layer on capture** — evidence spans, verbatim checks or sanity bounds
+— without the operator asking. It was considered and refused in favour of cheap undo.

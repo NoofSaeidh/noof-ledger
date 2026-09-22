@@ -2,11 +2,11 @@
 
 Personal finance tracker. Telegram bot captures spending (text, voice, receipt photos), an LLM categorises it per line item, a local Blazor dashboard shows it across multiple wallets and currencies. C# / .NET 10, EF Core, strict TDD, local hosting, **public repo**.
 
-> **Status:** spec approved (`docs/superpowers/specs/2026-09-19-noof-finance-design.md`); **Phases 0, 0b, 1A, 1B, 1C and 1D complete** — solution, EF Core model and migrations, PostgreSQL money-storage gate, cookie authentication as the sole mode, the `user set-password` verb, the loopback interlock (unconditional now, not tied to an auth mode), a Blazor Server shell, Telegram capture with a durable queue, LLM categorisation with quote-and-verify amounts and a write-once merchant identity table, a dashboard reading it all back through a read model, each assembly's public surface shrunk to what actually crosses its boundary, and the whole interface rebuilt on MudBlazor with a dark theme, a navigation bar and sign-out. 484 solution tests, all green — the Playwright browser tests are in the solution now, so `dotnet test --solution` runs them too and needs Chromium present. An opt-in live-model suite of 8 stays skipped unless `NOOF_LEDGER_LIVE_ANTHROPIC_KEY` is set; `ops/publish.ps1` produces a runnable host. Next is Phase 2 (money model — exact balances across all five currencies under `ru-RU` and `sr-Latn-RS`, and a proven backup restore). Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
+> **Status:** spec approved (`docs/superpowers/specs/2026-09-19-noof-finance-design.md`); **Phases 0, 0b, 1A, 1B, 1C and 1D complete** — solution, EF Core model and migrations, PostgreSQL money-storage gate, cookie authentication as the sole mode, the `user set-password` verb, the loopback interlock (unconditional now, not tied to an auth mode), a Blazor Server shell, Telegram capture with a durable queue, LLM categorisation with a write-once merchant identity table, a dashboard reading it all back through a read model, each assembly's public surface shrunk to what actually crosses its boundary, and the whole interface rebuilt on MudBlazor with a dark theme, a navigation bar and sign-out. 484 solution tests, all green — the Playwright browser tests are in the solution now, so `dotnet test --solution` runs them too and needs Chromium present. An opt-in live-model suite of 8 stays skipped unless `NOOF_LEDGER_LIVE_ANTHROPIC_KEY` is set; `ops/publish.ps1` produces a runnable host. Next is Phase 2, natural-language capture (`docs/superpowers/specs/2026-09-22-natural-language-capture.md`, which also renumbers the later phases): the model interprets amounts and dates, the bot echoes the result, the operator cancels or corrects it. Voice is Phase 3, the money model Phase 4. Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
 >
 > Deferred **decisions** live in `docs/OPEN-QUESTIONS.md`; deferred **work** lives in `docs/BACKLOG.md`. Check both before proposing something as missing.
 >
-> **Authentication is always on now, and `noof_ledger` has no user row**, so the operator must run `user set-password noof` before the app is usable at all.
+> **`noof_ledger` holds the operator's real credentials now.** Never run tests, experiments or manual checks against it, or call the live model, without an explicit request. Tests use the `noof_ledger_test_template` clones only.
 
 ---
 
@@ -63,7 +63,10 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
 
 **Money**
 - Money is `decimal` + `Currency` in the domain. Never `double`, never `float`. Every method signature, test, component and report sees a `decimal`.
-- No number in user-facing output ever originates from a model. The LLM phrases figures that C# computed.
+- Reports, totals and balances are computed by C#; the LLM only phrases figures C# computed.
+- **Capture is the exception** *(settled 2026-09-22)*: the model interprets amounts and dates from
+  natural speech with no validation layer. The safety is the echo in Telegram plus cancel and correct,
+  not rejection. Do not re-add verbatim checks or sanity bounds — `docs/OPEN-QUESTIONS.md` P2-1.
 
 **Architecture**
 - Projects are split: `Domain` ← `Application` ← (`Persistence` · `Ai` · `Fx` · `Receipts` · `Telegram` · `Web`) ← `Host`.

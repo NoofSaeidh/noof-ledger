@@ -157,7 +157,7 @@ A currency exchange is `Transaction(Kind=Transfer)` with an owned **`FxConversio
 - **Write order:** save + enqueue in one transaction → reply to Telegram immediately with total, wallet and running balance (model-free numbers) → categorise → `editMessageText` in place.
 - **Two implementations from day one:** `LlmCategorizer` (claude-haiku-4-5) and `DeterministicOfflineCategorizer`, so *"the LLM can be changed"* is real rather than nominal. Offline rows carry `CategorizedBy = Offline`, are visibly provisional, and auto-re-enqueue when the network returns.
 - **One model, one property.** `AnthropicOptions` has exactly one `Model`. No `AdviserModel`, no `EscalationModel`, no `FallbackModel` — making the schema *incapable* of expressing a tier is stronger than choosing not to configure one.
-- **Amounts never originate in a model.** Quote-and-verify: the model returns the **substring** it believes is an amount, never a number; C# asserts that substring occurs verbatim in the input and re-parses it. A hallucinated figure becomes structurally impossible.
+- ~~**Amounts never originate in a model.** Quote-and-verify.~~ **Superseded 2026-09-22** by `2026-09-22-natural-language-capture.md`: the model interprets amounts and dates from natural speech; the bot echoes the result and the operator cancels or corrects it.
 
 ---
 
@@ -225,6 +225,8 @@ Every bulk operation writes a **`RecategorizationBatch`** with full before/after
 ---
 
 ## 12. Phases
+
+> **Renumbered 2026-09-22** — see `2026-09-22-natural-language-capture.md`. Natural-language capture is now Phase 2 and voice Phase 3; every phase below from 2 on moves down, and a final live-calibration phase is added.
 
 | # | Phase | Delivers |
 |---|---|---|

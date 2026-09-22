@@ -7,7 +7,8 @@ each line item, and see where the money went on a local Blazor dashboard that un
 wallets and currencies.
 
 > **Status: the capture path works end to end.** A message typed to the Telegram bot becomes a
-> categorised expense on the dashboard, with every figure computed by C# from the text you wrote.
+> categorised expense on the dashboard. Next (Phase 2): natural-language capture — *"купил вчера
+> штуку евро"* is read by the model, echoed back, and can be cancelled or corrected by a reply.
 > 484 tests, all green — browser tests included.
 >
 > Still missing before it can carry a year of real spending: **balances** (there is no arithmetic
