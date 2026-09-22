@@ -8,9 +8,9 @@ namespace Noof.Ledger.Persistence;
         + "UserCommand validates it eagerly to print a friendly CLI error before the host starts.")]
 public static class LedgerConnectionString
 {
-    public const string DefaultDatabase = "noof_ledger";
+    const string DefaultDatabase = "noof_ledger";
 
-    public static string CredentialFile => Path.Combine(
+    internal static string CredentialFile => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "NoofLedger",
         "db.connection");
