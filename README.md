@@ -6,9 +6,14 @@ Capture spending through a Telegram bot — typed, spoken, or photographed — l
 each line item, and see where the money went on a local Blazor dashboard that understands multiple
 wallets and currencies.
 
-> **Status: in development.** The foundation and the authentication layer are built and tested.
-> Telegram capture, LLM categorisation and the dashboard itself are not written yet. Nothing here
-> is ready to track real money.
+> **Status: the capture path works end to end.** A message typed to the Telegram bot becomes a
+> categorised expense on the dashboard, with every figure computed by C# from the text you wrote.
+> 449 solution tests and 13 browser tests, all green.
+>
+> Still missing before it can carry a year of real spending: **balances** (there is no arithmetic
+> over wallets yet), **voice notes and receipt photos**, **currency exchange**, and — the one that
+> matters most — **a backup that has actually been restored at least once**. An untested backup is
+> a hypothesis.
 
 ## Why it looks the way it does
 
@@ -36,8 +41,10 @@ its owner is logged in. Against that owner, a login screen buys nothing — that
 holds the database credentials.
 
 `Auth:Mode` (`Off` | `Cookie`) selects **which handler is registered**; it never branches the
-middleware pipeline. `[Authorize]` ships on every page from the first commit, so a forgotten flag
-cannot leave a route ungated.
+middleware pipeline. Every routable page declares its authorization, and a test enumerates the
+pages to prove it: one that says nothing is a failure, and the sign-in page is the only one allowed
+to be anonymous. That rule exists because the convention had already drifted — a leftover template
+page was reachable without signing in, and nothing said so.
 
 The interlock that makes this safe: **if Kestrel binds anything but loopback while auth is off, the
 host logs the reason and exits.** The day you widen the binding to reach the dashboard from a

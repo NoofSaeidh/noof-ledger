@@ -2,7 +2,7 @@
 
 Personal finance tracker. Telegram bot captures spending (text, voice, receipt photos), an LLM categorises it per line item, a local Blazor dashboard shows it across multiple wallets and currencies. C# / .NET 10, EF Core, strict TDD, local hosting, **public repo**.
 
-> **Status:** spec approved (`docs/superpowers/specs/2026-09-19-noof-finance-design.md`); **Phases 0, 0b, 1A and 1B complete** — solution, EF Core model and migrations, PostgreSQL money-storage gate, authentication in two modes, the `user set-password` verb, the loopback interlock, a Blazor Server shell, Telegram capture with a durable queue, LLM categorisation with quote-and-verify amounts and a write-once merchant identity table, and a dashboard reading it all back through a read model. 441 solution tests plus 12 Playwright E2E tests, all green, and an opt-in live-model suite of 8 that is skipped unless `NOOF_LEDGER_LIVE_ANTHROPIC_KEY` is set; `ops/publish.ps1` produces a runnable host. Next is Phase 2 (money model — exact balances across all five currencies under `ru-RU` and `sr-Latn-RS`, and a proven backup restore). Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
+> **Status:** spec approved (`docs/superpowers/specs/2026-09-19-noof-finance-design.md`); **Phases 0, 0b, 1A and 1B complete** — solution, EF Core model and migrations, PostgreSQL money-storage gate, authentication in two modes, the `user set-password` verb, the loopback interlock, a Blazor Server shell, Telegram capture with a durable queue, LLM categorisation with quote-and-verify amounts and a write-once merchant identity table, and a dashboard reading it all back through a read model. 452 solution tests plus 13 Playwright E2E tests, all green, and an opt-in live-model suite of 8 that is skipped unless `NOOF_LEDGER_LIVE_ANTHROPIC_KEY` is set; `ops/publish.ps1` produces a runnable host. Next is Phase 2 (money model — exact balances across all five currencies under `ru-RU` and `sr-Latn-RS`, and a proven backup restore). Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
 >
 > Deferred **decisions** live in `docs/OPEN-QUESTIONS.md`; deferred **work** lives in `docs/BACKLOG.md`. Check both before proposing something as missing.
 >
@@ -79,8 +79,27 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
 
 **Testing**
 - TDD: a failing test first, for all behaviour. Exempt: migrations, DTOs, `Program.cs` wiring.
+- **Watch the new test fail before you let it pass.** A guard that has never been seen red may be
+  enforcing nothing — a grep that matches no file, a rule whose subject set is empty. Break the
+  thing deliberately, see the failure name it, put it back.
+- **Never seed a test with `DateTimeOffset.UtcNow` and then assert exact equality against a value
+  read back from PostgreSQL.** `timestamptz` keeps microseconds; a .NET tick is 100ns. A timestamp
+  whose final tick digit is non-zero is truncated on the round trip, so the assertion fails most
+  runs but not all — the worst kind of flake. Seed from a fixed literal, or compare with
+  `BeCloseTo`. This shipped twice before it was caught.
 - `global.json` must contain `{"test":{"runner":"Microsoft.Testing.Platform"}}` or `dotnet test` fails outright on SDK 10.0.204.
 - The inner red-green loop never touches the network or a real model. Live model calls live in an opt-in suite that is skipped by default.
+
+**The model** *(settled)*
+- Reached through **`Microsoft.Extensions.AI`'s `IChatClient`** (`raw.AsIChatClient(model)`), not the
+  Anthropic SDK's native `Messages.Create`. Operator's decision, and it fits: a raw `JsonElement`
+  schema reaches the wire verbatim, and `ChatResponseFormat.ForJsonSchema` lands as
+  `output_config.format` — Anthropic's structured-outputs mode. That **replaces** strict tool use
+  rather than working around its absence: `strict` constrains a tool's *input*, and our answer is
+  the *response*. Verified by capturing the outgoing HTTP body, not by reading documentation.
+- **Never set temperature.** It is `[Obsolete]` in the SDK and therefore a compile error here.
+  Determinism comes from the schema's enums.
+- `Noof.Ledger.Ai` is the only project that may touch the SDK, asserted by a test.
 
 **Secrets — this is a public repo**
 - Secrets are encrypted in the database and entered through the UI. Never in `appsettings.json`, never in the repo, never in a log, an exception message, or an LLM prompt.
