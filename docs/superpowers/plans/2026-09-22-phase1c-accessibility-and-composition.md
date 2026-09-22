@@ -1024,22 +1024,6 @@ dotnet_diagnostic.IDE0161.severity = error
 dotnet_diagnostic.CA1515.severity = error
 dotnet_code_quality.CA1515.output_kind = ConsoleApplication, DynamicallyLinkedLibrary
 
-[src/Noof.Ledger.Domain/**]
-# Domain and Application exist to be referenced. Their public types are the contract every other
-# assembly is written against, so "could this be internal?" has a standing answer of no. The list
-# is not unguarded - PublicSurfaceTests locks it, and adding to it is an edit a reviewer sees.
-dotnet_diagnostic.CA1515.severity = none
-
-[src/Noof.Ledger.Application/**]
-dotnet_diagnostic.CA1515.severity = none
-
-[src/Noof.Ledger.Persistence/Migrations/**]
-# EF scaffolds migration classes public and rewrites them on the next scaffold. CLAUDE.md already
-# exempts their generated companions from code style for the same reason; a rule that argues with
-# a code generator is a rule that loses every time the generator runs.
-dotnet_diagnostic.CA1515.severity = none
-dotnet_diagnostic.CA1861.severity = none
-
 # An internal type nobody derives from is sealed; this is free once the types above are internal.
 dotnet_diagnostic.CA1852.severity = error
 
@@ -1053,6 +1037,27 @@ dotnet_diagnostic.CA2263.severity = error
 # NOT currently caught despite EnforceCodeStyleInBuild - see Step 1a below for why.
 dotnet_diagnostic.IDE0005.severity = error
 
+# Every narrowing section below this line. A property belongs to whichever section header precedes
+# it, so anything added above [*.cs]'s end must stay above this comment or it silently becomes a
+# rule about one directory instead of about the repository.
+
+[src/Noof.Ledger.Domain/**]
+# Domain and Application exist to be referenced. Their public types are the contract every other
+# assembly is written against, so "could this be internal?" has a standing answer of no. The list
+# is not unguarded - PublicSurfaceTests locks it, and adding to it is an edit a reviewer sees.
+dotnet_diagnostic.CA1515.severity = none
+
+[src/Noof.Ledger.Application/**]
+dotnet_diagnostic.CA1515.severity = none
+
+[src/Noof.Ledger.Persistence/Migrations/**]
+# EF scaffolds migration classes public, with their own using directives, and rewrites both on the
+# next scaffold. CLAUDE.md already exempts their generated companions from code style for the same
+# reason; a rule that argues with a code generator is a rule that loses every time it runs.
+dotnet_diagnostic.CA1515.severity = none
+dotnet_diagnostic.CA1861.severity = none
+dotnet_diagnostic.IDE0005.severity = none
+
 [tests/**]
 # Test names are sentences: Every_routable_page_declares_its_authorization. That is the convention
 # throughout this repository and it is deliberate.
@@ -1062,6 +1067,8 @@ dotnet_diagnostic.CA1707.severity = none
 # Microsoft Testing Platform, so without this line CA1515 would fire on all of them by default.
 dotnet_diagnostic.CA1515.severity = none
 ```
+
+**The ordering above is load-bearing and the first two attempts at this task both died on it.** In EditorConfig a property belongs to whichever section header precedes it, until the next header. The previous draft interleaved the narrowing sections into the middle of `[*.cs]`, which quietly moved `CA1852`, `CA1862`, `CA1861`, `CA2263` and `IDE0005` *inside* the migrations glob: `CA1861` contradicted itself three lines apart, and `CA1862`/`CA2263` never ran anywhere except in migration files, so both of the genuine violations Step 3 names produced **zero** errors. A rule scoped to the wrong section looks exactly like a rule with nothing to report. Keep every repository-wide rule above the comment line, and every narrowing below it.
 
 - [ ] **Step 1a: Make `IDE0005` actually fire**
 
@@ -1095,11 +1102,12 @@ For each diagnostic, exactly one of:
 |---|---|---|
 | `CA1515` | 4: `LedgerConnectionString`, `PersistenceRegistration`, `AiRegistration`, `TelegramRegistration` | Suppress **at the declaration** — `[SuppressMessage("Maintainability", "CA1515", Justification = "...")]` — never globally. All four are genuinely named by another assembly, so the rule is simply wrong about them, and a file-local suppression keeps it live everywhere else. Write a real justification in each; "suppressing CA1515" is not one. |
 | `CA1852` | 0 | Nothing to do. |
-| `CA1861` | 2, both in `Migrations/20260921065115_AddCaptureModel.cs` | Already handled by the `Migrations/**` section above. If you see any outside `Migrations/`, fix those. |
-| `CA1862` | 1, `src/Noof.Ledger.Persistence/Auth/EfUserStore.cs:10` | A genuine fix — use the `StringComparison` overload. |
-| `CA2263` | 1, `tests/Noof.Ledger.Persistence.Tests/CaptureModelTests.cs:41` | A genuine fix — use the generic overload. |
+| `CA1861` | 2, both in `Migrations/20260921065115_AddCaptureModel.cs` | Silenced by the `Migrations/**` section. If any appears **outside** `Migrations/`, fix it. |
+| `CA1862` | 1, `src/Noof.Ledger.Persistence/Auth/EfUserStore.cs:10` — `u.Username.ToLower() == username.ToLower()` | A genuine fix: use the `StringComparison` overload. |
+| `CA2263` | 1, `tests/Noof.Ledger.Persistence.Tests/CaptureModelTests.cs:41` — `new[] { nameof(Category.Slug) }` into `SequenceEqual` | A genuine fix: use the generic overload. |
+| `IDE0005` | **unmeasured outside `Migrations/`** | 4 were seen inside migration files and are now silenced there. Nobody has yet seen what it reports across the rest of the tree, because both previous attempts stopped before that point. Report the real count. If it exceeds ~15, stop and say so — Step 1a's escape hatch exists precisely for this. |
 
-If your build disagrees with this table, **the table is the claim under test** — report the difference rather than quietly adapting. A count that grew means the scoping above is not working the way it was measured to.
+If your build disagrees with this table, **the table is the claim under test** — report the difference rather than quietly adapting. Two failure shapes to name explicitly: a count that *grew* means the narrowing sections are not matching what they were meant to, and a count that *fell to zero for a rule the table says has findings* means that rule is scoped into the wrong section and is silently inert. The second is the more dangerous of the two and has already happened twice on this task.
 
 - [ ] **Step 4: Build clean**
 
