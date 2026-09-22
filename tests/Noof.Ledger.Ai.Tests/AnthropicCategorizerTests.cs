@@ -161,6 +161,42 @@ public class AnthropicCategorizerTests
         assertion.Which.Kind.Should().Be(expectedKind, $"status {(int)statusCode} must classify as {expectedKind}");
     }
 
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.PaymentRequired)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task A_401_402_or_403_is_marked_account_level_so_one_bad_key_cannot_be_mistaken_for_a_per_job_failure(
+        HttpStatusCode statusCode)
+    {
+        var (categorizer, handler) = Build();
+        handler.Enqueue(statusCode, AnthropicResponses.GenericError("some_error", "boom"));
+        var request = new CategorizationRequest("Coffee 3.50 EUR", Categories, NoMerchantHints, NoMerchantHints);
+
+        var act = () => categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
+
+        var assertion = await act.Should().ThrowAsync<ModelCallException>();
+        assertion.Which.Kind.Should().Be(ModelFailureKind.Terminal, "the locked status table is unchanged");
+        assertion.Which.IsAccountLevel().Should().BeTrue(
+            "401/402/403 are properties of the account, not of this job's request");
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.NotFound)]
+    [InlineData(HttpStatusCode.RequestEntityTooLarge)]
+    public async Task A_genuinely_per_job_terminal_status_is_not_marked_account_level(HttpStatusCode statusCode)
+    {
+        var (categorizer, handler) = Build();
+        handler.Enqueue(statusCode, AnthropicResponses.GenericError("some_error", "boom"));
+        var request = new CategorizationRequest("Coffee 3.50 EUR", Categories, NoMerchantHints, NoMerchantHints);
+
+        var act = () => categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
+
+        var assertion = await act.Should().ThrowAsync<ModelCallException>();
+        assertion.Which.Kind.Should().Be(ModelFailureKind.Terminal);
+        assertion.Which.IsAccountLevel().Should().BeFalse();
+    }
+
     [Fact]
     public async Task A_missing_key_is_a_terminal_failure_without_ever_calling_the_network()
     {

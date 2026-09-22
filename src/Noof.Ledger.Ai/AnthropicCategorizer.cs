@@ -139,7 +139,10 @@ public sealed class AnthropicCategorizer(IAnthropicClientFactory clientFactory, 
         }
         catch (AnthropicApiException ex)
         {
-            throw new ModelCallException(Classify(ex.StatusCode), $"Anthropic call failed with status {(int)ex.StatusCode}.", ex);
+            var exception = new ModelCallException(Classify(ex.StatusCode), $"Anthropic call failed with status {(int)ex.StatusCode}.", ex);
+            if (IsAccountLevel(ex.StatusCode))
+                exception.AsAccountLevel();
+            throw exception;
         }
         catch (TaskCanceledException ex)
         {
@@ -163,6 +166,12 @@ public sealed class AnthropicCategorizer(IAnthropicClientFactory clientFactory, 
         400 or 401 or 402 or 403 or 404 or 413 => ModelFailureKind.Terminal,
         _ => ModelFailureKind.Transient,
     };
+
+    // 401/402/403 are the three statuses the locked table marks Terminal for a reason that has
+    // nothing to do with this specific request - a bad key, no credit, a revoked permission. Every
+    // other queued job would fail identically against the same account, which is exactly what
+    // CategorizationWorker uses this to guard against.
+    static bool IsAccountLevel(HttpStatusCode statusCode) => (int)statusCode is 401 or 402 or 403;
 
     static bool TryGetText(ChatResponse response, out string text)
     {

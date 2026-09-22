@@ -17,6 +17,7 @@ public class CategorizationWorkerOptionsTests
         options.BackoffCap.Should().Be(TimeSpan.FromMinutes(64));
         options.MerchantHintLimit.Should().Be(10);
         options.MaxCanonicalizationsPerJob.Should().Be(3);
+        options.AccountCooldown.Should().Be(TimeSpan.FromMinutes(5));
     }
 
     [Theory]

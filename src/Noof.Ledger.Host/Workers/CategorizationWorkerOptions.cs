@@ -33,6 +33,14 @@ public sealed class CategorizationWorkerOptions
     // and category and simply carry no merchant.
     public int MaxCanonicalizationsPerJob { get; init; } = 3;
 
+    // How long the worker stops claiming ANY new job after an account-level failure (a bad key, no
+    // credit, a revoked permission - see ModelCallExceptionExtensions.IsAccountLevel). Those three
+    // statuses fail every queued job identically, not just the one that happened to run first;
+    // without this, a mistyped key destroys a whole backlog's attempt budget within seconds instead
+    // of giving the operator a window to fix it. Matches Lease's order of magnitude: long enough to
+    // stop hammering, short enough that a fixed key recovers within minutes, not hours.
+    public TimeSpan AccountCooldown { get; init; } = TimeSpan.FromMinutes(5);
+
     public TimeSpan ComputeBackoff(int attemptCount)
     {
         var exponent = Math.Max(0, attemptCount - 1);

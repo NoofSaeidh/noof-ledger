@@ -19,6 +19,12 @@ public sealed class CategorizationWorker(
     ILogger<CategorizationWorker> logger)
     : BackgroundService
 {
+    // In-memory, per worker-instance state: this host process's own window of "an account-level
+    // failure just happened, do not claim more work yet." Deliberately not persisted - a second
+    // host process backs off independently the same way, and a restart clears it, which is fine
+    // because a restart means a fresh attempt is exactly what should happen.
+    DateTimeOffset accountCooldownUntil = DateTimeOffset.MinValue;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
@@ -49,6 +55,11 @@ public sealed class CategorizationWorker(
             // captured before then would be permanently Failed within minutes.
             var keyStatus = await secretStore.GetStatusAsync(SecretKeys.AnthropicApiKey, cancellationToken);
             if (keyStatus.State is not SecretState.Present)
+                return CategorizationTickResult.Idle;
+
+            // Same reasoning, same placement, as the key-presence check above: checked before
+            // claiming, so a cooldown never burns an attempt on the next job in line either.
+            if (now < accountCooldownUntil)
                 return CategorizationTickResult.Idle;
 
             var job = await jobQueue.ClaimAsync(workerId, options.Lease, cancellationToken);
@@ -206,6 +217,19 @@ public sealed class CategorizationWorker(
                     "SucceedAsync failed for job {JobId} after its line items were already committed; the transaction is left as Completed",
                     job.Id);
             }
+        }
+        catch (ModelCallException ex) when (ex.IsAccountLevel())
+        {
+            // 401/402/403: the account, not this job's request, is what's broken - every other
+            // queued job would fail identically against it. Handled as Transient regardless of
+            // ex.Kind (Terminal, per the locked status table) so this one occurrence cannot
+            // permanently fail the job it happened to land on, and claiming pauses for a cooldown
+            // so the rest of the backlog is not burned through while the key stays bad.
+            accountCooldownUntil = timeProvider.GetUtcNow() + options.AccountCooldown;
+            logger.LogWarning(
+                "Account-level Anthropic failure on job {JobId} ({Message}); pausing new claims for {Cooldown}",
+                job.Id, ex.Message, options.AccountCooldown);
+            await HandleModelFailureAsync(jobQueue, store, notifier, job, subject, ModelFailureKind.Transient, ex.Message, cancellationToken);
         }
         catch (ModelCallException ex)
         {
