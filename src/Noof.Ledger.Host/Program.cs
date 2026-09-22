@@ -101,7 +101,15 @@ builder.Services.AddSingleton(categorizationOptions);
 // AddHttpClient registers IHttpClientFactory, never an HttpClient - AnthropicClientFactory takes a
 // real client, so it has to be built through a lambda. Resolving HttpClient directly would fail at
 // the first request with a message that names neither this line nor the factory.
-builder.Services.AddHttpClient("anthropic");
+//
+// RemoveAllLoggers for the same reason as the telegram client below: IHttpClientFactory's default
+// logging handlers redact header values via HttpClientFactoryOptions.ShouldRedactHeaderValue, but
+// that is a per-client options delegate reachable by anything that later calls
+// services.Configure<HttpClientFactoryOptions>("anthropic", ...) - the same class of "a more
+// specific configured override beats a filter" hazard as a log-level filter. x-api-key carries the
+// Anthropic key on every request; removing the logging handlers means there is nothing left for
+// such a change to re-expose.
+builder.Services.AddHttpClient("anthropic").RemoveAllLoggers();
 builder.Services.AddScoped<IAnthropicClientFactory>(sp => new AnthropicClientFactory(
     sp.GetRequiredService<ISecretStore>(),
     sp.GetRequiredService<IHttpClientFactory>().CreateClient("anthropic"),
