@@ -248,11 +248,11 @@ Windows-only and a certificate-protected key ring **cannot decrypt what DPAPI wr
 secret must be re-entered; the Linux port is 2–4 days; and a public-repo finance application ends up on
 the open internet with no rate limiting on its login.
 
-## `LedgerConnectionString`'s `NOOF_TEST_PG` fallback is a landmine for a locally launched publish output
+## `LedgerConnectionString`'s `NOOF_TEST_PG` fallback was a landmine for a locally launched publish output — fixed 2026-09-22, commit `59e4783`
 
 **Symptom, hit while closing Phase 1B.** `ops/publish.ps1`'s published `appsettings.json` ships
 `ConnectionStrings:Ledger` empty by design (the operator fills it in on the real machine).
-`LedgerConnectionString.Resolve` falls back to the `NOOF_TEST_PG` environment variable when that's
+`LedgerConnectionString.Resolve` fell back to the `NOOF_TEST_PG` environment variable when that's
 empty, rewriting its `Database=postgres` to `Database=noof_ledger` — the real database name. A dev
 shell with `NOOF_TEST_PG` already set (ordinary local test setup, unrelated to publishing) that then
 launches `publish/Noof.Ledger.Host.dll` directly connects to, and writes to, the operator's real
@@ -261,18 +261,20 @@ handful of read-only dashboard queries plus repeated idempotent `ReleaseExpiredL
 against `categorization_jobs` before being killed. No row was inserted, deleted, or dropped, but the
 near miss is the point.
 
-**Why it is not scheduled.** `NOOF_TEST_PG` existing at all is deliberate test-suite convenience
-(`docs/OPEN-QUESTIONS.md` / `ops/reset-database-auth.ps1`), and the fallback chain is reasonable for
-a test process. The unsafe case is specifically a human launching the **published output** directly
-in a shell that happens to have that variable set — an operator with a real deployment normally has
-`ConnectionStrings:Ledger` (or the credential file) configured and never hits the fallback at all.
+**Why it stayed dangerous until it did not.** `NOOF_TEST_PG` existing at all is deliberate
+test-suite convenience (`docs/OPEN-QUESTIONS.md` / `ops/reset-database-auth.ps1`), and the fallback
+chain was reasonable for a test process. The unsafe case was specifically a human launching the
+**published output** directly in a shell that happens to have that variable set — an operator with
+a real deployment normally has `ConnectionStrings:Ledger` (or the credential file) configured and
+never hits the fallback at all.
 
-**The shape of a fix.** Either publish should refuse to fall back to `NOOF_TEST_PG` at all (it is a
-test-only signal, not a production one, and `Resolve` has no way to tell "test project" from
-"published host" apart today), or the published `appsettings.json` should set an environment name
-that makes the fallback chain visibly different in `Release`. Cheap once someone sits down with it;
-not attempted here because fixing it is a behavior change to shipped connection-resolution code, not
-this task's job of writing tests and docs.
+**The fix, commit `59e4783` (2026-09-22).** `LedgerConnectionString.Resolve` no longer consults
+`NOOF_TEST_PG` at all — the fallback was removed outright rather than gated, since `Resolve` has no
+way to tell "test project" from "published host" apart. Tests read the variable through
+`Noof.Ledger.TestKit.DatabaseSettings` instead, which both end-to-end fixtures already pass
+`ConnectionStrings__Ledger` explicitly through, so nothing that legitimately used the fallback lost
+anything. The regression test was proved to fail first — the old fallback was put back, the test
+went red, then the fallback was removed again — before being allowed to pass.
 
 ## Two lessons about researching prices, kept deliberately
 
@@ -283,3 +285,42 @@ Azure's real prices are in the **retail prices API** (`prices.azure.com/api/reta
 
 **Check whether a free tier is permanent or a 12-month trial.** That distinction flipped one
 recommendation entirely, and it is invisible in every comparison article.
+
+---
+
+# Choosing the default currency from Telegram
+
+**Status:** deferred by the operator, 2026-09-22. A single hard default (`RSD`) ships instead.
+
+A message that states no currency — `кофе 250` — has to become money in some currency. Until this
+lands, that is always `CategorizationWorkerOptions.DefaultCurrency`, which is `RSD`.
+
+**What was actually wrong before the default existed**, and why this is not a nice-to-have: `currency`
+was a `required` property in the response schema, so constrained decoding *forced* the model to emit
+one of the five codes whether or not the message said anything. The model had no way to say "not
+stated" and no way to be right except by luck. The amount was verified against the raw text and the
+currency beside it was a guess — with a hundredfold consequence between RSD and EUR. Making the
+property optional and substituting a known default is what removed the guess; the Telegram command
+below only makes the default the operator's to choose.
+
+**What to build.** A bot command — `/currency eur`, or a one-tap keyboard — that sets the default for
+every later message that omits one. It should:
+
+- store the choice, not hold it in configuration, so it survives a restart and is visible on the
+  settings page next to the other operator-owned values;
+- apply only to messages captured *after* the change, never retroactively — a transaction already
+  recorded in RSD was recorded in RSD, and re-interpreting history on a setting change is the same
+  class of mistake as bucketing a day by the current time zone rather than the row's (decision P1-3);
+- confirm the change in the chat, so the operator can see it took effect without opening the dashboard.
+
+**Where the default lives today, and where it should move.** `CategorizationWorkerOptions.DefaultCurrency`,
+bound from the `Categorization` configuration section. When this item is built it becomes a stored
+value the bot command writes and the worker reads per job, and the configuration key should be removed
+rather than left as a second source of truth that silently disagrees.
+
+**The alternative not taken, recorded so it is not re-proposed as new.** The default could have been
+derived from the wallet the capture lands in — wallets already carry a currency, and Phase 2 gives
+every account one wallet per currency. It was not taken because the operator asked for a chosen
+default rather than an inferred one, and because a wallet-derived default cannot express "I am
+travelling, price things in EUR for now" without moving the whole capture to a different wallet.
+Worth revisiting when Phase 2 makes multi-wallet capture real.
