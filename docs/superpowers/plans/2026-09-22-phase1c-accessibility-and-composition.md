@@ -524,6 +524,16 @@ git commit -m "refactor(persistence): register the stores inside the assembly th
 
 ---
 
+## The rule Task 2 paid for: grep before you narrow
+
+Task 2's file list was wrong in a way that cost real time. It listed the Persistence files and `Program.cs`, and missed that `src/Noof.Ledger.Host/Cli/UserCommand.cs` hand-rolled `AddDbContext<LedgerDbContext>` and `AddScoped<IUserStore, EfUserStore>()` of its own. The moment those types went internal, a file the plan never mentioned stopped compiling.
+
+**So, in every remaining task, before changing a single `public` to `internal`:** grep the whole repository for each type name you are about to narrow and list where it is used. Anything outside the owning assembly and its own test project is a surprise. Handle it the way Task 2 did — route the caller through the public registration or an Application interface — **never** by widening accessibility back or by granting `InternalsVisibleTo` to a production assembly.
+
+Watch for one specific compiler error while doing it. `CS0050` fires when a `public` member's signature mentions a type that has become internal; Task 2 hit it on `PostgresFixture.CreateContextAsync()`, which returned `LedgerDbContext`. The fix is to narrow the **test helper** to `internal`, which requirement 1 explicitly permits — not to re-widen the `src` type.
+
+---
+
 ## Task 3: `AddNoofAi`
 
 **Files:**
