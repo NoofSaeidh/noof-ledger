@@ -6034,7 +6034,7 @@ git commit -m "feat(host): CategorizationWorker claims, calls, verifies, writes,
 
 **Before you start — a prerequisite, and it is a real one:** this task consumes `ISpendingReadModel` (built in Task 6) and `ISecretProbe` (built in Task 3), both of which are **registered in DI by Task 7**, which owns every `Program.cs` change in this phase. Step 1 below verifies those registrations exist before you write a page against them; if they do not, stop and finish Task 7 rather than adding a second registration here.
 
-- [ ] **Step 1: Confirm the prerequisites**
+- [x] **Step 1: Confirm the prerequisites**
 
 ```bash
 grep -n "ISpendingReadModel\|AddScoped<ISecretProbe\|AddSingleton<ISecretProbe\|AddTransient<ISecretProbe" src/Noof.Ledger.Host/Program.cs
@@ -6082,7 +6082,7 @@ Also confirm (read-only, no edit needed): `tests/Noof.Ledger.Architecture.Tests/
 
 ---
 
-- [ ] **Step 2: Expose the clone database's connection string for direct seeding**
+- [x] **Step 2: Expose the clone database's connection string for direct seeding**
 
 `DashboardTests` (Step 4) needs to write a categorised transaction straight into the clone database, the same way `ReadStoredSecretAsync` already reads one back. In `tests/Noof.Ledger.E2E.Tests/CookieModeHostFixture.cs`, add a property next to the existing `BaseUrl`/`CapturedOutputLines`:
 
@@ -6100,7 +6100,7 @@ Also confirm (read-only, no edit needed): `tests/Noof.Ledger.Architecture.Tests/
 
 This is purely additive; nothing else in the file changes.
 
-- [ ] **Step 3: Write the failing dashboard E2E tests**
+- [x] **Step 3: Write the failing dashboard E2E tests**
 
 Create `tests/Noof.Ledger.E2E.Tests/DashboardTests.cs`:
 
@@ -6251,13 +6251,13 @@ public sealed class DashboardTests(CookieModeHostFixture fixture) : PageTest, IC
 
 > `TelegramChatId`/`TelegramMessageId` carries a unique index (`TransactionConfiguration`), so both seeded rows in the second test share one `chatId` derived from `DateTimeOffset.UtcNow.Ticks` (unique enough across runs) with distinct literal `messageId`s (`1`, `2`) rather than anything random that could collide with itself.
 
-- [ ] **Step 4: Run it and watch it fail**
+- [x] **Step 4: Run it and watch it fail**
 
 Run: `dotnet test --project tests/Noof.Ledger.E2E.Tests/Noof.Ledger.E2E.Tests.csproj`
 
 Expected: `LoginTests`, `SmokeTests`, `SettingsSecretsTests` still PASS (Step 2 was purely additive). Both new `DashboardTests` facts FAIL — `Microsoft.Playwright.PlaywrightException: Timeout ... exceeded` from `Expect(article).ToContainTextAsync(...)` / `Expect(Page.Locator($"#txn-{awaitingId}"))...`, because `Home.razor` still renders "Nothing to show yet." with no `#txn-*` elements at all.
 
-- [ ] **Step 5: Write the failing Test-button E2E tests**
+- [x] **Step 5: Write the failing Test-button E2E tests**
 
 Add two facts and a helper to `tests/Noof.Ledger.E2E.Tests/SettingsSecretsTests.cs`, alongside the existing four facts (leave everything already there unchanged):
 
@@ -6324,13 +6324,13 @@ Add two facts and a helper to `tests/Noof.Ledger.E2E.Tests/SettingsSecretsTests.
     }
 ```
 
-- [ ] **Step 6: Run it and watch it fail**
+- [x] **Step 6: Run it and watch it fail**
 
 Run: `dotnet test --project tests/Noof.Ledger.E2E.Tests/Noof.Ledger.E2E.Tests.csproj`
 
 Expected: the two new `DashboardTests` facts still FAIL as in Step 4. `Testing_an_invalid_Anthropic_key_reports_failure_without_echoing_it` FAILS with a Playwright timeout from `Page.Locator($"#test-{SecretKeys.AnthropicApiKey}").ClickAsync()` — no such button exists yet. `A_secret_with_no_registered_probe_shows_no_Test_button` PASSES already (there is no `#test-*` button of any kind on the current page, so "not visible" is trivially true) — that is expected and will stay true after Step 9 too, since it is asserting an absence.
 
-- [ ] **Step 7: Write the failing architecture (source) tests**
+- [x] **Step 7: Write the failing architecture (source) tests**
 
 Create `tests/Noof.Ledger.Architecture.Tests/DashboardPageSourceTests.cs`:
 
@@ -6378,13 +6378,13 @@ Add one more fact to `tests/Noof.Ledger.Architecture.Tests/SecretsPageSourceTest
     }
 ```
 
-- [ ] **Step 8: Run the architecture tests and watch the new ones fail**
+- [x] **Step 8: Run the architecture tests and watch the new ones fail**
 
 Run: `dotnet test --project tests/Noof.Ledger.Architecture.Tests/Noof.Ledger.Architecture.Tests.csproj`
 
 Expected: the three existing `SecretsPageSourceTests` facts and every other architecture test still PASS. `DashboardPageSourceTests.Formats_every_amount_and_date_against_invariant_culture` and `.Reads_spending_through_the_read_model_only` FAIL — the current `Home.razor` contains neither `"CultureInfo.InvariantCulture"` nor `"ISpendingReadModel"`. `SecretsPageSourceTests.Test_button_calls_the_probe_port_not_the_secret_store` FAILS — the current `Secrets.razor` contains no `"ProbeAsync("`.
 
-- [ ] **Step 9: Write the dashboard**
+- [x] **Step 9: Write the dashboard**
 
 Replace `src/Noof.Ledger.Web/Components/Pages/Home.razor` in full:
 
@@ -6477,23 +6477,45 @@ Replace `src/Noof.Ledger.Web/Components/Pages/Home.razor` in full:
     IReadOnlyList<RecentTransaction> recent = [];
     IReadOnlyList<CurrencyGroup> currencyGroups = [];
     DateOnly summaryFirstDay;
+    bool databaseUnavailable;
 
     sealed record CurrencyGroup(string Currency, IReadOnlyList<MonthTotal> Totals);
 
     protected override async Task OnInitializedAsync()
     {
-        recent = await ReadModel.RecentAsync(20, CancellationToken.None);
+        // The application must still serve this page with no database at all - BootTests and
+        // AuthModeTests both assert GET / returns 200 with the connection deliberately broken, and
+        // the spec asks for "waiting for database" to be a real UI state rather than a crash. This
+        // page prerenders, so an escaping exception here is a 500 on the site's front door.
+        try
+        {
+            recent = await ReadModel.RecentAsync(20, CancellationToken.None);
 
-        var summary = await ReadModel.ThisMonthAsync(CancellationToken.None);
-        summaryFirstDay = summary.FirstDay;
-        currencyGroups =
-        [
-            .. summary.Totals
-                .GroupBy(t => t.Currency.Value)
-                .OrderBy(g => g.Key, StringComparer.Ordinal)
-                .Select(g => new CurrencyGroup(g.Key, [.. g.OrderBy(t => t.CategoryName, StringComparer.Ordinal)])),
-        ];
+            var summary = await ReadModel.ThisMonthAsync(CancellationToken.None);
+            summaryFirstDay = summary.FirstDay;
+            currencyGroups =
+            [
+                .. summary.Totals
+                    .GroupBy(t => t.Currency.Value)
+                    .OrderBy(g => g.Key, StringComparer.Ordinal)
+                    .Select(g => new CurrencyGroup(g.Key, [.. g.OrderBy(t => t.CategoryName, StringComparer.Ordinal)])),
+            ];
+        }
+        catch (Exception exception) when (IsDatabaseUnavailable(exception))
+        {
+            databaseUnavailable = true;
+        }
     }
+
+    // Npgsql's own execution strategy decides a connection failure is "likely transient" and
+    // re-throws it wrapped in an InvalidOperationException, retry-on-failure configured or not, so
+    // the type that actually crosses the await is not the DbException - that sits one level down.
+    // Measured against a deliberately broken connection, not assumed. Walking the chain rather than
+    // matching the wrapper keeps this from being defeated by one more layer, while still requiring
+    // a real database exception to be in there: an ordinary bug in this page is not swallowed.
+    static bool IsDatabaseUnavailable(Exception exception) =>
+        exception is DbException
+        || (exception.InnerException is { } inner && IsDatabaseUnavailable(inner));
 
     static string FormatMoney(Money money) =>
         $"{money.Amount.ToString("N2", CultureInfo.InvariantCulture)} {money.Currency}";
@@ -6573,7 +6595,7 @@ Append to `src/Noof.Ledger.Web/wwwroot/app.css` (the file stays plain — this i
 
 > No `@rendermode` directive is added — see locked decision 3. `ISpendingReadModel` and everything it returns (`RecentTransaction`, `RecentLineItem`, `MonthSummary`, `MonthTotal`) live in `Noof.Ledger.Application.Reporting`, already reachable through the existing `ProjectReference` to `Noof.Ledger.Application` — no `.csproj` edit.
 
-- [ ] **Step 10: Add the Test button**
+- [x] **Step 10: Add the Test button**
 
 Replace `src/Noof.Ledger.Web/Components/Pages/Settings/Secrets.razor` in full:
 
@@ -6701,25 +6723,25 @@ Replace `src/Noof.Ledger.Web/Components/Pages/Settings/Secrets.razor` in full:
 
 > `row.Probe = Probes.SingleOrDefault(...)` uses `SingleOrDefault`, not `FirstOrDefault`: two probes claiming the same `SecretKey` is a DI wiring bug (Task 3's registration, not this page's business), and this makes that bug throw loudly during `OnInitializedAsync` instead of silently picking one. Whatever DI resolves for `Probes` today (Task 3 registers `AnthropicKeyProbe`, `SecretKey = SecretKeys.AnthropicApiKey`) is exactly what determines which rows get a button — the Telegram rows get none, matching "What this plan deliberately does NOT do."
 
-- [ ] **Step 11: Run the architecture tests again**
+- [x] **Step 11: Run the architecture tests again**
 
 Run: `dotnet test --project tests/Noof.Ledger.Architecture.Tests/Noof.Ledger.Architecture.Tests.csproj`
 
 Expected: PASS — all `DashboardPageSourceTests` and `SecretsPageSourceTests` facts, and every pre-existing architecture test including `ProjectReferenceTests.Project_references_exactly_its_allowed_set` and `.Web_package_references_are_exactly_its_allowed_set` (both untouched by this task, confirming Step 1's claim that no reference or package changed).
 
-- [ ] **Step 12: Run the E2E tests again**
+- [x] **Step 12: Run the E2E tests again**
 
 Run: `dotnet test --project tests/Noof.Ledger.E2E.Tests/Noof.Ledger.E2E.Tests.csproj`
 
 Expected: PASS — `LoginTests`, `SmokeTests`, all six `SettingsSecretsTests` facts, and both `DashboardTests` facts. `Testing_an_invalid_Anthropic_key_reports_failure_without_echoing_it` may report SKIPPED instead, with the reachability message, on a machine with no route to `api.anthropic.com` — that is expected there and is not a failure.
 
-- [ ] **Step 13: Confirm the rest of the suite is unaffected**
+- [x] **Step 13: Confirm the rest of the suite is unaffected**
 
 Run: `dotnet test --solution NoofLedger.slnx`
 
 Expected: all green, no regressions. `Noof.Ledger.E2E.Tests` is not part of `NoofLedger.slnx` (see locked decision 8), so this run and Step 12 check disjoint things, same as every earlier E2E task in this project.
 
-- [ ] **Step 14: Commit**
+- [x] **Step 14: Commit**
 
 ```bash
 git add src/Noof.Ledger.Web/Components/Pages/Home.razor src/Noof.Ledger.Web/Components/Pages/Settings/Secrets.razor src/Noof.Ledger.Web/wwwroot/app.css tests/Noof.Ledger.Architecture.Tests/DashboardPageSourceTests.cs tests/Noof.Ledger.Architecture.Tests/SecretsPageSourceTests.cs tests/Noof.Ledger.E2E.Tests/DashboardTests.cs tests/Noof.Ledger.E2E.Tests/SettingsSecretsTests.cs tests/Noof.Ledger.E2E.Tests/CookieModeHostFixture.cs
