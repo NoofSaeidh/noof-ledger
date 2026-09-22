@@ -24,8 +24,13 @@ public sealed class SettingsSecretsTests(CookieModeHostFixture fixture) : PageTe
         await Page.GotoAsync(fixture.BaseUrl + "/settings/secrets");
         await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
+        // No "Not set" precondition here: SecretKeys.AnthropicApiKey is also saved by
+        // Testing_an_invalid_Anthropic_key_reports_failure_without_echoing_it in this same class,
+        // and IClassFixture<CookieModeHostFixture> means every test here shares one database, so
+        // whichever of the two runs first leaves the key already "Set" for the other. The fresh-state
+        // assertion lives in SettingsSecretsFreshStateTests instead, which gets its own fixture
+        // instance and therefore its own, guaranteed-empty database.
         var status = Page.Locator($"#status-{SecretKeys.AnthropicApiKey}");
-        await Expect(status).ToContainTextAsync("Not set");
 
         var value = $"sk-e2e-{Guid.NewGuid():N}";
         await RetryUntilAsync(async () =>
