@@ -1005,6 +1005,12 @@ Requirement 4, the half the compiler can enforce on every build.
 
 `.editorconfig` today is five lines. Replace it with:
 
+**Corrected 2026-09-22 after the first attempt at this task stopped and reported.** The original version of this step set `CA1515`'s widened `output_kind` globally, which flagged **64 types, 56 of them in `Domain` and `Application`** — the two assemblies whose public types *are* the cross-assembly contract, and which this plan's own state table says are deliberately unchanged. The rule cannot tell a contract from an oversight; the scoping below tells it.
+
+Two glob facts, both verified by that implementer rather than assumed: `[src/Noof.Ledger.Domain/**/*.cs]` matches **nothing**, because `**` here requires at least one intervening directory and `Domain`'s files sit directly in the project root. The working form is `dir/**` with no trailing `/*.cs`. (`[tests/**/*.cs]` does work, because every test file sits one directory below `tests/` — but use the `dir/**` form throughout anyway, so nobody has to know that.)
+
+Severity is scoped per file rather than `output_kind`, deliberately: `dotnet_diagnostic.*.severity` is definitively per-syntax-tree, whereas whether a `dotnet_code_quality.*` option is honoured per-directory is not something to bet a silent rule on.
+
 ```ini
 root = true
 
@@ -1017,6 +1023,22 @@ dotnet_diagnostic.IDE0161.severity = error
 # the three assemblies this rule most needs to reach - silently unchecked.
 dotnet_diagnostic.CA1515.severity = error
 dotnet_code_quality.CA1515.output_kind = ConsoleApplication, DynamicallyLinkedLibrary
+
+[src/Noof.Ledger.Domain/**]
+# Domain and Application exist to be referenced. Their public types are the contract every other
+# assembly is written against, so "could this be internal?" has a standing answer of no. The list
+# is not unguarded - PublicSurfaceTests locks it, and adding to it is an edit a reviewer sees.
+dotnet_diagnostic.CA1515.severity = none
+
+[src/Noof.Ledger.Application/**]
+dotnet_diagnostic.CA1515.severity = none
+
+[src/Noof.Ledger.Persistence/Migrations/**]
+# EF scaffolds migration classes public and rewrites them on the next scaffold. CLAUDE.md already
+# exempts their generated companions from code style for the same reason; a rule that argues with
+# a code generator is a rule that loses every time the generator runs.
+dotnet_diagnostic.CA1515.severity = none
+dotnet_diagnostic.CA1861.severity = none
 
 # An internal type nobody derives from is sealed; this is free once the types above are internal.
 dotnet_diagnostic.CA1852.severity = error
@@ -1031,12 +1053,13 @@ dotnet_diagnostic.CA2263.severity = error
 # NOT currently caught despite EnforceCodeStyleInBuild - see Step 1a below for why.
 dotnet_diagnostic.IDE0005.severity = error
 
-[tests/**/*.cs]
+[tests/**]
 # Test names are sentences: Every_routable_page_declares_its_authorization. That is the convention
 # throughout this repository and it is deliberate.
 dotnet_diagnostic.CA1707.severity = none
 # A test project's fixtures and helpers are reached by the xUnit runner through reflection, and
-# several are public because xUnit requires it. CA1515 has nothing useful to say there.
+# several are public because xUnit requires it. Every test project is also OutputType=Exe under
+# Microsoft Testing Platform, so without this line CA1515 would fire on all of them by default.
 dotnet_diagnostic.CA1515.severity = none
 ```
 
@@ -1066,9 +1089,17 @@ For each diagnostic, exactly one of:
 - **Fix it.** Narrow the accessibility, seal the type, use the `StringComparison` overload.
 - **Reject it in `.editorconfig`** with a comment giving the reason, in the same voice as the entries above. A rejection with no reason is not allowed.
 
-Two you should expect and how to handle them:
-- `CA1515` on `LedgerConnectionString` and `PersistenceRegistration` — these are genuinely used across assemblies, so the rule is wrong here. Suppress **at the declaration** with `[SuppressMessage("Maintainability", "CA1515", Justification = "...")]`, not globally; a file-local suppression keeps the rule live everywhere else.
-- `CA1852` on types that EF or the DI container subclasses. Seal only what nothing derives from; if sealing breaks a test, that is the test telling you the type is extended.
+**The full finding list was measured during the first attempt at this task, so you are not walking in blind.** With the scoping above in place, expect exactly this:
+
+| Rule | Findings | What to do |
+|---|---|---|
+| `CA1515` | 4: `LedgerConnectionString`, `PersistenceRegistration`, `AiRegistration`, `TelegramRegistration` | Suppress **at the declaration** — `[SuppressMessage("Maintainability", "CA1515", Justification = "...")]` — never globally. All four are genuinely named by another assembly, so the rule is simply wrong about them, and a file-local suppression keeps it live everywhere else. Write a real justification in each; "suppressing CA1515" is not one. |
+| `CA1852` | 0 | Nothing to do. |
+| `CA1861` | 2, both in `Migrations/20260921065115_AddCaptureModel.cs` | Already handled by the `Migrations/**` section above. If you see any outside `Migrations/`, fix those. |
+| `CA1862` | 1, `src/Noof.Ledger.Persistence/Auth/EfUserStore.cs:10` | A genuine fix — use the `StringComparison` overload. |
+| `CA2263` | 1, `tests/Noof.Ledger.Persistence.Tests/CaptureModelTests.cs:41` | A genuine fix — use the generic overload. |
+
+If your build disagrees with this table, **the table is the claim under test** — report the difference rather than quietly adapting. A count that grew means the scoping above is not working the way it was measured to.
 
 - [ ] **Step 4: Build clean**
 
