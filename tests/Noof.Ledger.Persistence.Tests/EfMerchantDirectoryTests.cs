@@ -135,6 +135,31 @@ public class EfMerchantDirectoryTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task LinkAliasAsync_a_new_spelling_of_a_known_merchants_display_name_attaches_to_the_existing_merchant()
+    {
+        // The AnthropicCategorizer prompt tells the model to answer canonicalization with "THAT
+        // existing display name exactly" when it recognises the merchant under a new spelling
+        // (e.g. "МАКСИ" for a merchant already known as "MAXI"). The folded alias key differs, so
+        // the race-loser path in LinkAliasAsync never fires - reusing the merchant has to be a
+        // deliberate lookup on display name, not a side effect of the alias PK collision.
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var directory = new EfMerchantDirectory(db, new FakeTimeProvider());
+        var displayName = $"Maxi {Guid.NewGuid():N}";
+        var firstFolded = Folded("MAXI-LATIN");
+        var secondFolded = Folded("MAXI-CYRILLIC");
+
+        var firstId = await directory.LinkAliasAsync(firstFolded, displayName, TestContext.Current.CancellationToken);
+        var secondId = await directory.LinkAliasAsync(secondFolded, displayName, TestContext.Current.CancellationToken);
+
+        secondId.Should().Be(firstId, "a second spelling of an already-known merchant must attach to the existing merchant, not mint a duplicate");
+        (await db.Merchants.CountAsync(m => m.DisplayName == displayName, TestContext.Current.CancellationToken)).Should().Be(1);
+        var secondAlias = await db.MerchantAliases.AsNoTracking()
+            .SingleAsync(a => a.Folded == secondFolded, TestContext.Current.CancellationToken);
+        secondAlias.MerchantId.Should().Be(firstId);
+    }
+
+    [Fact]
     public async Task MerchantsAsync_returns_every_merchant_as_an_option()
     {
         await using var db = await fixture.CreateContextAsync();

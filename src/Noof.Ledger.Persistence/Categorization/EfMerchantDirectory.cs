@@ -24,6 +24,22 @@ public sealed class EfMerchantDirectory(LedgerDbContext db, TimeProvider timePro
         RequireMaxLength(folded, 256, nameof(folded));
         RequireMaxLength(displayName, 256, nameof(displayName));
 
+        // ICategorizer.CanonicalizeMerchantAsync's whole purpose is to answer with an EXISTING
+        // display name, character for character, when a new spelling ("МАКСИ") names a merchant
+        // already known under another ("MAXI"). Compared the same way this codebase already
+        // compares merchant names - MerchantName.Fold, ordinal - because "the same display name"
+        // must mean the same thing here as it does everywhere else identity is decided. Folding
+        // cannot be pushed into the SQL query (Fold is plain C#), and the merchant table is small
+        // enough for a personal ledger that reading it whole here costs nothing that matters.
+        var foldedDisplayName = MerchantName.Fold(displayName);
+        var existingMerchant = (await db.Merchants.AsNoTracking()
+                .Select(m => new { m.Id, m.DisplayName })
+                .ToListAsync(cancellationToken))
+            .FirstOrDefault(m => string.Equals(MerchantName.Fold(m.DisplayName), foldedDisplayName, StringComparison.Ordinal));
+
+        if (existingMerchant is not null)
+            return await LinkAliasToExistingMerchantAsync(folded, existingMerchant.Id, cancellationToken);
+
         var merchant = new Merchant
         {
             Id = Guid.NewGuid(),
@@ -51,6 +67,33 @@ public sealed class EfMerchantDirectory(LedgerDbContext db, TimeProvider timePro
             // implicit transaction - the alias's primary-key violation rolled the merchant insert
             // back with it. There is no orphaned merchant row to clean up; the loser wrote nothing.
             db.Entry(merchant).State = EntityState.Detached;
+            db.Entry(alias).State = EntityState.Detached;
+
+            var winner = await db.MerchantAliases.AsNoTracking()
+                .SingleAsync(a => a.Folded == folded, cancellationToken);
+            return winner.MerchantId;
+        }
+    }
+
+    async Task<Guid> LinkAliasToExistingMerchantAsync(string folded, Guid merchantId, CancellationToken cancellationToken)
+    {
+        var alias = new MerchantAlias
+        {
+            Folded = folded,
+            MerchantId = merchantId,
+            CreatedAt = timeProvider.GetUtcNow(),
+        };
+        db.MerchantAliases.Add(alias);
+
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            return merchantId;
+        }
+        catch (DbUpdateException ex) when (IsDuplicateAliasViolation(ex))
+        {
+            // Same race as the new-merchant path: another worker inserted this exact folded key
+            // first. No merchant row was staged here to roll back - only the alias insert fails.
             db.Entry(alias).State = EntityState.Detached;
 
             var winner = await db.MerchantAliases.AsNoTracking()
