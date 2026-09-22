@@ -532,6 +532,18 @@ Task 2's file list was wrong in a way that cost real time. It listed the Persist
 
 Watch for one specific compiler error while doing it. `CS0050` fires when a `public` member's signature mentions a type that has become internal; Task 2 hit it on `PostgresFixture.CreateContextAsync()`, which returned `LedgerDbContext`. The fix is to narrow the **test helper** to `internal`, which requirement 1 explicitly permits — not to re-widen the `src` type.
 
+### And the one Task 4 paid for: NSubstitute cannot see internals either
+
+`InternalsVisibleTo("Noof.Ledger.Telegram.Tests")` is not enough to let a test write `Substitute.For<ITelegramUpdateRouter>()` once that interface is internal. NSubstitute builds its proxies with Castle DynamicProxy, which emits them into a separate dynamic assembly — so the *declaring* assembly must also grant:
+
+```xml
+    <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
+```
+
+Without it the failure is a runtime `ProxyGenerationException` that names the type and, helpfully, tells you exactly this. Tasks 2 and 3 never saw it because `Persistence.Tests` and `Ai.Tests` only substitute `Application`-level public interfaces; Task 4 was the first to substitute an infrastructure-local one.
+
+**Before narrowing any interface, grep that assembly's test project for `Substitute.For<`.** If it names a type you are about to make internal, add the grant in the same commit rather than discovering it as a red test.
+
 ---
 
 ## Task 3: `AddNoofAi`
@@ -1255,8 +1267,10 @@ Add to §4 under **Architecture**, keeping it to three lines — `CLAUDE.md` is 
 ```markdown
 - **Minimum accessibility.** A type is `internal` unless another assembly names it; a member is
   `private` unless something outside its type calls it. Tests reach internals through
-  `InternalsVisibleTo`, never by widening `src`. `PublicSurfaceTests` holds each assembly's
-  allowlist — widening it is an edit to that file, which is the point.
+  `InternalsVisibleTo`, never by widening `src` — and substituting an internal interface needs
+  `InternalsVisibleTo("DynamicProxyGenAssembly2")` on the declaring assembly as well, or
+  NSubstitute fails at runtime. `PublicSurfaceTests` holds each assembly's allowlist; widening it
+  is an edit to that file, which is the point.
 - **Each assembly registers its own services**, exposing one `AddNoofXxx(this IServiceCollection)`
   the Host calls. `Program.cs` names no implementation type.
 ```
