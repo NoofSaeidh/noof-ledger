@@ -22,6 +22,7 @@
 - **The inner test loop never touches the network or a real model.** The live-model suite is opt-in and skipped by default (Task 3).
 - **File-scoped namespaces.** `IDE0161` and `TreatWarningsAsErrors` are compile errors.
 - **Central Package Management.** An inline `Version=` is NU1008. `NuGetAuditMode=all` with `NU1903`/`NU1904` as errors.
+- **Never seed a test with `DateTimeOffset.UtcNow` and then assert exact equality against a value read back from PostgreSQL.** `timestamptz` keeps microseconds; a .NET tick is 100ns. A timestamp whose final tick digit is non-zero is truncated on the round trip, so the assertion fails most of the time but not always — the worst kind of flake. Seed from a fixed literal, or compare with `BeCloseTo`. This plan shipped the defect twice before it was caught.
 - **`TimeProvider` everywhere time is read inside the host.** Tests advance a `FakeTimeProvider` rather than sleeping. There is exactly one existing exception, verified by grep: `src/Noof.Ledger.Host/Cli/UserCommand.cs:64` calls `DateTimeOffset.UtcNow`, because the CLI verb short-circuits before `WebApplication.CreateBuilder` and has no container to resolve a `TimeProvider` from. Do not "fix" it in this phase and do not copy it either; it is recorded in `docs/BACKLOG.md` by Task 9.
 - **`global.json` must keep `{"test":{"runner":"Microsoft.Testing.Platform"}}`.** Positional test paths are rejected; use `--project` or `--solution`. The solution file is `NoofLedger.slnx`.
 - **Build output is `artifacts/bin/<project>/<config>/`**, not `bin/Debug/net10.0/` — `Directory.Build.props` sets `ArtifactsPath` to a repo-root `artifacts/`. Any relative path climbing out of `AppContext.BaseDirectory` needs **four** `..`, not three.
@@ -4191,7 +4192,7 @@ Called out explicitly because this defect has already occurred once in this repo
 
 ---
 
-- [ ] **Step 1: Write the failing tests for `EfSpendingReadModel`**
+- [x] **Step 1: Write the failing tests for `EfSpendingReadModel`**
 
 Create `tests/Noof.Ledger.Persistence.Tests/EfSpendingReadModelTests.cs`:
 
@@ -4305,7 +4306,10 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
         db.Merchants.Add(merchant);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var now = DateTimeOffset.UtcNow;
+        // A fixed literal, not DateTimeOffset.UtcNow: timestamptz keeps microseconds while a
+        // .NET tick is 100ns, so a value with a non-zero final tick digit does not survive the
+        // round trip and an exact-equality assertion fails on roughly nine runs in ten.
+        var now = new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero);
         var transaction = NewTransaction(wallet.Id, now, "Europe/Belgrade", TransactionStatus.Completed);
         db.Transactions.Add(transaction);
         db.LineItems.AddRange(
@@ -4334,7 +4338,10 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
         db.Wallets.Add(wallet);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var now = DateTimeOffset.UtcNow;
+        // A fixed literal, not DateTimeOffset.UtcNow: timestamptz keeps microseconds while a
+        // .NET tick is 100ns, so a value with a non-zero final tick digit does not survive the
+        // round trip and an exact-equality assertion fails on roughly nine runs in ten.
+        var now = new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero);
         for (var i = 0; i < 5; i++)
             db.Transactions.Add(NewTransaction(wallet.Id, now.AddMinutes(i), "Europe/Belgrade", TransactionStatus.Captured));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -4476,12 +4483,12 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
 }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj`
 Expected: build error — `EfSpendingReadModel` does not exist in `Noof.Ledger.Persistence.Reporting`.
 
-- [ ] **Step 3: Write `EfSpendingReadModel`**
+- [x] **Step 3: Write `EfSpendingReadModel`**
 
 Create `src/Noof.Ledger.Persistence/Reporting/EfSpendingReadModel.cs`:
 
@@ -4609,12 +4616,12 @@ public sealed class EfSpendingReadModel(LedgerDbContext db, TimeProvider timePro
 >
 > `command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();` matters even though nothing in this task opens an explicit transaction: if a future caller ever wraps `ThisMonthAsync` inside one (e.g. a larger reporting transaction), Npgsql throws rather than silently reading outside it unless the raw command is enlisted — this line is what enlists it, and it is a no-op (`null`) in every test above.
 
-- [ ] **Step 4: Run the persistence tests green**
+- [x] **Step 4: Run the persistence tests green**
 
 Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj`
 Expected: all green, including the 7 new `EfSpendingReadModelTests`.
 
-- [ ] **Step 5: Run the full solution and commit**
+- [x] **Step 5: Run the full solution and commit**
 
 Run: `dotnet test --solution NoofLedger.slnx`
 Expected: all green.
