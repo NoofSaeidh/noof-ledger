@@ -46,8 +46,12 @@ this is a public repository.
 
 `ops/inspect.ps1` runs `dotnet jb inspectcode` (`JetBrains.ReSharper.GlobalTools`,
 pinned in `.config/dotnet-tools.json`) against `NoofLedger.slnx` and fails if any
-finding is ERROR-severity. It catches what no Roslyn analyzer can: a public
-**member** that nothing outside its own assembly ever calls
+finding under `src\` is ERROR-severity. It inspects `tests\` too and prints what
+it finds there, but does not gate on it — requirement 1 of Phase 1C exempts
+tests, and xUnit fixtures routinely trip `ClassCanBeSealed.Global` (67 of them,
+last measured) for reasons the inspection cannot see; gating on a count that can
+never reach zero would guard nothing. It catches what no Roslyn analyzer can: a
+public **member** that nothing outside its own assembly ever calls
 (`MemberCanBePrivate.Global`, `MemberCanBeInternal`), an unused public member or
 type (`UnusedMember.Global`, `UnusedType.Global`), and a class with no
 inheritors that could be sealed (`ClassCanBeSealed.Global`). Those five
@@ -65,8 +69,9 @@ pwsh -ExecutionPolicy Bypass -File ops/inspect.ps1
 
 (Windows PowerShell 5.1's `powershell.exe` will refuse the script's
 `#requires -Version 7`; use `pwsh`.) It writes `artifacts/inspect/report.xml`
-(already `.gitignore`d) and prints every ERROR-severity finding as
-`file:line TypeId Message` before failing. `inspectcode` itself always exits
+(already `.gitignore`d) and prints every ERROR-severity finding under `src\` as
+`file:line TypeId Message`, plus a one-line count of the ungated findings under
+`tests\`, before failing on the `src\` count. `inspectcode` itself always exits
 0, findings or not, so the script parses the report rather than trusting the
 exit code.
 

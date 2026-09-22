@@ -350,17 +350,104 @@ it is an `OperationCanceledException`, the filter needs to distinguish our token
 `ex is OperationCanceledException && stoppingToken.IsCancellationRequested` rather than a bare type
 test.
 
-## The read model's "current zone" is never given a zone other than UTC
+## The read model's "current zone" is supplied by a registered singleton now — a test gap remains
+
+**Corrected 2026-09-22 by Phase 1C Task 2.** This entry originally said the zone is "never given a
+zone other than UTC". That was true of every test but overstated as a claim about production, which
+is worth restating precisely now the wiring under it has changed.
 
 `EfSpendingReadModel` takes the operator's current zone as a constructor argument and compares it
 against each row's own stored zone — that pairing is the whole point of decision P1-3, and it is what
-keeps a spend made in Belgrade on its Belgrade day after the operator moves.
+keeps a spend made in Belgrade on its Belgrade day after the operator moves. Before Phase 1C that
+argument was threaded through a hand-written three-argument lambda registration in `Program.cs`.
+Phase 1C Task 2 registers `TimeZoneInfo` itself as a singleton (`CaptureTimeZoneGuard.Resolve(...)`
+against `Capture:TimeZone`, alongside the existing `AddSingleton(TimeProvider.System)`), and
+`AddNoofPersistence` registers `EfSpendingReadModel` by type, resolving `currentZone` from the
+container — so in production the read model now gets the operator's real configured zone, not UTC.
 
-Every test passes `TimeZoneInfo.Utc` as that argument. The row-zone side is covered well (there is a
-test built so that a naive `date_trunc` would merge two months the correct query separates), but the
-seam between "the zone the month boundaries are computed in" and "the zone each row is bucketed by" is
-never exercised with two different values. The reviewer found no defect there and neither did a
-re-read; it is untested, not known-wrong.
+What has not changed: `EfSpendingReadModelTests` still constructs `EfSpendingReadModel` directly in
+every test (`new EfSpendingReadModel(db, new FakeTimeProvider(now), TimeZoneInfo.Utc)`), bypassing DI,
+so the original gap stands unchanged — the seam between "the zone the month boundaries are computed
+in" and "the zone each row is bucketed by" is still never exercised with two different values. The
+row-zone side is covered well (there is a test built so that a naive `date_trunc` would merge two
+months the correct query separates). No defect is known; it is untested, not known-wrong.
 
 **To settle it:** one test with `currentZone` set to something well away from UTC and rows carrying a
 third zone, asserting which month each lands in.
+
+---
+
+# Phase 1C measurements — accessibility and composition analyzer choices
+
+Recorded 2026-09-22 closing Phase 1C, so none of these gets re-proposed as new without the measurement
+that already settled it.
+
+## `AnalysisMode=All` was measured and rejected
+
+A full rebuild with `-p:AnalysisMode=All` was run against the whole solution while Phase 1C looked for
+an analyzer gate (requirement 4). It emitted **842 distinct warnings across 31 rules** — 376 `CA1707`
+(underscores in names, this repository's deliberate test-naming convention, e.g.
+`Every_routable_page_declares_its_authorization`), 258 `CA2007` (`ConfigureAwait`, meaningless in an
+application with no synchronization context), 61 `CA2000`, and 28 `CA1062` (argument-null boilerplate
+`CLAUDE.md` §3 forbids).
+
+Adopting it would mean suppressing most of the rulebook and calling what survives "strictness" — the
+opposite of a curated gate. Phase 1C Task 6 enabled a small named list instead (`CA1515`, `CA1852`,
+`CA1862`, `CA1861`, `CA2263`, `IDE0005`), each chosen because the `AnalysisMode=All` run showed it cost
+fewer than a handful of genuine fixes.
+
+## `Microsoft.CodeAnalysis.PublicApiAnalyzers` was considered and deferred
+
+It would lock public surface at build time via a hand-maintained `PublicAPI.Unshipped.txt` per
+project — several hundred lines for `Domain` plus `Application` alone, whose public surface is
+deliberately large because it *is* the cross-assembly contract. At type level it duplicates what
+`PublicSurfaceTests` (added this phase) already does with no package at all; at member level it would
+close a real gap that `jb inspectcode` (Tasks 7–8) now covers instead, as a periodic sweep rather than
+a build gate. The maintenance cost of the unshipped files was judged not worth paying twice.
+
+## `ops/inspect.ps1` reports findings under `tests\` that it deliberately does not gate on
+
+A run against the finished tree reported **84 findings under `tests\`**, 67 of them
+`ClassCanBeSealed.Global` against xUnit fixtures. Phase 1C requirement 1 exempts tests
+(«Исключение - тесты. Для них можно делать internal или private protected.»), and xUnit fixtures are
+routinely left unsealed or subclassed for reasons the inspection cannot see — gating on a count that
+can never reach zero guards nothing. `ops/inspect.ps1` prints the count and fails only on ERROR-severity
+findings under `src\`. Worth a look occasionally; not worth a gate that can never pass.
+
+## ReSharper's other 42 WARNING-level findings were seen and not triaged
+
+A pre-settings baseline run of `jb inspectcode` found 42 issues at `WARNING` severity or above that are
+not about accessibility (accessibility is handled separately, raised to ERROR): 18 `InconsistentNaming`
+(ReSharper wants `_camelCase` private fields, which this repository does not use — a settings decision
+somebody should make deliberately rather than by silence), 12 `AccessToDisposedClosure`, 4
+`FormatStringProblem` in `EfCategorizationStore.cs` and `EfJobQueue.cs` (probably false positives about
+raw SQL parameters, not checked), 3 `RedundantSuppressNullableWarningExpression`, 2
+`ParameterHidesPrimaryConstructorParameter`, 2 `NotAccessedPositionalProperty.Global`, and 1
+`UsingStatementResourceInitialization`. Out of Phase 1C's scope (accessibility and composition, not
+general code health); none is gated at ERROR by `NoofLedger.sln.DotSettings`.
+
+## `PublicSurfaceTests`'s regex does not match `public delegate`
+
+The allowlist test's `TopLevelPublicType` regex
+(`tests/Noof.Ledger.Architecture.Tests/PublicSurfaceTests.cs`) matches `class`, `record`, `interface`,
+`enum` and `struct` declarations, but not `delegate`. There are no delegates in the tree today, so the
+lock is complete in practice — but a `public delegate` added to a scanned project later would slip past
+the allowlist unnoticed, silently defeating the point of the guard (widening the surface is supposed to
+be a reviewed edit to `PublicSurfaceTests.Allowed`). A one-line regex fix, worth doing with a
+watch-it-fail-first check the day the first delegate is actually added.
+
+## `Noof.Ledger.E2E.Tests` is not in `NoofLedger.slnx`
+
+Discovered in Phase 1C when an unused-`using` error in
+`tests/Noof.Ledger.E2E.Tests/CookieModeHostFixture.cs` survived a clean `dotnet build
+NoofLedger.slnx` — the E2E project is not a member of the `.slnx`, so neither `dotnet build
+NoofLedger.slnx` nor `dotnet test --solution NoofLedger.slnx` ever touches it. `ops/publish.ps1` only
+runs `dotnet test --solution NoofLedger.slnx`, so it does not cover the E2E suite either. It must be
+built and run separately: `dotnet test --project
+tests/Noof.Ledger.E2E.Tests/Noof.Ledger.E2E.Tests.csproj`.
+
+Not fixed here — out of Phase 1C's scope, and adding the project to the `.slnx` is a one-line change
+whose consequences are worth checking deliberately rather than in passing: whether it changes what
+`dotnet test --solution` reports in a way that breaks anything reading those numbers (this file
+included), and whether pulling Playwright's browser dependency into every plain `dotnet
+build`/`dotnet test` is welcome, versus only when the E2E suite is deliberately run.
