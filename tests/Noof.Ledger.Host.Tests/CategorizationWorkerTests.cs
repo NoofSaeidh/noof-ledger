@@ -490,6 +490,58 @@ public class CategorizationWorkerTests
     }
 
     [Fact]
+    public async Task A_transient_model_failure_is_retried_and_the_captured_transaction_survives_until_it_recovers()
+    {
+        // Stands in for "pull the network cable": ModelCallException(Transient, ...) is exactly
+        // what AnthropicCategorizer is contractually required to throw whether the cable is out
+        // or the API is briefly unreachable - from the worker's point of view they are the same
+        // "the call did not complete."
+        var jobQueue = Substitute.For<IJobQueue>();
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job(attemptCount: 1));
+        jobQueue.RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(JobCompletionOutcome.Applied);
+        jobQueue.SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>()).Returns(JobCompletionOutcome.Applied);
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new ModelCallException(ModelFailureKind.Transient, "simulated network outage"));
+        var notifier = Substitute.For<IChatNotifier>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer, notifier: notifier),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        // Still saves: nothing was marked failed and nothing was applied to the transaction - the
+        // raw capture alone survives - and the job was retried, not abandoned.
+        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+        await store.DidNotReceive().ApplyAsync(
+            Arg.Any<Guid>(), Arg.Any<IReadOnlyList<CategorizedLineItem>>(), Arg.Any<CancellationToken>());
+        await notifier.DidNotReceive().EditAsync(
+            Arg.Any<long>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await jobQueue.Received(1).RetryAsync(
+            JobId, WorkerId, Arg.Any<DateTimeOffset>(), "simulated network outage", Arg.Any<CancellationToken>());
+
+        // Reconnect: same job, same worker, the model now answers.
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(OneGroceryLine());
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        // It categorizes itself, and the Telegram message updates - faked, per the acceptance
+        // table's decision: EditAsync being called with the computed figures is the automated
+        // half of that proof.
+        await store.Received(1).ApplyAsync(
+            TransactionId,
+            Arg.Is<IReadOnlyList<CategorizedLineItem>>(items => items.Single().Description == "Bread"),
+            Arg.Any<CancellationToken>());
+        await jobQueue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
+        await notifier.Received(1).EditAsync(
+            111L, 42, Arg.Is<string>(text => text.Contains("250") && text.Contains("RSD")), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public void CreateWorkerId_fits_the_128_character_claimed_by_column()
     {
         var id = CategorizationWorker.CreateWorkerId();

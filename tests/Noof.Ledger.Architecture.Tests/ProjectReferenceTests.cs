@@ -64,6 +64,12 @@ public class ProjectReferenceTests
     }
 
     [Fact]
+    public void Ai_package_references_are_exactly_its_allowed_set()
+    {
+        Packages("Noof.Ledger.Ai").Should().BeEquivalentTo("Anthropic");
+    }
+
+    [Fact]
     public void Web_has_no_program_cs()
     {
         var web = Path.Combine(RepoRoot.Find().FullName, "src", "Noof.Ledger.Web");
