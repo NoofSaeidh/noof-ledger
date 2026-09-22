@@ -83,6 +83,8 @@ sealed partial class HostProcess : IAsyncDisposable
                 if (!toStop.HasExited)
                 {
                     toStop.Kill(entireProcessTree: true);
+                    // CancellationToken.None deliberately: a cancelled test run must still wait for
+                    // the killed process to actually exit, or it leaks a process instead of a database.
                     await toStop.WaitForExitAsync(CancellationToken.None);
                 }
             }

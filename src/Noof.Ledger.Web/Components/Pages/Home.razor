@@ -1,5 +1,6 @@
 @page "/"
 @attribute [Authorize]
+@implements IDisposable
 @using System.Data.Common
 @using System.Globalization
 @using Noof.Ledger.Application.Reporting
@@ -111,15 +112,17 @@ else
     DateOnly summaryFirstDay;
     bool databaseUnavailable;
 
+    readonly CancellationTokenSource cancellation = new();
+
     sealed record CurrencyGroup(string Currency, IReadOnlyList<MonthTotal> Totals);
 
     protected override async Task OnInitializedAsync()
     {
         try
         {
-            recent = await ReadModel.RecentAsync(20, CancellationToken.None);
+            recent = await ReadModel.RecentAsync(20, cancellation.Token);
 
-            var summary = await ReadModel.ThisMonthAsync(CancellationToken.None);
+            var summary = await ReadModel.ThisMonthAsync(cancellation.Token);
             summaryFirstDay = summary.FirstDay;
             currencyGroups =
             [
@@ -128,6 +131,12 @@ else
                     .OrderBy(g => g.Key, StringComparer.Ordinal)
                     .Select(g => new CurrencyGroup(g.Key, [.. g.OrderBy(t => t.CategoryName, StringComparer.Ordinal)])),
             ];
+        }
+        // Navigating away before the query returns cancels it via our own token, not a database
+        // failure - it must not land in the databaseUnavailable branch below, or leaving the page
+        // mid-load would flash "can't reach the database" at whoever navigates here next.
+        catch (OperationCanceledException)
+        {
         }
         // Npgsql's own execution strategy (NpgsqlExecutionStrategy.ExecuteAsync) decides a connection
         // failure is "likely transient" and re-throws it wrapped in a plain InvalidOperationException
@@ -143,6 +152,12 @@ else
         {
             databaseUnavailable = true;
         }
+    }
+
+    public void Dispose()
+    {
+        cancellation.Cancel();
+        cancellation.Dispose();
     }
 
     static bool IsDatabaseUnavailable(Exception exception) =>

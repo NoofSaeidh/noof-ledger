@@ -75,6 +75,8 @@ public class LoopbackGuardTerminatesTests
             if (!host.HasExited)
             {
                 host.Kill(entireProcessTree: true);
+                // CancellationToken.None deliberately: a cancelled test run must still wait for the
+                // killed host to actually exit, or it leaks a process bound to every interface.
                 await host.WaitForExitAsync(CancellationToken.None);
             }
         }

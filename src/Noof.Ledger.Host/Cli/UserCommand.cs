@@ -62,7 +62,42 @@ internal static class UserCommand
         };
         user.PasswordHash = hasher.Hash(user, password);
 
-        await userStore.UpsertAsync(user, CancellationToken.None);
+        // Registered only around the upsert, not around ReadPassword above: Console has no
+        // cancellable read primitive, so a Ctrl+C while the password prompt is blocked on
+        // Console.ReadKey keeps the OS's default behaviour (immediate process termination).
+        // Once the prompt has returned, though, the only work left is a real async database
+        // call, and that call deserves a clean cancellation instead of the process being killed
+        // mid-write.
+        using var cancellation = new CancellationTokenSource();
+        ConsoleCancelEventHandler onCancelKeyPress = (_, e) =>
+        {
+            e.Cancel = true;
+            cancellation.Cancel();
+        };
+
+        Console.CancelKeyPress += onCancelKeyPress;
+        try
+        {
+            return await UpsertPasswordAsync(userStore, user, username, cancellation.Token);
+        }
+        finally
+        {
+            Console.CancelKeyPress -= onCancelKeyPress;
+        }
+    }
+
+    internal static async Task<int> UpsertPasswordAsync(
+        IUserStore userStore, AppUser user, string username, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await userStore.UpsertAsync(user, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            Console.WriteLine("Cancelled.");
+            return 130;
+        }
 
         Console.WriteLine($"Password set for '{username}'.");
         return 0;

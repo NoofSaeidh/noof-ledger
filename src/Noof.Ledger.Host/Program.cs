@@ -58,7 +58,12 @@ builder.Services.AddNoofWorkers(categorizationOptions);
 var app = builder.Build();
 
 if (builder.Configuration.GetValue("Database:MigrateOnStartup", true))
-    await app.Services.MigrateNoofDatabaseAsync();
+    // ApplicationStopping, not CancellationToken.None: a Ctrl+C during startup migration should
+    // cancel the in-flight MigrateAsync rather than let it run unattended. EF applies each
+    // migration inside its own transaction, so a cancel here rolls back the migration in
+    // progress and leaves the schema at its last fully-applied version - never a half-applied
+    // one - which Migrate() can safely retry on the next start.
+    await app.Services.MigrateNoofDatabaseAsync(app.Lifetime.ApplicationStopping);
 
 app.UseAuthentication();
 app.UseAuthorization();

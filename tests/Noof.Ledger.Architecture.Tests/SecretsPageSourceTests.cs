@@ -53,4 +53,19 @@ public class SecretsPageSourceTests
         source.Should().Contain("finally",
             "row.Testing must be reset in a finally block so it clears even if ProbeAsync somehow throws");
     }
+
+    [Fact]
+    public void Disposes_a_component_owned_cancellation_source_so_navigating_away_cancels_in_flight_calls()
+    {
+        var source = SourceText();
+
+        source.Should().Contain("@implements IDisposable",
+            "Blazor gives a component no CancellationToken of its own - navigating away must cancel an " +
+            "in-flight save, status read or probe via a token this component owns and disposes");
+        source.Should().Contain("CancellationTokenSource",
+            "the component must own a CancellationTokenSource to cancel on dispose");
+        source.Should().NotContain("CancellationToken.None",
+            "CancellationToken.None never cancels - navigating away mid-save or mid-probe would let the " +
+            "call run to completion and then write into a disposed component");
+    }
 }

@@ -34,4 +34,28 @@ public class DashboardPageSourceTests
             "found nothing to record (a loan received, not spending) - it must say so, not silently " +
             "render an empty list that looks like a broken row");
     }
+
+    [Fact]
+    public void Disposes_a_component_owned_cancellation_source_so_navigating_away_cancels_the_in_flight_query()
+    {
+        var source = SourceText();
+
+        source.Should().Contain("@implements IDisposable",
+            "Blazor gives a component no CancellationToken of its own - navigating away must cancel the " +
+            "read-model query via a token this component owns and disposes");
+        source.Should().Contain("CancellationTokenSource",
+            "the component must own a CancellationTokenSource to cancel on dispose");
+        source.Should().NotContain("CancellationToken.None",
+            "CancellationToken.None never cancels - navigating away would let the query for a disposed component run to completion");
+    }
+
+    [Fact]
+    public void A_cancelled_query_is_not_mistaken_for_a_dead_database()
+    {
+        var source = SourceText();
+
+        source.Should().Contain("catch (OperationCanceledException",
+            "an OperationCanceledException from the component's own cancellation token must not fall " +
+            "through to the database-unavailable branch, which is reserved for a genuine DbException");
+    }
 }
