@@ -500,3 +500,38 @@ caused it. What is still missing is a guard: nothing compares the template again
 migrated database, so the next drift will be found the same way — by luck. A test that migrates a
 scratch database and diffs `pg_dump --schema-only` against the template would close it, at the cost
 of one full migration run per suite execution.
+
+## MudBlazor features that need a render-mode decision first — deferred 2026-09-22
+
+Phase 1D adopted MudBlazor but deliberately uses none of its JavaScript-backed components. MudBlazor
+documents that its providers "must render in the same interactive render mode as the components that
+use them", and `MainLayout` renders statically because render modes are per-page — which is itself
+forced by the sign-in page being a real form POST. So there is no `MudPopoverProvider`,
+`MudDialogProvider` or `MudSnackbarProvider`, and therefore no popover, dialog, snackbar, tooltip,
+menu, `MudSelect`, `MudDatePicker` or `MudAutocomplete` anywhere in the app.
+
+Three ways out, when something actually needs one:
+
+1. **Put the providers on each interactive page.** MudBlazor's own documented answer for per-page
+   interactivity. Cheapest, and the duplication is two lines per page.
+2. **Go globally interactive** (`<Routes @rendermode="InteractiveServer" />`) and mark the sign-in
+   page `[ExcludeFromInteractiveRouting]`. Cleaner afterwards, but it makes every page hold a
+   SignalR circuit, including the dashboard, which today needs none.
+3. **Keep doing without.** A single-user local ledger with four screens has not yet wanted a dialog.
+
+Nothing is blocked today. This is written down so the next person who reaches for `MudDialogService`
+and finds it silently doing nothing knows why in one minute rather than one afternoon.
+
+## A light/dark toggle — deferred 2026-09-22
+
+The theme is fixed dark, set as a parameter on `MudThemeProvider`. A toggle needs interactivity plus
+somewhere to persist the choice, and the layout is static (see above). Switching the whole app to
+light is a one-line change to `NoofTheme`; offering the user the choice is not.
+
+## The dashboard's reading width — deferred 2026-09-22
+
+`MudContainer MaxWidth="MaxWidth.Large"` caps the content at 1280px. On a 2552px monitor that leaves
+wide empty margins, which looks under-filled for a dashboard; on a laptop it is exactly right. The
+honest fix is not a bigger number but a layout that uses the extra width — three cards across
+instead of two — and that is worth doing when there are more than two currencies to show.
+

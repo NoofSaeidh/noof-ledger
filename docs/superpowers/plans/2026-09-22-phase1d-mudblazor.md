@@ -149,3 +149,60 @@ Three assertions, each naming a failure that has no other detector: the styleshe
 - [ ] **Step 7: Full suite, then look at it**
 
 `dotnet test --solution NoofLedger.slnx` must be green, and then the app must actually be opened in a browser. The blank-page defect got through a green suite; "the tests pass" is not the same claim as "it renders".
+
+---
+
+## Task 2: The dashboard
+
+**Files:** Modify `src/Noof.Ledger.Web/Components/Pages/Home.razor`
+
+**Deliverable:** the page described in D5, with `#txn-{id}` and `#month-totals-{currency}` intact so `DashboardTests` still proves the read model works.
+
+- [x] Card per currency: month total, donut of spending by category, right-aligned category table
+- [x] Recent transactions as cards, status as a coloured `MudChip`
+- [x] A single category renders no chart — a ring of one slice is a decoration that says nothing
+- [x] Every `DashboardPageSourceTests` constraint preserved: invariant culture, no `.ToString("C")`, the `Items.Count == 0` branch, the component-owned `CancellationTokenSource`, the `OperationCanceledException` catch before the database-unavailable one
+
+**What it cost.** `MudChart` is generic in v9 and its `ChartSeries[].Data` is a `ChartData<T>`, not a list, so a collection expression does not initialise it. Component attributes reject mixed content, so `id="txn-@transaction.Id"` has to be written `id="@($"txn-{transaction.Id}")"`. Both were compiler errors, found in one build.
+
+## Task 3: Sign-in
+
+**Files:** Modify `src/Noof.Ledger.Web/Components/Account/Login.razor`
+
+- [x] MudBlazor chrome, native inputs (D8), `LoginTests` unchanged and passing
+- [x] Reads `?failed=1` and says so — the defect described in D6
+- [x] Still does not say *which* of the two was wrong; naming it would turn the form into a way to find out whether a username exists
+
+## Task 4: Secrets
+
+**Files:** Modify `src/Noof.Ledger.Web/Components/Pages/Settings/Secrets.razor`
+
+- [x] Card per secret, status as a `MudChip`, probe result as a `MudAlert`
+- [x] Every id preserved: `status-`, `secret-` (via `InputId`), `save-`, `error-`, `test-`, `test-result-`
+- [x] `SecretsPageSourceTests` intact: `prerender: false`, `autocomplete="off"`, the `finally`, the cancellation source, and no `GetAsync(` anywhere
+
+## Task 5: Counter, and what it is for
+
+**Files:** Modify `src/Noof.Ledger.Web/Components/Pages/Counter.razor`, `tests/Noof.Ledger.E2E.Tests/CounterTests.cs`
+
+- [x] `MudButton`, so the page now proves MudBlazor's *interactive* path works rather than only that its stylesheet loaded
+- [x] `role="status"` kept; the selector moves from `button.btn` to an id, because `MudButton` brings its own classes
+
+## Task 6: The theme bug this phase shipped
+
+Not planned. Found by opening the app in a browser after Task 2, when every page rendered in Times New Roman with 482 tests green.
+
+MudBlazor builds its typography CSS variables by wrapping **each element** of `FontFamily` in single quotes. A comma-separated string handed to it as one element becomes `font-family: 'system-ui, -apple-system, ...'` — a single font name no machine has — and the whole app falls back to the browser's default serif. Nothing throws. Nothing logs. Every test passes.
+
+- [x] `NoofTheme` passes one family per array element
+- [x] `ThemeTests` reads `--mud-typography-default-family` off the page the app actually serves and asserts no quoted run contains a comma
+- [x] Watched failing against the broken theme before being trusted
+
+This is the phase's one lesson worth promoting: **a look that fails silently needs a test that reads what the app serves, not the source.** A source-text assertion would have passed on the broken theme, because the source was perfectly reasonable C#.
+
+## Task 7: Closing
+
+- [x] `README.md` gains an interface section and the corrected test count
+- [x] `CLAUDE.md` gains the render-mode rule and the silent-look rule; status block corrected
+- [x] `docs/BACKLOG.md` records what MudBlazor features are unavailable and the three ways out, the deferred light/dark toggle, and the dashboard's reading width
+- [x] `ops/RUNBOOK.md` gains the working-directory trap: a published host launched from the wrong directory answers every static asset 200 with an empty body, which looks exactly like a CSS bug and has now cost two debugging sessions

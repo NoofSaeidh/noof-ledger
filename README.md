@@ -8,7 +8,7 @@ wallets and currencies.
 
 > **Status: the capture path works end to end.** A message typed to the Telegram bot becomes a
 > categorised expense on the dashboard, with every figure computed by C# from the text you wrote.
-> 467 tests, all green — browser tests included.
+> 484 tests, all green — browser tests included.
 >
 > Still missing before it can carry a year of real spending: **balances** (there is no arithmetic
 > over wallets yet), **voice notes and receipt photos**, **currency exchange**, and — the one that
@@ -60,6 +60,22 @@ Ledger.Host.exe user set-password <name>
 
 is the only way a user is ever created. There is no registration page — a password in any settings
 file is one commit from being permanent in a public repository.
+
+## The interface
+
+MudBlazor, in a dark theme defined in one C# file. The component library is not cosmetics: a
+dashboard that needs a card, a chart and a table is assembly rather than invention, and Phase 2
+onward needs several more of them.
+
+The app never fetches a typeface from the internet — it binds to loopback, holds financial data and
+should work with the network down, none of which survives a stylesheet pulled from Google on every
+page load. The theme names the machine's own fonts instead.
+
+Render modes are per-page and stay that way. The sign-in page is a real HTML form POST, because
+`SignInAsync` needs an `HttpContext` that an interactive circuit does not have. That single fact
+decides the rest: `MainLayout` renders statically, MudBlazor's popover, dialog and snackbar
+providers cannot work from there, and so nothing in the app uses a popover, dialog, snackbar,
+tooltip or menu. Feedback is an inline alert. An inert provider is worse than an absent one.
 
 ## Running it
 

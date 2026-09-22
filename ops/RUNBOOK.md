@@ -114,6 +114,22 @@ mutated from parallel tests, and one failed drop used to abort the loop and skip
 every remaining database. Teardown now continues past a failure and ends by
 naming what it could not remove, pointing here.
 
+## Start the published app from its own directory
+
+```powershell
+Push-Location .\publish; .\Noof.Ledger.Host.exe; Pop-Location
+```
+
+The `Push-Location` is not decoration. `WebApplication.CreateBuilder` derives the content root from
+the process's **current directory**, not from the executable's location, so a host launched from
+anywhere else resolves every static asset against the wrong folder — and `MapStaticAssets` then
+answers each one **200 with an empty body** rather than 404. The app comes up, every page renders,
+nothing is logged, and the whole thing is unstyled with no Blazor script. It looks exactly like a
+CSS bug, and it has now cost two separate debugging sessions.
+
+A real deployment always launches with its working directory set to its install directory, which is
+why `HostProcess` in the E2E fixture sets it too.
+
 ## Manual acceptance — the end-to-end check no test can do
 
 The automated suite never talks to Telegram or to Anthropic. Everything between
@@ -144,8 +160,9 @@ A freshly recreated ledger reads `0 | 0 | 0 | 1 | 20`.
 
 ### The run
 
-1. **Start it.** `.\publish\Noof.Ledger.Host.exe` — it binds loopback only and
-   refuses to start otherwise. Open the address it prints.
+1. **Start it.** `Push-Location .\publish; .\Noof.Ledger.Host.exe` — from that
+   directory, per the section above. It binds loopback only and refuses to
+   start otherwise. Open the address it prints.
 
    Authentication is always on. The first time, `noof_ledger` has **no user
    row**, so create one with `.\publish\Noof.Ledger.Host.exe user set-password
