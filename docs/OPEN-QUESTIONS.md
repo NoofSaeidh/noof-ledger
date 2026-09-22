@@ -87,10 +87,10 @@ correct descriptions of the two-mode design while it existed.
 | B2 | Which entities beyond `AppUser` ship before Phase 1? | **None.** `MoneyProbeEntity` stays as the Money-mapping regression fixture and is dropped in Phase 1 when a real Money-bearing entity exists | Phase 1 |
 | B3 | Should the loopback guard also reject a non-loopback *configured* URL pre-bind, as an early check? | **No** — the post-bind `IServerAddressesFeature` check is authoritative. Re-deriving Kestrel's URL precedence by hand is a bug source | Phase 0b, task 9 |
 
-**Note on A1/A2.** `Auth:Mode` still defaults to `Off`, so the login screen is not in the way.
-The startup guard makes the config key and the Kestrel binding inseparable: widening the binding
-for phone access will refuse to start until auth is on. That is what stops "optional now" from
-becoming "forgotten forever" — no discipline required from you.
+**Note on A1/A2 — SUPERSEDED 2026-09-22.** This paragraph described `Auth:Mode` defaulting to `Off`
+so the login screen stayed out of the way. That key no longer exists: cookie authentication is the
+only mode, and the loopback interlock now refuses a non-loopback bind unconditionally rather than
+only while auth was off. Kept for the record of why the toggle seemed worth having.
 
 ---
 

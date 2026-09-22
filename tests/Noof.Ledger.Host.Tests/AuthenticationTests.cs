@@ -1,6 +1,10 @@
 using System.Net;
 using AwesomeAssertions;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization.Infrastructure;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Noof.Ledger.Host.Tests;
 
@@ -36,5 +40,41 @@ public class AuthenticationTests
         var response = await client.GetAsync("/account/login", TestContext.Current.CancellationToken);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    // Every page declares its own authorization and an architecture test holds it to that. Nothing
+    // holds a minimal-API endpoint to it: an `app.MapGet("/spending", ...)` added in a later phase
+    // answers anyone who can reach the port, and the only thing that would notice is a person
+    // looking at it. The fallback policy makes the default deny rather than allow, so a forgotten
+    // [Authorize] costs a redirect to the login page instead of handing out the ledger.
+    [Fact]
+    public void An_endpoint_that_declares_no_authorization_still_denies_anonymous_callers()
+    {
+        using var factory = Factory();
+
+        var fallback = factory.Services
+            .GetRequiredService<IOptions<AuthorizationOptions>>().Value.FallbackPolicy;
+
+        fallback.Should().NotBeNull(
+            "without a fallback policy every endpoint that names no policy is anonymous by default");
+        fallback!.Requirements.Should().Contain(requirement => requirement is DenyAnonymousAuthorizationRequirement);
+    }
+
+    // The fallback policy above applies to every endpoint that names no policy - and MapStaticAssets
+    // maps endpoints too. If it caught them, the sign-in page would still render but arrive with no
+    // stylesheet and no Blazor script: a page that looks broken to the one visitor who cannot sign in
+    // to report it. These are the two assets App.razor pulls in before anybody is authenticated.
+    [Theory]
+    [InlineData("/_content/Noof.Ledger.Web/app.css")]
+    [InlineData("/_framework/blazor.web.js")]
+    public async Task The_assets_the_sign_in_page_needs_are_served_anonymously(string path)
+    {
+        using var factory = Factory();
+        using var client = factory.CreateClient(new() { AllowAutoRedirect = false });
+
+        var response = await client.GetAsync(path, TestContext.Current.CancellationToken);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            "a visitor who is not signed in yet must still be able to load the sign-in page in full");
     }
 }

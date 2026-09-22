@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Hosting.Server;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Noof.Ledger.Ai;
 using Noof.Ledger.Application.Auth;
@@ -46,7 +47,12 @@ builder.Services.AddAuthentication(AuthSchemes.Cookie)
         options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
     });
 
-builder.Services.AddAuthorization();
+// Deny by default. Every page declares [Authorize] and an architecture test holds it to that, but
+// nothing holds a minimal-API endpoint to it - a MapGet added in a later phase would answer anyone
+// who can reach the port. With a fallback policy the omission costs a redirect to the login page
+// instead of handing out the ledger, so the guarantee survives code nobody has written yet.
+builder.Services.AddAuthorization(options =>
+    options.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
 builder.Services.AddCascadingAuthenticationState();
 
 builder.Services.AddNoofTelegram();
@@ -69,7 +75,10 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
 
-app.MapStaticAssets();
+// Anonymous, or the fallback policy above redirects the sign-in page's own stylesheet and Blazor
+// script to the sign-in page. The page would still render - unstyled and inert - to the one visitor
+// who cannot sign in to report it.
+app.MapStaticAssets().AllowAnonymous();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 

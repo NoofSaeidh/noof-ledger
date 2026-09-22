@@ -44,6 +44,11 @@ that says nothing is a failure, and the sign-in page is the only one allowed to 
 rule exists because the convention had already drifted — a leftover template page was reachable
 without signing in, and nothing said so.
 
+Endpoints get the same guarantee from the other direction: the authorization fallback policy denies
+anonymous callers, so an endpoint that names no policy is closed rather than open. Only three things
+opt out, each deliberately — the sign-in page, the form it posts to, and `/healthz`. Static assets
+opt out too, or the sign-in page would arrive without the stylesheet and script it needs.
+
 The interlock that makes this safe regardless: **if Kestrel binds anything but loopback, the host
 logs the reason and exits — unconditionally, not only while auth is off.** The day you widen the
 binding to reach the dashboard from a phone, the app still refuses to start; loopback-only is
