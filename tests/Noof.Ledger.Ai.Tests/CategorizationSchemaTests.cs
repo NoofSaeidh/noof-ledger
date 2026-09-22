@@ -35,7 +35,7 @@ public class CategorizationSchemaTests
           "properties": {
             "items": {
               "type": "array",
-              "minItems": 1,
+              "minItems": 0,
               "items": {
                 "type": "object",
                 "additionalProperties": false,
