@@ -1,0 +1,36 @@
+using AwesomeAssertions;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Noof.Ledger.Application.Chat;
+using Noof.Ledger.Application.Secrets;
+using NSubstitute;
+
+namespace Noof.Ledger.Telegram.Tests;
+
+public class TelegramRegistrationTests
+{
+    [Fact]
+    public void AddNoofTelegram_registers_the_notifier_the_router_and_the_poller()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(TimeProvider.System);
+        // TelegramPollingService takes IConfiguration (it reads Capture:TimeZone per update). The
+        // Host always has one; a bare ServiceCollection does not, and GetServices<IHostedService>()
+        // constructs the service, so without this the test fails on a missing dependency rather
+        // than on the behaviour under test.
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddScoped(_ => Substitute.For<ISecretStore>());
+        services.AddScoped(_ => Substitute.For<Application.Capture.ICaptureStore>());
+        services.AddNoofTelegram();
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        scope.ServiceProvider.GetRequiredService<IChatNotifier>().Should().BeOfType<TelegramChatNotifier>();
+        scope.ServiceProvider.GetRequiredService<ITelegramUpdateRouter>().Should().BeOfType<TelegramUpdateRouter>();
+        provider.GetServices<IHostedService>().Should().ContainSingle()
+            .Which.Should().BeOfType<TelegramPollingService>();
+    }
+}

@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Noof.Ledger.Ai;
 using Noof.Ledger.Application.Auth;
-using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Host.Auth;
 using Noof.Ledger.Host.Cli;
 using Noof.Ledger.Host.Endpoints;
@@ -64,19 +63,7 @@ if (!cookieMode)
 builder.Services.AddAuthorization();
 builder.Services.AddCascadingAuthenticationState();
 
-// A log-level filter is a suppression a more specific configured category can override at
-// runtime - Logging:LogLevel:System.Net.Http.HttpClient.telegram.LogicalHandler beats a filter on
-// the shorter prefix and puts the full request URI, bot token included, at Information. Removing
-// the logging handlers from the pipeline instead means there is nothing left to re-enable.
-builder.Services.AddHttpClient("telegram").RemoveAllLoggers();
-
-builder.Services.AddSingleton<TelegramClientHandle>();
-builder.Services.AddSingleton<ITelegramBotClientFactory, TelegramBotClientFactory>();
-builder.Services.AddSingleton<IChatNotifier, TelegramChatNotifier>();
-builder.Services.AddScoped<TelegramOwnerGate>();
-builder.Services.AddScoped<TelegramUpdateOffsetStore>();
-builder.Services.AddScoped<ITelegramUpdateRouter, TelegramUpdateRouter>();
-builder.Services.AddHostedService<TelegramPollingService>();
+builder.Services.AddNoofTelegram();
 
 builder.Services.AddNoofAi(builder.Configuration);
 

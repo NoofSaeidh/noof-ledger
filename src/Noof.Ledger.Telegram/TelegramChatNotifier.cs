@@ -3,7 +3,7 @@ using Telegram.Bot;
 
 namespace Noof.Ledger.Telegram;
 
-public sealed class TelegramChatNotifier(TelegramClientHandle clientHandle) : IChatNotifier
+internal sealed class TelegramChatNotifier(TelegramClientHandle clientHandle) : IChatNotifier
 {
     public async Task<int> SendAsync(long chatId, string text, CancellationToken cancellationToken)
     {

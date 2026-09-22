@@ -54,13 +54,7 @@ public class PublicSurfaceTests
         ],
         ["Noof.Ledger.Persistence"] = ["LedgerConnectionString", "PersistenceRegistration"],
         ["Noof.Ledger.Ai"] = ["AiRegistration"],
-        ["Noof.Ledger.Telegram"] =
-        [
-            "ITelegramBotClientFactory", "ITelegramUpdateRouter", "TelegramBackoff",
-            "TelegramBotClientFactory", "TelegramChatNotifier", "TelegramClientHandle",
-            "TelegramOwnerGate", "TelegramPollResult", "TelegramPollingService",
-            "TelegramUpdateOffsetStore", "TelegramUpdateRouter",
-        ],
+        ["Noof.Ledger.Telegram"] = ["TelegramRegistration"],
         ["Noof.Ledger.Fx"] = [],
         ["Noof.Ledger.Receipts"] = [],
         ["Noof.Ledger.Host"] =
@@ -81,7 +75,7 @@ public class PublicSurfaceTests
             + "it means editing PublicSurfaceTests.Allowed, which is the point");
     }
 
-    [Fact(Skip = "Enabled per-assembly by Phase 1C Tasks 2-4; Task 4 removes this Skip.")]
+    [Fact]
     public void No_public_concrete_service_crosses_an_infrastructure_boundary()
     {
         string[] infrastructure = ["Noof.Ledger.Persistence", "Noof.Ledger.Ai", "Noof.Ledger.Telegram"];

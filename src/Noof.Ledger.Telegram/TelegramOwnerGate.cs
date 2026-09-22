@@ -3,7 +3,7 @@ using Noof.Ledger.Application.Secrets;
 
 namespace Noof.Ledger.Telegram;
 
-public sealed class TelegramOwnerGate(ISecretStore secretStore)
+internal sealed class TelegramOwnerGate(ISecretStore secretStore)
 {
     public async Task<bool> IsAllowedAsync(long chatId, CancellationToken cancellationToken)
     {

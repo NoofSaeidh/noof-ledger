@@ -3,7 +3,7 @@ using Noof.Ledger.Application.Secrets;
 
 namespace Noof.Ledger.Telegram;
 
-public sealed class TelegramUpdateOffsetStore(ISecretStore secretStore)
+internal sealed class TelegramUpdateOffsetStore(ISecretStore secretStore)
 {
     public const string Key = "telegram-update-offset";
 

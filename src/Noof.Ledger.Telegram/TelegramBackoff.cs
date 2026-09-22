@@ -1,6 +1,6 @@
 namespace Noof.Ledger.Telegram;
 
-public static class TelegramBackoff
+internal static class TelegramBackoff
 {
     static readonly TimeSpan Cap = TimeSpan.FromMinutes(1);
 
