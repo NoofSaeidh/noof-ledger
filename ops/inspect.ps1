@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 
@@ -12,7 +12,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'dotnet tool restore failed.' }
 
     # --no-build requires NoofLedger.slnx to already be built (dotnet build NoofLedger.slnx).
-    dotnet jb inspectcode NoofLedger.slnx -o="$report" -f=Xml -e=WARNING --caches-home="$reportDir/caches" --no-build
+    # -s points at a settings file this script owns. It is NOT NoofLedger.sln.DotSettings, because
+    # Rider reads that name too, and raising these inspections to ERROR there painted every test
+    # project red over findings requirement 1 exempts. The severity floor is the gate's business.
+    dotnet jb inspectcode NoofLedger.slnx -o="$report" -f=Xml -e=WARNING -s="ops/inspect.DotSettings" --caches-home="$reportDir/caches" --no-build
 
     if (-not (Test-Path $report)) {
         throw "inspectcode produced no report at $report"

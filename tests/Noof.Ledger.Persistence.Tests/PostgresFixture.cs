@@ -1,3 +1,4 @@
+﻿using System.Collections.Concurrent;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Noof.Ledger.TestKit;
@@ -6,7 +7,10 @@ namespace Noof.Ledger.Persistence.Tests;
 
 public sealed class PostgresFixture : IAsyncLifetime
 {
-    readonly List<string> created = [];
+    // A List<string> here was a real defect, not a style point: Add runs from however many tests
+    // xunit.runner.json lets run at once, List<T> is not thread safe, and a lost entry is a database
+    // that never gets dropped. That is one of the two reasons 166 of them had accumulated.
+    readonly ConcurrentBag<string> created = [];
 
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
@@ -62,6 +66,8 @@ public sealed class PostgresFixture : IAsyncLifetime
         await using var admin = new NpgsqlConnection(DatabaseSettings.AdminConnectionString);
         await admin.OpenAsync(TestContext.Current.CancellationToken);
 
+        List<string> undropped = [];
+
         foreach (var name in created)
         {
             // DROP DATABASE waits on a Postgres checkpoint before it can remove the files. With
@@ -72,7 +78,25 @@ public sealed class PostgresFixture : IAsyncLifetime
             {
                 CommandTimeout = 120,
             };
-            await drop.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+
+            // The second reason 166 databases had accumulated: this loop used to let a failed drop
+            // escape, which skipped every remaining database in the list. One slow checkpoint cost
+            // the whole run's cleanup. Now one failure costs exactly one database, and says so.
+            try
+            {
+                await drop.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+            }
+            catch (Exception exposed) when (exposed is NpgsqlException or TimeoutException)
+            {
+                undropped.Add(name);
+            }
+        }
+
+        if (undropped.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Left {undropped.Count} test database(s) behind: {string.Join(", ", undropped)}. "
+                + "Run ops/clean-test-databases.ps1 to remove them.");
         }
     }
 }

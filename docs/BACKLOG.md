@@ -1,4 +1,4 @@
-# Backlog — future improvements
+﻿# Backlog — future improvements
 
 Work that is wanted but deliberately not scheduled. Distinct from `OPEN-QUESTIONS.md`, which holds
 deferred *decisions*; this holds deferred *work* whose decision is already made.
@@ -436,18 +436,16 @@ the allowlist unnoticed, silently defeating the point of the guard (widening the
 be a reviewed edit to `PublicSurfaceTests.Allowed`). A one-line regex fix, worth doing with a
 watch-it-fail-first check the day the first delegate is actually added.
 
-## `Noof.Ledger.E2E.Tests` is not in `NoofLedger.slnx`
+## `Noof.Ledger.E2E.Tests` was not in `NoofLedger.slnx` — fixed 2026-09-22
 
 Discovered in Phase 1C when an unused-`using` error in
 `tests/Noof.Ledger.E2E.Tests/CookieModeHostFixture.cs` survived a clean `dotnet build
-NoofLedger.slnx` — the E2E project is not a member of the `.slnx`, so neither `dotnet build
-NoofLedger.slnx` nor `dotnet test --solution NoofLedger.slnx` ever touches it. `ops/publish.ps1` only
-runs `dotnet test --solution NoofLedger.slnx`, so it does not cover the E2E suite either. It must be
-built and run separately: `dotnet test --project
-tests/Noof.Ledger.E2E.Tests/Noof.Ledger.E2E.Tests.csproj`.
+NoofLedger.slnx`: the E2E project was not a member of the `.slnx`, so neither `dotnet build
+NoofLedger.slnx` nor `dotnet test --solution NoofLedger.slnx` ever touched it, and `ops/publish.ps1`
+— which only runs `dotnet test --solution` — did not cover it either. A test suite outside the
+solution is a test suite that rots without anybody noticing.
 
-Not fixed here — out of Phase 1C's scope, and adding the project to the `.slnx` is a one-line change
-whose consequences are worth checking deliberately rather than in passing: whether it changes what
-`dotnet test --solution` reports in a way that breaks anything reading those numbers (this file
-included), and whether pulling Playwright's browser dependency into every plain `dotnet
-build`/`dotnet test` is welcome, versus only when the E2E suite is deliberately run.
+Added to the `.slnx` at the operator's instruction, with both consequences accepted knowingly:
+`dotnet test --solution` now runs the browser suite too, so a plain test run needs Playwright's
+Chromium present and takes about 40 seconds longer, and the solution test count now includes those
+13. Every number in this repository's documentation counts the whole solution from here on.

@@ -1,3 +1,15 @@
+<!--
+  Settings used ONLY by ops/inspect.ps1, passed with `jb inspectcode -s`. Deliberately not named
+  NoofLedger.sln.DotSettings: that filename is the solution's shared layer, which Rider also reads,
+  and raising these five inspections to ERROR there painted 84 findings red in the test projects -
+  67 of them ClassCanBeSealed.Global against xUnit fixtures, which requirement 1 of Phase 1C exempts
+  and nobody intends to fix. The severity floor exists so `-e=WARNING` reports these inspections at
+  all (their default is SUGGESTION, below the floor); it is the gate's business, not the editor's.
+  In Rider these stay at ReSharper's defaults, which still show them as hints where they apply.
+
+  Dots inside an inspection id are escaped as _002E: MemberCanBePrivate.Global becomes
+  MemberCanBePrivate_002EGlobal.
+-->
 <wpf:ResourceDictionary xml:space="preserve" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:s="clr-namespace:System;assembly=mscorlib" xmlns:ss="urn:shemas-jetbrains-com:settings-storage-xaml" xmlns:wpf="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
 	<s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=MemberCanBePrivate_002EGlobal/@EntryIndexedValue">ERROR</s:String>
 	<s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=MemberCanBeInternal/@EntryIndexedValue">ERROR</s:String>

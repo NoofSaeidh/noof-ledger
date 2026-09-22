@@ -1,4 +1,4 @@
-# noof-ledger
+﻿# noof-ledger
 
 A personal finance tracker, built for one person and one machine.
 
@@ -8,7 +8,7 @@ wallets and currencies.
 
 > **Status: the capture path works end to end.** A message typed to the Telegram bot becomes a
 > categorised expense on the dashboard, with every figure computed by C# from the text you wrote.
-> 466 solution tests and 13 browser tests, all green.
+> 479 tests, all green — browser tests included.
 >
 > Still missing before it can carry a year of real spending: **balances** (there is no arithmetic
 > over wallets yet), **voice notes and receipt photos**, **currency exchange**, and — the one that

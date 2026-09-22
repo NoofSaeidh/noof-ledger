@@ -1,4 +1,4 @@
-# Ops Runbook
+﻿# Ops Runbook
 
 ## PostgreSQL local setup (one-time)
 
@@ -55,10 +55,17 @@ public **member** that nothing outside its own assembly ever calls
 (`MemberCanBePrivate.Global`, `MemberCanBeInternal`), an unused public member or
 type (`UnusedMember.Global`, `UnusedType.Global`), and a class with no
 inheritors that could be sealed (`ClassCanBeSealed.Global`). Those five
-inspections are raised from their default `SUGGESTION` to `ERROR` by the
-committed `NoofLedger.sln.DotSettings`, which `jb inspectcode` picks up
-automatically because it sits next to `NoofLedger.slnx` — the same file also
-lights the same inspections up in Rider for anyone who opens the solution.
+inspections are raised from their default `SUGGESTION` to `ERROR` by
+`ops/inspect.DotSettings`, which the script passes with `-s`.
+
+That file is deliberately **not** called `NoofLedger.sln.DotSettings`. That
+name is the solution's shared settings layer, which Rider reads too, and
+raising these five inspections there turned every test project red over 92
+findings that requirement 1 exempts and nobody intends to fix — 67 of them
+`ClassCanBeSealed.Global` against xUnit fixtures. The severity floor exists so
+`-e=WARNING` reports these inspections at all; it belongs to the gate, not to
+everyone's editor. In Rider they stay at ReSharper's defaults and still show
+up as hints where they apply.
 
 Run `dotnet build NoofLedger.slnx` first — `--no-build` means the script
 inspects whatever was last built, not what is currently on disk. Then:
@@ -83,3 +90,26 @@ narrow the member (`private`, `private protected`, or `internal` — tests reach
 narrowed `src` members through `InternalsVisibleTo`) or, if it is a genuine
 exception, reject it in `.editorconfig` or with a file-local suppression that
 states the reason — never by silently re-widening the member.
+
+## Leftover test databases
+
+`Noof.Ledger.Persistence.Tests` creates one throwaway PostgreSQL database per test
+(`noof_test_*`) and `Noof.Ledger.E2E.Tests` one per host fixture (`noof_e2e_*`).
+Both drop them when the run ends. A run killed partway through, or a `DROP` that
+times out waiting on a Postgres checkpoint, leaves them behind — 166 had
+accumulated before anyone counted.
+
+```powershell
+pwsh -File ops/clean-test-databases.ps1          # drop them
+pwsh -File ops/clean-test-databases.ps1 -WhatIf  # list them and drop nothing
+```
+
+The script refuses `noof_ledger` and `noof_ledger_test_template` **by name**, not
+merely by the pattern it searches with. A pattern is a filter; a refusal is a
+guarantee, and this script's whole job is dropping databases.
+
+Two bugs that used to turn a single slow `DROP` into dozens of orphans are fixed
+in `PostgresFixture`: the list of created databases was a plain `List<string>`
+mutated from parallel tests, and one failed drop used to abort the loop and skip
+every remaining database. Teardown now continues past a failure and ends by
+naming what it could not remove, pointing here.

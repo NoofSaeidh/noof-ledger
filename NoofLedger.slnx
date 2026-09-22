@@ -14,6 +14,7 @@
     <Project Path="tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj" />
     <Project Path="tests/Noof.Ledger.Architecture.Tests/Noof.Ledger.Architecture.Tests.csproj" />
     <Project Path="tests/Noof.Ledger.Domain.Tests/Noof.Ledger.Domain.Tests.csproj" />
+    <Project Path="tests/Noof.Ledger.E2E.Tests/Noof.Ledger.E2E.Tests.csproj" />
     <Project Path="tests/Noof.Ledger.Host.Tests/Noof.Ledger.Host.Tests.csproj" />
     <Project Path="tests/Noof.Ledger.Persistence.Tests/Noof.Ledger.Persistence.Tests.csproj" />
     <Project Path="tests/Noof.Ledger.Telegram.Tests/Noof.Ledger.Telegram.Tests.csproj" />
