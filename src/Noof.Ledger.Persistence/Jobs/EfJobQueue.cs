@@ -5,7 +5,7 @@ using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Persistence.Jobs;
 
-public sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, int maxAttempts) : IJobQueue
+internal sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, int maxAttempts) : IJobQueue
 {
     public async Task<CategorizationJob?> ClaimAsync(string workerId, TimeSpan lease, CancellationToken cancellationToken)
     {

@@ -6,7 +6,7 @@ using Npgsql;
 
 namespace Noof.Ledger.Persistence.Secrets;
 
-public sealed class EfSecretStore(LedgerDbContext db, IDataProtectionProvider dataProtection, TimeProvider timeProvider)
+internal sealed class EfSecretStore(LedgerDbContext db, IDataProtectionProvider dataProtection, TimeProvider timeProvider)
     : ISecretStore
 {
     public async Task<SecretResult> GetAsync(string key, CancellationToken cancellationToken)

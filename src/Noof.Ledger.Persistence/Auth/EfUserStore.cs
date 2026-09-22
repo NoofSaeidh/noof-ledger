@@ -4,7 +4,7 @@ using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Persistence.Auth;
 
-public sealed class EfUserStore(LedgerDbContext db) : IUserStore
+internal sealed class EfUserStore(LedgerDbContext db) : IUserStore
 {
     public Task<AppUser?> FindByUsernameAsync(string username, CancellationToken cancellationToken) =>
         db.Users.FirstOrDefaultAsync(u => u.Username.ToLower() == username.ToLower(), cancellationToken);

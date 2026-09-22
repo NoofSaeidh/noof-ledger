@@ -1,10 +1,8 @@
 using System.Text;
-using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Auth;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Host.Auth;
 using Noof.Ledger.Persistence;
-using Noof.Ledger.Persistence.Auth;
 
 namespace Noof.Ledger.Host.Cli;
 
@@ -28,10 +26,9 @@ public static class UserCommand
         // Microsoft.Extensions.Hosting.Host, because this file sits inside that namespace.
         var builder = Microsoft.Extensions.Hosting.Host.CreateApplicationBuilder(args);
 
-        string connectionString;
         try
         {
-            connectionString = LedgerConnectionString.Resolve(builder.Configuration.GetConnectionString("Ledger"));
+            LedgerConnectionString.Resolve(builder.Configuration.GetConnectionString("Ledger"));
         }
         catch (InvalidOperationException exposed)
         {
@@ -39,9 +36,9 @@ public static class UserCommand
             return 1;
         }
 
-        builder.Services.AddDbContext<LedgerDbContext>(options => options.UseNpgsql(connectionString));
         builder.Services.AddSingleton<IPasswordHasher, PasswordHasherAdapter>();
-        builder.Services.AddScoped<IUserStore, EfUserStore>();
+        // maxJobAttempts is inert on this path: the CLI never resolves IJobQueue, only IUserStore.
+        builder.Services.AddNoofPersistence(builder.Configuration, maxJobAttempts: 1);
 
         var password = ReadPassword();
         if (string.IsNullOrEmpty(password))

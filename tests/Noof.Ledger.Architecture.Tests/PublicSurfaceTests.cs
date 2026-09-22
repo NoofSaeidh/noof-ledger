@@ -52,13 +52,7 @@ public class PublicSurfaceTests
             "ISpendingReadModel", "ProbeResult", "ISecretProbe", "ISecretStore", "SecretKeys",
             "SecretResult", "SecretState", "SecretStatus",
         ],
-        ["Noof.Ledger.Persistence"] =
-        [
-            "EfUserStore", "EfCaptureStore", "EfCategorizationStore", "EfCategoryCatalog",
-            "EfMerchantDirectory", "DesignTimeDbContextFactory", "EfJobQueue",
-            "LedgerConnectionString", "LedgerDbContext", "EfSpendingReadModel", "AppSecret",
-            "EfSecretStore",
-        ],
+        ["Noof.Ledger.Persistence"] = ["LedgerConnectionString", "PersistenceRegistration"],
         ["Noof.Ledger.Ai"] =
         [
             "AnthropicCategorizer", "IAnthropicClientFactory", "AnthropicClientFactory",

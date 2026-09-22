@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore.Design;
 
 namespace Noof.Ledger.Persistence;
 
-public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<LedgerDbContext>
+internal sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<LedgerDbContext>
 {
     public LedgerDbContext CreateDbContext(string[] args)
     {

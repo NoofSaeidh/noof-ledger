@@ -5,7 +5,7 @@ using Npgsql;
 
 namespace Noof.Ledger.Persistence.Capture;
 
-public sealed class EfCaptureStore(LedgerDbContext db, TimeProvider timeProvider) : ICaptureStore
+internal sealed class EfCaptureStore(LedgerDbContext db, TimeProvider timeProvider) : ICaptureStore
 {
     public async Task<Guid> CaptureAsync(CapturedMessage message, string timeZoneId, CancellationToken cancellationToken)
     {
