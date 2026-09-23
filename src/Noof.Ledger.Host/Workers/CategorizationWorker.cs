@@ -174,7 +174,7 @@ internal sealed class CategorizationWorker(
                 replyLines.Add(new CategorizationReply.ReplyLine(item.Description, item.Amount, categoryNameBySlug[item.CategorySlug]));
             }
 
-            await store.ApplyAsync(job.TransactionId, categorizedItems, cancellationToken);
+            await store.ApplyAsync(job.TransactionId, new CategorizationOutcome(categorizedItems, sub.OccurredOn), cancellationToken);
 
             // From this line on, the transaction's line items and Completed status are already
             // committed. Nothing past here may ever be treated as a job failure - that would run

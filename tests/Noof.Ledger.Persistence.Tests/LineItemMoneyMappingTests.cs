@@ -18,6 +18,7 @@ public class LineItemMoneyMappingTests(PostgresFixture fixture)
         Status = TransactionStatus.Captured,
         TimeZoneId = "Europe/Belgrade",
         OccurredAt = DateTimeOffset.UtcNow,
+        OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
         TelegramChatId = 1,
         TelegramMessageId = 1,
         CreatedAt = DateTimeOffset.UtcNow,

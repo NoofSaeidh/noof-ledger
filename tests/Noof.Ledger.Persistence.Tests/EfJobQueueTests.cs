@@ -28,6 +28,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
         Status = TransactionStatus.Captured,
         TimeZoneId = "Europe/Belgrade",
         OccurredAt = now,
+        OccurredOn = DateOnly.FromDateTime(now.UtcDateTime),
         TelegramChatId = 1,
         TelegramMessageId = Interlocked.Increment(ref nextTelegramMessageId),
         CreatedAt = now,

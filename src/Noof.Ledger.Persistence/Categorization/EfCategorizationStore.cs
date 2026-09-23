@@ -7,15 +7,45 @@ namespace Noof.Ledger.Persistence.Categorization;
 
 internal sealed class EfCategorizationStore(LedgerDbContext db) : ICategorizationStore
 {
-    public async Task<CategorizationSubject?> GetSubjectAsync(Guid transactionId, CancellationToken cancellationToken) =>
-        await (
+    public async Task<CategorizationSubject?> GetSubjectAsync(Guid transactionId, CancellationToken cancellationToken)
+    {
+        var header = await (
             from t in db.Transactions.AsNoTracking()
             join w in db.Wallets.AsNoTracking() on t.WalletId equals w.Id
             where t.Id == transactionId
-            select new CategorizationSubject(t.Id, t.RawText, t.TelegramChatId, t.BotMessageId, w.Name))
+            select new
+            {
+                t.Id, t.RawText, t.TelegramChatId, t.BotMessageId, WalletName = w.Name,
+                t.Status, t.OccurredAt, t.TimeZoneId, t.OccurredOn,
+            })
             .SingleOrDefaultAsync(cancellationToken);
 
-    public async Task ApplyAsync(Guid transactionId, IReadOnlyList<CategorizedLineItem> items, CancellationToken cancellationToken)
+        if (header is null)
+            return null;
+
+        // line_items has no ordinal column, so the order is made deterministic rather than left to the heap.
+        var lines = await (
+            from li in db.LineItems.AsNoTracking()
+            where li.TransactionId == transactionId
+            join c in db.Categories.AsNoTracking() on li.CategoryId equals c.Id into categoryJoin
+            from c in categoryJoin.DefaultIfEmpty()
+            join m in db.Merchants.AsNoTracking() on li.MerchantId equals m.Id into merchantJoin
+            from m in merchantJoin.DefaultIfEmpty()
+            orderby li.Description
+            select new RecordedLine(
+                li.Description,
+                li.Amount,
+                c == null ? null : c.Slug,
+                c == null ? null : c.NameRu,
+                m == null ? null : m.DisplayName))
+            .ToListAsync(cancellationToken);
+
+        return new CategorizationSubject(
+            header.Id, header.RawText, header.TelegramChatId, header.BotMessageId, header.WalletName,
+            header.Status, ZonedClock.LocalDate(header.OccurredAt, header.TimeZoneId), header.OccurredOn, lines);
+    }
+
+    public async Task ApplyAsync(Guid transactionId, CategorizationOutcome outcome, CancellationToken cancellationToken)
     {
         await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
 
@@ -43,7 +73,7 @@ internal sealed class EfCategorizationStore(LedgerDbContext db) : ICategorizatio
             ],
             cancellationToken);
 
-        foreach (var item in items)
+        foreach (var item in outcome.Items)
         {
             db.LineItems.Add(new LineItem
             {
@@ -59,6 +89,7 @@ internal sealed class EfCategorizationStore(LedgerDbContext db) : ICategorizatio
 
         var transaction = await db.Transactions.SingleAsync(t => t.Id == transactionId, cancellationToken);
         transaction.Status = TransactionStatus.Completed;
+        transaction.OccurredOn = outcome.OccurredOn;
 
         await db.SaveChangesAsync(cancellationToken);
         await tx.CommitAsync(cancellationToken);

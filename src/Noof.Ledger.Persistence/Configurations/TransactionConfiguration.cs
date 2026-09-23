@@ -18,6 +18,7 @@ internal sealed class TransactionConfiguration : IEntityTypeConfiguration<Transa
         builder.Property(t => t.Status).HasColumnName("status");
         builder.Property(t => t.TimeZoneId).HasColumnName("time_zone_id").HasMaxLength(64).IsRequired();
         builder.Property(t => t.OccurredAt).HasColumnName("occurred_at");
+        builder.Property(t => t.OccurredOn).HasColumnName("occurred_on");
         builder.Property(t => t.TelegramChatId).HasColumnName("telegram_chat_id");
         builder.Property(t => t.TelegramMessageId).HasColumnName("telegram_message_id");
         builder.Property(t => t.BotMessageId).HasColumnName("bot_message_id");

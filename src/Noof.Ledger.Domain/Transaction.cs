@@ -5,7 +5,7 @@ public sealed class Transaction
     public required Guid Id { get; init; }
     public required Guid WalletId { get; init; }
 
-    public required string RawText { get; init; }
+    public required string RawText { get; set; }
 
     public required TransactionStatus Status { get; set; }
 
@@ -13,6 +13,11 @@ public sealed class Transaction
     public required string TimeZoneId { get; init; }
 
     public required DateTimeOffset OccurredAt { get; init; }
+
+    // The local day the purchase happened. OccurredAt stays the instant the message was sent; when the two
+    // name the same local day the time of day is known, otherwise only the day is (decision D3).
+    public required DateOnly OccurredOn { get; set; }
+
     public required long TelegramChatId { get; init; }
 
     // The user's own message.

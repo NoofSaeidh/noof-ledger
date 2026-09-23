@@ -96,8 +96,12 @@ public class CategorizationWorkerTests
         UpdatedAt = DateTimeOffset.UtcNow,
     };
 
-    static CategorizationSubject Subject(int? botMessageId = 42, string rawText = "Bread 250 RSD") =>
-        new(TransactionId, rawText, 111L, botMessageId, "Cash");
+    static readonly DateOnly SentOn = new(2026, 9, 21);
+
+    static CategorizationSubject Subject(
+        int? botMessageId = 42, string rawText = "Bread 250 RSD", DateOnly? occurredOn = null,
+        TransactionStatus status = TransactionStatus.Captured, IReadOnlyList<RecordedLine>? lines = null) =>
+        new(TransactionId, rawText, 111L, botMessageId, "Cash", status, SentOn, occurredOn ?? SentOn, lines ?? []);
 
     static CategorizationProposal OneGroceryLine(decimal amount = 250m, string currency = "RSD") =>
         new([new ProposedLineItem("Bread", amount, currency, "groceries", null, null)]);
@@ -244,7 +248,7 @@ public class CategorizationWorkerTests
 
         result.Should().Be(CategorizationTickResult.Processed);
         await store.Received(1).ApplyAsync(
-            TransactionId, Arg.Is<IReadOnlyList<CategorizedLineItem>>(items => items.Count == 0), Arg.Any<CancellationToken>());
+            TransactionId, Arg.Is<CategorizationOutcome>(outcome => outcome.Items.Count == 0), Arg.Any<CancellationToken>());
         await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
         await jobQueue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
         await jobQueue.DidNotReceive().FailAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
@@ -274,7 +278,7 @@ public class CategorizationWorkerTests
         var result = await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
         result.Should().Be(CategorizationTickResult.Processed);
-        await store.Received(1).ApplyAsync(TransactionId, Arg.Any<IReadOnlyList<CategorizedLineItem>>(), Arg.Any<CancellationToken>());
+        await store.Received(1).ApplyAsync(TransactionId, Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
         await notifier.Received(1).EditAsync(111L, 42, Arg.Any<string>(), Arg.Any<CancellationToken>());
         await jobQueue.DidNotReceive().RetryAsync(
             Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
@@ -425,7 +429,7 @@ public class CategorizationWorkerTests
         await merchantDirectory.DidNotReceive().LinkAliasAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await store.Received(1).ApplyAsync(
             TransactionId,
-            Arg.Is<IReadOnlyList<CategorizedLineItem>>(items => items.Single().MerchantId == merchantId),
+            Arg.Is<CategorizationOutcome>(outcome => outcome.Items.Single().MerchantId == merchantId),
             Arg.Any<CancellationToken>());
     }
 
@@ -459,7 +463,7 @@ public class CategorizationWorkerTests
         await merchantDirectory.Received(1).LinkAliasAsync("STARBUCKS", "Starbucks", Arg.Any<CancellationToken>());
         await store.Received(1).ApplyAsync(
             TransactionId,
-            Arg.Is<IReadOnlyList<CategorizedLineItem>>(items => items.Single().MerchantId == linkedId),
+            Arg.Is<CategorizationOutcome>(outcome => outcome.Items.Single().MerchantId == linkedId),
             Arg.Any<CancellationToken>());
     }
 
@@ -477,7 +481,7 @@ public class CategorizationWorkerTests
 
         await jobQueue.Received(1).FailAsync(JobId, WorkerId, Arg.Any<string>(), Arg.Any<CancellationToken>());
         await store.DidNotReceive().ApplyAsync(
-            Arg.Any<Guid>(), Arg.Any<IReadOnlyList<CategorizedLineItem>>(), Arg.Any<CancellationToken>());
+            Arg.Any<Guid>(), Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
         await store.Received(1).MarkFailedAsync(TransactionId, Arg.Any<CancellationToken>());
     }
 
@@ -555,7 +559,7 @@ public class CategorizationWorkerTests
         // raw capture alone survives - and the job was retried, not abandoned.
         await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
         await store.DidNotReceive().ApplyAsync(
-            Arg.Any<Guid>(), Arg.Any<IReadOnlyList<CategorizedLineItem>>(), Arg.Any<CancellationToken>());
+            Arg.Any<Guid>(), Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
         await notifier.DidNotReceive().EditAsync(
             Arg.Any<long>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await jobQueue.Received(1).RetryAsync(
@@ -572,7 +576,7 @@ public class CategorizationWorkerTests
         // half of that proof.
         await store.Received(1).ApplyAsync(
             TransactionId,
-            Arg.Is<IReadOnlyList<CategorizedLineItem>>(items => items.Single().Description == "Bread"),
+            Arg.Is<CategorizationOutcome>(outcome => outcome.Items.Single().Description == "Bread"),
             Arg.Any<CancellationToken>());
         await jobQueue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
         await notifier.Received(1).EditAsync(
@@ -607,7 +611,7 @@ public class CategorizationWorkerTests
 
         result.Should().Be(CategorizationTickResult.Processed);
         await store.Received(1).ApplyAsync(
-            TransactionId, Arg.Any<IReadOnlyList<CategorizedLineItem>>(), Arg.Any<CancellationToken>());
+            TransactionId, Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
         await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
         await jobQueue.DidNotReceive().FailAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await jobQueue.DidNotReceive().RetryAsync(

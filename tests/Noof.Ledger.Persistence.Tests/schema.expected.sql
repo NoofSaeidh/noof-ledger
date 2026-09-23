@@ -60,6 +60,7 @@ CREATE TABLE public.transactions (
     status integer NOT NULL,
     time_zone_id character varying(64) NOT NULL,
     occurred_at timestamptz NOT NULL,
+    occurred_on date NOT NULL,
     telegram_chat_id bigint NOT NULL,
     telegram_message_id integer NOT NULL,
     bot_message_id integer,

@@ -37,7 +37,8 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
     };
 
     static Transaction NewTransaction(
-        Guid walletId, DateTimeOffset occurredAt, string timeZoneId, TransactionStatus status) => new()
+        Guid walletId, DateTimeOffset occurredAt, string timeZoneId, TransactionStatus status,
+        DateOnly? occurredOn = null) => new()
     {
         Id = Guid.NewGuid(),
         WalletId = walletId,
@@ -45,6 +46,7 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
         Status = status,
         TimeZoneId = timeZoneId,
         OccurredAt = occurredAt,
+        OccurredOn = occurredOn ?? DateOnly.FromDateTime(occurredAt.UtcDateTime),
         TelegramChatId = 1,
         TelegramMessageId = Interlocked.Increment(ref nextTelegramMessageId),
         CreatedAt = occurredAt,

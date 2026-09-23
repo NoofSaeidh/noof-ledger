@@ -44,7 +44,7 @@ public class PublicSurfaceTests
             "IPasswordHasher", "IUserStore", "PasswordVerifyResult", "CapturedMessage",
             "ICaptureStore", "CategoryOption", "MerchantOption", "CategorizationRequest",
             "ProposedLineItem", "CategorizationProposal", "ResolvedLineItem", "CategorizedLineItem",
-            "CategorizationSubject", "CategoryEntry", "MerchantAliasEntry", "ICategorizationStore",
+            "CategorizationSubject", "RecordedLine", "CategorizationOutcome", "CategoryEntry", "MerchantAliasEntry", "ICategorizationStore",
             "ICategorizer", "ICategoryCatalog", "IMerchantDirectory", "MerchantScan",
             "ModelFailureKind", "ModelCallException", "ModelCallExceptionExtensions",
             "ProposalMapper", "MappedProposal", "IChatNotifier", "IJobQueue", "JobCompletionOutcome",
