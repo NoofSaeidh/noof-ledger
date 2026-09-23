@@ -2,7 +2,11 @@ namespace Noof.Ledger.TestKit;
 
 public static class DatabaseSettings
 {
-    public const string TemplateDatabase = "noof_ledger_test_template";
+    // Parallel worktrees each add migrations to the template independently, so each needs its own clone.
+    public static string TemplateDatabase =>
+        string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NOOF_TEST_TEMPLATE"))
+            ? "noof_ledger_test_template"
+            : Environment.GetEnvironmentVariable("NOOF_TEST_TEMPLATE")!;
 
     private static readonly string CredentialFile = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
