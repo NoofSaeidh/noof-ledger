@@ -31,7 +31,7 @@ internal sealed class AnthropicCategorizer(IAnthropicClientFactory clientFactory
         // System is the SAME across turns; per-request data - categories, hints - lives only in the
         // user turn, built by CategorizationPrompt.BuildUserTurn. Instructions lands as the request's
         // "system" per the captured HTTP body (fact 1/2 above).
-        var userTurn = CategorizationPrompt.BuildUserTurn(request.RawText, request.Categories, request.MerchantHints);
+        var userTurn = CategorizationPrompt.BuildUserTurn(request);
         var recordSpendingSchema = CategorizationSchema.BuildRecordSpending(request.Categories, request.MerchantHints);
         var recordSpendingTool = new RawSchemaFunctionDeclaration(RecordSpendingName, RecordSpendingDescription, recordSpendingSchema);
         var listMerchantsTool = new RawSchemaFunctionDeclaration(
@@ -198,7 +198,7 @@ internal sealed class AnthropicCategorizer(IAnthropicClientFactory clientFactory
         if (payload is null)
             throw new ModelCallException(ModelFailureKind.Transient, $"{RecordSpendingName} returned an empty payload.");
 
-        return new CategorizationProposal([.. payload.Items.Select(i => i.ToProposedLineItem())]);
+        return new CategorizationProposal([.. payload.Items.Select(i => i.ToProposedLineItem())], payload.OccurredOn);
     }
 
     // FunctionCallContent.Arguments holds one JsonElement per top-level parameter, produced by
@@ -254,7 +254,9 @@ internal sealed class AnthropicCategorizer(IAnthropicClientFactory clientFactory
     // promises ("currency", not "currency_code") do not all match ProposedLineItem's C# property
     // names, so this maps explicitly, field by field, rather than trusting a naming-policy
     // convention that is wrong for exactly one field.
-    sealed record RecordSpendingPayload([property: JsonPropertyName("items")] IReadOnlyList<ProposedLineItemDto> Items);
+    sealed record RecordSpendingPayload(
+        [property: JsonPropertyName("items")] IReadOnlyList<ProposedLineItemDto> Items,
+        [property: JsonPropertyName("occurred_on")] string? OccurredOn);
 
     sealed record ProposedLineItemDto(
         [property: JsonPropertyName("description")] string Description,

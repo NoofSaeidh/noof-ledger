@@ -86,15 +86,23 @@ public class CategorizationPromptTests
     }
 
     [Fact]
-    public void Build_user_turn_includes_the_raw_text_the_categories_and_the_hints()
+    public void Build_user_turn_gives_today_with_its_weekday_then_the_message_categories_and_hints()
     {
         IReadOnlyList<CategoryOption> categories = [new CategoryOption("groceries", "Groceries", "Продукты", null)];
-        IReadOnlyList<MerchantOption> hints = [];
+        var request = new CategorizationRequest("купил вчера штуку евро", new DateOnly(2026, 9, 22), categories, [], []);
 
-        var turn = CategorizationPrompt.BuildUserTurn("кофе 250 рсд", categories, hints);
+        var turn = CategorizationPrompt.BuildUserTurn(request);
 
-        turn.Should().Contain("кофе 250 рсд");
+        turn.Should().StartWith("Today: 2026-09-22 (Tuesday)");
+        turn.Should().Contain("купил вчера штуку евро");
         turn.Should().Contain("groceries: Groceries / Продукты");
         turn.Should().Contain("No known merchants");
+    }
+
+    [Fact]
+    public void System_prompt_explains_relative_days_are_counted_from_today()
+    {
+        CategorizationPrompt.System.Should().Contain("occurred_on");
+        CategorizationPrompt.System.Should().Contain("counted from today");
     }
 }

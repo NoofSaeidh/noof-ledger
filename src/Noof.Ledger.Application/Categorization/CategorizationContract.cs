@@ -9,8 +9,11 @@ public sealed record CategoryOption(string Slug, string NameEn, string NameRu, s
 // A merchant the database already knows. Id is what the model returns when it accepts one.
 public sealed record MerchantOption(Guid Id, string DisplayName);
 
+// Today is the local day the message was SENT, never the day the job runs: a message that waited in the
+// offline queue overnight must not move a day (D2).
 public sealed record CategorizationRequest(
     string RawText,
+    DateOnly Today,
     IReadOnlyList<CategoryOption> Categories,
     IReadOnlyList<MerchantOption> MerchantHints,
     IReadOnlyList<MerchantOption> AllMerchants);
@@ -27,7 +30,7 @@ public sealed record ProposedLineItem(
     Guid? KnownMerchantId,
     string? MerchantName);
 
-public sealed record CategorizationProposal(IReadOnlyList<ProposedLineItem> Items);
+public sealed record CategorizationProposal(IReadOnlyList<ProposedLineItem> Items, string? OccurredOn = null);
 
 public sealed record ResolvedLineItem(
     string Description,
@@ -36,7 +39,7 @@ public sealed record ResolvedLineItem(
     Guid? KnownMerchantId,
     string? MerchantName);
 
-public sealed record MappedProposal(IReadOnlyList<ResolvedLineItem> Items);
+public sealed record MappedProposal(IReadOnlyList<ResolvedLineItem> Items, DateOnly? OccurredOn);
 
 // A line ready to be written: identity resolved, slug resolved to a real row.
 public sealed record CategorizedLineItem(
