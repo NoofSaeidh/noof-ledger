@@ -9,13 +9,13 @@ wallets and currencies.
 > **Status: the capture path works end to end.** A message typed to the Telegram bot becomes a
 > categorised expense on the dashboard. Say it the way you would say it — *"купил вчера штуку
 > евро"* is recorded as 1000 EUR dated yesterday, echoed back in the chat, and can be cancelled
-> with one tap or corrected by a reply.
-> 577 tests, all green — browser tests included.
+> with one tap or corrected by a reply. Voice notes work the same way: say it, and the bot records
+> what it heard.
+> 675 tests, all green — browser tests included.
 >
 > Still missing before it can carry a year of real spending: **balances** (there is no arithmetic
-> over wallets yet), **voice notes** (next) **and receipt photos**, **currency exchange**, and —
-> the one that matters most — **a backup that has actually been restored at least once**. An
-> untested backup is a hypothesis.
+> over wallets yet), **receipt photos**, **currency exchange**, and — the one that matters most —
+> **a backup that has actually been restored at least once**. An untested backup is a hypothesis.
 
 ## Why it looks the way it does
 
