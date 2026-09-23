@@ -1,5 +1,7 @@
 using Noof.Ledger.Application.Chat;
 using Telegram.Bot;
+using Telegram.Bot.Exceptions;
+using Telegram.Bot.Types.ReplyMarkups;
 
 namespace Noof.Ledger.Telegram;
 
@@ -11,8 +13,22 @@ internal sealed class TelegramChatNotifier(TelegramClientHandle clientHandle) : 
         return message.Id;
     }
 
-    public async Task EditAsync(long chatId, int messageId, string text, CancellationToken cancellationToken) =>
-        await Client().EditMessageText(chatId, messageId, text, cancellationToken: cancellationToken);
+    public async Task EditAsync(long chatId, int messageId, EchoMessage message, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Client().EditMessageText(chatId, messageId, message.Text,
+                replyMarkup: Keyboard(message.Actions), cancellationToken: cancellationToken);
+        }
+        // Telegram refuses an edit that changes nothing: a second tap on a button whose first tap already
+        // produced this exact text. The chat already shows what it should.
+        catch (ApiRequestException exception) when (exception.Message.Contains("message is not modified", StringComparison.Ordinal))
+        {
+        }
+    }
+
+    static InlineKeyboardMarkup? Keyboard(IReadOnlyList<RecordAction> actions) =>
+        actions.Count == 0 ? null : new InlineKeyboardMarkup(actions.Select(RecordActionButtons.ToButton));
 
     ITelegramBotClient Client() =>
         clientHandle.Current ?? throw new InvalidOperationException(

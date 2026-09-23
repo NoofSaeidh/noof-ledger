@@ -22,7 +22,7 @@ internal sealed class TelegramPollingService(
     : BackgroundService
 {
     const string PoisonUpdateNotice =
-        "Sorry, I couldn't process this message after several attempts. I'm skipping it so newer messages aren't stuck behind it.";
+        "Не смог обработать это сообщение после нескольких попыток — пропускаю его, чтобы не задерживать следующие.";
 
     static readonly TimeSpan IdlePollInterval = TimeSpan.FromSeconds(5);
     const int MaxUpdateAttempts = 3;

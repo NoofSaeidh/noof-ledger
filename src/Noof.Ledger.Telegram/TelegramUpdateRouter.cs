@@ -10,8 +10,6 @@ internal sealed class TelegramUpdateRouter(
     TelegramOwnerGate ownerGate)
     : ITelegramUpdateRouter
 {
-    public const string ReceiptAcknowledgement = "Saved. I'll add the amount once it's categorised.";
-
     public async Task HandleAsync(Update update, string timeZoneId, CancellationToken cancellationToken)
     {
         var message = update.Message;
@@ -35,7 +33,7 @@ internal sealed class TelegramUpdateRouter(
         var captured = new CapturedMessage(message.Chat.Id, message.Id, text, sentAt);
         var transactionId = await captureStore.CaptureAsync(captured, timeZoneId, cancellationToken);
 
-        var botMessageId = await chatNotifier.SendAsync(message.Chat.Id, ReceiptAcknowledgement, cancellationToken);
+        var botMessageId = await chatNotifier.SendAsync(message.Chat.Id, RecordEcho.Acknowledgement, cancellationToken);
         await captureStore.AttachBotMessageAsync(transactionId, botMessageId, cancellationToken);
     }
 }

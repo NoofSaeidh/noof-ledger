@@ -127,12 +127,10 @@ internal sealed class CategorizationWorker(
                 return;
             }
 
-            var categoryNameBySlug = categories.ToDictionary(category => category.Slug, category => category.NameEn);
             var aliasByFolded = aliases.ToDictionary(alias => alias.Folded, alias => alias);
             var canonicalizations = 0;
 
             var categorizedItems = new List<CategorizedLineItem>(mapped.Items.Count);
-            var replyLines = new List<CategorizationReply.ReplyLine>(mapped.Items.Count);
 
             foreach (var item in mapped.Items)
             {
@@ -171,7 +169,6 @@ internal sealed class CategorizationWorker(
 
                 var categoryId = categories.First(category => category.Slug == item.CategorySlug).Id;
                 categorizedItems.Add(new CategorizedLineItem(item.Description, item.Amount, categoryId, merchantId));
-                replyLines.Add(new CategorizationReply.ReplyLine(item.Description, item.Amount, categoryNameBySlug[item.CategorySlug]));
             }
 
             await store.ApplyAsync(job.TransactionId, new CategorizationOutcome(categorizedItems, sub.OccurredOn), cancellationToken);
@@ -186,22 +183,7 @@ internal sealed class CategorizationWorker(
             // bookkeeping, not a reason to touch the transaction again, so both are caught locally
             // instead of being allowed to reach the outer catch blocks below - each independently,
             // so a dropped edit never prevents the SucceedAsync attempt that follows it.
-            if (sub.BotMessageId is { } messageId)
-            {
-                try
-                {
-                    var text = replyLines.Count == 0
-                        ? CategorizationReply.ComposeNothingToRecord(sub.WalletName)
-                        : CategorizationReply.ComposeSuccess(sub.WalletName, replyLines);
-                    await notifier.EditAsync(sub.TelegramChatId, messageId, text, cancellationToken);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    logger.LogWarning(ex,
-                        "Failed to edit Telegram message {MessageId} for job {JobId}; the categorization itself already succeeded",
-                        messageId, job.Id);
-                }
-            }
+            await EchoAsync(store, notifier, job, cancellationToken);
 
             try
             {
@@ -239,6 +221,23 @@ internal sealed class CategorizationWorker(
             // attempt cap already bounds the damage: a persistent failure converges to Failed after
             // MaxAttempts instead of leaving the job Claimed for a full lease duration for no reason.
             await HandleModelFailureAsync(jobQueue, store, notifier, job, subject, ModelFailureKind.Transient, ex.Message, cancellationToken);
+        }
+    }
+
+    async Task EchoAsync(ICategorizationStore store, IChatNotifier notifier, CategorizationJob job, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Read back, not composed from the proposal: the echo shows what the database now holds (D4).
+            if (await store.GetSubjectAsync(job.TransactionId, cancellationToken) is not { BotMessageId: { } messageId } record)
+                return;
+
+            await notifier.EditAsync(record.TelegramChatId, messageId, RecordEcho.Compose(record), cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex,
+                "Failed to echo job {JobId}'s result to Telegram; the categorization itself already succeeded", job.Id);
         }
     }
 
@@ -283,8 +282,7 @@ internal sealed class CategorizationWorker(
 
         try
         {
-            var text = CategorizationReply.ComposeFailure(sub.WalletName);
-            await notifier.EditAsync(sub.TelegramChatId, messageId, text, cancellationToken);
+            await notifier.EditAsync(sub.TelegramChatId, messageId, RecordEcho.Failure, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
