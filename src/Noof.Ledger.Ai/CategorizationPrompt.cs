@@ -1,3 +1,4 @@
+using System.Globalization;
 using Noof.Ledger.Application.Categorization;
 
 namespace Noof.Ledger.Ai;
@@ -45,6 +46,12 @@ internal static class CategorizationPrompt
         than choosing one — a missing currency is filled in later from a configured default, so
         guessing here would only replace a correct default with a wrong guess.
 
+        The message comes with today's date and weekday in the person's time zone. When the
+        message says which day the purchase happened — "вчера", "позавчера", "в пятницу", "15-го"
+        — answer with occurred_on: that day as YYYY-MM-DD, counted from today. A weekday means the
+        most recent such day before today. When the message names no day, answer occurred_on as
+        null: it will be recorded as today.
+
         A message may name zero, one or several purchases. Produce one line item per purchase that
         has an amount. If a merchant is named and it matches one of the known merchants you were
         given, set known_merchant_id to that merchant's id. If a merchant is named but matches no
@@ -60,10 +67,10 @@ internal static class CategorizationPrompt
         one whose meaning is everyday food and drink, no merchant.
         </example>
         <example>
-        Message: "купил штуку евро на продукты"
+        Message: "купил вчера штуку евро на продукты"
         Answer with one item: description "продукты", amount 1000, currency "EUR", category_slug
-        the one whose meaning is groceries, no merchant. "Штуку" is how people say one thousand;
-        the message has no digits and does not need any.
+        the one whose meaning is groceries, no merchant, and occurred_on the day before today.
+        "Штуку" is how people say one thousand; the message has no digits and does not need any.
         </example>
         <example>
         Message: "такси двести пятьдесят"
@@ -96,17 +103,18 @@ internal static class CategorizationPrompt
             ? "No known merchants are offered for this message."
             : string.Join('\n', merchantHints.Select(m => $"- {m.Id}: {m.DisplayName}"));
 
-    public static string BuildUserTurn(
-        string rawText, IReadOnlyList<CategoryOption> categories, IReadOnlyList<MerchantOption> merchantHints) =>
+    public static string BuildUserTurn(CategorizationRequest request) =>
         $"""
+        Today: {request.Today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} ({request.Today.DayOfWeek})
+
         Message:
-        {rawText}
+        {request.RawText}
 
         Categories:
-        {RenderCategories(categories)}
+        {RenderCategories(request.Categories)}
 
         Known merchants:
-        {RenderMerchantHints(merchantHints)}
+        {RenderMerchantHints(request.MerchantHints)}
         """;
 
     static string RenderCategory(CategoryOption category) =>

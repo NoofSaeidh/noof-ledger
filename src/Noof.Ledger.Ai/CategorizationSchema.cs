@@ -15,6 +15,10 @@ internal static class CategorizationSchema
         "The amount the person meant, as a number - for example 1000 or 45.3. Interpret words, slang and speech: "
         + "\"штуку\" is 1000, \"полтос\" is 50, \"двести пятьдесят\" is 250.";
 
+    const string OccurredOnDescription =
+        "The day the purchase happened, as an ISO date (YYYY-MM-DD), worked out from today's date given with the "
+        + "message, or null when the message names no day.";
+
     public static JsonElement BuildRecordSpending(
         IReadOnlyList<CategoryOption> categories, IReadOnlyList<MerchantOption> merchantHints)
     {
@@ -77,7 +81,7 @@ internal static class CategorizationSchema
         {
             ["type"] = "object",
             ["additionalProperties"] = false,
-            ["required"] = new JsonArray("items"),
+            ["required"] = new JsonArray("items", "occurred_on"),
             ["properties"] = new JsonObject
             {
                 ["items"] = new JsonObject
@@ -90,6 +94,11 @@ internal static class CategorizationSchema
                     // was just told not to record.
                     ["minItems"] = 0,
                     ["items"] = lineItem,
+                },
+                ["occurred_on"] = new JsonObject
+                {
+                    ["type"] = new JsonArray("string", "null"),
+                    ["description"] = OccurredOnDescription,
                 },
             },
         };

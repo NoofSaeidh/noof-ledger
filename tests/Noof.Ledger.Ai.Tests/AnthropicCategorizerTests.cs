@@ -12,6 +12,11 @@ public class AnthropicCategorizerTests
         [new CategoryOption("food-drink", "Food & Drink", "Еда и напитки", null)];
 
     static readonly IReadOnlyList<MerchantOption> NoMerchantHints = [];
+    static readonly DateOnly Today = new(2026, 9, 22);
+
+    static CategorizationRequest Request(
+        string rawText, IReadOnlyList<MerchantOption>? hints = null, IReadOnlyList<MerchantOption>? all = null) =>
+        new(rawText, Today, Categories, hints ?? NoMerchantHints, all ?? NoMerchantHints);
 
     static (AnthropicCategorizer Categorizer, StubHttpMessageHandler Handler) Build(
         SecretState state = SecretState.Present, string? key = "sk-ant-test-key-do-not-log-me")
@@ -29,7 +34,7 @@ public class AnthropicCategorizerTests
     {
         var (categorizer, handler) = Build();
         handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingJsonAnswer);
-        var request = new CategorizationRequest("Coffee 3.50 EUR", Categories, NoMerchantHints, NoMerchantHints);
+        var request = Request("Coffee 3.50 EUR");
 
         var proposal = await categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
 
@@ -46,7 +51,7 @@ public class AnthropicCategorizerTests
     {
         var (categorizer, handler) = Build();
         handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingJsonAnswer);
-        var request = new CategorizationRequest("Coffee 3.50 EUR", Categories, NoMerchantHints, NoMerchantHints);
+        var request = Request("Coffee 3.50 EUR");
 
         await categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
 
@@ -76,7 +81,7 @@ public class AnthropicCategorizerTests
     {
         var (categorizer, handler) = Build();
         handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingJsonAnswer);
-        var request = new CategorizationRequest("Coffee 3.50 EUR", Categories, NoMerchantHints, NoMerchantHints);
+        var request = Request("Coffee 3.50 EUR");
 
         await categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
 
@@ -96,7 +101,7 @@ public class AnthropicCategorizerTests
             new(Guid.Parse("11111111-1111-1111-1111-111111111111"), "Lidl"),
             new(Guid.Parse("22222222-2222-2222-2222-222222222222"), "Maxi"),
         };
-        var request = new CategorizationRequest("Lidl 3.50 EUR", Categories, hints, all);
+        var request = Request("Lidl 3.50 EUR", hints, all);
 
         var proposal = await categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
 
@@ -121,7 +126,7 @@ public class AnthropicCategorizerTests
     {
         var (categorizer, handler) = Build();
         handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingFromWordsAnswer);
-        var request = new CategorizationRequest("купил штуку евро в Lidl", Categories, NoMerchantHints, NoMerchantHints);
+        var request = Request("купил штуку евро в Lidl");
 
         var proposal = await categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
 
@@ -129,6 +134,18 @@ public class AnthropicCategorizerTests
         item.Amount.Should().Be(1000m);
         item.CurrencyCode.Should().Be("EUR");
         item.MerchantName.Should().Be("Lidl");
+    }
+
+    [Fact]
+    public async Task Tells_the_model_today_and_maps_the_day_it_answers()
+    {
+        var (categorizer, handler) = Build();
+        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingWithDateAnswer);
+
+        var proposal = await categorizer.ProposeAsync(Request("купил вчера штуку евро"), TestContext.Current.CancellationToken);
+
+        handler.Requests[0].Body.Should().Contain("Today: 2026-09-22 (Tuesday)");
+        proposal.OccurredOn.Should().Be("2026-09-21");
     }
 
     [Theory]
@@ -147,7 +164,7 @@ public class AnthropicCategorizerTests
              "content":[{"type":"tool_use","id":"toolu_07","name":"record_spending","input":{"items":[{"description":"кофе","amount":{{{raw}}},"currency":null,"category_slug":"food-drink","merchant_name":null}]}}],
              "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
             """);
-        var request = new CategorizationRequest("кофе", Categories, NoMerchantHints, NoMerchantHints);
+        var request = Request("кофе");
 
         var proposal = await categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
 
@@ -160,7 +177,7 @@ public class AnthropicCategorizerTests
         var (categorizer, handler) = Build();
         handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.ListMerchantsToolUse);
         handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.ListMerchantsToolUse);
-        var request = new CategorizationRequest("Lidl 3.50 EUR", Categories, NoMerchantHints, NoMerchantHints);
+        var request = Request("Lidl 3.50 EUR");
 
         var act = () => categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
 
@@ -175,7 +192,7 @@ public class AnthropicCategorizerTests
     {
         var (categorizer, handler) = Build();
         handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.NoAnswerAtAll);
-        var request = new CategorizationRequest("what is this", Categories, NoMerchantHints, NoMerchantHints);
+        var request = Request("what is this");
 
         var act = () => categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
 
@@ -200,7 +217,7 @@ public class AnthropicCategorizerTests
     {
         var (categorizer, handler) = Build();
         handler.Enqueue(statusCode, AnthropicResponses.GenericError("some_error", "boom"));
-        var request = new CategorizationRequest("Coffee 3.50 EUR", Categories, NoMerchantHints, NoMerchantHints);
+        var request = Request("Coffee 3.50 EUR");
 
         var act = () => categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
 
@@ -217,7 +234,7 @@ public class AnthropicCategorizerTests
     {
         var (categorizer, handler) = Build();
         handler.Enqueue(statusCode, AnthropicResponses.GenericError("some_error", "boom"));
-        var request = new CategorizationRequest("Coffee 3.50 EUR", Categories, NoMerchantHints, NoMerchantHints);
+        var request = Request("Coffee 3.50 EUR");
 
         var act = () => categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
 
@@ -235,7 +252,7 @@ public class AnthropicCategorizerTests
     {
         var (categorizer, handler) = Build();
         handler.Enqueue(statusCode, AnthropicResponses.GenericError("some_error", "boom"));
-        var request = new CategorizationRequest("Coffee 3.50 EUR", Categories, NoMerchantHints, NoMerchantHints);
+        var request = Request("Coffee 3.50 EUR");
 
         var act = () => categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
 
@@ -248,7 +265,7 @@ public class AnthropicCategorizerTests
     public async Task A_missing_key_is_a_terminal_failure_without_ever_calling_the_network()
     {
         var (categorizer, handler) = Build(state: SecretState.Missing, key: null);
-        var request = new CategorizationRequest("Coffee 3.50 EUR", Categories, NoMerchantHints, NoMerchantHints);
+        var request = Request("Coffee 3.50 EUR");
 
         var act = () => categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
 
@@ -261,7 +278,7 @@ public class AnthropicCategorizerTests
     public async Task An_unreadable_key_is_a_terminal_failure_without_ever_calling_the_network()
     {
         var (categorizer, handler) = Build(state: SecretState.Unreadable, key: null);
-        var request = new CategorizationRequest("Coffee 3.50 EUR", Categories, NoMerchantHints, NoMerchantHints);
+        var request = Request("Coffee 3.50 EUR");
 
         var act = () => categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
 
@@ -276,7 +293,7 @@ public class AnthropicCategorizerTests
         const string secretKeyText = "sk-ant-VERY-SECRET-DO-NOT-LEAK-abc123";
         var (categorizer, handler) = Build(key: secretKeyText);
         handler.Enqueue(HttpStatusCode.Unauthorized, AnthropicResponses.AuthenticationError);
-        var request = new CategorizationRequest("Coffee 3.50 EUR", Categories, NoMerchantHints, NoMerchantHints);
+        var request = Request("Coffee 3.50 EUR");
 
         var act = () => categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
         var assertion = await act.Should().ThrowAsync<ModelCallException>();

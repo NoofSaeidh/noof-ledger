@@ -30,7 +30,7 @@ public class CategorizationSchemaTests
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["items"],
+          "required": ["items", "occurred_on"],
           "properties": {
             "items": {
               "type": "array",
@@ -47,12 +47,23 @@ public class CategorizationSchemaTests
                   "merchant_name": { "type": ["string", "null"], "description": "The merchant's name as the person wrote it, or null when no merchant is named or it is one of the known merchants." }
                 }
               }
-            }
+            },
+            "occurred_on": { "type": ["string", "null"], "description": "The day the purchase happened, as an ISO date (YYYY-MM-DD), worked out from today's date given with the message, or null when the message names no day." }
           }
         }
         """;
 
         JsonNode.DeepEquals(Reserialize(schema), JsonNode.Parse(expected)).Should().BeTrue();
+    }
+
+    [Fact]
+    public void Occurred_on_is_required_but_nullable_so_the_model_can_answer_no_day_named()
+    {
+        var schema = CategorizationSchema.BuildRecordSpending(Categories, NoHints);
+
+        schema.GetProperty("properties").TryGetProperty("occurred_on", out var occurredOn).Should().BeTrue();
+        occurredOn.GetProperty("type").EnumerateArray().Select(e => e.GetString()).Should().BeEquivalentTo(["string", "null"]);
+        schema.GetProperty("required").EnumerateArray().Select(e => e.GetString()).Should().BeEquivalentTo(["items", "occurred_on"]);
     }
 
     [Fact]

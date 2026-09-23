@@ -31,6 +31,12 @@ public static class AnthropicResponses
          "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
         """;
 
+    public const string RecordSpendingWithDateAnswer = """
+        {"id":"msg_06","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
+         "content":[{"type":"tool_use","id":"toolu_06","name":"record_spending","input":{"items":[{"description":"продукты","amount":1000,"currency":"EUR","category_slug":"food-drink","merchant_name":null}],"occurred_on":"2026-09-21"}}],
+         "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
+        """;
+
     public const string NoAnswerAtAll = """
         {"id":"msg_04","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
          "content":[],

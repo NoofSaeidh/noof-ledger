@@ -1,3 +1,4 @@
+using System.Globalization;
 using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Application.Categorization;
@@ -20,7 +21,7 @@ public static class ProposalMapper
         out MappedProposal mapped,
         out string failure)
     {
-        mapped = new MappedProposal([]);
+        mapped = new MappedProposal([], null);
         var items = new List<ResolvedLineItem>(proposal.Items.Count);
 
         for (var index = 0; index < proposal.Items.Count; index++)
@@ -35,7 +36,20 @@ public static class ProposalMapper
             items.Add(resolved);
         }
 
-        mapped = new MappedProposal(items);
+        DateOnly? occurredOn = null;
+        if (!string.IsNullOrWhiteSpace(proposal.OccurredOn))
+        {
+            if (!DateOnly.TryParseExact(
+                proposal.OccurredOn.Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day))
+            {
+                failure = $"occurred_on \"{proposal.OccurredOn}\" is not an ISO date (YYYY-MM-DD).";
+                return false;
+            }
+
+            occurredOn = day;
+        }
+
+        mapped = new MappedProposal(items, occurredOn);
         failure = string.Empty;
         return true;
     }

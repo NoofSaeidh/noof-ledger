@@ -110,6 +110,86 @@ public class CategorizationWorkerTests
         IServiceScopeFactory scopeFactory, FakeTimeProvider time, CategorizationWorkerOptions? options = null) =>
         new(scopeFactory, time, options ?? new CategorizationWorkerOptions(), WorkerId, NullLogger<CategorizationWorker>.Instance);
 
+    static IJobQueue QueueWith(CategorizationJob job)
+    {
+        var jobQueue = Substitute.For<IJobQueue>();
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(job);
+        jobQueue.SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>()).Returns(JobCompletionOutcome.Applied);
+        jobQueue.FailAsync(JobId, WorkerId, Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(JobCompletionOutcome.Applied);
+        jobQueue.RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(JobCompletionOutcome.Applied);
+        return jobQueue;
+    }
+
+    [Fact]
+    public async Task The_model_is_told_the_day_the_message_was_sent_not_the_day_the_job_runs()
+    {
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine());
+        // The job runs the morning after the message was sent - the offline queue (D2).
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 22, 9, 0, 0, TimeSpan.Zero));
+        var worker = CreateWorker(ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, categorizer: categorizer), time);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await categorizer.Received(1).ProposeAsync(
+            Arg.Is<CategorizationRequest>(request => request.Today == SentOn), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_proposal_that_names_no_day_is_recorded_on_the_send_day()
+    {
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject(occurredOn: new DateOnly(2026, 9, 1)));
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine());
+        var worker = CreateWorker(ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await store.Received(1).ApplyAsync(
+            TransactionId, Arg.Is<CategorizationOutcome>(outcome => outcome.OccurredOn == SentOn), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_proposal_that_names_a_day_is_recorded_on_that_day()
+    {
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(OneGroceryLine() with { OccurredOn = "2026-09-20" });
+        var worker = CreateWorker(ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await store.Received(1).ApplyAsync(
+            TransactionId, Arg.Is<CategorizationOutcome>(outcome => outcome.OccurredOn == new DateOnly(2026, 9, 20)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_day_that_does_not_parse_fails_the_job_terminally()
+    {
+        var jobQueue = QueueWith(Job());
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(OneGroceryLine() with { OccurredOn = "вчера" });
+        var worker = CreateWorker(ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await jobQueue.Received(1).FailAsync(JobId, WorkerId, Arg.Is<string>(error => error.Contains("occurred_on")), Arg.Any<CancellationToken>());
+        await store.DidNotReceive().ApplyAsync(Arg.Any<Guid>(), Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task Idle_when_the_Anthropic_key_is_not_present()
     {

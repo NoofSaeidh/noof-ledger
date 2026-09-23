@@ -31,7 +31,7 @@ public sealed class LiveModelTests
         new(CreateFactory(apiKey), new AnthropicOptions());
 
     static CategorizationRequest Request(string rawText) =>
-        new(rawText, OfferedCategories, [], []);
+        new(rawText, DateOnly.FromDateTime(DateTime.Today), OfferedCategories, [], []);
 
     [Fact]
     public async Task A_single_coffee_purchase_produces_one_line_item_with_the_amount_and_currency()
@@ -145,6 +145,21 @@ public sealed class LiveModelTests
             .ProposeAsync(Request(rawText), TestContext.Current.CancellationToken);
 
         proposal.Items.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Yesterday_is_answered_as_the_day_before_today()
+    {
+        if (!LiveModelGate.TryGetApiKey(out var apiKey))
+            Assert.Skip(LiveModelGate.SkipMessage);
+
+        var today = new DateOnly(2026, 9, 22);
+        var proposal = await CreateCategorizer(apiKey).ProposeAsync(
+            new CategorizationRequest("купил вчера штуку евро на продукты", today, OfferedCategories, [], []),
+            TestContext.Current.CancellationToken);
+
+        proposal.OccurredOn.Should().Be("2026-09-21");
+        proposal.Items.Should().ContainSingle().Which.Amount.Should().Be(1000m);
     }
 
     [Fact]

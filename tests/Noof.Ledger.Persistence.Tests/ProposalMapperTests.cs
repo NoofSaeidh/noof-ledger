@@ -113,4 +113,31 @@ public class ProposalMapperTests
 
         mapped.Items.Should().BeEmpty();
     }
+
+    [Fact]
+    public void A_named_day_maps_to_that_date()
+    {
+        Map(new([Line(100m)], "2026-09-20"), out var mapped, out _).Should().BeTrue();
+
+        mapped.OccurredOn.Should().Be(new DateOnly(2026, 9, 20));
+    }
+
+    [Fact]
+    public void No_day_maps_to_no_date()
+    {
+        Map(new([Line(100m)]), out var mapped, out _).Should().BeTrue();
+
+        mapped.OccurredOn.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("вчера")]
+    [InlineData("20.09.2026")]
+    [InlineData("2026-02-30")]
+    public void A_day_that_is_not_an_ISO_date_fails(string occurredOn)
+    {
+        Map(new([Line(100m)], occurredOn), out _, out var failure).Should().BeFalse();
+
+        failure.Should().Contain("occurred_on");
+    }
 }
