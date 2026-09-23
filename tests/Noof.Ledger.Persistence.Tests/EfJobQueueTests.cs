@@ -48,10 +48,12 @@ public class EfJobQueueTests(PostgresFixture fixture)
         return transaction.Id;
     }
 
+    static readonly JobKind[] AnyKind = Enum.GetValues<JobKind>();
+
     static CategorizationJob NewJob(
         Guid transactionId, DateTimeOffset runAfter, JobStatus status = JobStatus.Pending, int attemptCount = 0,
         JobKind kind = JobKind.Categorize, string? instruction = null, int? sourceMessageId = null,
-        DateOnly? instructionDay = null, DateTimeOffset? createdAt = null) => new()
+        DateOnly? instructionDay = null, DateTimeOffset? createdAt = null, string? voiceFileId = null) => new()
     {
         Id = Guid.NewGuid(),
         TransactionId = transactionId,
@@ -64,6 +66,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
         InstructionDay = instructionDay,
         CreatedAt = createdAt ?? runAfter,
         UpdatedAt = createdAt ?? runAfter,
+        VoiceFileId = voiceFileId,
     };
 
     [Fact]
@@ -78,7 +81,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
         db.CategorizationJobs.Add(job);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var claimed = await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
+        var claimed = await queue.ClaimAsync("worker-a", AnyKind, TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
 
         claimed.Should().NotBeNull();
         claimed!.Id.Should().Be(job.Id);
@@ -100,7 +103,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
         db.CategorizationJobs.Add(NewJob(transactionId, time.GetUtcNow().AddMinutes(5)));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var claimed = await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
+        var claimed = await queue.ClaimAsync("worker-a", AnyKind, TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
 
         claimed.Should().BeNull();
     }
@@ -125,10 +128,10 @@ public class EfJobQueueTests(PostgresFixture fixture)
 
         await using var txA = await dbA.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
 
-        var claimedByA = await queueA.ClaimAsync("worker-a", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
+        var claimedByA = await queueA.ClaimAsync("worker-a", AnyKind, TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
         claimedByA.Should().NotBeNull("worker-a claimed first and still holds the row lock inside its open transaction");
 
-        var claimBTask = queueB.ClaimAsync("worker-b", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
+        var claimBTask = queueB.ClaimAsync("worker-b", AnyKind, TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
         var finished = await Task.WhenAny(claimBTask, Task.Delay(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
 
         finished.Should().BeSameAs(claimBTask,
@@ -149,7 +152,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
         var job = NewJob(transactionId, time.GetUtcNow().AddMinutes(-1));
         db.CategorizationJobs.Add(job);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-        await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
+        await queue.ClaimAsync("worker-a", AnyKind, TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
 
         var outcome = await queue.SucceedAsync(job.Id, "worker-a", TestContext.Current.CancellationToken);
 
@@ -170,10 +173,10 @@ public class EfJobQueueTests(PostgresFixture fixture)
         var job = NewJob(transactionId, time.GetUtcNow().AddMinutes(-1));
         db.CategorizationJobs.Add(job);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-        await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(1), TestContext.Current.CancellationToken);
+        await queue.ClaimAsync("worker-a", AnyKind, TimeSpan.FromMinutes(1), TestContext.Current.CancellationToken);
         time.Advance(TimeSpan.FromMinutes(2));
         await queue.ReleaseExpiredLeasesAsync(time.GetUtcNow(), TestContext.Current.CancellationToken);
-        await queue.ClaimAsync("worker-b", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
+        await queue.ClaimAsync("worker-b", AnyKind, TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
 
         var outcome = await queue.SucceedAsync(job.Id, "worker-a", TestContext.Current.CancellationToken);
 
@@ -203,11 +206,11 @@ public class EfJobQueueTests(PostgresFixture fixture)
         db.CategorizationJobs.Add(job);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(1), TestContext.Current.CancellationToken);
+        await queue.ClaimAsync("worker-a", AnyKind, TimeSpan.FromMinutes(1), TestContext.Current.CancellationToken);
         time.Advance(TimeSpan.FromMinutes(2));
         var released = await queue.ReleaseExpiredLeasesAsync(time.GetUtcNow(), TestContext.Current.CancellationToken);
         released.Should().Be(1, "worker-a's one-minute lease is two minutes stale by now");
-        await queue.ClaimAsync("worker-b", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
+        await queue.ClaimAsync("worker-b", AnyKind, TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
         var succeedOutcome = await queue.SucceedAsync(job.Id, "worker-b", TestContext.Current.CancellationToken);
         succeedOutcome.Should().Be(JobCompletionOutcome.Applied);
 
@@ -236,10 +239,10 @@ public class EfJobQueueTests(PostgresFixture fixture)
         db.CategorizationJobs.Add(job);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(1), TestContext.Current.CancellationToken);
+        await queue.ClaimAsync("worker-a", AnyKind, TimeSpan.FromMinutes(1), TestContext.Current.CancellationToken);
         time.Advance(TimeSpan.FromMinutes(2));
         await queue.ReleaseExpiredLeasesAsync(time.GetUtcNow(), TestContext.Current.CancellationToken);
-        await queue.ClaimAsync("worker-b", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
+        await queue.ClaimAsync("worker-b", AnyKind, TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
 
         var outcome = await queue.FailAsync(job.Id, "worker-a", "worker-a's late failure", TestContext.Current.CancellationToken);
 
@@ -262,7 +265,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
         var job = NewJob(transactionId, time.GetUtcNow().AddMinutes(-1));
         db.CategorizationJobs.Add(job);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-        await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
+        await queue.ClaimAsync("worker-a", AnyKind, TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
         var nextRunAfter = time.GetUtcNow().AddMinutes(1);
 
         var outcome = await queue.RetryAsync(job.Id, "worker-a", nextRunAfter, "boom", TestContext.Current.CancellationToken);
@@ -288,10 +291,10 @@ public class EfJobQueueTests(PostgresFixture fixture)
         db.CategorizationJobs.Add(job);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
+        await queue.ClaimAsync("worker-a", AnyKind, TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
         await queue.RetryAsync(job.Id, "worker-a", time.GetUtcNow().AddMinutes(1), "first failure", TestContext.Current.CancellationToken);
         time.Advance(TimeSpan.FromMinutes(2));
-        await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
+        await queue.ClaimAsync("worker-a", AnyKind, TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
 
         var outcome = await queue.RetryAsync(job.Id, "worker-a", time.GetUtcNow().AddMinutes(1), "second failure", TestContext.Current.CancellationToken);
 
@@ -314,7 +317,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
         var job = NewJob(transactionId, time.GetUtcNow().AddMinutes(-1));
         db.CategorizationJobs.Add(job);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-        await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
+        await queue.ClaimAsync("worker-a", AnyKind, TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
 
         var outcome = await queue.FailAsync(job.Id, "worker-a", "not a transaction", TestContext.Current.CancellationToken);
 
@@ -381,10 +384,10 @@ public class EfJobQueueTests(PostgresFixture fixture)
         db.CategorizationJobs.Add(otherJob);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var claimed = await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken);
+        var claimed = await queue.ClaimAsync("worker-a", AnyKind, TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken);
 
         claimed!.Id.Should().Be(otherJob.Id);
-        (await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken))
+        (await queue.ClaimAsync("worker-a", AnyKind, TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken))
             .Should().BeNull("the correction must wait until the first reading is no longer pending");
     }
 
@@ -400,7 +403,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
             sourceMessageId: 7, instructionDay: new DateOnly(2026, 9, 23)));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var claimed = await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken);
+        var claimed = await queue.ClaimAsync("worker-a", AnyKind, TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken);
 
         claimed!.Kind.Should().Be(JobKind.Correct);
         claimed.Instruction.Should().Be("нет, 1500");
@@ -456,5 +459,63 @@ public class EfJobQueueTests(PostgresFixture fixture)
         var assertion = await act.Should().ThrowAsync<ArgumentException>();
         assertion.WithMessage("*UTC*");
         assertion.And.ParamName.Should().Be("now");
+    }
+
+    [Fact]
+    public async Task Claims_only_the_kinds_it_asks_for()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 24, 9, 0, 0, TimeSpan.Zero));
+        var queue = new EfJobQueue(db, time, maxAttempts: 8);
+        var voiceTransaction = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
+        var textTransaction = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
+        var transcription = NewJob(voiceTransaction, time.GetUtcNow().AddMinutes(-2), kind: JobKind.Transcribe, voiceFileId: "voice-file-1");
+        var reading = NewJob(textTransaction, time.GetUtcNow().AddMinutes(-1));
+        db.CategorizationJobs.AddRange(transcription, reading);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var first = await queue.ClaimAsync("worker-a", [JobKind.Categorize, JobKind.Correct, JobKind.Reinterpret],
+            TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken);
+        var second = await queue.ClaimAsync("worker-a", [JobKind.Categorize, JobKind.Correct, JobKind.Reinterpret],
+            TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken);
+
+        first!.Id.Should().Be(reading.Id, "the transcription is older and due, but not a kind this worker claims");
+        second.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_pending_transcription_holds_back_the_reading_queued_after_it_even_for_a_worker_that_cannot_claim_it()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 24, 9, 0, 0, TimeSpan.Zero));
+        var queue = new EfJobQueue(db, time, maxAttempts: 8);
+        var transactionId = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
+        db.CategorizationJobs.AddRange(
+            NewJob(transactionId, time.GetUtcNow().AddMinutes(-2), kind: JobKind.Transcribe, voiceFileId: "voice-file-1"),
+            NewJob(transactionId, time.GetUtcNow().AddMinutes(-1)));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var claimed = await queue.ClaimAsync("worker-a", [JobKind.Categorize], TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken);
+
+        claimed.Should().BeNull("the ordering rule spans kinds: nothing overtakes an earlier job for the same record");
+    }
+
+    [Fact]
+    public async Task A_claimed_transcription_carries_its_voice_file()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 24, 9, 0, 0, TimeSpan.Zero));
+        var queue = new EfJobQueue(db, time, maxAttempts: 8);
+        var transactionId = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
+        db.CategorizationJobs.Add(NewJob(transactionId, time.GetUtcNow().AddMinutes(-1), kind: JobKind.Transcribe, voiceFileId: "voice-file-1"));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var claimed = await queue.ClaimAsync("worker-a", [JobKind.Transcribe], TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken);
+
+        claimed!.Kind.Should().Be(JobKind.Transcribe);
+        claimed.VoiceFileId.Should().Be("voice-file-1");
     }
 }

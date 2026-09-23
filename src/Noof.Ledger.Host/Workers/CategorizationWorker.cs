@@ -24,6 +24,9 @@ internal sealed class CategorizationWorker(
     // because a restart means a fresh attempt is exactly what should happen.
     DateTimeOffset accountCooldownUntil = DateTimeOffset.MinValue;
 
+    // Every kind but Transcribe. A transcription needs the speech provider, which is TranscriptionWorker's to check.
+    static readonly JobKind[] ClaimableKinds = [JobKind.Categorize, JobKind.Correct, JobKind.Reinterpret];
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
@@ -60,7 +63,7 @@ internal sealed class CategorizationWorker(
             if (now < accountCooldownUntil)
                 return CategorizationTickResult.Idle;
 
-            var job = await jobQueue.ClaimAsync(workerId, options.Lease, cancellationToken);
+            var job = await jobQueue.ClaimAsync(workerId, ClaimableKinds, options.Lease, cancellationToken);
             if (job is null)
                 return CategorizationTickResult.Idle;
 
