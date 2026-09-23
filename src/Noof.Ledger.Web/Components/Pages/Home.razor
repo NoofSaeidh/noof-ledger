@@ -96,7 +96,7 @@ else
             <MudPaper id="@($"txn-{transaction.Id}")" Outlined="true" Elevation="0" Class="pa-4 mb-3">
                 <div class="noof-txn-header">
                     <MudText Typo="Typo.body2">@transaction.WalletName</MudText>
-                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@FormatOccurredAt(transaction)</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@FormatOccurred(transaction)</MudText>
                     <MudSpacer />
                     <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
                              Color="@StatusColour(transaction.Status)">
@@ -229,14 +229,12 @@ else
 
     static string FormatMoney(Money money) => $"{FormatAmount(money.Amount)} {money.Currency}";
 
-    // The row's own time zone, not the browser's and not the server's - decision P1-3. TimeZoneId is
-    // stamped from a known IANA id at capture time, so a failure to resolve it here is a genuine bug
-    // upstream, not a condition this page should mask.
-    static string FormatOccurredAt(RecentTransaction transaction)
+    static string FormatOccurred(RecentTransaction transaction)
     {
-        var zone = TimeZoneInfo.FindSystemTimeZoneById(transaction.TimeZoneId);
-        var local = TimeZoneInfo.ConvertTime(transaction.OccurredAt, zone);
-        return local.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+        var day = transaction.OccurredOn.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        return transaction.LocalTime is { } time
+            ? $"{day} {time.ToString("HH:mm", CultureInfo.InvariantCulture)}"
+            : day;
     }
 
     static string DescribeStatus(TransactionStatus status) => status switch

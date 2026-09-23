@@ -14,16 +14,19 @@ internal sealed class EfSpendingReadModel(LedgerDbContext db, TimeProvider timeP
     public async Task<IReadOnlyList<RecentTransaction>> RecentAsync(int limit, CancellationToken cancellationToken)
     {
         var headers = await db.Transactions
+            .Where(t => t.Status != TransactionStatus.Cancelled)
             .Join(db.Wallets, t => t.WalletId, w => w.Id, (t, w) => new
             {
                 t.Id,
+                t.OccurredOn,
                 t.OccurredAt,
                 t.TimeZoneId,
                 t.RawText,
                 t.Status,
                 WalletName = w.Name,
             })
-            .OrderByDescending(h => h.OccurredAt)
+            .OrderByDescending(h => h.OccurredOn)
+            .ThenByDescending(h => h.OccurredAt)
             .ThenByDescending(h => h.Id)
             .Take(limit)
             .ToListAsync(cancellationToken);
@@ -57,8 +60,8 @@ internal sealed class EfSpendingReadModel(LedgerDbContext db, TimeProvider timeP
         [
             .. headers.Select(h => new RecentTransaction(
                 h.Id,
-                h.OccurredAt,
-                h.TimeZoneId,
+                h.OccurredOn,
+                LocalTimeOf(h.OccurredAt, h.TimeZoneId, h.OccurredOn),
                 h.RawText,
                 h.Status,
                 h.WalletName,
@@ -67,10 +70,16 @@ internal sealed class EfSpendingReadModel(LedgerDbContext db, TimeProvider timeP
         ];
     }
 
+    static TimeOnly? LocalTimeOf(DateTimeOffset occurredAt, string timeZoneId, DateOnly occurredOn)
+    {
+        var local = ZonedClock.LocalDateTime(occurredAt, timeZoneId);
+        return DateOnly.FromDateTime(local) == occurredOn ? TimeOnly.FromDateTime(local) : null;
+    }
+
     public async Task<MonthSummary> ThisMonthAsync(CancellationToken cancellationToken)
     {
-        var nowInZone = TimeZoneInfo.ConvertTime(timeProvider.GetUtcNow(), currentZone);
-        var firstDay = new DateTime(nowInZone.Year, nowInZone.Month, 1, 0, 0, 0, DateTimeKind.Unspecified);
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(timeProvider.GetUtcNow(), currentZone).DateTime);
+        var firstDay = new DateOnly(today.Year, today.Month, 1);
         var firstDayNextMonth = firstDay.AddMonths(1);
 
         await db.Database.OpenConnectionAsync(cancellationToken);
@@ -88,13 +97,15 @@ internal sealed class EfSpendingReadModel(LedgerDbContext db, TimeProvider timeP
                 FROM line_items li
                 JOIN transactions t ON t.id = li.transaction_id
                 LEFT JOIN categories c ON c.id = li.category_id
-                WHERE (t.occurred_at AT TIME ZONE t.time_zone_id) >= @firstDay
-                  AND (t.occurred_at AT TIME ZONE t.time_zone_id) < @firstDayNextMonth
+                WHERE t.occurred_on >= @firstDay
+                  AND t.occurred_on < @firstDayNextMonth
+                  AND t.status <> @cancelled
                 GROUP BY COALESCE(c.name_en, @uncategorised), li.currency
                 """;
             command.Parameters.Add(new NpgsqlParameter("uncategorised", UncategorisedLabel));
             command.Parameters.Add(new NpgsqlParameter("firstDay", firstDay));
             command.Parameters.Add(new NpgsqlParameter("firstDayNextMonth", firstDayNextMonth));
+            command.Parameters.Add(new NpgsqlParameter("cancelled", (int)TransactionStatus.Cancelled));
 
             var totals = new List<MonthTotal>();
             await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
@@ -108,7 +119,7 @@ internal sealed class EfSpendingReadModel(LedgerDbContext db, TimeProvider timeP
                 }
             }
 
-            return new MonthSummary(DateOnly.FromDateTime(firstDay), totals);
+            return new MonthSummary(firstDay, totals);
         }
         finally
         {
