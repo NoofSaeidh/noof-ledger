@@ -6,12 +6,14 @@ namespace Noof.Ledger.Persistence.Tests;
 
 public class MerchantScanTests
 {
+    static readonly IMerchantScan Scan = new MerchantScan();
+
     [Fact]
     public void Matches_an_alias_that_occurs_on_whole_word_boundaries()
     {
         var aliases = new[] { new MerchantAliasEntry("MAXI", Guid.NewGuid(), "Maxi") };
 
-        var matches = MerchantScan.Matches("kupio u maxi danas", aliases, 10);
+        var matches = Scan.Matches("kupio u maxi danas", aliases, 10);
 
         matches.Should().ContainSingle().Which.Folded.Should().Be("MAXI");
     }
@@ -21,7 +23,7 @@ public class MerchantScanTests
     {
         var aliases = new[] { new MerchantAliasEntry("MAXI", Guid.NewGuid(), "Maxi") };
 
-        var matches = MerchantScan.Matches("kupio maximalno danas", aliases, 10);
+        var matches = Scan.Matches("kupio maximalno danas", aliases, 10);
 
         matches.Should().BeEmpty();
     }
@@ -31,7 +33,7 @@ public class MerchantScanTests
     {
         var aliases = new[] { new MerchantAliasEntry("MAXI PLUS", Guid.NewGuid(), "Maxi Plus") };
 
-        var matches = MerchantScan.Matches("kupio u maxi ali ne plus danas", aliases, 10);
+        var matches = Scan.Matches("kupio u maxi ali ne plus danas", aliases, 10);
 
         matches.Should().BeEmpty();
     }
@@ -42,7 +44,7 @@ public class MerchantScanTests
         var maxi = new MerchantAliasEntry("MAXI", Guid.NewGuid(), "Maxi");
         var maxiPlus = new MerchantAliasEntry("MAXI PLUS", Guid.NewGuid(), "Maxi Plus");
 
-        var matches = MerchantScan.Matches("kupio u maxi plus danas", [maxi, maxiPlus], 10);
+        var matches = Scan.Matches("kupio u maxi plus danas", [maxi, maxiPlus], 10);
 
         matches.Select(m => m.Folded).Should().Equal("MAXI PLUS", "MAXI");
     }
@@ -53,7 +55,7 @@ public class MerchantScanTests
         var idea = new MerchantAliasEntry("IDEA", Guid.NewGuid(), "Idea");
         var maxi = new MerchantAliasEntry("MAXI", Guid.NewGuid(), "Maxi");
 
-        var matches = MerchantScan.Matches("kupio u maxi i idea danas", [maxi, idea], 10);
+        var matches = Scan.Matches("kupio u maxi i idea danas", [maxi, idea], 10);
 
         matches.Select(m => m.Folded).Should().Equal("IDEA", "MAXI");
     }
@@ -64,7 +66,7 @@ public class MerchantScanTests
         var idea = new MerchantAliasEntry("IDEA", Guid.NewGuid(), "Idea");
         var maxi = new MerchantAliasEntry("MAXI", Guid.NewGuid(), "Maxi");
 
-        var matches = MerchantScan.Matches("kupio u maxi i idea danas", [maxi, idea], 1);
+        var matches = Scan.Matches("kupio u maxi i idea danas", [maxi, idea], 1);
 
         matches.Should().ContainSingle().Which.Folded.Should().Be("IDEA");
     }
@@ -76,7 +78,7 @@ public class MerchantScanTests
     {
         var aliases = new[] { new MerchantAliasEntry("MAXI", Guid.NewGuid(), "Maxi") };
 
-        MerchantScan.Matches("kupio u maxi danas", aliases, limit).Should().BeEmpty();
+        Scan.Matches("kupio u maxi danas", aliases, limit).Should().BeEmpty();
     }
 
     [Fact]
@@ -92,7 +94,7 @@ public class MerchantScanTests
         {
             var aliases = new[] { new MerchantAliasEntry("MAXI", Guid.NewGuid(), "Maxi") };
 
-            var matches = MerchantScan.Matches("kupio u maxi danas", aliases, 10);
+            var matches = Scan.Matches("kupio u maxi danas", aliases, 10);
 
             matches.Should().ContainSingle().Which.Folded.Should().Be("MAXI");
         }

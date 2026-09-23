@@ -6,17 +6,17 @@ namespace Noof.Ledger.Application.Chat;
 
 // Everything the bot says about a record. Figures are read from the stored rows, never from a model's
 // answer, so the echo shows exactly what the database holds (D4).
-public static class RecordEcho
+internal sealed class RecordEcho : IRecordEcho
 {
-    public const string Acknowledgement = "Записываю…";
-    public const string Correcting = "Исправляю…";
-    public const string EditPrompt = "Что исправить? Ответьте на это сообщение — например: «нет, 1500» или «это было вчера».";
+    public string Acknowledgement => "Записываю…";
+    public string Correcting => "Исправляю…";
+    public string EditPrompt => "Что исправить? Ответьте на это сообщение — например: «нет, 1500» или «это было вчера».";
 
-    public static readonly EchoMessage Failure = new(
+    public EchoMessage Failure { get; } = new(
         "Не смог разобрать это сообщение. Оно сохранено — ответьте на это сообщение и напишите, как его записать.",
         [RecordAction.Edit]);
 
-    public static EchoMessage Compose(CategorizationSubject record) => record switch
+    public EchoMessage Compose(CategorizationSubject record) => record switch
     {
         { Status: TransactionStatus.Cancelled } =>
             new($"Отменено — {record.WalletName}\n{Body(record)}".TrimEnd(), [RecordAction.Restore]),
@@ -27,7 +27,7 @@ public static class RecordEcho
         _ => new($"Записал — {record.WalletName}\n{Body(record)}", [RecordAction.Cancel, RecordAction.Edit]),
     };
 
-    public static EchoMessage ComposeCorrectionFailure(CategorizationSubject record)
+    public EchoMessage ComposeCorrectionFailure(CategorizationSubject record)
     {
         var current = Compose(record);
         return current with { Text = $"Не получилось применить исправление — запись не изменилась.\n\n{current.Text}" };

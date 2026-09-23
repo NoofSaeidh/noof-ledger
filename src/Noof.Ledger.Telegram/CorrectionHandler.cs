@@ -4,9 +4,9 @@ using Telegram.Bot.Types;
 
 namespace Noof.Ledger.Telegram;
 
-internal sealed class CorrectionHandler(IRecordEditor editor, IChatNotifier chatNotifier)
+internal sealed class CorrectionHandler(IRecordEditor editor, IChatNotifier chatNotifier, IRecordEcho recordEcho)
 {
-    static readonly EchoMessage Correcting = new(RecordEcho.Correcting, []);
+    readonly EchoMessage correcting = new(recordEcho.Correcting, []);
 
     // A reply to anything other than a record's echo or its Изменить prompt is not a correction: returning
     // false lets the router capture it as a new message.
@@ -19,7 +19,7 @@ internal sealed class CorrectionHandler(IRecordEditor editor, IChatNotifier chat
         var sentAt = new DateTimeOffset(reply.Date);
         if (await editor.RequestCorrectionAsync(target.TransactionId, instruction, reply.Id, sentAt, cancellationToken)
             && target.EchoMessageId is { } echoId)
-            await chatNotifier.EditAsync(reply.Chat.Id, echoId, Correcting, cancellationToken);
+            await chatNotifier.EditAsync(reply.Chat.Id, echoId, correcting, cancellationToken);
 
         return true;
     }
@@ -34,6 +34,6 @@ internal sealed class CorrectionHandler(IRecordEditor editor, IChatNotifier chat
 
         if (await editor.ReplaceRawTextAsync(target.TransactionId, text, cancellationToken)
             && target.EchoMessageId is { } echoId)
-            await chatNotifier.EditAsync(edited.Chat.Id, echoId, Correcting, cancellationToken);
+            await chatNotifier.EditAsync(edited.Chat.Id, echoId, correcting, cancellationToken);
     }
 }

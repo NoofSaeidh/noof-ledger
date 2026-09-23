@@ -11,6 +11,8 @@ namespace Noof.Ledger.Telegram.Tests;
 
 public class TelegramUpdateRouterTests
 {
+    static readonly IRecordEcho Echo = new RecordEcho();
+
     sealed record Harness(
         TelegramUpdateRouter Router, ICaptureStore CaptureStore, IChatNotifier ChatNotifier,
         IRecordEditor Editor, ICategorizationStore Store);
@@ -25,7 +27,7 @@ public class TelegramUpdateRouterTests
         var editor = Substitute.For<IRecordEditor>();
         var store = Substitute.For<ICategorizationStore>();
         var router = new TelegramUpdateRouter(captureStore, chatNotifier, new TelegramOwnerGate(secretStore),
-            new RecordActionHandler(editor, store, chatNotifier), new CorrectionHandler(editor, chatNotifier));
+            new RecordActionHandler(editor, store, chatNotifier, Echo), new CorrectionHandler(editor, chatNotifier, Echo), Echo);
 
         return new Harness(router, captureStore, chatNotifier, editor, store);
     }
@@ -73,7 +75,7 @@ public class TelegramUpdateRouterTests
         var transactionId = Guid.NewGuid();
         captureStore.CaptureAsync(Arg.Any<CapturedMessage>(), "Europe/Belgrade", Arg.Any<CancellationToken>())
             .Returns(transactionId);
-        chatNotifier.SendAsync(111L, RecordEcho.Acknowledgement, Arg.Any<CancellationToken>())
+        chatNotifier.SendAsync(111L, Echo.Acknowledgement, Arg.Any<CancellationToken>())
             .Returns(777);
 
         await router.HandleAsync(
@@ -99,7 +101,7 @@ public class TelegramUpdateRouterTests
         var sentAt = DateTimeOffset.Parse("2026-09-21T23:50:00Z");
         captureStore.CaptureAsync(Arg.Any<CapturedMessage>(), "Europe/Belgrade", Arg.Any<CancellationToken>())
             .Returns(Guid.NewGuid());
-        chatNotifier.SendAsync(111L, RecordEcho.Acknowledgement, Arg.Any<CancellationToken>())
+        chatNotifier.SendAsync(111L, Echo.Acknowledgement, Arg.Any<CancellationToken>())
             .Returns(777);
 
         // "Processed" hours after "sent" -- exactly the outage-recovery scenario this guards.
@@ -218,7 +220,7 @@ public class TelegramUpdateRouterTests
 
         await editor.Received(1).RequestCorrectionAsync(transactionId, "нет, 1500", 8, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
         await chatNotifier.Received(1).EditAsync(111L, 42,
-            Arg.Is<EchoMessage>(echo => echo.Text == RecordEcho.Correcting && echo.Actions.Count == 0), Arg.Any<CancellationToken>());
+            Arg.Is<EchoMessage>(echo => echo.Text == Echo.Correcting && echo.Actions.Count == 0), Arg.Any<CancellationToken>());
         await captureStore.DidNotReceive().CaptureAsync(Arg.Any<CapturedMessage>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
@@ -253,7 +255,7 @@ public class TelegramUpdateRouterTests
         var (router, _, chatNotifier, editor, _) = CreateRouter(ownerChatId: 111L);
         var transactionId = Guid.NewGuid();
         editor.FindByBotMessageAsync(111L, 42, Arg.Any<CancellationToken>()).Returns(new EchoTarget(transactionId, 42));
-        chatNotifier.AskAsync(111L, 42, RecordEcho.EditPrompt, Arg.Any<CancellationToken>()).Returns(77);
+        chatNotifier.AskAsync(111L, 42, Echo.EditPrompt, Arg.Any<CancellationToken>()).Returns(77);
 
         await router.HandleAsync(ButtonPress(111L, 42, "edit"), "Europe/Belgrade", TestContext.Current.CancellationToken);
 
@@ -272,7 +274,7 @@ public class TelegramUpdateRouterTests
         await router.HandleAsync(update, "Europe/Belgrade", TestContext.Current.CancellationToken);
 
         await editor.Received(1).ReplaceRawTextAsync(transactionId, "кофе 300", Arg.Any<CancellationToken>());
-        await chatNotifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(echo => echo.Text == RecordEcho.Correcting), Arg.Any<CancellationToken>());
+        await chatNotifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(echo => echo.Text == Echo.Correcting), Arg.Any<CancellationToken>());
     }
 
     [Fact]

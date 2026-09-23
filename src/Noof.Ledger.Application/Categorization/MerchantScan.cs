@@ -2,9 +2,9 @@ using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Application.Categorization;
 
-public static class MerchantScan
+internal sealed class MerchantScan : IMerchantScan
 {
-    public static IReadOnlyList<MerchantAliasEntry> Matches(
+    public IReadOnlyList<MerchantAliasEntry> Matches(
         string rawText, IReadOnlyList<MerchantAliasEntry> aliases, int limit)
     {
         if (limit <= 0)

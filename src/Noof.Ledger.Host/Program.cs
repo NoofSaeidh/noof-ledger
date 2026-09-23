@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Noof.Ledger.Ai;
+using Noof.Ledger.Application;
 using Noof.Ledger.Application.Auth;
 using Noof.Ledger.Host.Auth;
 using Noof.Ledger.Host.Cli;
@@ -25,6 +26,8 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 builder.Services.AddNoofWeb();
+
+builder.Services.AddNoofApplication();
 
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(CaptureTimeZoneGuard.Resolve(

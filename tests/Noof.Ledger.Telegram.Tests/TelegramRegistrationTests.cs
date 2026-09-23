@@ -25,6 +25,7 @@ public class TelegramRegistrationTests
         services.AddScoped(_ => Substitute.For<Application.Capture.ICaptureStore>());
         services.AddScoped(_ => Substitute.For<Application.Editing.IRecordEditor>());
         services.AddScoped(_ => Substitute.For<Application.Categorization.ICategorizationStore>());
+        services.AddScoped(_ => Substitute.For<IRecordEcho>());
         services.AddNoofTelegram();
 
         using var provider = services.BuildServiceProvider();

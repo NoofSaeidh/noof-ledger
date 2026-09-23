@@ -1,4 +1,7 @@
 ﻿
+using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Application.Chat;
+
 namespace Noof.Ledger.Host.Workers;
 
 internal static class WorkerRegistration
@@ -12,6 +15,9 @@ internal static class WorkerRegistration
             sp.GetRequiredService<TimeProvider>(),
             options,
             CategorizationWorker.CreateWorkerId(),
+            sp.GetRequiredService<IProposalMapper>(),
+            sp.GetRequiredService<IMerchantScan>(),
+            sp.GetRequiredService<IRecordEcho>(),
             sp.GetRequiredService<ILogger<CategorizationWorker>>()));
 
         return services;

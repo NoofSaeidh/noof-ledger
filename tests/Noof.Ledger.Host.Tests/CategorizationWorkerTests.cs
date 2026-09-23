@@ -19,6 +19,9 @@ public class CategorizationWorkerTests
     static readonly Guid TransactionId = Guid.NewGuid();
     static readonly Guid JobId = Guid.NewGuid();
     static readonly CategoryEntry Groceries = new(Guid.NewGuid(), "groceries", "Groceries", "Продукты", null);
+    static readonly IProposalMapper Mapper = new ProposalMapper();
+    static readonly IMerchantScan Scan = new MerchantScan();
+    static readonly IRecordEcho Echo = new RecordEcho();
 
     static IServiceScopeFactory ScopeFactoryFor(
         IJobQueue jobQueue, ISecretStore secretStore, ICategorizationStore? store = null,
@@ -112,7 +115,8 @@ public class CategorizationWorkerTests
 
     static CategorizationWorker CreateWorker(
         IServiceScopeFactory scopeFactory, FakeTimeProvider time, CategorizationWorkerOptions? options = null) =>
-        new(scopeFactory, time, options ?? new CategorizationWorkerOptions(), WorkerId, NullLogger<CategorizationWorker>.Instance);
+        new(scopeFactory, time, options ?? new CategorizationWorkerOptions(), WorkerId,
+            Mapper, Scan, Echo, NullLogger<CategorizationWorker>.Instance);
 
     static IJobQueue QueueWith(CategorizationJob job)
     {
@@ -950,7 +954,7 @@ public class CategorizationWorkerTests
 
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
-        await notifier.Received(1).EditAsync(111L, 42, RecordEcho.Failure, Arg.Any<CancellationToken>());
+        await notifier.Received(1).EditAsync(111L, 42, Echo.Failure, Arg.Any<CancellationToken>());
     }
 
     [Fact]

@@ -90,7 +90,7 @@ public sealed class LiveModelTests
         var proposal = await CreateCategorizer(apiKey)
             .ProposeAsync(Request(rawText), TestContext.Current.CancellationToken);
 
-        var mapped = ProposalMapper.TryMap(proposal, OfferedSlugs, offeredMerchantIds: [], defaultCurrency: "RSD", out var result, out var failure);
+        var mapped = new ProposalMapper().TryMap(proposal, OfferedSlugs, offeredMerchantIds: [], defaultCurrency: "RSD", out var result, out var failure);
 
         mapped.Should().BeTrue(failure);
         result.Items.Should().NotBeEmpty();
