@@ -5,6 +5,7 @@ using AwesomeAssertions;
 using Microsoft.Extensions.AI;
 using Noof.Ledger.Ai.Anthropic;
 using Noof.Ledger.Application.Categorization;
+using NSubstitute;
 
 namespace Noof.Ledger.Ai.Tests.Anthropic;
 
@@ -121,5 +122,17 @@ public class AnthropicTranslatingChatClientTests
         var act = () => new AnthropicTranslatingChatClient(inner).GetResponseAsync(UserTurn, null, TestContext.Current.CancellationToken);
 
         (await act.Should().ThrowAsync<ModelCallException>()).Which.Kind.Should().Be(ModelFailureKind.Transient);
+    }
+
+    [Fact]
+    public void GetStreamingResponseAsync_is_refused_before_it_ever_reaches_the_inner_client()
+    {
+        var inner = Substitute.For<IChatClient>();
+
+        var act = () => new AnthropicTranslatingChatClient(inner).GetStreamingResponseAsync(UserTurn);
+
+        act.Should().Throw<NotSupportedException>();
+        inner.DidNotReceive().GetStreamingResponseAsync(
+            Arg.Any<IEnumerable<ChatMessage>>(), Arg.Any<ChatOptions?>(), Arg.Any<CancellationToken>());
     }
 }

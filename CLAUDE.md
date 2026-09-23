@@ -2,7 +2,7 @@
 
 Personal finance tracker. Telegram bot captures spending (text, voice, receipt photos), an LLM categorises it per line item, a local Blazor dashboard shows it across multiple wallets and currencies. C# / .NET 10, EF Core, strict TDD, local hosting, **public repo**.
 
-> **Status:** spec approved (`docs/superpowers/specs/2026-09-19-noof-finance-design.md`); **Phases 0, 0b, 1A, 1B, 1C, 1D and 2 complete** — solution, EF Core model and migrations, PostgreSQL money-storage gate, cookie authentication as the sole mode, the `user set-password` verb, the loopback interlock (unconditional now, not tied to an auth mode), a Blazor Server shell, Telegram capture with a durable queue, natural-language capture — the model reads amounts and dates from how people talk, the bot echoes the stored record in English with Cancel · Edit, a reply or an edit corrects it, and every state is kept in an append-only revision history — with a write-once merchant identity table, a dashboard reading it all back through a read model, each assembly's public surface shrunk to what actually crosses its boundary, and the whole interface rebuilt on MudBlazor with a dark theme, a navigation bar and sign-out. 576 solution tests, all green — the Playwright browser tests are in the solution now, so `dotnet test --solution` runs them too and needs Chromium present. An opt-in live-model suite of 10 stays skipped unless `NOOF_LEDGER_LIVE_ANTHROPIC_KEY` is set; `ops/publish.ps1` produces a runnable host. Next is Phase 3, voice (a speech-to-text decision comes first); the money model is Phase 4. Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
+> **Status:** spec approved (`docs/superpowers/specs/2026-09-19-noof-finance-design.md`); **Phases 0, 0b, 1A, 1B, 1C, 1D and 2 complete** — solution, EF Core model and migrations, PostgreSQL money-storage gate, cookie authentication as the sole mode, the `user set-password` verb, the loopback interlock (unconditional now, not tied to an auth mode), a Blazor Server shell, Telegram capture with a durable queue, natural-language capture — the model reads amounts and dates from how people talk, the bot echoes the stored record in English with Cancel · Edit, a reply or an edit corrects it, and every state is kept in an append-only revision history — with a write-once merchant identity table, a dashboard reading it all back through a read model, each assembly's public surface shrunk to what actually crosses its boundary, and the whole interface rebuilt on MudBlazor with a dark theme, a navigation bar and sign-out. 577 solution tests, all green — the Playwright browser tests are in the solution now, so `dotnet test --solution` runs them too and needs Chromium present. An opt-in live-model suite of 10 stays skipped unless `NOOF_LEDGER_LIVE_ANTHROPIC_KEY` is set; `ops/publish.ps1` produces a runnable host. Next is Phase 3, voice (a speech-to-text decision comes first); the money model is Phase 4. Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
 >
 > Deferred **decisions** live in `docs/OPEN-QUESTIONS.md`; deferred **work** lives in `docs/BACKLOG.md`. Check both before proposing something as missing.
 >
@@ -59,7 +59,9 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
 
 **Public services go through an interface**, registered by the assembly's own `AddNoofXxx`. The
 exceptions are simple helpers with no state and nothing to substitute — `MerchantName.Fold`,
-`SecretKeys` — named because they are exceptions, not a licence to invent more by analogy.
+`SecretKeys` — plus the composition-root `AddNoofXxx` registration classes themselves and
+`LedgerConnectionString` (read before any `IServiceCollection` exists, so there is nothing to
+register it into) — named because they are exceptions, not a licence to invent more by analogy.
 
 **Don't:** defensive boilerplate for conditions that cannot occur · ceremony that exists to look enterprise.
 
@@ -127,8 +129,9 @@ exceptions are simple helpers with no state and nothing to substitute — `Merch
 - The inner red-green loop never touches the network or a real model. Live model calls live in an opt-in suite that is skipped by default.
 
 **The model** *(settled)*
-- Reached through **`Microsoft.Extensions.AI`'s `IChatClient`** (`raw.AsIChatClient(model)`), not the
-  Anthropic SDK's native `Messages.Create`. Operator's decision.
+- Reached through **`Microsoft.Extensions.AI`'s `IChatClient`** — the Anthropic factory calls
+  `AsIChatClient(options.Model, options.MaxTokens)` on the SDK client — not the SDK's native
+  `Messages.Create`. Operator's decision.
 - **The answer is a forced tool call with `strict: true`, not structured outputs** *(settled
   2026-09-23, operator's preference)*. `record_spending`'s arguments are the answer; strictness is a
   provider-neutral marker (`StrictTool.Marker()`), translated to the wire's own `"Strict"` key inside

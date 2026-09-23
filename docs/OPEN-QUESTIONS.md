@@ -409,7 +409,6 @@ Append-only by trigger; the FK is RESTRICT, so a revised transaction can never b
 ### P2-5 — operator review of Phase 2 (2026-09-23)
 
 The operator reviewed the finished phase and made six decisions, since implemented (see
-`followup-A-report.md` and `followup-BC-report.md` in `.claude/worktrees/p2-reports/`, and
 `CLAUDE.md` §3/§4). Recorded here for the reasoning; the rules themselves live in `CLAUDE.md`.
 
 | # | Decision | Reasoning |

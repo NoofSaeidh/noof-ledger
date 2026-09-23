@@ -1,6 +1,7 @@
 using System.Text.Json;
 using AwesomeAssertions;
 using Microsoft.Extensions.AI;
+using NSubstitute;
 
 namespace Noof.Ledger.Ai.Tests;
 
@@ -74,5 +75,17 @@ public class AnswerToolGuardTests
 
         options.Tools.Should().HaveCount(2);
         options.ToolMode.Should().BeNull();
+    }
+
+    [Fact]
+    public void GetStreamingResponseAsync_is_refused_before_it_ever_reaches_the_inner_client()
+    {
+        var inner = Substitute.For<IChatClient>();
+
+        var act = () => new AnswerToolGuard(inner, Answer).GetStreamingResponseAsync([UserTurn]);
+
+        act.Should().Throw<NotSupportedException>();
+        inner.DidNotReceive().GetStreamingResponseAsync(
+            Arg.Any<IEnumerable<ChatMessage>>(), Arg.Any<ChatOptions?>(), Arg.Any<CancellationToken>());
     }
 }

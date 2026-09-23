@@ -15,8 +15,8 @@ internal sealed class AnthropicOptions
     // There is no Temperature property and there must not be one. Microsoft.Extensions.AI's
     // ChatOptions.Temperature exists and would compile, unlike the raw SDK's
     // MessageCreateParams.Temperature (which is [Obsolete] and a compile error under
-    // TreatWarningsAsErrors) — but it is never set either. Determinism here comes from the
-    // JSON-schema-constrained response format, not from a sampling parameter, and giving this
-    // options type a Temperature property would invite someone to "tune" a call that is supposed
-    // to be deterministic by construction.
+    // TreatWarningsAsErrors) — but it is never set either. Determinism here comes from the forced
+    // strict tool call's schema, not from a sampling parameter, and giving this options type a
+    // Temperature property would invite someone to "tune" a call that is supposed to be
+    // deterministic by construction.
 }

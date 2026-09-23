@@ -44,6 +44,12 @@ internal sealed class AnthropicTranslatingChatClient(IChatClient innerClient) : 
         }
     }
 
+    public override IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+        IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException(
+            $"{nameof(AnthropicTranslatingChatClient)} does not support streaming: a streamed response " +
+            "has no single point to translate strictness onto or normalise an SDK exception from.");
+
     static ChatOptions? Translate(ChatOptions? options)
     {
         if (options?.Tools is not { } tools || !tools.Any(tool => tool.IsStrict()))

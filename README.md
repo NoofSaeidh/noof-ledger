@@ -10,7 +10,7 @@ wallets and currencies.
 > categorised expense on the dashboard. Say it the way you would say it — *"купил вчера штуку
 > евро"* is recorded as 1000 EUR dated yesterday, echoed back in the chat, and can be cancelled
 > with one tap or corrected by a reply.
-> 576 tests, all green — browser tests included.
+> 577 tests, all green — browser tests included.
 >
 > Still missing before it can carry a year of real spending: **balances** (there is no arithmetic
 > over wallets yet), **voice notes** (next) **and receipt photos**, **currency exchange**, and —
