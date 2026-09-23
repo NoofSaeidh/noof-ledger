@@ -1,5 +1,6 @@
 using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Time.Testing;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Categorization;
@@ -9,6 +10,8 @@ namespace Noof.Ledger.Persistence.Tests;
 [Collection("postgres")]
 public class EfCategorizationStoreTests(PostgresFixture fixture)
 {
+    static readonly FakeTimeProvider Clock = new(new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero));
+
     static Wallet NewWallet(string name = "Cash") => new()
     {
         Id = Guid.NewGuid(),
@@ -73,7 +76,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
         await using var db = await fixture.CreateContextAsync();
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
         var (transactionId, categoryId, merchantId) = await SeedAsync(db, TestContext.Current.CancellationToken);
-        var store = new EfCategorizationStore(db);
+        var store = new EfCategorizationStore(db, Clock);
         var items = new[] { new CategorizedLineItem("Coffee", new Money(3.50m, CurrencyCode.Eur), categoryId, merchantId) };
 
         await store.ApplyAsync(transactionId, Outcome(items), TestContext.Current.CancellationToken);
@@ -109,7 +112,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
             MerchantId = null,
         });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-        var store = new EfCategorizationStore(db);
+        var store = new EfCategorizationStore(db, Clock);
         var items = new[] { new CategorizedLineItem("Coffee", new Money(3.50m, CurrencyCode.Eur), categoryId, merchantId) };
 
         await store.ApplyAsync(transactionId, Outcome(items), TestContext.Current.CancellationToken);
@@ -139,7 +142,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
             MerchantId = null,
         });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-        var store = new EfCategorizationStore(db);
+        var store = new EfCategorizationStore(db, Clock);
         var items = new[] { new CategorizedLineItem("Coffee", new Money(3.50m, CurrencyCode.Eur), categoryId, merchantId) };
 
         await store.ApplyAsync(transactionId, Outcome(items), TestContext.Current.CancellationToken);
@@ -172,8 +175,8 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
         await using var dbB = new LedgerDbContext(
             new DbContextOptionsBuilder<LedgerDbContext>().UseNpgsql(connectionString).Options);
 
-        var storeA = new EfCategorizationStore(dbA);
-        var storeB = new EfCategorizationStore(dbB);
+        var storeA = new EfCategorizationStore(dbA, Clock);
+        var storeB = new EfCategorizationStore(dbB, Clock);
         var itemsA = new[] { new CategorizedLineItem("Coffee", new Money(3.50m, CurrencyCode.Eur), categoryId, merchantId) };
         var itemsB = new[] { new CategorizedLineItem("Milk", new Money(1.20m, CurrencyCode.Eur), categoryId, merchantId) };
 
@@ -195,7 +198,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
         await using var db = await fixture.CreateContextAsync();
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
         var (transactionId, categoryId, merchantId) = await SeedAsync(db, TestContext.Current.CancellationToken);
-        var store = new EfCategorizationStore(db);
+        var store = new EfCategorizationStore(db, Clock);
         var items = new[]
         {
             new CategorizedLineItem("Coffee", new Money(3.50m, CurrencyCode.Eur), categoryId, merchantId),
@@ -236,7 +239,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
                 .UseNpgsql(connectionString)
                 .AddInterceptors(new ThrowsBeforeCommitInterceptor())
                 .Options);
-        var store = new EfCategorizationStore(breaking);
+        var store = new EfCategorizationStore(breaking, Clock);
         var items = new[] { new CategorizedLineItem("Coffee", new Money(3.50m, CurrencyCode.Eur), categoryId, merchantId) };
 
         var act = async () => await store.ApplyAsync(transactionId, Outcome(items), TestContext.Current.CancellationToken);
@@ -275,7 +278,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
             MerchantId = merchant.Id,
         });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-        var store = new EfCategorizationStore(db);
+        var store = new EfCategorizationStore(db, Clock);
 
         var subject = await store.GetSubjectAsync(transaction.Id, TestContext.Current.CancellationToken);
 
@@ -297,7 +300,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
         await using var db = await fixture.CreateContextAsync();
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
         var (transactionId, categoryId, _) = await SeedAsync(db, TestContext.Current.CancellationToken);
-        var store = new EfCategorizationStore(db);
+        var store = new EfCategorizationStore(db, Clock);
         var items = new[] { new CategorizedLineItem("Coffee", new Money(3.50m, CurrencyCode.Eur), categoryId, null) };
 
         await store.ApplyAsync(transactionId, new CategorizationOutcome(items, new DateOnly(2026, 9, 20)), TestContext.Current.CancellationToken);
@@ -312,7 +315,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
     {
         await using var db = await fixture.CreateContextAsync();
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
-        var store = new EfCategorizationStore(db);
+        var store = new EfCategorizationStore(db, Clock);
 
         var subject = await store.GetSubjectAsync(Guid.NewGuid(), TestContext.Current.CancellationToken);
 
@@ -329,7 +332,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
         db.Wallets.Add(wallet);
         db.Transactions.Add(transaction);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-        var store = new EfCategorizationStore(db);
+        var store = new EfCategorizationStore(db, Clock);
 
         await store.MarkFailedAsync(transaction.Id, TestContext.Current.CancellationToken);
 

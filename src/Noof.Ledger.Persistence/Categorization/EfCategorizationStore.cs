@@ -2,10 +2,11 @@ using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Domain;
+using Noof.Ledger.Persistence.Revisions;
 
 namespace Noof.Ledger.Persistence.Categorization;
 
-internal sealed class EfCategorizationStore(LedgerDbContext db) : ICategorizationStore
+internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider timeProvider) : ICategorizationStore
 {
     public async Task<CategorizationSubject?> GetSubjectAsync(Guid transactionId, CancellationToken cancellationToken)
     {
@@ -88,12 +89,23 @@ internal sealed class EfCategorizationStore(LedgerDbContext db) : ICategorizatio
         }
 
         var transaction = await db.Transactions.SingleAsync(t => t.Id == transactionId, cancellationToken);
+        var statusBefore = transaction.Status;
         transaction.Status = TransactionStatus.Completed;
         transaction.OccurredOn = outcome.OccurredOn;
 
         await db.SaveChangesAsync(cancellationToken);
+        await RevisionLog.AppendAsync(db, transaction, RevisionKindFor(outcome.Kind), outcome.Instruction,
+            statusBefore, timeProvider.GetUtcNow(), cancellationToken);
         await tx.CommitAsync(cancellationToken);
     }
+
+    static RevisionKind RevisionKindFor(JobKind kind) => kind switch
+    {
+        JobKind.Categorize => RevisionKind.Initial,
+        JobKind.Correct => RevisionKind.Correction,
+        JobKind.Reinterpret => RevisionKind.Edit,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "No revision kind for this job kind."),
+    };
 
     public Task MarkFailedAsync(Guid transactionId, CancellationToken cancellationToken) =>
         db.Database.ExecuteSqlRawAsync(

@@ -107,6 +107,21 @@ CREATE TABLE public.line_items (
 );
 
 
+CREATE TABLE public.transaction_revisions (
+    id uuid NOT NULL,
+    transaction_id uuid NOT NULL,
+    revision_number integer NOT NULL,
+    kind integer NOT NULL,
+    instruction text,
+    status_before integer NOT NULL,
+    status_after integer NOT NULL,
+    snapshot jsonb NOT NULL,
+    created_at timestamptz NOT NULL,
+    CONSTRAINT "PK_transaction_revisions" PRIMARY KEY (id),
+    CONSTRAINT "FK_transaction_revisions_transactions_transaction_id" FOREIGN KEY (transaction_id) REFERENCES public.transactions (id) ON DELETE RESTRICT
+);
+
+
 CREATE INDEX "IX_categories_parent_id" ON public.categories (parent_id);
 
 
@@ -129,6 +144,9 @@ CREATE INDEX "IX_line_items_transaction_id" ON public.line_items (transaction_id
 
 
 CREATE INDEX "IX_merchant_aliases_merchant_id" ON public.merchant_aliases (merchant_id);
+
+
+CREATE UNIQUE INDEX "IX_transaction_revisions_transaction_id_revision_number" ON public.transaction_revisions (transaction_id, revision_number);
 
 
 CREATE UNIQUE INDEX "IX_transactions_telegram_chat_id_telegram_message_id" ON public.transactions (telegram_chat_id, telegram_message_id);
