@@ -54,7 +54,7 @@ public class PublicSurfaceTests
             "SecretResult", "SecretState", "SecretStatus",
             "RecordAction", "EchoMessage", "IRecordEcho",
             "EchoTarget", "IRecordEditor", "ApplicationRegistration",
-            "ITranscriber", "ISpeechProvider", "CapturedVoice", "ITranscriptionStore",
+            "ITranscriber", "ISpeechProvider", "CapturedVoice", "ITranscriptionStore", "IVoiceFileSource",
         ],
         ["Noof.Ledger.Persistence"] = ["LedgerConnectionString", "PersistenceRegistration"],
         ["Noof.Ledger.Ai"] = ["AiRegistration"],
