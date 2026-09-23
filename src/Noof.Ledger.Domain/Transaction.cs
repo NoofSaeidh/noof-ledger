@@ -27,5 +27,9 @@ public sealed class Transaction
     // unlike TelegramMessageId, it starts unset.
     public int? BotMessageId { get; set; }
 
+    // The Изменить prompt. Telegram nests reply_to_message one level only, so a reply to the prompt can be
+    // traced back to this record only through this column.
+    public int? PromptMessageId { get; set; }
+
     public required DateTimeOffset CreatedAt { get; init; }
 }

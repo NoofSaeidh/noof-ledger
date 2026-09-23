@@ -52,6 +52,12 @@ internal static class CategorizationPrompt
         most recent such day before today. When the message names no day, answer occurred_on as
         null: it will be recorded as today.
 
+        Sometimes the message has already been recorded and the person wants it changed — "нет,
+        1500", "это было позавчера", "это подарок". Then you are also given the current record and
+        their correction. Answer with the complete corrected record: every line, not only the one
+        that changed, with the correction applied and everything it does not mention kept as it
+        is. Days in a correction are counted from today, as above.
+
         A message may name zero, one or several purchases. Produce one line item per purchase that
         has an amount. If a merchant is named and it matches one of the known merchants you were
         given, set known_merchant_id to that merchant's id. If a merchant is named but matches no
@@ -103,19 +109,44 @@ internal static class CategorizationPrompt
             ? "No known merchants are offered for this message."
             : string.Join('\n', merchantHints.Select(m => $"- {m.Id}: {m.DisplayName}"));
 
-    public static string BuildUserTurn(CategorizationRequest request) =>
+    public static string BuildUserTurn(CategorizationRequest request)
+    {
+        var turn = $"""
+            Today: {request.Today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} ({request.Today.DayOfWeek})
+
+            Message:
+            {request.RawText}
+
+            Categories:
+            {RenderCategories(request.Categories)}
+
+            Known merchants:
+            {RenderMerchantHints(request.MerchantHints)}
+            """;
+
+        return request.Correction is { } correction ? $"{turn}\n\n{RenderCorrection(correction)}" : turn;
+    }
+
+    static string RenderCorrection(CorrectionRequest correction) =>
         $"""
-        Today: {request.Today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} ({request.Today.DayOfWeek})
+        Current record (dated {correction.CurrentOccurredOn.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}):
+        {RenderCurrentLines(correction.CurrentLines)}
 
-        Message:
-        {request.RawText}
-
-        Categories:
-        {RenderCategories(request.Categories)}
-
-        Known merchants:
-        {RenderMerchantHints(request.MerchantHints)}
+        Correction from the person:
+        {correction.Instruction}
         """;
+
+    static string RenderCurrentLines(IReadOnlyList<RecordedLine> lines) =>
+        lines.Count == 0
+            ? "- nothing was recorded"
+            : string.Join('\n', lines.Select(RenderCurrentLine));
+
+    static string RenderCurrentLine(RecordedLine line)
+    {
+        var text = $"- {line.Description}: {line.Amount.Amount.ToString("0.####", CultureInfo.InvariantCulture)} "
+            + $"{line.Amount.Currency}, category {line.CategorySlug ?? "none"}";
+        return line.MerchantName is { } merchant ? $"{text}, merchant {merchant}" : text;
+    }
 
     static string RenderCategory(CategoryOption category) =>
         category.ParentSlug is null

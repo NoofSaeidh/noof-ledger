@@ -109,7 +109,8 @@ internal sealed class CategorizationWorker(
                 sub.SentOn,
                 [.. categories.Select(category => new CategoryOption(category.Slug, category.NameEn, category.NameRu, category.ParentSlug))],
                 hints,
-                allMerchants);
+                allMerchants,
+                CorrectionFor(job, sub));
 
             var proposal = await categorizer.ProposeAsync(request, cancellationToken);
 
@@ -172,8 +173,9 @@ internal sealed class CategorizationWorker(
                 categorizedItems.Add(new CategorizedLineItem(item.Description, item.Amount, categoryId, merchantId));
             }
 
+            var occurredOn = mapped.OccurredOn ?? DefaultDay(job, sub);
             await store.ApplyAsync(
-                job.TransactionId, new CategorizationOutcome(categorizedItems, mapped.OccurredOn ?? sub.SentOn), cancellationToken);
+                job.TransactionId, new CategorizationOutcome(categorizedItems, occurredOn, job.Kind, job.Instruction), cancellationToken);
 
             // From this line on, the transaction's line items and Completed status are already
             // committed. Nothing past here may ever be treated as a job failure - that would run
@@ -226,6 +228,16 @@ internal sealed class CategorizationWorker(
         }
     }
 
+    static CorrectionRequest? CorrectionFor(CategorizationJob job, CategorizationSubject record) =>
+        job is { Kind: JobKind.Correct, Instruction: { } instruction }
+            ? new CorrectionRequest(record.OccurredOn, record.Lines, instruction)
+            : null;
+
+    // A correction that names no day keeps the record's day. Anything read from scratch starts from the
+    // day the message was sent (D2).
+    static DateOnly DefaultDay(CategorizationJob job, CategorizationSubject record) =>
+        job.Kind == JobKind.Correct ? record.OccurredOn : record.SentOn;
+
     async Task EchoAsync(ICategorizationStore store, IChatNotifier notifier, CategorizationJob job, CancellationToken cancellationToken)
     {
         try
@@ -261,7 +273,7 @@ internal sealed class CategorizationWorker(
         var outcome = await jobQueue.RetryAsync(job.Id, workerId, runAfter, error, cancellationToken);
 
         if (outcome == JobCompletionOutcome.Applied && isLastAttempt)
-            await NotifyFailureAsync(store, notifier, subject, job.TransactionId, cancellationToken);
+            await NotifyFailureAsync(store, notifier, subject, job, cancellationToken);
     }
 
     async Task FailTerminallyAsync(
@@ -270,27 +282,33 @@ internal sealed class CategorizationWorker(
     {
         var outcome = await jobQueue.FailAsync(job.Id, workerId, error, cancellationToken);
         if (outcome == JobCompletionOutcome.Applied)
-            await NotifyFailureAsync(store, notifier, subject, job.TransactionId, cancellationToken);
+            await NotifyFailureAsync(store, notifier, subject, job, cancellationToken);
     }
 
     async Task NotifyFailureAsync(
-        ICategorizationStore store, IChatNotifier notifier, CategorizationSubject? subject, Guid transactionId,
+        ICategorizationStore store, IChatNotifier notifier, CategorizationSubject? subject, CategorizationJob job,
         CancellationToken cancellationToken)
     {
-        await store.MarkFailedAsync(transactionId, cancellationToken);
+        // Only a first reading marks the transaction Failed. A correction or a re-read that fails leaves the
+        // record the person already saw confirmed exactly as it was.
+        if (job.Kind == JobKind.Categorize)
+            await store.MarkFailedAsync(job.TransactionId, cancellationToken);
 
         if (subject is not { BotMessageId: { } messageId } sub)
             return;
 
         try
         {
-            await notifier.EditAsync(sub.TelegramChatId, messageId, RecordEcho.Failure, cancellationToken);
+            var echo = job.Kind == JobKind.Categorize
+                ? RecordEcho.Failure
+                : RecordEcho.ComposeCorrectionFailure(await store.GetSubjectAsync(job.TransactionId, cancellationToken) ?? sub);
+            await notifier.EditAsync(sub.TelegramChatId, messageId, echo, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogWarning(ex,
-                "Failed to edit Telegram message {MessageId} to report a failed categorization for transaction {TransactionId}",
-                messageId, transactionId);
+                "Failed to edit Telegram message {MessageId} to report a failed job for transaction {TransactionId}",
+                messageId, job.TransactionId);
         }
     }
 

@@ -22,6 +22,7 @@ internal sealed class TransactionConfiguration : IEntityTypeConfiguration<Transa
         builder.Property(t => t.TelegramChatId).HasColumnName("telegram_chat_id");
         builder.Property(t => t.TelegramMessageId).HasColumnName("telegram_message_id");
         builder.Property(t => t.BotMessageId).HasColumnName("bot_message_id");
+        builder.Property(t => t.PromptMessageId).HasColumnName("prompt_message_id");
         builder.Property(t => t.CreatedAt).HasColumnName("created_at");
 
         builder.HasIndex(t => new { t.TelegramChatId, t.TelegramMessageId }).IsUnique();

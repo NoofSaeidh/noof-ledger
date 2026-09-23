@@ -1,4 +1,4 @@
-CREATE TABLE public.app_secret (
+﻿CREATE TABLE public.app_secret (
     key text NOT NULL,
     ciphertext text NOT NULL,
     updated_at timestamptz NOT NULL,
@@ -64,6 +64,7 @@ CREATE TABLE public.transactions (
     telegram_chat_id bigint NOT NULL,
     telegram_message_id integer NOT NULL,
     bot_message_id integer,
+    prompt_message_id integer,
     created_at timestamptz NOT NULL,
     CONSTRAINT "PK_transactions" PRIMARY KEY (id),
     CONSTRAINT "FK_transactions_wallets_wallet_id" FOREIGN KEY (wallet_id) REFERENCES public.wallets (id) ON DELETE RESTRICT
@@ -73,6 +74,9 @@ CREATE TABLE public.transactions (
 CREATE TABLE public.categorization_jobs (
     id uuid NOT NULL,
     transaction_id uuid NOT NULL,
+    kind integer NOT NULL,
+    instruction text,
+    source_message_id integer,
     status integer NOT NULL,
     attempt_count integer NOT NULL,
     run_after timestamptz NOT NULL,
@@ -82,6 +86,7 @@ CREATE TABLE public.categorization_jobs (
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
     CONSTRAINT "PK_categorization_jobs" PRIMARY KEY (id),
+    CONSTRAINT ck_categorization_jobs_correction_has_instruction CHECK (kind <> 1 OR instruction IS NOT NULL),
     CONSTRAINT "FK_categorization_jobs_transactions_transaction_id" FOREIGN KEY (transaction_id) REFERENCES public.transactions (id) ON DELETE CASCADE
 );
 
@@ -111,7 +116,7 @@ CREATE UNIQUE INDEX "IX_categories_slug" ON public.categories (slug);
 CREATE INDEX "IX_categorization_jobs_status_run_after" ON public.categorization_jobs (status, run_after);
 
 
-CREATE INDEX "IX_categorization_jobs_transaction_id" ON public.categorization_jobs (transaction_id);
+CREATE UNIQUE INDEX "IX_categorization_jobs_transaction_id_source_message_id" ON public.categorization_jobs (transaction_id, source_message_id) WHERE source_message_id IS NOT NULL;
 
 
 CREATE INDEX "IX_line_items_category_id" ON public.line_items (category_id);
@@ -130,3 +135,5 @@ CREATE UNIQUE INDEX "IX_transactions_telegram_chat_id_telegram_message_id" ON pu
 
 
 CREATE INDEX "IX_transactions_wallet_id" ON public.transactions (wallet_id);
+
+

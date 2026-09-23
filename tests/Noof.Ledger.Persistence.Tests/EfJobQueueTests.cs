@@ -48,15 +48,21 @@ public class EfJobQueueTests(PostgresFixture fixture)
         return transaction.Id;
     }
 
-    static CategorizationJob NewJob(Guid transactionId, DateTimeOffset runAfter, JobStatus status = JobStatus.Pending, int attemptCount = 0) => new()
+    static CategorizationJob NewJob(
+        Guid transactionId, DateTimeOffset runAfter, JobStatus status = JobStatus.Pending, int attemptCount = 0,
+        JobKind kind = JobKind.Categorize, string? instruction = null, int? sourceMessageId = null,
+        DateTimeOffset? createdAt = null) => new()
     {
         Id = Guid.NewGuid(),
         TransactionId = transactionId,
         Status = status,
         AttemptCount = attemptCount,
         RunAfter = runAfter,
-        CreatedAt = runAfter,
-        UpdatedAt = runAfter,
+        Kind = kind,
+        Instruction = instruction,
+        SourceMessageId = sourceMessageId,
+        CreatedAt = createdAt ?? runAfter,
+        UpdatedAt = createdAt ?? runAfter,
     };
 
     [Fact]
@@ -351,6 +357,66 @@ public class EfJobQueueTests(PostgresFixture fixture)
         var reloadedStillLeased = await db.CategorizationJobs.AsNoTracking()
             .SingleAsync(j => j.Id == stillLeased.Id, TestContext.Current.CancellationToken);
         reloadedStillLeased.Status.Should().Be(JobStatus.Claimed, "its lease has not expired yet");
+    }
+
+    [Fact]
+    public async Task A_later_job_for_the_same_transaction_waits_for_the_earlier_one()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var now = new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero);
+        var time = new FakeTimeProvider(now);
+        var queue = new EfJobQueue(db, time, maxAttempts: 8);
+        var corrected = await SeedTransactionAsync(db, now, TestContext.Current.CancellationToken);
+        var other = await SeedTransactionAsync(db, now, TestContext.Current.CancellationToken);
+
+        // The first reading is backing off after a transient failure; the correction behind it is due.
+        // Claiming the correction first would apply it, then let the older reading overwrite it.
+        db.CategorizationJobs.AddRange(
+            NewJob(corrected, runAfter: now.AddMinutes(5), createdAt: now.AddMinutes(-10)),
+            NewJob(corrected, runAfter: now.AddMinutes(-1), kind: JobKind.Correct, instruction: "нет, 1500",
+                sourceMessageId: 7, createdAt: now.AddMinutes(-5)));
+        var otherJob = NewJob(other, runAfter: now.AddMinutes(-1), createdAt: now.AddMinutes(-4));
+        db.CategorizationJobs.Add(otherJob);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var claimed = await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken);
+
+        claimed!.Id.Should().Be(otherJob.Id);
+        (await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken))
+            .Should().BeNull("the correction must wait until the first reading is no longer pending");
+    }
+
+    [Fact]
+    public async Task A_claimed_correction_carries_its_kind_instruction_and_source_message()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var now = new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero);
+        var queue = new EfJobQueue(db, new FakeTimeProvider(now), maxAttempts: 8);
+        var transactionId = await SeedTransactionAsync(db, now, TestContext.Current.CancellationToken);
+        db.CategorizationJobs.Add(NewJob(transactionId, now.AddMinutes(-1), kind: JobKind.Correct, instruction: "нет, 1500", sourceMessageId: 7));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var claimed = await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken);
+
+        claimed!.Kind.Should().Be(JobKind.Correct);
+        claimed.Instruction.Should().Be("нет, 1500");
+        claimed.SourceMessageId.Should().Be(7);
+    }
+
+    [Fact]
+    public async Task A_correction_without_an_instruction_is_refused_by_the_database()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var now = new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero);
+        var transactionId = await SeedTransactionAsync(db, now, TestContext.Current.CancellationToken);
+        db.CategorizationJobs.Add(NewJob(transactionId, now, kind: JobKind.Correct));
+
+        var act = () => db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<DbUpdateException>();
     }
 
     [Fact]

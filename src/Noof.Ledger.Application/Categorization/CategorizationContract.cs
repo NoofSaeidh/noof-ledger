@@ -16,7 +16,12 @@ public sealed record CategorizationRequest(
     DateOnly Today,
     IReadOnlyList<CategoryOption> Categories,
     IReadOnlyList<MerchantOption> MerchantHints,
-    IReadOnlyList<MerchantOption> AllMerchants);
+    IReadOnlyList<MerchantOption> AllMerchants,
+    CorrectionRequest? Correction = null);
+
+// The record as it stands and what the person asked to change. The model answers with the complete corrected
+// record, which replaces the model-authored lines exactly as a first reading does (D6).
+public sealed record CorrectionRequest(DateOnly CurrentOccurredOn, IReadOnlyList<RecordedLine> CurrentLines, string Instruction);
 
 // One line in the model's own reading of the message. Amount is the number the person meant (1000
 // for "штуку"), answered as a JSON number and read straight into decimal by System.Text.Json — no
@@ -69,7 +74,11 @@ public sealed record RecordedLine(
     string? CategoryName,
     string? MerchantName);
 
-public sealed record CategorizationOutcome(IReadOnlyList<CategorizedLineItem> Items, DateOnly OccurredOn);
+public sealed record CategorizationOutcome(
+    IReadOnlyList<CategorizedLineItem> Items,
+    DateOnly OccurredOn,
+    JobKind Kind = JobKind.Categorize,
+    string? Instruction = null);
 
 public sealed record CategoryEntry(Guid Id, string Slug, string NameEn, string NameRu, string? ParentSlug);
 

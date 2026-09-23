@@ -35,14 +35,14 @@ public class PublicSurfaceTests
         ["Noof.Ledger.Domain"] =
         [
             "AppUser", "CategorizationAuthority", "CategorizationJob", "Category", "CurrencyCode",
-            "CurrencyMismatchException", "JobStatus", "LineItem", "Merchant", "MerchantAlias",
+            "CurrencyMismatchException", "JobKind", "JobStatus", "LineItem", "Merchant", "MerchantAlias",
             "MerchantKind", "MerchantName", "Money", "Transaction",
             "TransactionStatus", "Wallet",
         ],
         ["Noof.Ledger.Application"] =
         [
             "IPasswordHasher", "IUserStore", "PasswordVerifyResult", "CapturedMessage",
-            "ICaptureStore", "CategoryOption", "MerchantOption", "CategorizationRequest",
+            "ICaptureStore", "CategoryOption", "MerchantOption", "CategorizationRequest", "CorrectionRequest",
             "ProposedLineItem", "CategorizationProposal", "ResolvedLineItem", "CategorizedLineItem",
             "CategorizationSubject", "RecordedLine", "CategorizationOutcome", "CategoryEntry", "MerchantAliasEntry", "ICategorizationStore",
             "ICategorizer", "ICategoryCatalog", "IMerchantDirectory", "MerchantScan",

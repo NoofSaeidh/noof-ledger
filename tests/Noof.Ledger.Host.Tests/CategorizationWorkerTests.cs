@@ -85,12 +85,14 @@ public class CategorizationWorkerTests
         return store;
     }
 
-    static CategorizationJob Job(int attemptCount = 1) => new()
+    static CategorizationJob Job(int attemptCount = 1, JobKind kind = JobKind.Categorize, string? instruction = null) => new()
     {
         Id = JobId,
         TransactionId = TransactionId,
         Status = JobStatus.Claimed,
         AttemptCount = attemptCount,
+        Kind = kind,
+        Instruction = instruction,
         RunAfter = DateTimeOffset.UtcNow,
         CreatedAt = DateTimeOffset.UtcNow,
         UpdatedAt = DateTimeOffset.UtcNow,
@@ -188,6 +190,95 @@ public class CategorizationWorkerTests
 
         await jobQueue.Received(1).FailAsync(JobId, WorkerId, Arg.Is<string>(error => error.Contains("occurred_on")), Arg.Any<CancellationToken>());
         await store.DidNotReceive().ApplyAsync(Arg.Any<Guid>(), Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
+    }
+
+    static readonly RecordedLine StoredBread = new("Bread", new Money(250m, CurrencyCode.Rsd), "groceries", "Продукты", null);
+
+    [Fact]
+    public async Task A_correction_hands_the_model_the_current_record_and_the_instruction()
+    {
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(status: TransactionStatus.Completed, occurredOn: new DateOnly(2026, 9, 20), lines: [StoredBread]));
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine(1500m));
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job(kind: JobKind.Correct, instruction: "нет, 1500")), KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await categorizer.Received(1).ProposeAsync(
+            Arg.Is<CategorizationRequest>(request =>
+                request.Correction != null
+                && request.Correction.Instruction == "нет, 1500"
+                && request.Correction.CurrentOccurredOn == new DateOnly(2026, 9, 20)
+                && request.Correction.CurrentLines.Single() == StoredBread),
+            Arg.Any<CancellationToken>());
+        await store.Received(1).ApplyAsync(TransactionId,
+            Arg.Is<CategorizationOutcome>(outcome => outcome.Kind == JobKind.Correct && outcome.Instruction == "нет, 1500"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_correction_that_names_no_day_keeps_the_records_day()
+    {
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(status: TransactionStatus.Completed, occurredOn: new DateOnly(2026, 9, 20), lines: [StoredBread]));
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine(1500m));
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job(kind: JobKind.Correct, instruction: "нет, 1500")), KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await store.Received(1).ApplyAsync(TransactionId,
+            Arg.Is<CategorizationOutcome>(outcome => outcome.OccurredOn == new DateOnly(2026, 9, 20)), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_reinterpretation_reads_from_scratch_and_falls_back_to_the_send_day()
+    {
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(status: TransactionStatus.Completed, occurredOn: new DateOnly(2026, 9, 20), lines: [StoredBread]));
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine());
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job(kind: JobKind.Reinterpret)), KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await categorizer.Received(1).ProposeAsync(Arg.Is<CategorizationRequest>(request => request.Correction == null), Arg.Any<CancellationToken>());
+        await store.Received(1).ApplyAsync(TransactionId,
+            Arg.Is<CategorizationOutcome>(outcome => outcome.OccurredOn == SentOn && outcome.Kind == JobKind.Reinterpret),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_failed_correction_leaves_the_record_as_it_was()
+    {
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(status: TransactionStatus.Completed, lines: [StoredBread]));
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new ModelCallException(ModelFailureKind.Terminal, "bad request"));
+        var notifier = Substitute.For<IChatNotifier>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job(kind: JobKind.Correct, instruction: "нет, 1500")), KeyPresent(), store,
+                categorizer: categorizer, notifier: notifier),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+        await notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(echo => echo.Text.StartsWith("Не получилось применить исправление") && echo.Text.Contains("250.00 RSD")),
+            Arg.Any<CancellationToken>());
     }
 
     // Behaves like the real store for the one property the echo depends on: after ApplyAsync, reading the

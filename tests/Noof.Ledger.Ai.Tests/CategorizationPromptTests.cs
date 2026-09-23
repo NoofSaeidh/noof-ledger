@@ -1,6 +1,7 @@
 ﻿using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Ai.Tests;
 
@@ -104,5 +105,36 @@ public class CategorizationPromptTests
     {
         CategorizationPrompt.System.Should().Contain("occurred_on");
         CategorizationPrompt.System.Should().Contain("counted from today");
+    }
+
+    [Fact]
+    public void A_correction_adds_the_current_record_and_the_instruction_to_the_user_turn()
+    {
+        IReadOnlyList<CategoryOption> categories = [new CategoryOption("groceries", "Groceries", "Продукты", null)];
+        var current = new RecordedLine("продукты", new Money(1000m, CurrencyCode.Eur), "groceries", "Продукты", "Lidl");
+        var request = new CategorizationRequest("купил штуку евро", new DateOnly(2026, 9, 22), categories, [], [],
+            new CorrectionRequest(new DateOnly(2026, 9, 21), [current], "нет, 1500"));
+
+        var turn = CategorizationPrompt.BuildUserTurn(request);
+
+        turn.Should().Contain("Current record (dated 2026-09-21):");
+        turn.Should().Contain("- продукты: 1000 EUR, category groceries, merchant Lidl");
+        // Raw string literals carry the source file's line endings, so assert per line, not on "\n".
+        turn.Should().Contain("Correction from the person:");
+        turn.Should().EndWith("нет, 1500");
+    }
+
+    [Fact]
+    public void A_first_reading_has_no_correction_section()
+    {
+        var request = new CategorizationRequest("кофе 250", new DateOnly(2026, 9, 22), [], [], []);
+
+        CategorizationPrompt.BuildUserTurn(request).Should().NotContain("Correction from the person");
+    }
+
+    [Fact]
+    public void System_prompt_asks_for_the_complete_corrected_record()
+    {
+        CategorizationPrompt.System.Should().Contain("complete corrected record");
     }
 }

@@ -23,13 +23,19 @@ internal sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, 
                     run_after = @leaseExpiry,
                     updated_at = @now
                 WHERE id = (
-                    SELECT id FROM categorization_jobs
-                    WHERE status = 0 AND run_after <= @now
-                    ORDER BY run_after
+                    SELECT j.id FROM categorization_jobs j
+                    WHERE j.status = 0 AND j.run_after <= @now
+                      AND NOT EXISTS (
+                          SELECT 1 FROM categorization_jobs earlier
+                          WHERE earlier.transaction_id = j.transaction_id
+                            AND earlier.status IN (0, 1)
+                            AND earlier.created_at < j.created_at)
+                    ORDER BY j.run_after
                     LIMIT 1
-                    FOR UPDATE SKIP LOCKED
+                    FOR UPDATE OF j SKIP LOCKED
                 )
-                RETURNING id, transaction_id, status, attempt_count, run_after, claimed_at, claimed_by, last_error, created_at, updated_at
+                RETURNING id, transaction_id, status, attempt_count, run_after, claimed_at, claimed_by, last_error,
+                          created_at, updated_at, kind, instruction, source_message_id
                 """,
                 new NpgsqlParameter("now", now),
                 new NpgsqlParameter("workerId", workerId),
@@ -37,6 +43,8 @@ internal sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, 
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
+        // NOT EXISTS keeps one transaction's jobs in the order they were asked for: a correction must
+        // never be applied before the reading it corrects, which would then overwrite it.
         return claimed.SingleOrDefault();
     }
 
