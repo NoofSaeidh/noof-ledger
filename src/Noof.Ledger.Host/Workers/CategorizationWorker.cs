@@ -106,7 +106,7 @@ internal sealed class CategorizationWorker(
 
             var request = new CategorizationRequest(
                 sub.RawText,
-                sub.SentOn,
+                TodayFor(job, sub),
                 [.. categories.Select(category => new CategoryOption(category.Slug, category.NameEn, category.NameRu, category.ParentSlug))],
                 hints,
                 allMerchants,
@@ -232,6 +232,13 @@ internal sealed class CategorizationWorker(
         job is { Kind: JobKind.Correct, Instruction: { } instruction }
             ? new CorrectionRequest(record.OccurredOn, record.Lines, instruction)
             : null;
+
+    // A correction's "today" is the reply's own send day (job.InstructionDay), not the original
+    // message's - otherwise a relative word like "позавчера" resolves from the wrong anchor when
+    // the reply arrives days after the original capture (docs/OPEN-QUESTIONS.md P2-2). A first
+    // reading and a Reinterpret job carry no InstructionDay, so both fall back to SentOn (D2).
+    static DateOnly TodayFor(CategorizationJob job, CategorizationSubject record) =>
+        job.InstructionDay ?? record.SentOn;
 
     // A correction that names no day keeps the record's day. Anything read from scratch starts from the
     // day the message was sent (D2).

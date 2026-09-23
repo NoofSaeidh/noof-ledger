@@ -13,6 +13,12 @@ public sealed class CategorizationJob
     // The reply that asked for this correction. A unique index makes Telegram redelivering it a no-op.
     public int? SourceMessageId { get; init; }
 
+    // The local day the correction reply itself was sent, set for a Correct job only. The model's
+    // "today" for a correction must be this day, not the original message's send day - otherwise a
+    // relative word like "позавчера" resolves from the wrong anchor when the reply arrives days
+    // after the original capture.
+    public DateOnly? InstructionDay { get; init; }
+
     public required JobStatus Status { get; set; }
     public required int AttemptCount { get; set; }
     public required DateTimeOffset RunAfter { get; set; }

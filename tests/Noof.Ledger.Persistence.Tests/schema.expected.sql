@@ -77,6 +77,7 @@ CREATE TABLE public.categorization_jobs (
     kind integer NOT NULL,
     instruction text,
     source_message_id integer,
+    instruction_day date,
     status integer NOT NULL,
     attempt_count integer NOT NULL,
     run_after timestamptz NOT NULL,

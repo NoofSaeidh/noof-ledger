@@ -85,7 +85,8 @@ public class CategorizationWorkerTests
         return store;
     }
 
-    static CategorizationJob Job(int attemptCount = 1, JobKind kind = JobKind.Categorize, string? instruction = null) => new()
+    static CategorizationJob Job(
+        int attemptCount = 1, JobKind kind = JobKind.Categorize, string? instruction = null, DateOnly? instructionDay = null) => new()
     {
         Id = JobId,
         TransactionId = TransactionId,
@@ -93,6 +94,7 @@ public class CategorizationWorkerTests
         AttemptCount = attemptCount,
         Kind = kind,
         Instruction = instruction,
+        InstructionDay = instructionDay,
         RunAfter = DateTimeOffset.UtcNow,
         CreatedAt = DateTimeOffset.UtcNow,
         UpdatedAt = DateTimeOffset.UtcNow,
@@ -236,6 +238,31 @@ public class CategorizationWorkerTests
 
         await store.Received(1).ApplyAsync(TransactionId,
             Arg.Is<CategorizationOutcome>(outcome => outcome.OccurredOn == new DateOnly(2026, 9, 20)), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_correction_sent_on_a_later_day_tells_the_model_that_day()
+    {
+        // The defect this guards against: a purchase captured Monday (SentOn) corrected on
+        // Wednesday with "это было позавчера" must resolve позавчера from Wednesday, not from the
+        // original Monday capture - otherwise every relative word in a correction is off by
+        // however long the correction waited (docs/OPEN-QUESTIONS.md P2-2).
+        var instructionDay = new DateOnly(2026, 9, 23);
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(status: TransactionStatus.Completed, occurredOn: new DateOnly(2026, 9, 20), lines: [StoredBread]));
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine(1500m));
+        var worker = CreateWorker(
+            ScopeFactoryFor(
+                QueueWith(Job(kind: JobKind.Correct, instruction: "нет, 1500", instructionDay: instructionDay)),
+                KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await categorizer.Received(1).ProposeAsync(
+            Arg.Is<CategorizationRequest>(request => request.Today == instructionDay), Arg.Any<CancellationToken>());
     }
 
     [Fact]

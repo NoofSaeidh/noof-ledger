@@ -146,8 +146,8 @@ public class EfRecordEditorTests(PostgresFixture fixture)
         var transaction = await SeedAsync(db);
         var editor = new EfRecordEditor(db, Clock);
 
-        (await editor.RequestCorrectionAsync(transaction.Id, "нет, 1500", 8, TestContext.Current.CancellationToken)).Should().BeTrue();
-        (await editor.RequestCorrectionAsync(transaction.Id, "нет, 1500", 8, TestContext.Current.CancellationToken)).Should().BeFalse();
+        (await editor.RequestCorrectionAsync(transaction.Id, "нет, 1500", 8, Clock.GetUtcNow(), TestContext.Current.CancellationToken)).Should().BeTrue();
+        (await editor.RequestCorrectionAsync(transaction.Id, "нет, 1500", 8, Clock.GetUtcNow(), TestContext.Current.CancellationToken)).Should().BeFalse();
 
         db.ChangeTracker.Clear();
         var job = await db.CategorizationJobs.SingleAsync(TestContext.Current.CancellationToken);
@@ -156,6 +156,24 @@ public class EfRecordEditorTests(PostgresFixture fixture)
         job.SourceMessageId.Should().Be(8);
         job.Status.Should().Be(JobStatus.Pending);
         job.RunAfter.Should().Be(Clock.GetUtcNow());
+    }
+
+    [Fact]
+    public async Task A_corrections_instruction_day_is_the_replys_own_local_day_not_the_original_messages()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = await SeedAsync(db);
+        var editor = new EfRecordEditor(db, Clock);
+        // 22:30 UTC on the 23rd is already past midnight in Belgrade (UTC+2 in September) - the
+        // 24th there. The transaction's own SeedAsync day (the 21st) must play no part.
+        var sentAt = new DateTimeOffset(2026, 9, 23, 22, 30, 0, TimeSpan.Zero);
+
+        await editor.RequestCorrectionAsync(transaction.Id, "нет, 1500", 8, sentAt, TestContext.Current.CancellationToken);
+
+        db.ChangeTracker.Clear();
+        (await db.CategorizationJobs.SingleAsync(TestContext.Current.CancellationToken)).InstructionDay
+            .Should().Be(new DateOnly(2026, 9, 24));
     }
 
     [Fact]

@@ -212,11 +212,11 @@ public class TelegramUpdateRouterTests
         var (router, captureStore, chatNotifier, editor, _) = CreateRouter(ownerChatId: 111L);
         var transactionId = Guid.NewGuid();
         editor.FindByBotMessageAsync(111L, 42, Arg.Any<CancellationToken>()).Returns(new EchoTarget(transactionId, 42));
-        editor.RequestCorrectionAsync(transactionId, "нет, 1500", 8, Arg.Any<CancellationToken>()).Returns(true);
+        editor.RequestCorrectionAsync(transactionId, "нет, 1500", 8, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(true);
 
         await router.HandleAsync(ReplyTo(111L, 8, 42, "нет, 1500"), "Europe/Belgrade", TestContext.Current.CancellationToken);
 
-        await editor.Received(1).RequestCorrectionAsync(transactionId, "нет, 1500", 8, Arg.Any<CancellationToken>());
+        await editor.Received(1).RequestCorrectionAsync(transactionId, "нет, 1500", 8, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
         await chatNotifier.Received(1).EditAsync(111L, 42,
             Arg.Is<EchoMessage>(echo => echo.Text == RecordEcho.Correcting && echo.Actions.Count == 0), Arg.Any<CancellationToken>());
         await captureStore.DidNotReceive().CaptureAsync(Arg.Any<CapturedMessage>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
@@ -228,7 +228,7 @@ public class TelegramUpdateRouterTests
         var (router, captureStore, chatNotifier, editor, _) = CreateRouter(ownerChatId: 111L);
         var transactionId = Guid.NewGuid();
         editor.FindByBotMessageAsync(111L, 42, Arg.Any<CancellationToken>()).Returns(new EchoTarget(transactionId, 42));
-        editor.RequestCorrectionAsync(transactionId, "нет, 1500", 8, Arg.Any<CancellationToken>()).Returns(false);
+        editor.RequestCorrectionAsync(transactionId, "нет, 1500", 8, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(false);
 
         await router.HandleAsync(ReplyTo(111L, 8, 42, "нет, 1500"), "Europe/Belgrade", TestContext.Current.CancellationToken);
 

@@ -10,7 +10,8 @@ public sealed record CategoryOption(string Slug, string NameEn, string NameRu, s
 public sealed record MerchantOption(Guid Id, string DisplayName);
 
 // Today is the local day the message was SENT, never the day the job runs: a message that waited in the
-// offline queue overnight must not move a day (D2).
+// offline queue overnight must not move a day (D2). For a Correct job specifically, "the message" is the
+// correction reply itself, not the original capture (docs/OPEN-QUESTIONS.md P2-2).
 public sealed record CategorizationRequest(
     string RawText,
     DateOnly Today,

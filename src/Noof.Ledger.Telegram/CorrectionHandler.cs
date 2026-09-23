@@ -15,7 +15,9 @@ internal sealed class CorrectionHandler(IRecordEditor editor, IChatNotifier chat
         if (await editor.FindByBotMessageAsync(reply.Chat.Id, repliedTo.Id, cancellationToken) is not { } target)
             return false;
 
-        if (await editor.RequestCorrectionAsync(target.TransactionId, instruction, reply.Id, cancellationToken)
+        // reply.Date deserialises as DateTime with Kind=Utc, same as TelegramUpdateRouter's message.Date.
+        var sentAt = new DateTimeOffset(reply.Date);
+        if (await editor.RequestCorrectionAsync(target.TransactionId, instruction, reply.Id, sentAt, cancellationToken)
             && target.EchoMessageId is { } echoId)
             await chatNotifier.EditAsync(reply.Chat.Id, echoId, Correcting, cancellationToken);
 

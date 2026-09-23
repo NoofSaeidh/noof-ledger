@@ -51,7 +51,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
     static CategorizationJob NewJob(
         Guid transactionId, DateTimeOffset runAfter, JobStatus status = JobStatus.Pending, int attemptCount = 0,
         JobKind kind = JobKind.Categorize, string? instruction = null, int? sourceMessageId = null,
-        DateTimeOffset? createdAt = null) => new()
+        DateOnly? instructionDay = null, DateTimeOffset? createdAt = null) => new()
     {
         Id = Guid.NewGuid(),
         TransactionId = transactionId,
@@ -61,6 +61,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
         Kind = kind,
         Instruction = instruction,
         SourceMessageId = sourceMessageId,
+        InstructionDay = instructionDay,
         CreatedAt = createdAt ?? runAfter,
         UpdatedAt = createdAt ?? runAfter,
     };
@@ -395,7 +396,8 @@ public class EfJobQueueTests(PostgresFixture fixture)
         var now = new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero);
         var queue = new EfJobQueue(db, new FakeTimeProvider(now), maxAttempts: 8);
         var transactionId = await SeedTransactionAsync(db, now, TestContext.Current.CancellationToken);
-        db.CategorizationJobs.Add(NewJob(transactionId, now.AddMinutes(-1), kind: JobKind.Correct, instruction: "нет, 1500", sourceMessageId: 7));
+        db.CategorizationJobs.Add(NewJob(transactionId, now.AddMinutes(-1), kind: JobKind.Correct, instruction: "нет, 1500",
+            sourceMessageId: 7, instructionDay: new DateOnly(2026, 9, 23)));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var claimed = await queue.ClaimAsync("worker-a", TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken);
@@ -403,6 +405,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
         claimed!.Kind.Should().Be(JobKind.Correct);
         claimed.Instruction.Should().Be("нет, 1500");
         claimed.SourceMessageId.Should().Be(7);
+        claimed.InstructionDay.Should().Be(new DateOnly(2026, 9, 23), "ClaimAsync's RETURNING must carry instruction_day, not just SELECT it into the row");
     }
 
     [Fact]

@@ -26,6 +26,7 @@ internal sealed class CategorizationJobConfiguration : IEntityTypeConfiguration<
         builder.Property(j => j.Kind).HasColumnName("kind");
         builder.Property(j => j.Instruction).HasColumnName("instruction");
         builder.Property(j => j.SourceMessageId).HasColumnName("source_message_id");
+        builder.Property(j => j.InstructionDay).HasColumnName("instruction_day");
 
         builder.HasIndex(j => new { j.Status, j.RunAfter });
 

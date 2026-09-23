@@ -25,9 +25,15 @@ internal sealed class EfRecordEditor(LedgerDbContext db, TimeProvider timeProvid
             .SingleOrDefaultAsync(cancellationToken);
 
     public async Task<bool> RequestCorrectionAsync(
-        Guid transactionId, string instruction, int sourceMessageId, CancellationToken cancellationToken)
+        Guid transactionId, string instruction, int sourceMessageId, DateTimeOffset sentAt, CancellationToken cancellationToken)
     {
-        var job = NewJob(transactionId, JobKind.Correct, instruction, sourceMessageId);
+        var timeZoneId = await db.Transactions.AsNoTracking()
+            .Where(t => t.Id == transactionId)
+            .Select(t => (string?)t.TimeZoneId)
+            .SingleOrDefaultAsync(cancellationToken);
+        var instructionDay = timeZoneId is null ? (DateOnly?)null : ZonedClock.LocalDate(sentAt, timeZoneId);
+
+        var job = NewJob(transactionId, JobKind.Correct, instruction, sourceMessageId, instructionDay);
         db.CategorizationJobs.Add(job);
 
         try
@@ -54,7 +60,7 @@ internal sealed class EfRecordEditor(LedgerDbContext db, TimeProvider timeProvid
             return false;
 
         transaction.RawText = rawText;
-        db.CategorizationJobs.Add(NewJob(transactionId, JobKind.Reinterpret, instruction: null, sourceMessageId: null));
+        db.CategorizationJobs.Add(NewJob(transactionId, JobKind.Reinterpret, instruction: null, sourceMessageId: null, instructionDay: null));
         await db.SaveChangesAsync(cancellationToken);
         await tx.CommitAsync(cancellationToken);
         return true;
@@ -103,7 +109,7 @@ internal sealed class EfRecordEditor(LedgerDbContext db, TimeProvider timeProvid
         return true;
     }
 
-    CategorizationJob NewJob(Guid transactionId, JobKind kind, string? instruction, int? sourceMessageId)
+    CategorizationJob NewJob(Guid transactionId, JobKind kind, string? instruction, int? sourceMessageId, DateOnly? instructionDay)
     {
         var now = timeProvider.GetUtcNow();
         return new CategorizationJob
@@ -113,6 +119,7 @@ internal sealed class EfRecordEditor(LedgerDbContext db, TimeProvider timeProvid
             Kind = kind,
             Instruction = instruction,
             SourceMessageId = sourceMessageId,
+            InstructionDay = instructionDay,
             Status = JobStatus.Pending,
             AttemptCount = 0,
             RunAfter = now,
