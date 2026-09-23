@@ -6,7 +6,7 @@
 
 **Architecture:** The model stops quoting and starts interpreting. It returns a decimal amount, a currency, an optional ISO date, a slug and a merchant name. `ProposalMapper` *parses* those values and never checks them against the message. The safety shifts from rejection to visibility. The worker writes the result together with an append-only revision in one database transaction, reads the record back, and C# renders the echo from the stored rows. Corrections are one more kind of `categorization_jobs` row, so each one gets the claim, lease, retry and attempt cap the queue already provides. Cancel and restore are deterministic database operations that make no model call.
 
-**Tech Stack:** .NET 10 · C# · EF Core 10 + Npgsql · PostgreSQL 18 · Anthropic 12.49.0 through `Microsoft.Extensions.AI` `IChatClient` (structured output via `ChatResponseFormat.ForJsonSchema`) · Telegram.Bot 22.10.3.1 · Blazor Server + MudBlazor · xUnit v3 on Microsoft Testing Platform · AwesomeAssertions · NSubstitute
+**Tech Stack:** .NET 10 · C# · EF Core 10 + Npgsql · PostgreSQL 18 · Anthropic 12.49.0 through `Microsoft.Extensions.AI` `IChatClient` (a forced strict tool call — `record_spending`, `list_merchants`, `canonicalize_merchant` — not structured outputs) · Telegram.Bot 22.10.3.1 · Blazor Server + MudBlazor · xUnit v3 on Microsoft Testing Platform · AwesomeAssertions · NSubstitute
 
 **Spec:** `docs/superpowers/specs/2026-09-22-natural-language-capture.md` (decisions D1–D8). It amends `docs/superpowers/specs/2026-09-19-noof-finance-design.md` §8 and §12. The decision record is `docs/OPEN-QUESTIONS.md` P2-1 and the deferred work is in `docs/BACKLOG.md`. The predecessor plan is `docs/superpowers/plans/2026-09-21-phase1b-categorisation-and-dashboard.md`.
 
@@ -22,8 +22,10 @@
 
 ## Global Constraints
 
-- **Money is `decimal` + `Currency`.** Never `double`, never `float`. A model's amount is a JSON *number* in the schema (`"type": "number"`), reached through the same schema-constrained structured output (`ChatResponseFormat.ForJsonSchema` → Anthropic `output_config.format`), so it arrives typed. The DTO field is `decimal`, and `System.Text.Json` deserialises the JSON number token straight into it — no string parsing, no separator handling, anywhere in the pipeline. **Amount is a JSON number deserialised directly into `decimal` (operator, 2026-09-23).**
-- **Capture has no validation layer (settled 2026-09-22, D1, P2-1).** Do not add a verbatim check, an evidence span or a sanity bound anywhere. The amount arrives already a `decimal` (it is a JSON number in the schema); `ProposalMapper` only maps and validates the rest: a supported currency, an offered slug, an offered merchant id, and an ISO date. A response that does not map fails the job. The mapper does not judge whether a value is plausible.
+- **The model's answer is a forced tool call with `strict: true`, not structured outputs** (operator, 2026-09-23). `record_spending` is offered as a strict `AIFunctionDeclaration` and forced with `ChatToolMode.RequireAny` (first turn, alongside `list_merchants`) or `ChatToolMode.RequireSpecific("record_spending")` (the forced follow-up, and `canonicalize_merchant`'s one-tool call). `ChatResponseFormat.ForJsonSchema` and `output_config.format` are gone from every call site — verify by capturing the outgoing HTTP body, not by reading documentation: every `tools[]` entry the categorizer sends must show `"strict": true`, `tool_choice` must be `{"type":"any"}` on the first call and `{"type":"tool","name":"record_spending"}` on the forced follow-up, and the body must contain no `output_config` key at all. The answer is read from the response's `FunctionCallContent` for the forced tool, never from response text.
+- **Money is `decimal` + `Currency`.** Never `double`, never `float`. A model's amount is a JSON *number* in the tool's argument schema (`"type": "number"`). It arrives inside `FunctionCallContent.Arguments`, a dictionary of `JsonElement`s built by `System.Text.Json` with no object converter, so the token text is preserved exactly as the model wrote it. The DTO field is `decimal`, filled by re-serialising the arguments and deserialising into the payload record — `System.Text.Json` reads the JSON number token straight into `decimal`, no `double`, no string parsing, no separator handling anywhere in the pipeline. **Amount is a JSON number deserialised directly into `decimal` (operator, 2026-09-23).**
+- **Strict tool schemas require every declared property in `"required"`.** Optionality is expressed by a nullable type (`"type": ["string", "null"]`, with `null` also added to an `"enum"`, since `enum` still applies when the type allows null), never by omitting the key from `"required"`. A property the request never declares at all (`known_merchant_id` with no merchant hints) is simply not part of that schema and needs no entry either way.
+- **Capture has no validation layer (settled 2026-09-22, D1, P2-1).** Do not add a verbatim check, an evidence span or a sanity bound anywhere. The amount arrives already a `decimal` (it is a JSON number in the tool call); `ProposalMapper` only maps and validates the rest: a supported currency, an offered slug, an offered merchant id, and an ISO date. A response that does not map fails the job. The mapper does not judge whether a value is plausible.
 - **Reports, totals and balances are computed by C#.** The echo's figures are read from the stored rows after the write (D4), never from the proposal.
 - **The bot speaks Russian.** That covers every string the bot sends, the button labels and the category names in the echo (`name_ru`).
 - **`noof_ledger` holds real credentials.** Never run a test, a manual check, `dotnet ef database update` or the published host against it. **`dotnet ef database update` without `--connection` resolves to `noof_ledger`**: `DesignTimeDbContextFactory` → `LedgerConnectionString.Resolve(null)` → the credential file → `Database=noof_ledger`. Always pass `--connection` naming `noof_ledger_test_template` (see "Updating the test template" below).
@@ -71,6 +73,8 @@ The output's last line must name the new migration. Do **not** run it without `-
 | `DesignTimeDbContextFactory` resolves `noof_ledger` when `--connection` is omitted | `src/Noof.Ledger.Persistence/LedgerConnectionString.cs` | See Global Constraints. `dotnet ef migrations add` and `dotnet ef dbcontext script` never open a connection and are safe |
 | Most Persistence tests migrate a fresh empty database, while `MoneyStorageTests` and the E2E suite clone the template | `PostgresFixture.CreateContextAsync` vs `CreateDatabaseAsync`, and `CookieModeHostFixture.CreateCloneAsync` | The template update step above is needed for the E2E suite, not for the Persistence suite |
 | `ApplyConfigurationsFromAssembly` already picks up `internal sealed` configurations | Every existing configuration is internal | `TransactionRevisionConfiguration` can be internal too, next to an internal entity (as `AppSecret` is) |
+| The Anthropic adapter in Anthropic 12.49.0 / `Microsoft.Extensions.AI.Abstractions` 10.5.1 copies `AITool.AdditionalProperties["Strict"]` onto the wire `Tool.strict`, and maps `ChatToolMode.RequireAny` to `tool_choice {"type":"any"}` and `ChatToolMode.RequireSpecific(name)` to `{"type":"tool","name":...}` | Decompiled (operator, 2026-09-23) | `RawSchemaFunctionDeclaration` takes a `strict` constructor option instead of the categorizer setting `ResponseFormat`; the forced follow-up narrows `Tools` to `[recordSpendingTool]` with `RequireSpecific`, which is what structurally rules out a third call (Locked design decision 3), not `ToolMode.Auto` with no tools offered |
+| `FunctionCallContent.Arguments` holds one `JsonElement` per top-level parameter, produced by `System.Text.Json` with no object converter, so the original response token text (not a re-encoded value) survives into it | Decompiled (operator, 2026-09-23) | Re-serialising `Arguments` and deserialising into the payload record reads `amount` straight into `decimal` from the tool call, the same guarantee `ChatResponseFormat.ForJsonSchema` gave for a text answer — never via `double` |
 
 ## What this plan deliberately does NOT do
 
@@ -98,7 +102,7 @@ The output's last line must name the new migration. Do **not** run it without `-
 | `src/Noof.Ledger.Application/Chat/IChatNotifier.cs` | `EditAsync(..., EchoMessage)`, `AskAsync` and `AnswerActionAsync` |
 | `src/Noof.Ledger.Application/Editing/IRecordEditor.cs` | **New.** Find by message, cancel, restore, request a correction, replace the raw text, attach the prompt |
 | `src/Noof.Ledger.Application/Reporting/ISpendingReadModel.cs` | `RecentTransaction` carries `OccurredOn` and `LocalTime?` |
-| `src/Noof.Ledger.Ai/CategorizationSchema.cs` · `CategorizationPrompt.cs` · `AnthropicCategorizer.cs` | Interpretation instead of quotation, the date, and corrections |
+| `src/Noof.Ledger.Ai/CategorizationSchema.cs` · `CategorizationPrompt.cs` · `AnthropicCategorizer.cs` | Interpretation instead of quotation, the date, corrections, and answering through a forced strict tool call rather than `ChatResponseFormat.ForJsonSchema` |
 | `src/Noof.Ledger.Persistence/ZonedClock.cs` | **New.** A UTC instant converted to a local date or time in an IANA zone |
 | `src/Noof.Ledger.Persistence/Capture/EfCaptureStore.cs` | Stamps `OccurredOn` at capture |
 | `src/Noof.Ledger.Persistence/Categorization/EfCategorizationStore.cs` | Reads the full record, writes the outcome and its revision |
@@ -208,7 +212,7 @@ public sealed record RecentTransaction(Guid Id, DateOnly OccurredOn, TimeOnly? L
 
 **Interfaces:**
 - Consumes: nothing new.
-- Produces: `CurrencyCode.Supported`. `ProposedLineItem(Description, decimal Amount, CurrencyCode?, CategorySlug, KnownMerchantId?, string? MerchantName)`. `ResolvedLineItem(..., string? MerchantName)`. `MappedProposal(IReadOnlyList<ResolvedLineItem> Items)` (Task 3 adds `OccurredOn`). `ProposalMapper.TryMap(proposal, offeredSlugs, offeredMerchantIds, defaultCurrency, out MappedProposal mapped, out string failure)`. JSON fields `amount` (a JSON number, deserialised straight into `decimal`) and `merchant_name` replace `amount_quote` and `merchant_quote`.
+- Produces: `CurrencyCode.Supported`. `ProposedLineItem(Description, decimal Amount, CurrencyCode?, CategorySlug, KnownMerchantId?, string? MerchantName)`. `ResolvedLineItem(..., string? MerchantName)`. `MappedProposal(IReadOnlyList<ResolvedLineItem> Items)` (Task 3 adds `OccurredOn`). `ProposalMapper.TryMap(proposal, offeredSlugs, offeredMerchantIds, defaultCurrency, out MappedProposal mapped, out string failure)`. Tool argument fields `amount` (a JSON number, deserialised straight into `decimal`) and `merchant_name` replace `amount_quote` and `merchant_quote`. `record_spending` becomes a forced strict tool (`ChatToolMode.RequireAny` then `RequireSpecific`) instead of `ChatResponseFormat.ForJsonSchema`; `RawSchemaFunctionDeclaration` gains a `strict` constructor option; `canonicalize_merchant` converts the same way.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -358,13 +362,13 @@ public class ProposalMapperTests
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["description", "amount", "category_slug"],
+                "required": ["description", "amount", "currency", "category_slug", "merchant_name"],
                 "properties": {
                   "description": { "type": "string", "description": "What was bought, as short plain text in the language of the message." },
                   "amount": { "type": "number", "description": "The amount the person meant, as a number - for example 1000 or 45.3. Interpret words, slang and speech: \"штуку\" is 1000, \"полтос\" is 50, \"двести пятьдесят\" is 250." },
-                  "currency": { "type": "string", "enum": ["EUR", "RSD", "USD", "RUB", "KZT"] },
+                  "currency": { "type": ["string", "null"], "enum": ["EUR", "RSD", "USD", "RUB", "KZT", null], "description": "The currency the message states, or null when it states none." },
                   "category_slug": { "type": "string", "enum": ["groceries", "food-drink"] },
-                  "merchant_name": { "type": "string", "description": "The merchant's name as the person wrote it. Only when a merchant is named and it is not one of the known merchants." }
+                  "merchant_name": { "type": ["string", "null"], "description": "The merchant's name as the person wrote it, or null when no merchant is named or it is one of the known merchants." }
                 }
               }
             }
@@ -374,6 +378,23 @@ public class ProposalMapperTests
 ```
 
 and rename the `"merchant_quote"` in `With_hints_known_merchant_id_lands_between_category_slug_and_merchant_quote` to `"merchant_name"` (rename the method to `..._and_merchant_name` as well).
+
+The rest of `CategorizationSchemaTests.cs` predates this phase and pins the old optional-by-omission shape; strict mode requires every declared property in `required`, so update these four in the same pass:
+- `Currency_is_a_property_but_is_not_required`: rename to `Currency_is_required_but_nullable_so_the_model_can_answer_none_stated` and replace its body with
+  ```csharp
+        var schema = CategorizationSchema.BuildRecordSpending(Categories, NoHints);
+
+        var lineItem = schema.GetProperty("properties").GetProperty("items").GetProperty("items");
+        var required = lineItem.GetProperty("required").EnumerateArray().Select(e => e.GetString());
+
+        required.Should().Contain("currency");
+        LineItemProperties(schema).GetProperty("currency").GetProperty("type").EnumerateArray()
+            .Select(e => e.GetString()).Should().BeEquivalentTo(["string", "null"]);
+  ```
+- `Currency_enum_is_the_five_CurrencyCode_statics`: add `null` to the expected list — `currencies.Should().BeEquivalentTo(["EUR", "RSD", "USD", "RUB", "KZT", null]);` — a strict enum keyword still applies to a null value, so null has to be listed explicitly or the model's "not stated" answer fails its own schema.
+- `Known_merchant_id_enum_is_exactly_the_hinted_guids`: add `null` to the expected list the same way, and assert the type is nullable: `knownMerchantId.GetProperty("type").EnumerateArray().Select(e => e.GetString()).Should().BeEquivalentTo(["string", "null"]);` in place of the single `"type"` string assertion.
+- `An_empty_hint_list_omits_known_merchant_id_entirely` is unchanged: a property never declared needs no `required` entry either way (see Global Constraints).
+- `Schema_round_trips_through_JsonElement_deserialization_unchanged`'s comment says the schema "is handed to `ChatResponseFormat.ForJsonSchema` as a `JsonElement` directly" — that mechanism is gone (operator, 2026-09-23). Replace it with a comment saying the schema is handed to `RawSchemaFunctionDeclaration`'s `JsonSchema` as a `JsonElement` directly instead; the test body and assertions are unchanged.
 
 `tests/Noof.Ledger.Ai.Tests/CategorizationPromptTests.cs`: replace `System_prompt_instructs_verbatim_amount_quoting` with
 
@@ -388,17 +409,94 @@ and rename the `"merchant_quote"` in `With_hints_known_merchant_id_lands_between
     }
 ```
 
-`tests/Noof.Ledger.Ai.Tests/AnthropicResponses.cs`: in `RecordSpendingJsonAnswer`, change `\"amount_quote\":\"3.50\"` to `\"amount\":3.50` (a JSON number, unquoted), and add
+`tests/Noof.Ledger.Ai.Tests/AnthropicResponses.cs`: the file's own header comment describes the response-format approach ("a plain assistant message whose one text block is the schema-constrained JSON — there is no 'tool_use' block for record_spending or canonicalize_merchant"). That is no longer true (operator, 2026-09-23): replace the comment with one saying `record_spending`, `canonicalize_merchant` and `list_merchants` are now all genuine `tool_use` blocks, forced by `tool_choice`. Replace `RecordSpendingJsonAnswer` and `CanonicalizeMerchantJsonAnswer` with
+
+```csharp
+    public const string RecordSpendingJsonAnswer = """
+        {"id":"msg_01","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
+         "content":[{"type":"tool_use","id":"toolu_01","name":"record_spending","input":{"items":[{"description":"Coffee","amount":3.50,"currency":"EUR","category_slug":"food-drink","merchant_name":null}]}}],
+         "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
+        """;
+
+    public const string CanonicalizeMerchantJsonAnswer = """
+        {"id":"msg_03","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
+         "content":[{"type":"tool_use","id":"toolu_03","name":"canonicalize_merchant","input":{"display_name":"Lidl"}}],
+         "stop_reason":"tool_use","stop_sequence":null,
+         "usage":{"input_tokens":40,"output_tokens":8}}
+        """;
+```
+
+and add
 
 ```csharp
     public const string RecordSpendingFromWordsAnswer = """
         {"id":"msg_05","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
-         "content":[{"type":"text","text":"{\"items\":[{\"description\":\"продукты\",\"amount\":1000,\"currency\":\"EUR\",\"category_slug\":\"food-drink\",\"merchant_name\":\"Lidl\"}]}"}],
-         "stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
+         "content":[{"type":"tool_use","id":"toolu_05","name":"record_spending","input":{"items":[{"description":"продукты","amount":1000,"currency":"EUR","category_slug":"food-drink","merchant_name":"Lidl"}]}}],
+         "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
         """;
 ```
 
-`tests/Noof.Ledger.Ai.Tests/AnthropicCategorizerTests.cs`: in `Returns_the_proposal_when_the_first_turn_answers_with_JSON_text` change `proposal.Items[0].AmountQuote.Should().Be("3.50");` to `proposal.Items[0].Amount.Should().Be(3.50m);`, and add
+`tests/Noof.Ledger.Ai.Tests/AnthropicCategorizerTests.cs`: rename `Returns_the_proposal_when_the_first_turn_answers_with_JSON_text` to `Returns_the_proposal_when_the_first_turn_answers_the_record_spending_tool_call` and replace its body with
+
+```csharp
+        var (categorizer, handler) = Build();
+        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingJsonAnswer);
+        var request = new CategorizationRequest("Coffee 3.50 EUR", Categories, NoMerchantHints, NoMerchantHints);
+
+        var proposal = await categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
+
+        proposal.Items.Should().ContainSingle();
+        proposal.Items[0].Description.Should().Be("Coffee");
+        proposal.Items[0].Amount.Should().Be(3.50m);
+        proposal.Items[0].CurrencyCode.Should().Be("EUR", "the JSON field is \"currency\", not \"currency_code\" — this is the mapping Locked Decision 5 exists for");
+        proposal.Items[0].CategorySlug.Should().Be("food-drink");
+        handler.Requests.Should().ContainSingle("a direct record_spending call on the first turn must not trigger a follow-up call");
+```
+
+Rename `Sends_json_schema_output_config_and_exactly_one_tool_on_the_first_call` to `Sends_both_tools_strict_and_forced_with_no_output_config_on_the_first_call` and replace its body with
+
+```csharp
+        var (categorizer, handler) = Build();
+        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingJsonAnswer);
+        var request = new CategorizationRequest("Coffee 3.50 EUR", Categories, NoMerchantHints, NoMerchantHints);
+
+        await categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
+
+        var sent = JsonDocument.Parse(handler.Requests[0].Body).RootElement;
+        sent.TryGetProperty("output_config", out _).Should().BeFalse("this is a tool call, not a structured-output answer");
+
+        var tools = sent.GetProperty("tools");
+        tools.GetArrayLength().Should().Be(2, "guarding against the RawRepresentationFactory trap: a tool must never appear twice");
+        var names = tools.EnumerateArray().Select(t => t.GetProperty("name").GetString());
+        names.Should().BeEquivalentTo(["list_merchants", "record_spending"]);
+        foreach (var tool in tools.EnumerateArray())
+            tool.GetProperty("strict").GetBoolean().Should().BeTrue($"{tool.GetProperty("name").GetString()} must be strict");
+
+        var recordSpending = tools.EnumerateArray().Single(t => t.GetProperty("name").GetString() == "record_spending");
+        var currencyEnum = recordSpending.GetProperty("input_schema")
+            .GetProperty("properties").GetProperty("items").GetProperty("items").GetProperty("properties")
+            .GetProperty("currency").GetProperty("enum").EnumerateArray().Select(e => e.GetString());
+        currencyEnum.Should().BeEquivalentTo(["EUR", "RSD", "USD", "RUB", "KZT", null]);
+
+        sent.GetProperty("tool_choice").GetProperty("type").GetString().Should().Be("any");
+
+        sent.TryGetProperty("temperature", out _).Should().BeFalse("ChatOptions.Temperature must never be set");
+```
+
+Rename `Answers_list_merchants_then_sends_one_follow_up_that_offers_no_tools` to `Answers_list_merchants_then_sends_one_follow_up_forced_onto_record_spending`. Its `handler.Requests.Should().HaveCount(2, ...)` line and the "Maxi" assertion stay; replace the lines between them with
+
+```csharp
+        var secondSent = JsonDocument.Parse(handler.Requests[1].Body).RootElement;
+        var secondTools = secondSent.GetProperty("tools");
+        secondTools.GetArrayLength().Should().Be(1, "only record_spending is offered, which is what structurally rules out a third list_merchants call");
+        secondTools[0].GetProperty("name").GetString().Should().Be("record_spending");
+        secondSent.GetProperty("tool_choice").GetProperty("type").GetString().Should().Be("tool");
+        secondSent.GetProperty("tool_choice").GetProperty("name").GetString().Should().Be("record_spending");
+```
+
+and change the two enqueued `AnthropicResponses.RecordSpendingJsonAnswer` responses' consumers accordingly - the test already enqueues `ListMerchantsToolUse` then `RecordSpendingJsonAnswer`; nothing else in the test changes.
+
+Add
 
 ```csharp
     [Fact]
@@ -422,14 +520,15 @@ and rename the `"merchant_quote"` in `With_hints_known_merchant_id_lands_between
     [InlineData(0.1, 0.1)]
     public async Task An_amount_in_the_response_round_trips_into_decimal_exactly(double raw, double expected)
     {
-        // The schema declares amount as a JSON number (not a string), so System.Text.Json reads the
-        // decimal straight from the response's token text - no double, no string parsing, no separator
-        // handling. 0.1 is the classic case a binary float cannot hold exactly; decimal must.
+        // The schema declares amount as a JSON number (not a string), and the tool call's arguments
+        // are read as a JsonElement with no object converter, so System.Text.Json reads the decimal
+        // straight from the response's own token text - no double, no separator handling. 0.1 is the
+        // classic case a binary float cannot hold exactly; decimal must (operator, 2026-09-23).
         var (categorizer, handler) = Build();
         handler.Enqueue(HttpStatusCode.OK, $$"""
             {"id":"msg_07","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
-             "content":[{"type":"text","text":"{\"items\":[{\"description\":\"кофе\",\"amount\":{{raw}},\"category_slug\":\"food-drink\"}]}"}],
-             "stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
+             "content":[{"type":"tool_use","id":"toolu_07","name":"record_spending","input":{"items":[{"description":"кофе","amount":{{raw}},"currency":null,"category_slug":"food-drink","merchant_name":null}]}}],
+             "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
             """);
         var request = new CategorizationRequest("кофе", Categories, NoMerchantHints, NoMerchantHints);
 
@@ -437,6 +536,19 @@ and rename the `"merchant_quote"` in `With_hints_known_merchant_id_lands_between
 
         proposal.Items.Should().ContainSingle().Which.Amount.Should().Be((decimal)expected);
     }
+```
+
+Rename `CanonicalizeMerchantAsync_sends_a_single_call_with_json_schema_output_and_returns_the_display_name` to `CanonicalizeMerchantAsync_sends_a_single_forced_strict_tool_call_and_returns_the_display_name` and replace its body from `var sent = ...` onward with
+
+```csharp
+        var sent = JsonDocument.Parse(handler.Requests[0].Body).RootElement;
+        sent.TryGetProperty("output_config", out _).Should().BeFalse("this is a tool call, not a structured-output answer");
+        var tools = sent.GetProperty("tools");
+        tools.GetArrayLength().Should().Be(1);
+        tools[0].GetProperty("name").GetString().Should().Be("canonicalize_merchant");
+        tools[0].GetProperty("strict").GetBoolean().Should().BeTrue();
+        sent.GetProperty("tool_choice").GetProperty("type").GetString().Should().Be("tool");
+        sent.GetProperty("tool_choice").GetProperty("name").GetString().Should().Be("canonicalize_merchant");
 ```
 
 `tests/Noof.Ledger.Architecture.Tests/AiBoundaryTests.cs`: replace `Only_QuotedAmount_constructs_a_Money_inside_the_categorization_pipeline` with
@@ -647,7 +759,7 @@ public static class ProposalMapper
 }
 ```
 
-`src/Noof.Ledger.Ai/CategorizationSchema.cs`: delete the `CurrencyCodes` array. Add
+`src/Noof.Ledger.Ai/CategorizationSchema.cs`: delete the `CurrencyCodes` array (`CurrencyCode.Supported` replaces it). Add
 
 ```csharp
     const string AmountDescription =
@@ -655,17 +767,87 @@ public static class ProposalMapper
         + "\"штуку\" is 1000, \"полтос\" is 50, \"двести пятьдесят\" is 250.";
 ```
 
-Replace the `amount_quote` entry with `new("amount", new JsonObject { ["type"] = "number", ["description"] = AmountDescription }),`. Build the currency enum from `CurrencyCode.Supported.Select(code => (JsonNode)code.Value).ToArray()`. Replace the `merchant_quote` entry with
+Replace the whole body of `BuildRecordSpending` (the `properties` list through the `return ToElement(root);`) with
 
 ```csharp
+        var properties = new List<KeyValuePair<string, JsonNode?>>
+        {
+            new("description", new JsonObject
+            {
+                ["type"] = "string",
+                ["description"] = "What was bought, as short plain text in the language of the message.",
+            }),
+            new("amount", new JsonObject
+            {
+                ["type"] = "number",
+                ["description"] = AmountDescription,
+            }),
+            new("currency", new JsonObject
+            {
+                // Strict mode puts every declared property in "required" (below); optionality is a
+                // nullable type instead of omission, and the enum keyword still applies to a null
+                // value, so null has to be listed in it explicitly too (operator, 2026-09-23).
+                ["type"] = new JsonArray("string", "null"),
+                ["enum"] = new JsonArray([.. CurrencyCode.Supported.Select(code => (JsonNode)code.Value), null]),
+                ["description"] = "The currency the message states, or null when it states none.",
+            }),
+            new("category_slug", new JsonObject
+            {
+                ["type"] = "string",
+                ["enum"] = new JsonArray(categories.Select(c => (JsonNode)c.Slug).ToArray()),
+            }),
+        };
+
+        if (merchantHints.Count > 0)
+        {
+            properties.Add(new("known_merchant_id", new JsonObject
+            {
+                ["type"] = new JsonArray("string", "null"),
+                ["enum"] = new JsonArray([.. merchantHints.Select(m => (JsonNode)m.Id.ToString()), null]),
+                ["description"] = "One of the listed known merchants' ids, or null when the merchant is not one of them.",
+            }));
+        }
+
         properties.Add(new("merchant_name", new JsonObject
         {
-            ["type"] = "string",
-            ["description"] = "The merchant's name as the person wrote it. Only when a merchant is named and it is not one of the known merchants.",
+            ["type"] = new JsonArray("string", "null"),
+            ["description"] = "The merchant's name as the person wrote it, or null when no merchant is named or it is one of the known merchants.",
         }));
-```
 
-and set `["required"] = new JsonArray("description", "amount", "category_slug")`.
+        var lineItem = new JsonObject
+        {
+            ["type"] = "object",
+            ["additionalProperties"] = false,
+            // Derived from the properties actually added, not a hand-written list: strict mode
+            // requires every declared property here, and this keeps known_merchant_id out of it on
+            // the no-hints path, where the property itself is never declared (operator, 2026-09-23).
+            ["required"] = new JsonArray([.. properties.Select(p => (JsonNode)p.Key)]),
+            ["properties"] = new JsonObject(properties),
+        };
+
+        var root = new JsonObject
+        {
+            ["type"] = "object",
+            ["additionalProperties"] = false,
+            ["required"] = new JsonArray("items"),
+            ["properties"] = new JsonObject
+            {
+                ["items"] = new JsonObject
+                {
+                    ["type"] = "array",
+                    // 0, not 1: a message can genuinely describe zero purchases (a loan received,
+                    // not a purchase - see CategorizationPrompt's "заняла у Маши" example). Only 0
+                    // and 1 are valid values for minItems under this API's schema subset, and
+                    // requiring at least one item here would force the model to invent a spend it
+                    // was just told not to record.
+                    ["minItems"] = 0,
+                    ["items"] = lineItem,
+                },
+            },
+        };
+
+        return ToElement(root);
+```
 
 `src/Noof.Ledger.Ai/CategorizationPrompt.cs`: replace the `System` constant with
 
@@ -690,16 +872,17 @@ and set `["required"] = new JsonArray("description", "amount", "category_slug")`
         line has no amount at all, do not produce that line.
 
         Report a currency only when the message actually states one — "евро", "eur", "€", "рсд",
-        "динар", "рублей". If the message names no currency at all, leave currency out of your
-        answer rather than choosing one — a missing currency is filled in later from a configured
-        default, so guessing here would only replace a correct default with a wrong guess.
+        "динар", "рублей". If the message names no currency at all, answer currency as null rather
+        than choosing one — a missing currency is filled in later from a configured default, so
+        guessing here would only replace a correct default with a wrong guess.
 
         A message may name zero, one or several purchases. Produce one line item per purchase that
         has an amount. If a merchant is named and it matches one of the known merchants you were
         given, set known_merchant_id to that merchant's id. If a merchant is named but matches no
         known merchant, put its name in merchant_name as the person wrote it. If no merchant is
-        named, leave both out. If a merchant is named and you are unsure whether it is already
-        known, you may call list_merchants to check the full list before answering.
+        named, answer both known_merchant_id and merchant_name as null. If a merchant is named and
+        you are unsure whether it is already known, you may call list_merchants to check the full
+        list before answering.
 
         <examples>
         <example>
@@ -716,8 +899,8 @@ and set `["required"] = new JsonArray("description", "amount", "category_slug")`
         <example>
         Message: "такси двести пятьдесят"
         Answer with one item: description "такси", amount 250, category_slug the one whose
-        meaning is transport, no merchant. The message names no currency, so currency is left out
-        of the answer entirely — do not guess RSD, EUR or anything else.
+        meaning is transport, no merchant. The message names no currency, so currency is null — do
+        not guess RSD, EUR or anything else.
         </example>
         <example>
         Message: "Lidl 45,30 eur продукты, потом кофе 2.50 eur"
@@ -752,6 +935,156 @@ and set `["required"] = new JsonArray("description", "amount", "category_slug")`
             Description, Amount, Currency, CategorySlug,
             string.IsNullOrEmpty(KnownMerchantId) ? null : Guid.Parse(KnownMerchantId), MerchantName);
     }
+```
+
+The mechanism itself changes in the same file: `record_spending` and `canonicalize_merchant` become forced strict tool calls, not `ChatResponseFormat.ForJsonSchema` answers (operator, 2026-09-23). Replace `RawSchemaFunctionDeclaration` with
+
+```csharp
+    // AIFunctionDeclaration is abstract in Microsoft.Extensions.AI.Abstractions; this is the minimal
+    // subclass needed to declare a tool from a raw JSON Schema instead of one generated by
+    // reflection. Declaration-only: it is never asked to invoke anything - FunctionCallContent is
+    // handled by hand in ProposeAsync's tool loop instead. strict defaults to true because every
+    // tool this categorizer declares already has "additionalProperties": false and every property
+    // in "required" (Global Constraints). The Anthropic adapter copies
+    // AdditionalProperties["Strict"] onto the wire Tool.strict - decompiled, not read from docs
+    // (Verified facts table).
+    sealed class RawSchemaFunctionDeclaration : AIFunctionDeclaration
+    {
+        public RawSchemaFunctionDeclaration(string name, string description, JsonElement schema, bool strict = true)
+        {
+            Name = name;
+            Description = description;
+            JsonSchema = schema;
+            if (strict)
+                AdditionalProperties = new AdditionalPropertiesDictionary { ["Strict"] = true };
+        }
+
+        public override string Name { get; }
+        public override string Description { get; }
+        public override JsonElement JsonSchema { get; }
+    }
+```
+
+Replace `ProposeAsync` with
+
+```csharp
+    public async Task<CategorizationProposal> ProposeAsync(CategorizationRequest request, CancellationToken cancellationToken)
+    {
+        var raw = await clientFactory.CreateAsync(cancellationToken);
+        var chat = raw.AsIChatClient(options.Model);
+
+        // System is the SAME across turns; per-request data - categories, hints - lives only in the
+        // user turn, built by CategorizationPrompt.BuildUserTurn. Instructions lands as the request's
+        // "system" per the captured HTTP body (fact 1/2 above).
+        var userTurn = CategorizationPrompt.BuildUserTurn(request.RawText, request.Categories, request.MerchantHints);
+        var recordSpendingSchema = CategorizationSchema.BuildRecordSpending(request.Categories, request.MerchantHints);
+        var recordSpendingTool = new RawSchemaFunctionDeclaration(RecordSpendingName, RecordSpendingDescription, recordSpendingSchema);
+        var listMerchantsTool = new RawSchemaFunctionDeclaration(
+            ListMerchantsName, ListMerchantsDescription, CategorizationSchema.BuildListMerchants());
+
+        var messages = new List<ChatMessage> { new(ChatRole.User, userTurn) };
+
+        // Both tools are offered and one is forced (RequireAny, not Auto): the model answers either
+        // record_spending directly or list_merchants first, never plain text (operator, 2026-09-23).
+        var firstOptions = new ChatOptions
+        {
+            MaxOutputTokens = options.MaxTokens,
+            Instructions = CategorizationPrompt.System,
+            Tools = [listMerchantsTool, recordSpendingTool],
+            ToolMode = ChatToolMode.RequireAny,
+        };
+
+        var firstResponse = await CallAsync(chat, messages, firstOptions, cancellationToken);
+
+        if (TryGetFunctionCall(firstResponse, RecordSpendingName, out var firstCall))
+            return ToProposal(firstCall);
+
+        if (!TryGetFunctionCall(firstResponse, ListMerchantsName, out var call))
+        {
+            throw new ModelCallException(
+                ModelFailureKind.Transient,
+                $"First turn produced neither {RecordSpendingName} nor {ListMerchantsName} (finish reason: {firstResponse.FinishReason}).");
+        }
+
+        // AllMerchants, not MerchantHints: the hints are the handful the local scan already found
+        // and the model has already seen. It only calls this tool when none of them fit, so
+        // answering with the same short list would make the tool pointless - which is exactly why
+        // the contract carries AllMerchants as a second, prompt-free field (Locked design decision 9).
+        messages.AddRange(firstResponse.Messages);
+        messages.Add(new ChatMessage(ChatRole.Tool,
+            [new FunctionResultContent(call.CallId, JsonSerializer.Serialize(request.AllMerchants))]));
+
+        // The loop runs exactly once: only record_spending is offered on the follow-up, and it is
+        // forced with RequireSpecific, so there is structurally no tool left for a third request to
+        // reach for (Locked design decision 3) - enforced by the API, not by the model behaving.
+        var followUpOptions = new ChatOptions
+        {
+            MaxOutputTokens = options.MaxTokens,
+            Instructions = CategorizationPrompt.System,
+            Tools = [recordSpendingTool],
+            ToolMode = ChatToolMode.RequireSpecific(RecordSpendingName),
+        };
+
+        var followUpResponse = await CallAsync(chat, messages, followUpOptions, cancellationToken);
+
+        if (TryGetFunctionCall(followUpResponse, RecordSpendingName, out var followUpCall))
+            return ToProposal(followUpCall);
+
+        throw new ModelCallException(
+            ModelFailureKind.Transient,
+            $"Second turn, after answering {ListMerchantsName}, still produced no {RecordSpendingName} call (finish reason: {followUpResponse.FinishReason}).");
+    }
+```
+
+Replace `CanonicalizeMerchantAsync`'s body from `var callOptions = ...` through the `payload.DisplayName` return with
+
+```csharp
+        var canonicalizeMerchantTool = new RawSchemaFunctionDeclaration(
+            CanonicalizeMerchantName, CanonicalizeMerchantDescription, CanonicalizeMerchantSchema);
+
+        var callOptions = new ChatOptions
+        {
+            MaxOutputTokens = 256,
+            Instructions = instructions,
+            Tools = [canonicalizeMerchantTool],
+            ToolMode = ChatToolMode.RequireSpecific(CanonicalizeMerchantName),
+        };
+
+        var response = await CallAsync(chat, [new ChatMessage(ChatRole.User, merchantText)], callOptions, cancellationToken);
+
+        if (!TryGetFunctionCall(response, CanonicalizeMerchantName, out var call))
+        {
+            throw new ModelCallException(
+                ModelFailureKind.Transient,
+                $"{CanonicalizeMerchantName} produced no tool call (finish reason: {response.FinishReason}).");
+        }
+
+        var payload = ToPayload<CanonicalizeMerchantPayload>(call);
+        if (payload is null || string.IsNullOrWhiteSpace(payload.DisplayName))
+            throw new ModelCallException(ModelFailureKind.Transient, $"{CanonicalizeMerchantName} returned an empty display_name.");
+
+        return payload.DisplayName;
+```
+
+Delete `TryGetText` entirely - both call sites now read a `FunctionCallContent`, not response text, so it is dead code. Replace `ToProposal` with
+
+```csharp
+    static CategorizationProposal ToProposal(FunctionCallContent call)
+    {
+        var payload = ToPayload<RecordSpendingPayload>(call);
+        if (payload is null)
+            throw new ModelCallException(ModelFailureKind.Transient, $"{RecordSpendingName} returned an empty payload.");
+
+        return new CategorizationProposal([.. payload.Items.Select(i => i.ToProposedLineItem())]);
+    }
+
+    // FunctionCallContent.Arguments holds one JsonElement per top-level parameter, produced by
+    // System.Text.Json with no object converter - the response's own token text, not a re-encoded
+    // value (decompiled, operator 2026-09-23; Verified facts table). Re-serialising the dictionary
+    // and deserialising it into the payload record in one step is what keeps "amount" a decimal
+    // read straight off that token text, never a double.
+    static T? ToPayload<T>(FunctionCallContent call) =>
+        JsonSerializer.Deserialize<T>(JsonSerializer.SerializeToElement(call.Arguments));
 ```
 
 `src/Noof.Ledger.Host/Workers/CategorizationWorker.cs`: replace the `ProposalVerification.TryResolve(...)` block with
@@ -1192,7 +1525,7 @@ EOF
 
 **Interfaces:**
 - Consumes: `CategorizationSubject.SentOn` and `CategorizationOutcome` (Task 2).
-- Produces: `CategorizationRequest(RawText, DateOnly Today, Categories, MerchantHints, AllMerchants)`. `CategorizationProposal(Items, string? OccurredOn = null)`. `MappedProposal(Items, DateOnly? OccurredOn)`. `CategorizationPrompt.BuildUserTurn(CategorizationRequest request)`. The JSON root property `occurred_on`.
+- Produces: `CategorizationRequest(RawText, DateOnly Today, Categories, MerchantHints, AllMerchants)`. `CategorizationProposal(Items, string? OccurredOn = null)`. `MappedProposal(Items, DateOnly? OccurredOn)`. `CategorizationPrompt.BuildUserTurn(CategorizationRequest request)`. The `record_spending` tool's root argument `occurred_on`, required but nullable like `currency` and `merchant_name`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1231,19 +1564,20 @@ EOF
 
 ```json
             ,
-            "occurred_on": { "type": "string", "description": "The day the purchase happened, as an ISO date (YYYY-MM-DD), worked out from today's date given with the message. Leave it out when the message names no day." }
+            "occurred_on": { "type": ["string", "null"], "description": "The day the purchase happened, as an ISO date (YYYY-MM-DD), worked out from today's date given with the message, or null when the message names no day." }
 ```
 
-The root `required` stays `["items"]`. Add
+The root `required` becomes `["items", "occurred_on"]` — strict mode puts every declared property there; occurred_on's optionality is its nullable type, the same pattern as `currency` and `merchant_name` (Global Constraints). Add
 
 ```csharp
     [Fact]
-    public void Occurred_on_is_offered_at_the_root_but_not_required()
+    public void Occurred_on_is_required_but_nullable_so_the_model_can_answer_no_day_named()
     {
         var schema = CategorizationSchema.BuildRecordSpending(Categories, NoHints);
 
-        schema.GetProperty("properties").TryGetProperty("occurred_on", out _).Should().BeTrue();
-        schema.GetProperty("required").EnumerateArray().Select(e => e.GetString()).Should().Equal("items");
+        schema.GetProperty("properties").TryGetProperty("occurred_on", out var occurredOn).Should().BeTrue();
+        occurredOn.GetProperty("type").EnumerateArray().Select(e => e.GetString()).Should().BeEquivalentTo(["string", "null"]);
+        schema.GetProperty("required").EnumerateArray().Select(e => e.GetString()).Should().BeEquivalentTo(["items", "occurred_on"]);
     }
 ```
 
@@ -1277,8 +1611,8 @@ The root `required` stays `["items"]`. Add
 ```csharp
     public const string RecordSpendingWithDateAnswer = """
         {"id":"msg_06","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
-         "content":[{"type":"text","text":"{\"items\":[{\"description\":\"продукты\",\"amount\":1000,\"currency\":\"EUR\",\"category_slug\":\"food-drink\"}],\"occurred_on\":\"2026-09-21\"}"}],
-         "stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
+         "content":[{"type":"tool_use","id":"toolu_06","name":"record_spending","input":{"items":[{"description":"продукты","amount":1000,"currency":"EUR","category_slug":"food-drink","merchant_name":null}],"occurred_on":"2026-09-21"}}],
+         "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
         """;
 ```
 
@@ -1461,7 +1795,7 @@ and end with `mapped = new MappedProposal(items, occurredOn);`.
 ```csharp
     const string OccurredOnDescription =
         "The day the purchase happened, as an ISO date (YYYY-MM-DD), worked out from today's date given with the "
-        + "message. Leave it out when the message names no day.";
+        + "message, or null when the message names no day.";
 ```
 
 and in the root `properties` add after `["items"] = ...`:
@@ -1469,10 +1803,12 @@ and in the root `properties` add after `["items"] = ...`:
 ```csharp
                 ["occurred_on"] = new JsonObject
                 {
-                    ["type"] = "string",
+                    ["type"] = new JsonArray("string", "null"),
                     ["description"] = OccurredOnDescription,
                 },
 ```
+
+and change the root's `["required"] = new JsonArray("items")` to `["required"] = new JsonArray("items", "occurred_on")` — strict mode puts every declared property there (Global Constraints); occurred_on's optionality is now its nullable type, not its absence from `required`.
 
 `CategorizationPrompt.cs`: add `using System.Globalization;`. In `System`, insert this paragraph after the currency paragraph:
 
@@ -1480,8 +1816,8 @@ and in the root `properties` add after `["items"] = ...`:
         The message comes with today's date and weekday in the person's time zone. When the
         message says which day the purchase happened — "вчера", "позавчера", "в пятницу", "15-го"
         — answer with occurred_on: that day as YYYY-MM-DD, counted from today. A weekday means the
-        most recent such day before today. When the message names no day, leave occurred_on out:
-        it will be recorded as today.
+        most recent such day before today. When the message names no day, answer occurred_on as
+        null: it will be recorded as today.
 ```
 
 Replace the second example with
@@ -4383,5 +4719,6 @@ Expected: `git status --short` prints nothing.
   4. Can a Telegram update be turned into a poison update, and so skipped with a notice, by anything that is harmless: a double tap, a stale callback, an unchanged edit, a redelivered reply?
   5. Is there any remaining verbatim check, sanity bound or "plausible amount" logic? Its absence is required (D1).
   6. Does anything read or write `noof_ledger`, or call the live model, in the default test run?
+  7. Does every outgoing categorization/correction/canonicalization call actually forgo `ChatResponseFormat`/`output_config` and send a `strict: true` tool with a forcing `tool_choice`, checked against a captured HTTP body rather than assumed from the source? Is there any live-model test left asserting the old text-JSON shape?
 
 Fix what it finds as separate commits. Amend this plan in place for each fix, so a re-run from scratch reproduces the fixed code.

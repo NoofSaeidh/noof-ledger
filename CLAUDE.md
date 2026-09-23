@@ -118,11 +118,15 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
 
 **The model** *(settled)*
 - Reached through **`Microsoft.Extensions.AI`'s `IChatClient`** (`raw.AsIChatClient(model)`), not the
-  Anthropic SDK's native `Messages.Create`. Operator's decision, and it fits: a raw `JsonElement`
-  schema reaches the wire verbatim, and `ChatResponseFormat.ForJsonSchema` lands as
-  `output_config.format` — Anthropic's structured-outputs mode. That **replaces** strict tool use
-  rather than working around its absence: `strict` constrains a tool's *input*, and our answer is
-  the *response*. Verified by capturing the outgoing HTTP body, not by reading documentation.
+  Anthropic SDK's native `Messages.Create`. Operator's decision.
+- **The answer is a forced tool call with `strict: true`, not structured outputs** *(settled
+  2026-09-23, operator's preference)*. `record_spending`'s arguments are the answer; `strict` is set
+  through `AITool.AdditionalProperties["Strict"]`, which the adapter copies onto the wire, and
+  `ChatToolMode.RequireAny`/`RequireSpecific` becomes `tool_choice`. Assert both on the captured
+  HTTP body, not from documentation. (Phase 1B had used `output_config.format`; that was an agent's
+  choice, not the operator's.)
+- **Amounts are JSON numbers read straight into `decimal`** — from the argument's `JsonElement`,
+  never via `double`.
 - **Never set temperature.** It is `[Obsolete]` in the SDK and therefore a compile error here.
   Determinism comes from the schema's enums.
 - `Noof.Ledger.Ai` is the only project that may touch the SDK, asserted by a test.
