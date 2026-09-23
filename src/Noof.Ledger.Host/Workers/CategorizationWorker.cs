@@ -117,9 +117,9 @@ internal sealed class CategorizationWorker(
             var offeredSlugs = categories.Select(category => category.Slug).ToHashSet();
 
             // The full directory, NOT just the hints. A model that called list_merchants answers with
-            // an id it learned there, and validating against the short hint list would reject exactly
+            // an id it learned there, and mapping against the short hint list would reject exactly
             // the answers that tool exists to produce - the tool would appear to work and every result
-            // it influenced would fail verification.
+            // it influenced would fail to map.
             var offeredMerchantIds = allMerchants.Select(merchant => merchant.Id).ToHashSet();
 
             if (!ProposalMapper.TryMap(

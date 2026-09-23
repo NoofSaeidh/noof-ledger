@@ -2,7 +2,7 @@
 
 Personal finance tracker. Telegram bot captures spending (text, voice, receipt photos), an LLM categorises it per line item, a local Blazor dashboard shows it across multiple wallets and currencies. C# / .NET 10, EF Core, strict TDD, local hosting, **public repo**.
 
-> **Status:** spec approved (`docs/superpowers/specs/2026-09-19-noof-finance-design.md`); **Phases 0, 0b, 1A, 1B, 1C and 1D complete** — solution, EF Core model and migrations, PostgreSQL money-storage gate, cookie authentication as the sole mode, the `user set-password` verb, the loopback interlock (unconditional now, not tied to an auth mode), a Blazor Server shell, Telegram capture with a durable queue, LLM categorisation with a write-once merchant identity table, a dashboard reading it all back through a read model, each assembly's public surface shrunk to what actually crosses its boundary, and the whole interface rebuilt on MudBlazor with a dark theme, a navigation bar and sign-out. 484 solution tests, all green — the Playwright browser tests are in the solution now, so `dotnet test --solution` runs them too and needs Chromium present. An opt-in live-model suite of 8 stays skipped unless `NOOF_LEDGER_LIVE_ANTHROPIC_KEY` is set; `ops/publish.ps1` produces a runnable host. Next is Phase 2, natural-language capture (`docs/superpowers/specs/2026-09-22-natural-language-capture.md`, which also renumbers the later phases): the model interprets amounts and dates, the bot echoes the result, the operator cancels or corrects it. Voice is Phase 3, the money model Phase 4. Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
+> **Status:** spec approved (`docs/superpowers/specs/2026-09-19-noof-finance-design.md`); **Phases 0, 0b, 1A, 1B, 1C, 1D and 2 complete** — solution, EF Core model and migrations, PostgreSQL money-storage gate, cookie authentication as the sole mode, the `user set-password` verb, the loopback interlock (unconditional now, not tied to an auth mode), a Blazor Server shell, Telegram capture with a durable queue, natural-language capture — the model reads amounts and dates from how people talk, the bot echoes the stored record with Отменить · Изменить, a reply or an edit corrects it, and every state is kept in an append-only revision history — with a write-once merchant identity table, a dashboard reading it all back through a read model, each assembly's public surface shrunk to what actually crosses its boundary, and the whole interface rebuilt on MudBlazor with a dark theme, a navigation bar and sign-out. 548 solution tests, all green — the Playwright browser tests are in the solution now, so `dotnet test --solution` runs them too and needs Chromium present. An opt-in live-model suite of 10 stays skipped unless `NOOF_LEDGER_LIVE_ANTHROPIC_KEY` is set; `ops/publish.ps1` produces a runnable host. Next is Phase 3, voice (a speech-to-text decision comes first); the money model is Phase 4. Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
 >
 > Deferred **decisions** live in `docs/OPEN-QUESTIONS.md`; deferred **work** lives in `docs/BACKLOG.md`. Check both before proposing something as missing.
 >
@@ -97,6 +97,12 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
   `merchant_aliases_no_truncate` trigger to an existing migration, and `noof_ledger` and the test
   template went on for a phase without the TRUNCATE guard the README promised, while every freshly
   created database had it.
+- **After adding a migration, update `noof_ledger_test_template`** with the command in
+  `ops/RUNBOOK.md` ("After adding a migration"). The E2E suite clones it and fails on a stale one;
+  never run `dotnet ef database update` without `--connection` — it resolves `noof_ledger`.
+- **`transaction_revisions` is append-only** (a trigger refuses `UPDATE`/`DELETE`/`TRUNCATE`). Any
+  code that changes a record writes a revision inside the same database transaction, through
+  `RevisionLog.AppendAsync`.
 - Tests run against a real database, never the EF InMemory provider.
 
 **Testing**

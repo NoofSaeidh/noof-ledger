@@ -10,14 +10,14 @@ internal static class CategorizationPrompt
     // constant. Under Microsoft.Extensions.AI this string becomes ChatOptions.Instructions, which
     // the captured request body confirms lands as the request's "system" field — the same field
     // the raw SDK's MessageCreateParams.System would have used, so this text needed no rewriting
-    // for the switch away from strict tool use.
+    // for the forced strict tool call.
     //
-    // The closed set of category_slug values is enforced by CategorizationSchema's enum via the
-    // response format, which is Anthropic's recommended mechanism for a closed label set. This
-    // prompt exists to explain what each category MEANS so a line item lands under the right one;
-    // it deliberately never repeats "choose only from this list" in prose, since a live slug could
-    // not even appear here — System is a compile-time const, so it cannot embed data from the
-    // current request.
+    // The closed set of category_slug values is enforced by CategorizationSchema's enum in the
+    // record_spending tool's strict schema, which is Anthropic's recommended mechanism for a closed
+    // label set. This prompt exists to explain what each category MEANS so a line item lands under
+    // the right one; it deliberately never repeats "choose only from this list" in prose, since a
+    // live slug could not even appear here — System is a compile-time const, so it cannot embed
+    // data from the current request.
     //
     // Messages arrive in Russian and English, sometimes both in one message. Anthropic publishes no
     // multilingual-prompting guidance as of this writing, so no technique is invented for it beyond

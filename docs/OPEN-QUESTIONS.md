@@ -391,3 +391,17 @@ stores the correction reply's own local day, computed by `EfRecordEditor.Request
 the reply's `sentAt` and the transaction's `time_zone_id`. `CategorizationWorker` reads
 `job.InstructionDay ?? sub.SentOn` as `Today`, so a first reading and a Reinterpret job (no
 `InstructionDay`) are unaffected and keep D2's rule; only a Correct job's anchor moves.
+
+### P2-3 — a correction is a job, not a table *(taken 2026-09-22, Phase 2 plan)*
+
+`categorization_jobs` gained `kind`, `instruction` and `source_message_id` instead of a separate
+corrections table, because a correction needs exactly the claim/lease/retry/attempt-cap machinery the
+queue already has. The cost is an ordering rule in `ClaimAsync`: a job is never claimed while an earlier
+job for the same transaction is Pending or Claimed, or a correction could be applied and then
+overwritten by the reading it corrected. A failed correction never marks a transaction Failed.
+
+### P2-4 — the revision history's shape *(taken 2026-09-22, Phase 2 plan)*
+
+One `transaction_revisions` row per state, with `status_before` and `status_after`, the instruction,
+and a jsonb snapshot whose amounts are decimal strings. `status_before` is what Вернуть restores.
+Append-only by trigger; the FK is RESTRICT, so a revised transaction can never be deleted.

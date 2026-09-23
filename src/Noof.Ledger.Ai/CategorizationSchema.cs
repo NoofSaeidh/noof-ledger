@@ -5,10 +5,10 @@ using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Ai;
 
-// Raw JSON Schema, built as a JsonElement rather than through a typed builder or reflection:
-// ChatResponseFormat.ForJsonSchema and a raw-schema AIFunctionDeclaration both need
-// "additionalProperties": false at every object level, which is easiest to guarantee by building
-// the JsonObject tree directly and controlling every key by hand.
+// Raw JSON Schema, built as a JsonElement rather than through a typed builder or reflection: a
+// strict raw-schema AIFunctionDeclaration needs "additionalProperties": false at every object
+// level, which is easiest to guarantee by building the JsonObject tree directly and controlling
+// every key by hand.
 internal static class CategorizationSchema
 {
     const string AmountDescription =

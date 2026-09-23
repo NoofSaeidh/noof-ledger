@@ -7,14 +7,15 @@ each line item, and see where the money went on a local Blazor dashboard that un
 wallets and currencies.
 
 > **Status: the capture path works end to end.** A message typed to the Telegram bot becomes a
-> categorised expense on the dashboard. Next (Phase 2): natural-language capture — *"купил вчера
-> штуку евро"* is read by the model, echoed back, and can be cancelled or corrected by a reply.
-> 484 tests, all green — browser tests included.
+> categorised expense on the dashboard. Say it the way you would say it — *"купил вчера штуку
+> евро"* is recorded as 1000 EUR dated yesterday, echoed back in the chat, and can be cancelled
+> with one tap or corrected by a reply.
+> 548 tests, all green — browser tests included.
 >
 > Still missing before it can carry a year of real spending: **balances** (there is no arithmetic
-> over wallets yet), **voice notes and receipt photos**, **currency exchange**, and — the one that
-> matters most — **a backup that has actually been restored at least once**. An untested backup is
-> a hypothesis.
+> over wallets yet), **voice notes** (next) **and receipt photos**, **currency exchange**, and —
+> the one that matters most — **a backup that has actually been restored at least once**. An
+> untested backup is a hypothesis.
 
 ## Why it looks the way it does
 

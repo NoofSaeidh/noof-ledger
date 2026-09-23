@@ -42,6 +42,22 @@ that were already running when the script set it). Neither the connection
 string nor the file's contents should ever be logged, committed, or printed —
 this is a public repository.
 
+## After adding a migration
+
+Any new EF Core migration must be applied to `noof_ledger_test_template` right after it builds, or
+the E2E suite and `MoneyStorageTests` fail with a missing-column error the next time they clone it —
+that failure is how you notice this step was skipped. `noof_ledger` itself is migrated only when the
+operator starts the host (`Database:MigrateOnStartup`), never by hand.
+
+```powershell
+$admin = if ($env:NOOF_TEST_PG) { $env:NOOF_TEST_PG } else { (Get-Content "$env:LOCALAPPDATA\NoofLedger\db.connection").Trim() }
+$template = $admin -replace 'Database=postgres', 'Database=noof_ledger_test_template'
+if ($template -notmatch 'Database=noof_ledger_test_template') { throw "Refusing: the connection string does not name the test template." }
+dotnet ef database update --project src/Noof.Ledger.Persistence --startup-project src/Noof.Ledger.Persistence --connection $template
+```
+
+The output's last line must name the new migration. Do **not** run it without `--connection`.
+
 ## Solution-wide accessibility sweep
 
 `ops/inspect.ps1` runs `dotnet jb inspectcode` (`JetBrains.ReSharper.GlobalTools`,
