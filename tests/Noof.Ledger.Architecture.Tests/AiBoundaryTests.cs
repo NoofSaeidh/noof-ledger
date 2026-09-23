@@ -3,8 +3,8 @@ using AwesomeAssertions;
 
 namespace Noof.Ledger.Architecture.Tests;
 
-// Operator decision D-A (2026-09-23): nothing depends on the model provider except its
-// IChatClientFactory implementation, and everything provider-specific lives in its folder.
+// Operator decision D-A (2026-09-23): nothing depends on a model or speech provider except its factory, and
+// everything provider-specific lives in that provider's folder.
 public class AiBoundaryTests
 {
     static readonly string SrcRoot = Path.Combine(RepoRoot.Find().FullName, "src");
@@ -16,10 +16,6 @@ public class AiBoundaryTests
     static readonly Regex SdkReference = new(
         @"^\s*(?:global\s+)?using\s+(?:static\s+)?(?:\w+\s*=\s*)?(?:global::)?Anthropic\b|(?<![\w.])Anthropic\.\w",
         RegexOptions.Multiline | RegexOptions.Compiled);
-
-    static readonly Regex ProviderNamedType = new(
-        @"\b(?:class|record|interface|enum|struct)\s+(?<name>\w*Anthropic\w*)",
-        RegexOptions.Compiled);
 
     [Fact]
     public void Only_the_provider_folder_references_the_Anthropic_SDK()
@@ -38,33 +34,52 @@ public class AiBoundaryTests
             "the provider folder must use the SDK, or an empty offender list proves nothing about the pattern");
     }
 
-    [Fact]
-    public void No_type_outside_the_provider_folder_is_named_after_the_provider()
+    [Theory]
+    [InlineData("Anthropic")]
+    [InlineData("Groq")]
+    public void No_type_outside_its_provider_folder_is_named_after_the_provider(string provider)
     {
+        var folder = Path.Combine(SrcRoot, "Noof.Ledger.Ai", provider) + Path.DirectorySeparatorChar;
+        var namedAfterProvider = new Regex(@$"\b(?:class|record|interface|enum|struct)\s+(?<name>\w*{provider}\w*)");
+
         var offenders = SourceFiles("*.cs")
-            .Where(file => !InProviderFolder(file))
-            .SelectMany(file => ProviderNamedType.Matches(File.ReadAllText(file))
+            .Where(file => !file.StartsWith(folder, StringComparison.OrdinalIgnoreCase))
+            .SelectMany(file => namedAfterProvider.Matches(File.ReadAllText(file))
                 .Select(match => $"{Relative(file)}: {match.Groups["name"].Value}"))
             .ToArray();
 
         offenders.Should().BeEmpty("a type named after the provider belongs with the provider");
-        SourceFiles("*.cs").Where(InProviderFolder).Should().Contain(file => ProviderNamedType.IsMatch(File.ReadAllText(file)),
-            "the provider folder's own types must match, or the pattern is matching nothing");
+        SourceFiles("*.cs").Where(file => file.StartsWith(folder, StringComparison.OrdinalIgnoreCase))
+            .Should().Contain(file => namedAfterProvider.IsMatch(File.ReadAllText(file)),
+                "the provider folder's own types must match, or the pattern is matching nothing");
     }
 
-    [Fact]
-    public void Nothing_outside_the_Ai_assembly_names_the_provider()
+    [Theory]
+    [InlineData("anthropic")]
+    [InlineData("groq")]
+    public void Nothing_outside_the_Ai_assembly_names_the_provider(string provider)
     {
-        // Host and Web learn what they need - which secret to ask for, what to call it, whether
-        // it is set - through IModelProvider. Case-insensitive, so the stored key's own spelling
-        // ("anthropic-api-key") counts too: it belongs to the provider, not to Application.
+        // Host and Web learn what they need - which secret to ask for, what to call it, whether it is set -
+        // through IModelProvider and ISpeechProvider. Case-insensitive, so a stored key's own spelling
+        // ("anthropic-api-key", "groq-api-key") counts too: it belongs to the provider, not to Application.
         var offenders = SourceFiles("*.cs").Concat(SourceFiles("*.razor"))
             .Where(file => !file.StartsWith(AiRoot, StringComparison.OrdinalIgnoreCase))
-            .Where(file => File.ReadAllText(file).Contains("anthropic", StringComparison.OrdinalIgnoreCase))
+            .Where(file => File.ReadAllText(file).Contains(provider, StringComparison.OrdinalIgnoreCase))
             .Select(Relative)
             .ToArray();
 
         offenders.Should().BeEmpty("only Noof.Ledger.Ai may know which provider answers");
+    }
+
+    [Fact]
+    public void Only_the_Groq_folder_knows_where_Groq_is()
+    {
+        var groqFolder = Path.Combine(SrcRoot, "Noof.Ledger.Ai", "Groq") + Path.DirectorySeparatorChar;
+        var naming = SourceFiles("*.cs").Where(file => File.ReadAllText(file).Contains("api.groq.com", StringComparison.OrdinalIgnoreCase)).ToArray();
+
+        naming.Where(file => !file.StartsWith(groqFolder, StringComparison.OrdinalIgnoreCase)).Select(Relative)
+            .Should().BeEmpty("the endpoint is the provider's own detail");
+        naming.Should().NotBeEmpty("the Groq folder must name its endpoint, or the rule proves nothing");
     }
 
     [Fact]
