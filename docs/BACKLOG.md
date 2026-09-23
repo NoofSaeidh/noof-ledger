@@ -643,3 +643,37 @@ self-heals on the next interaction.
 message. If the person deleted the echo, Telegram refuses ("message to be replied not found") and the
 update burns three poison attempts for no reason. Consider
 `ReplyParameters.AllowSendingWithoutReply = true`.
+
+---
+
+## Currencies outside the five known codes
+
+**Wanted.** A sixth currency code, or at least a clean failure when one is meant, instead of the
+silent RSD default.
+
+**Why it is not scheduled.** `record_spending`'s response schema constrains `currency` to a
+compile-time enum of the five supported codes, so the model has no way to answer with a sixth even
+when a message names one — it lands on `CategorizationWorkerOptions.DefaultCurrency` (RSD) instead,
+visible only in the echo if the operator happens to notice the wrong code. Widening it safely is
+Phase 4/7 work: `CurrencyCode.Supported` conflates "nameable" (can appear as an ISO code at all) with
+"rateable" (has an exchange-rate source), and Phase 7's rate source (`docs/OPEN-QUESTIONS.md` Q4) is
+scoped to the same five. Recorded by the operator's 2026-09-23 review (P2-5, D-F).
+
+**What it costs, when built.** Split `CurrencyCode.Supported` into a nameable set and a rateable
+subset, widen the schema enum to the nameable set, and reopen Q4 for whichever currencies gain a rate
+source.
+
+## Multi-language bot
+
+**Wanted.** The bot's own text (the echo, buttons, prompts) in more than one language.
+
+**Why it is not scheduled.** English only for now, by the operator's 2026-09-23 review (P2-5, D-D) —
+multi-language was never budgeted into Phase 2, and shipping one language today costs nothing toward
+shipping more later. The operator may still write to the bot in any language; only the bot's own
+output is fixed to English (`Category.NameEn` in the echo, `RecordEcho`'s constants, the button
+labels).
+
+**What it would take.** Resource strings per language instead of literals in `RecordEcho.cs` and
+`RecordActionButtons.cs`, and a language setting for the operator to choose from — stored, not
+configuration, the same shape as the currency default above. `Category.NameRu` already exists in the
+schema and is unused by the bot today, so the category half of this is data that is already there.

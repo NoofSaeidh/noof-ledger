@@ -46,6 +46,11 @@ rows, so the echo shows exactly what is in the database.
 model call, works offline. The read model excludes cancelled rows. The button becomes **Вернуть**,
 which restores the previous status.
 
+> **Note, operator, 2026-09-23.** The labels above are now **Cancel** / **Edit** / **Restore**, and
+> the bot writes English only (multi-language is deferred — `docs/BACKLOG.md`). The operator may
+> still write to the bot in any language; only the bot's own output changed. See
+> `docs/OPEN-QUESTIONS.md` P2-5.
+
 **D6 — Three ways to change a record, all converging on one correction job:**
 1. **Reply** to the bot's echo with free text — *"нет, 1500"*, *"это было позавчера"*, *"это подарок"*.
 2. **Изменить** — the bot asks what to change with a `ForceReply` prompt; the answer is route 1.
