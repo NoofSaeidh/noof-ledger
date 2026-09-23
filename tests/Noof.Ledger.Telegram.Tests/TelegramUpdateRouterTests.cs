@@ -287,4 +287,118 @@ public class TelegramUpdateRouterTests
 
         await editor.DidNotReceive().FindByUserMessageAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
+
+    static Update VoiceNote(long chatId, int messageId, DateTime date, Message? replyTo = null) => new()
+    {
+        Id = 905,
+        Message = new Message
+        {
+            Id = messageId,
+            Chat = new Chat { Id = chatId },
+            Date = date,
+            ReplyToMessage = replyTo,
+            Voice = new Voice { FileId = "voice-file-1", FileUniqueId = "unique-1", Duration = 4 },
+        },
+    };
+
+    [Fact]
+    public async Task Captures_a_voice_note_and_says_it_is_transcribing()
+    {
+        var (router, captureStore, chatNotifier, _, _) = CreateRouter(ownerChatId: 111L);
+        var sentAt = DateTimeOffset.Parse("2026-09-24T21:30:00Z");
+        var transactionId = Guid.NewGuid();
+        captureStore.CaptureVoiceAsync(Arg.Any<CapturedVoice>(), "Europe/Belgrade", Arg.Any<CancellationToken>()).Returns(transactionId);
+        chatNotifier.SendAsync(111L, Echo.Transcribing, Arg.Any<CancellationToken>()).Returns(777);
+
+        await router.HandleAsync(VoiceNote(111L, 5, sentAt.UtcDateTime), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await captureStore.Received(1).CaptureVoiceAsync(
+            Arg.Is<CapturedVoice>(v => v.ChatId == 111L && v.MessageId == 5 && v.VoiceFileId == "voice-file-1"
+                && v.DurationSeconds == 4 && v.SentAt == sentAt),
+            "Europe/Belgrade",
+            Arg.Any<CancellationToken>());
+        await captureStore.Received(1).AttachBotMessageAsync(transactionId, 777, Arg.Any<CancellationToken>());
+        await captureStore.DidNotReceiveWithAnyArgs().CaptureAsync(default!, default!, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Rejects_a_strangers_voice_note_before_reading_it()
+    {
+        var (router, captureStore, chatNotifier, editor, _) = CreateRouter(ownerChatId: 111L);
+
+        await router.HandleAsync(VoiceNote(222L, 5, DateTime.UtcNow), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await captureStore.DidNotReceiveWithAnyArgs().CaptureVoiceAsync(default!, default!, Arg.Any<CancellationToken>());
+        await chatNotifier.DidNotReceiveWithAnyArgs().SendAsync(default, default!, Arg.Any<CancellationToken>());
+        await editor.DidNotReceiveWithAnyArgs().FindByBotMessageAsync(default, default, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_voice_reply_to_an_echo_queues_a_spoken_correction_instead_of_a_new_capture()
+    {
+        var (router, captureStore, chatNotifier, editor, _) = CreateRouter(ownerChatId: 111L);
+        var transactionId = Guid.NewGuid();
+        var sentAt = DateTimeOffset.Parse("2026-09-24T10:00:00Z");
+        editor.FindByBotMessageAsync(111L, 42, Arg.Any<CancellationToken>()).Returns(new EchoTarget(transactionId, 42));
+        editor.RequestVoiceCorrectionAsync(transactionId, "voice-file-1", 6, sentAt, Arg.Any<CancellationToken>()).Returns(true);
+
+        await router.HandleAsync(
+            VoiceNote(111L, 6, sentAt.UtcDateTime, replyTo: new Message { Id = 42, Chat = new Chat { Id = 111L } }),
+            "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await editor.Received(1).RequestVoiceCorrectionAsync(transactionId, "voice-file-1", 6, sentAt, Arg.Any<CancellationToken>());
+        await chatNotifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(m => m.Text == Echo.Transcribing), Arg.Any<CancellationToken>());
+        await captureStore.DidNotReceiveWithAnyArgs().CaptureVoiceAsync(default!, default!, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_redelivered_voice_reply_edits_nothing_and_captures_nothing()
+    {
+        var (router, captureStore, chatNotifier, editor, _) = CreateRouter(ownerChatId: 111L);
+        var transactionId = Guid.NewGuid();
+        editor.FindByBotMessageAsync(111L, 42, Arg.Any<CancellationToken>()).Returns(new EchoTarget(transactionId, 42));
+        editor.RequestVoiceCorrectionAsync(transactionId, "voice-file-1", 6, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        await router.HandleAsync(
+            VoiceNote(111L, 6, DateTime.UtcNow, replyTo: new Message { Id = 42, Chat = new Chat { Id = 111L } }),
+            "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await chatNotifier.DidNotReceiveWithAnyArgs().EditAsync(default, default, default!, Arg.Any<CancellationToken>());
+        await captureStore.DidNotReceiveWithAnyArgs().CaptureVoiceAsync(default!, default!, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_voice_reply_to_anything_but_an_echo_is_captured_as_a_new_voice_note()
+    {
+        var (router, captureStore, _, editor, _) = CreateRouter(ownerChatId: 111L);
+        editor.FindByBotMessageAsync(111L, 50, Arg.Any<CancellationToken>()).Returns((EchoTarget?)null);
+
+        await router.HandleAsync(
+            VoiceNote(111L, 6, DateTime.UtcNow, replyTo: new Message { Id = 50, Chat = new Chat { Id = 111L } }),
+            "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await captureStore.Received(1).CaptureVoiceAsync(Arg.Any<CapturedVoice>(), "Europe/Belgrade", Arg.Any<CancellationToken>());
+        await editor.DidNotReceiveWithAnyArgs().RequestVoiceCorrectionAsync(default, default!, default, default, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task An_edited_voice_note_is_ignored()
+    {
+        var (router, _, _, editor, _) = CreateRouter(ownerChatId: 111L);
+        var edited = new Update
+        {
+            Id = 906,
+            EditedMessage = new Message
+            {
+                Id = 5, Chat = new Chat { Id = 111L }, Date = DateTime.UtcNow, Caption = "новая подпись",
+                Voice = new Voice { FileId = "voice-file-1", FileUniqueId = "unique-1", Duration = 4 },
+            },
+        };
+
+        await router.HandleAsync(edited, "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await editor.DidNotReceiveWithAnyArgs().FindByUserMessageAsync(default, default, Arg.Any<CancellationToken>());
+        await editor.DidNotReceiveWithAnyArgs().ReplaceRawTextAsync(default, default!, Arg.Any<CancellationToken>());
+    }
 }

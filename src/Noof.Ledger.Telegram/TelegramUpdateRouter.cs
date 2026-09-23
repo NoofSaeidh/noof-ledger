@@ -39,6 +39,12 @@ internal sealed class TelegramUpdateRouter(
         if (!await ownerGate.IsAllowedAsync(message.Chat.Id, cancellationToken))
             return;
 
+        if (message.Voice is { } voice)
+        {
+            await HandleVoiceAsync(message, voice, timeZoneId, cancellationToken);
+            return;
+        }
+
         if (message.Text is not { Length: > 0 } text)
             return;
 
@@ -56,6 +62,20 @@ internal sealed class TelegramUpdateRouter(
         var transactionId = await captureStore.CaptureAsync(captured, timeZoneId, cancellationToken);
 
         var botMessageId = await chatNotifier.SendAsync(message.Chat.Id, recordEcho.Acknowledgement, cancellationToken);
+        await captureStore.AttachBotMessageAsync(transactionId, botMessageId, cancellationToken);
+    }
+
+    async Task HandleVoiceAsync(Message message, Voice voice, string timeZoneId, CancellationToken cancellationToken)
+    {
+        if (message.ReplyToMessage is { } repliedTo
+            && await correctionHandler.TryHandleVoiceReplyAsync(message, repliedTo, voice, cancellationToken))
+            return;
+
+        // message.Date is the send instant, Kind=Utc - see HandleMessageAsync.
+        var captured = new CapturedVoice(message.Chat.Id, message.Id, voice.FileId, voice.Duration, new DateTimeOffset(message.Date));
+        var transactionId = await captureStore.CaptureVoiceAsync(captured, timeZoneId, cancellationToken);
+
+        var botMessageId = await chatNotifier.SendAsync(message.Chat.Id, recordEcho.Transcribing, cancellationToken);
         await captureStore.AttachBotMessageAsync(transactionId, botMessageId, cancellationToken);
     }
 }

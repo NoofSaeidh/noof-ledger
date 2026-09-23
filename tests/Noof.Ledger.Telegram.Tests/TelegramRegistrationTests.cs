@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Secrets;
+using Noof.Ledger.Application.Transcription;
 using NSubstitute;
 
 namespace Noof.Ledger.Telegram.Tests;
@@ -33,6 +34,7 @@ public class TelegramRegistrationTests
 
         scope.ServiceProvider.GetRequiredService<IChatNotifier>().Should().BeOfType<TelegramChatNotifier>();
         scope.ServiceProvider.GetRequiredService<ITelegramUpdateRouter>().Should().BeOfType<TelegramUpdateRouter>();
+        scope.ServiceProvider.GetRequiredService<IVoiceFileSource>().Should().BeOfType<TelegramVoiceFileSource>();
         provider.GetServices<IHostedService>().Should().ContainSingle()
             .Which.Should().BeOfType<TelegramPollingService>();
     }
