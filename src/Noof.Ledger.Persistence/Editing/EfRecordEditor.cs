@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Editing;
 using Noof.Ledger.Domain;
+using Noof.Ledger.Persistence.Configurations;
 using Noof.Ledger.Persistence.Revisions;
 using Npgsql;
 
@@ -8,8 +9,6 @@ namespace Noof.Ledger.Persistence.Editing;
 
 internal sealed class EfRecordEditor(LedgerDbContext db, TimeProvider timeProvider) : IRecordEditor
 {
-    const string CorrectionSourceIndex = "IX_categorization_jobs_transaction_id_source_message_id";
-
     public Task<EchoTarget?> FindByBotMessageAsync(long chatId, int messageId, CancellationToken cancellationToken) =>
         db.Transactions.AsNoTracking()
             .Where(t => t.TelegramChatId == chatId
@@ -44,7 +43,7 @@ internal sealed class EfRecordEditor(LedgerDbContext db, TimeProvider timeProvid
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException
         {
             SqlState: PostgresErrorCodes.UniqueViolation,
-            ConstraintName: CorrectionSourceIndex,
+            ConstraintName: CategorizationJobConfiguration.SourceMessageIndex,
         })
         {
             db.Entry(job).State = EntityState.Detached;

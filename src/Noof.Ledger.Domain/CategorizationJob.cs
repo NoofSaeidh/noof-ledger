@@ -19,6 +19,10 @@ public sealed class CategorizationJob
     // after the original capture.
     public DateOnly? InstructionDay { get; init; }
 
+    // The voice note to transcribe, set for a Transcribe job only, which a check constraint holds. For a spoken
+    // correction it is the reply's own voice, not the record's.
+    public string? VoiceFileId { get; init; }
+
     public required JobStatus Status { get; set; }
     public required int AttemptCount { get; set; }
     public required DateTimeOffset RunAfter { get; set; }

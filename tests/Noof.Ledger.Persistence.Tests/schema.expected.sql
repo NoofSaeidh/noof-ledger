@@ -56,7 +56,10 @@ CREATE TABLE public.merchant_aliases (
 CREATE TABLE public.transactions (
     id uuid NOT NULL,
     wallet_id uuid NOT NULL,
-    raw_text text NOT NULL,
+    raw_text text,
+    capture_kind integer NOT NULL,
+    voice_file_id text,
+    voice_duration_seconds integer,
     status integer NOT NULL,
     time_zone_id character varying(64) NOT NULL,
     occurred_at timestamptz NOT NULL,
@@ -67,6 +70,7 @@ CREATE TABLE public.transactions (
     prompt_message_id integer,
     created_at timestamptz NOT NULL,
     CONSTRAINT "PK_transactions" PRIMARY KEY (id),
+    CONSTRAINT ck_transactions_capture_has_content CHECK ((capture_kind = 0 AND raw_text IS NOT NULL) OR (capture_kind = 1 AND voice_file_id IS NOT NULL)),
     CONSTRAINT "FK_transactions_wallets_wallet_id" FOREIGN KEY (wallet_id) REFERENCES public.wallets (id) ON DELETE RESTRICT
 );
 
@@ -78,6 +82,7 @@ CREATE TABLE public.categorization_jobs (
     instruction text,
     source_message_id integer,
     instruction_day date,
+    voice_file_id text,
     status integer NOT NULL,
     attempt_count integer NOT NULL,
     run_after timestamptz NOT NULL,
@@ -88,6 +93,7 @@ CREATE TABLE public.categorization_jobs (
     updated_at timestamptz NOT NULL,
     CONSTRAINT "PK_categorization_jobs" PRIMARY KEY (id),
     CONSTRAINT ck_categorization_jobs_correction_has_instruction CHECK (kind <> 1 OR instruction IS NOT NULL),
+    CONSTRAINT ck_categorization_jobs_transcription_has_voice_file CHECK (kind <> 3 OR voice_file_id IS NOT NULL),
     CONSTRAINT "FK_categorization_jobs_transactions_transaction_id" FOREIGN KEY (transaction_id) REFERENCES public.transactions (id) ON DELETE CASCADE
 );
 
@@ -132,7 +138,7 @@ CREATE UNIQUE INDEX "IX_categories_slug" ON public.categories (slug);
 CREATE INDEX "IX_categorization_jobs_status_run_after" ON public.categorization_jobs (status, run_after);
 
 
-CREATE UNIQUE INDEX "IX_categorization_jobs_transaction_id_source_message_id" ON public.categorization_jobs (transaction_id, source_message_id) WHERE source_message_id IS NOT NULL;
+CREATE UNIQUE INDEX "IX_categorization_jobs_transaction_id_source_message_id_kind" ON public.categorization_jobs (transaction_id, source_message_id, kind) WHERE source_message_id IS NOT NULL;
 
 
 CREATE INDEX "IX_line_items_category_id" ON public.line_items (category_id);

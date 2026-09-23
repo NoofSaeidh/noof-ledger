@@ -21,7 +21,7 @@ internal sealed class EfSpendingReadModel(LedgerDbContext db, TimeProvider timeP
                 t.OccurredOn,
                 t.OccurredAt,
                 t.TimeZoneId,
-                t.RawText,
+                RawText = t.RawText ?? string.Empty,
                 t.Status,
                 WalletName = w.Name,
             })
