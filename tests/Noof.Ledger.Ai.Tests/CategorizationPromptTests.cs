@@ -7,18 +7,20 @@ namespace Noof.Ledger.Ai.Tests;
 public class CategorizationPromptTests
 {
     [Fact]
-    public void System_prompt_instructs_verbatim_amount_quoting()
+    public void System_prompt_asks_for_the_meant_amount_as_a_plain_decimal()
     {
-        CategorizationPrompt.System.Should().Contain("character for character");
-        CategorizationPrompt.System.Should().Contain("never compute, round or sum anything");
-        CategorizationPrompt.System.Should().Contain("do not produce that line");
+        CategorizationPrompt.System.Should().Contain("the number the person meant");
+        CategorizationPrompt.System.Should().Contain("\"штуку\"");
+        CategorizationPrompt.System.Should().NotContain("character for character",
+            "quote-and-verify is gone (D1): an instruction to copy verbatim makes the model refuse exactly the amounts this phase exists to accept");
     }
 
     [Fact]
-    public void System_prompt_instructs_omitting_an_unstated_currency_rather_than_guessing()
+    public void System_prompt_instructs_answering_currency_as_null_rather_than_guessing()
     {
         CategorizationPrompt.System.Should().Contain("only when the message actually states one");
-        CategorizationPrompt.System.Should().Contain("leave currency out of your answer rather than choosing one");
+        CategorizationPrompt.System.Should().Contain("answer currency as null rather");
+        CategorizationPrompt.System.Should().Contain("than choosing one");
     }
 
     [Fact]

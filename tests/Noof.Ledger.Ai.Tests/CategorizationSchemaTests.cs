@@ -38,13 +38,13 @@ public class CategorizationSchemaTests
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["description", "amount_quote", "category_slug"],
+                "required": ["description", "amount", "currency", "category_slug", "merchant_name"],
                 "properties": {
                   "description": { "type": "string", "description": "What was bought, as short plain text in the language of the message." },
-                  "amount_quote": { "type": "string", "description": "The amount copied from the message character for character, exactly as written. Do not convert digits, do not add or remove separators, do not add a currency symbol, and never compute or sum anything. If the message does not state an amount for this line, do not produce the line." },
-                  "currency": { "type": "string", "enum": ["EUR", "RSD", "USD", "RUB", "KZT"] },
+                  "amount": { "type": "number", "description": "The amount the person meant, as a number - for example 1000 or 45.3. Interpret words, slang and speech: \"штуку\" is 1000, \"полтос\" is 50, \"двести пятьдесят\" is 250." },
+                  "currency": { "type": ["string", "null"], "enum": ["EUR", "RSD", "USD", "RUB", "KZT", null], "description": "The currency the message states, or null when it states none." },
                   "category_slug": { "type": "string", "enum": ["groceries", "food-drink"] },
-                  "merchant_quote": { "type": "string", "description": "The merchant name copied from the message character for character. Only when a merchant is actually named and it is not one of the known merchants." }
+                  "merchant_name": { "type": ["string", "null"], "description": "The merchant's name as the person wrote it, or null when no merchant is named or it is one of the known merchants." }
                 }
               }
             }
@@ -64,13 +64,13 @@ public class CategorizationSchemaTests
     }
 
     [Fact]
-    public void With_hints_known_merchant_id_lands_between_category_slug_and_merchant_quote()
+    public void With_hints_known_merchant_id_lands_between_category_slug_and_merchant_name()
     {
         var schema = CategorizationSchema.BuildRecordSpending(Categories, OneHint);
 
         var names = LineItemProperties(schema).EnumerateObject().Select(p => p.Name);
 
-        names.Should().ContainInOrder("category_slug", "known_merchant_id", "merchant_quote");
+        names.Should().ContainInOrder("category_slug", "known_merchant_id", "merchant_name");
     }
 
     [Fact]
@@ -80,11 +80,12 @@ public class CategorizationSchemaTests
 
         var knownMerchantId = LineItemProperties(schema).GetProperty("known_merchant_id");
 
-        knownMerchantId.GetProperty("type").GetString().Should().Be("string");
+        knownMerchantId.GetProperty("type").EnumerateArray().Select(e => e.GetString())
+            .Should().BeEquivalentTo(["string", "null"]);
         knownMerchantId.GetProperty("enum").EnumerateArray().Select(e => e.GetString())
-            .Should().BeEquivalentTo(["11111111-1111-1111-1111-111111111111"]);
+            .Should().BeEquivalentTo(["11111111-1111-1111-1111-111111111111", null]);
         knownMerchantId.GetProperty("description").GetString().Should().Be(
-            "Set this only if the merchant in the message is one of the listed known merchants.");
+            "One of the listed known merchants' ids, or null when the merchant is not one of them.");
     }
 
     [Fact]
@@ -106,23 +107,20 @@ public class CategorizationSchemaTests
         var currencies = LineItemProperties(schema).GetProperty("currency").GetProperty("enum")
             .EnumerateArray().Select(e => e.GetString());
 
-        currencies.Should().BeEquivalentTo(["EUR", "RSD", "USD", "RUB", "KZT"]);
+        currencies.Should().BeEquivalentTo(["EUR", "RSD", "USD", "RUB", "KZT", null]);
     }
 
     [Fact]
-    public void Currency_is_a_property_but_is_not_required()
+    public void Currency_is_required_but_nullable_so_the_model_can_answer_none_stated()
     {
-        // The model must be able to answer "not stated" by omitting currency altogether — it is
-        // still constrained to one of the five codes whenever it does report one (see
-        // Currency_enum_is_the_five_CurrencyCode_statics), but it is never forced to invent a
-        // sixth answer for a message that states no currency at all.
         var schema = CategorizationSchema.BuildRecordSpending(Categories, NoHints);
 
         var lineItem = schema.GetProperty("properties").GetProperty("items").GetProperty("items");
         var required = lineItem.GetProperty("required").EnumerateArray().Select(e => e.GetString());
 
-        required.Should().NotContain("currency");
-        LineItemProperties(schema).TryGetProperty("currency", out _).Should().BeTrue();
+        required.Should().Contain("currency");
+        LineItemProperties(schema).GetProperty("currency").GetProperty("type").EnumerateArray()
+            .Select(e => e.GetString()).Should().BeEquivalentTo(["string", "null"]);
     }
 
     [Fact]
@@ -190,8 +188,9 @@ public class CategorizationSchemaTests
     [Fact]
     public void Schema_round_trips_through_JsonElement_deserialization_unchanged()
     {
-        // The schema is handed to ChatResponseFormat.ForJsonSchema as a JsonElement directly, not
-        // reassembled from a dictionary — this pins the property that call site actually relies on.
+        // The schema is handed to RawSchemaFunctionDeclaration's JsonSchema as a JsonElement
+        // directly, not reassembled from a dictionary — this pins the property that call site
+        // actually relies on.
         var schema = CategorizationSchema.BuildRecordSpending(Categories, OneHint);
         var roundTripped = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(schema));
 

@@ -36,7 +36,7 @@ public class PublicSurfaceTests
         [
             "AppUser", "CategorizationAuthority", "CategorizationJob", "Category", "CurrencyCode",
             "CurrencyMismatchException", "JobStatus", "LineItem", "Merchant", "MerchantAlias",
-            "MerchantKind", "MerchantName", "Money", "QuotedAmount", "Transaction",
+            "MerchantKind", "MerchantName", "Money", "Transaction",
             "TransactionStatus", "Wallet",
         ],
         ["Noof.Ledger.Application"] =
@@ -47,7 +47,7 @@ public class PublicSurfaceTests
             "CategorizationSubject", "CategoryEntry", "MerchantAliasEntry", "ICategorizationStore",
             "ICategorizer", "ICategoryCatalog", "IMerchantDirectory", "MerchantScan",
             "ModelFailureKind", "ModelCallException", "ModelCallExceptionExtensions",
-            "ProposalVerification", "IChatNotifier", "IJobQueue", "JobCompletionOutcome",
+            "ProposalMapper", "MappedProposal", "IChatNotifier", "IJobQueue", "JobCompletionOutcome",
             "RecentLineItem", "RecentTransaction", "MonthTotal", "MonthSummary",
             "ISpendingReadModel", "ProbeResult", "ISecretProbe", "ISecretStore", "SecretKeys",
             "SecretResult", "SecretState", "SecretStatus",

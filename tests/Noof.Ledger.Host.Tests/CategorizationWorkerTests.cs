@@ -99,8 +99,8 @@ public class CategorizationWorkerTests
     static CategorizationSubject Subject(int? botMessageId = 42, string rawText = "Bread 250 RSD") =>
         new(TransactionId, rawText, 111L, botMessageId, "Cash");
 
-    static CategorizationProposal OneGroceryLine(string quote = "250", string currency = "RSD") =>
-        new([new ProposedLineItem("Bread", quote, currency, "groceries", null, null)]);
+    static CategorizationProposal OneGroceryLine(decimal amount = 250m, string currency = "RSD") =>
+        new([new ProposedLineItem("Bread", amount, currency, "groceries", null, null)]);
 
     static CategorizationWorker CreateWorker(
         IServiceScopeFactory scopeFactory, FakeTimeProvider time, CategorizationWorkerOptions? options = null) =>
@@ -197,7 +197,7 @@ public class CategorizationWorkerTests
     }
 
     [Fact]
-    public async Task A_verification_failure_is_terminal_and_never_retried()
+    public async Task An_answer_that_does_not_map_is_terminal_and_never_retried()
     {
         var jobQueue = Substitute.For<IJobQueue>();
         jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
@@ -205,10 +205,11 @@ public class CategorizationWorkerTests
         var store = Substitute.For<ICategorizationStore>();
         store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
         var categorizer = Substitute.For<ICategorizer>();
-        // amount_quote "999" never occurs in the raw text "Bread 250 RSD" - ProposalVerification.TryResolve
-        // must reject this, which is real production logic (Task 1), not a stub.
+        // Amount is a JSON number now, so the model cannot hand back an unparsable amount - the
+        // schema rules that out. "GBP" is not a supported currency, and ProposalMapper.TryMap refuses
+        // it, which is real production logic, not a stub.
         categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>())
-            .Returns(OneGroceryLine(quote: "999"));
+            .Returns(OneGroceryLine(currency: "GBP"));
         var worker = CreateWorker(ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer), new FakeTimeProvider(DateTimeOffset.UtcNow));
 
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
@@ -412,7 +413,7 @@ public class CategorizationWorkerTests
             .Returns(new List<MerchantAliasEntry> { new("STARBUCKS", merchantId, "Starbucks") });
         var categorizer = Substitute.For<ICategorizer>();
         categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new CategorizationProposal([new ProposedLineItem("Coffee", "250", "RSD", "groceries", null, "Starbucks")]));
+            .Returns(new CategorizationProposal([new ProposedLineItem("Coffee", 250m, "RSD", "groceries", null, "Starbucks")]));
         var worker = CreateWorker(
             ScopeFactoryFor(jobQueue, KeyPresent(), store, merchantDirectory: merchantDirectory, categorizer: categorizer),
             new FakeTimeProvider(DateTimeOffset.UtcNow));
@@ -444,7 +445,7 @@ public class CategorizationWorkerTests
         merchantDirectory.LinkAliasAsync("STARBUCKS", "Starbucks", Arg.Any<CancellationToken>()).Returns(linkedId);
         var categorizer = Substitute.For<ICategorizer>();
         categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new CategorizationProposal([new ProposedLineItem("Coffee", "250", "RSD", "groceries", null, "Starbucks")]));
+            .Returns(new CategorizationProposal([new ProposedLineItem("Coffee", 250m, "RSD", "groceries", null, "Starbucks")]));
         categorizer.CanonicalizeMerchantAsync("Starbucks", Arg.Any<IReadOnlyList<MerchantOption>>(), Arg.Any<CancellationToken>())
             .Returns("Starbucks");
         var worker = CreateWorker(

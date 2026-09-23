@@ -11,14 +11,9 @@ namespace Noof.Ledger.Ai;
 // the JsonObject tree directly and controlling every key by hand.
 internal static class CategorizationSchema
 {
-    static readonly string[] CurrencyCodes =
-    [
-        CurrencyCode.Eur.Value,
-        CurrencyCode.Rsd.Value,
-        CurrencyCode.Usd.Value,
-        CurrencyCode.Rub.Value,
-        CurrencyCode.Kzt.Value,
-    ];
+    const string AmountDescription =
+        "The amount the person meant, as a number - for example 1000 or 45.3. Interpret words, slang and speech: "
+        + "\"штуку\" is 1000, \"полтос\" is 50, \"двести пятьдесят\" is 250.";
 
     public static JsonElement BuildRecordSpending(
         IReadOnlyList<CategoryOption> categories, IReadOnlyList<MerchantOption> merchantHints)
@@ -30,15 +25,19 @@ internal static class CategorizationSchema
                 ["type"] = "string",
                 ["description"] = "What was bought, as short plain text in the language of the message.",
             }),
-            new("amount_quote", new JsonObject
+            new("amount", new JsonObject
             {
-                ["type"] = "string",
-                ["description"] = "The amount copied from the message character for character, exactly as written. Do not convert digits, do not add or remove separators, do not add a currency symbol, and never compute or sum anything. If the message does not state an amount for this line, do not produce the line.",
+                ["type"] = "number",
+                ["description"] = AmountDescription,
             }),
             new("currency", new JsonObject
             {
-                ["type"] = "string",
-                ["enum"] = new JsonArray(CurrencyCodes.Select(code => (JsonNode)code).ToArray()),
+                // Strict mode puts every declared property in "required" (below); optionality is a
+                // nullable type instead of omission, and the enum keyword still applies to a null
+                // value, so null has to be listed in it explicitly too (operator, 2026-09-23).
+                ["type"] = new JsonArray("string", "null"),
+                ["enum"] = new JsonArray([.. CurrencyCode.Supported.Select(code => (JsonNode)code.Value), null]),
+                ["description"] = "The currency the message states, or null when it states none.",
             }),
             new("category_slug", new JsonObject
             {
@@ -51,23 +50,26 @@ internal static class CategorizationSchema
         {
             properties.Add(new("known_merchant_id", new JsonObject
             {
-                ["type"] = "string",
-                ["enum"] = new JsonArray(merchantHints.Select(m => (JsonNode)m.Id.ToString()).ToArray()),
-                ["description"] = "Set this only if the merchant in the message is one of the listed known merchants.",
+                ["type"] = new JsonArray("string", "null"),
+                ["enum"] = new JsonArray([.. merchantHints.Select(m => (JsonNode)m.Id.ToString()), null]),
+                ["description"] = "One of the listed known merchants' ids, or null when the merchant is not one of them.",
             }));
         }
 
-        properties.Add(new("merchant_quote", new JsonObject
+        properties.Add(new("merchant_name", new JsonObject
         {
-            ["type"] = "string",
-            ["description"] = "The merchant name copied from the message character for character. Only when a merchant is actually named and it is not one of the known merchants.",
+            ["type"] = new JsonArray("string", "null"),
+            ["description"] = "The merchant's name as the person wrote it, or null when no merchant is named or it is one of the known merchants.",
         }));
 
         var lineItem = new JsonObject
         {
             ["type"] = "object",
             ["additionalProperties"] = false,
-            ["required"] = new JsonArray("description", "amount_quote", "category_slug"),
+            // Derived from the properties actually added, not a hand-written list: strict mode
+            // requires every declared property here, and this keeps known_merchant_id out of it on
+            // the no-hints path, where the property itself is never declared (operator, 2026-09-23).
+            ["required"] = new JsonArray([.. properties.Select(p => (JsonNode)p.Key)]),
             ["properties"] = new JsonObject(properties),
         };
 

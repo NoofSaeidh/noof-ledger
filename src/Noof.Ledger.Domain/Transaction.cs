@@ -5,8 +5,6 @@ public sealed class Transaction
     public required Guid Id { get; init; }
     public required Guid WalletId { get; init; }
 
-    // Quote-and-verify re-reads this, possibly hours after capture, so it must
-    // survive untouched regardless of what categorization does to the line items.
     public required string RawText { get; init; }
 
     public required TransactionStatus Status { get; set; }

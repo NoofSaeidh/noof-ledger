@@ -98,4 +98,10 @@ public class CurrencyCodeTests
     {
         ((IComparable)CurrencyCode.Eur).CompareTo(null).Should().BePositive();
     }
+
+    [Fact]
+    public void Supported_lists_the_five_codes_the_ledger_accepts()
+    {
+        CurrencyCode.Supported.Select(code => code.Value).Should().Equal("EUR", "RSD", "USD", "RUB", "KZT");
+    }
 }

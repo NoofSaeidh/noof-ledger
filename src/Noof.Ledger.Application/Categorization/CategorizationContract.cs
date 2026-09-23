@@ -15,31 +15,28 @@ public sealed record CategorizationRequest(
     IReadOnlyList<MerchantOption> MerchantHints,
     IReadOnlyList<MerchantOption> AllMerchants);
 
-// One line the model proposes. Nothing here is trusted: AmountQuote is a claim about the raw
-// text, CategorySlug is a claim about the offered list, and MerchantQuote is a claim about a
-// name that appears in the message. ProposalVerification turns claims into values.
-//
-// CurrencyCode is optional: the schema no longer forces the model to name a currency the message
-// never states (decision: currency is out of `required` in CategorizationSchema). Null or empty
-// means "not stated" and ProposalVerification substitutes the configured default before
-// resolving; a currency the model DOES report is still validated exactly as before.
+// One line in the model's own reading of the message. Amount is the number the person meant (1000
+// for "штуку"), answered as a JSON number and read straight into decimal by System.Text.Json — no
+// parsing step, nothing compares it with the message (decision D1). CurrencyCode is null when the
+// message states none.
 public sealed record ProposedLineItem(
     string Description,
-    string AmountQuote,
+    decimal Amount,
     string? CurrencyCode,
     string CategorySlug,
     Guid? KnownMerchantId,
-    string? MerchantQuote);
+    string? MerchantName);
 
 public sealed record CategorizationProposal(IReadOnlyList<ProposedLineItem> Items);
 
-// A line that survived verification. Amount is a Money built by C# from text C# re-read.
 public sealed record ResolvedLineItem(
     string Description,
     Money Amount,
     string CategorySlug,
     Guid? KnownMerchantId,
-    string? MerchantText);
+    string? MerchantName);
+
+public sealed record MappedProposal(IReadOnlyList<ResolvedLineItem> Items);
 
 // A line ready to be written: identity resolved, slug resolved to a real row.
 public sealed record CategorizedLineItem(

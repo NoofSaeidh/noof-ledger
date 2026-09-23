@@ -1,5 +1,4 @@
 ﻿using System.Net;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Anthropic.Exceptions;
@@ -34,30 +33,32 @@ internal sealed class AnthropicCategorizer(IAnthropicClientFactory clientFactory
         // "system" per the captured HTTP body (fact 1/2 above).
         var userTurn = CategorizationPrompt.BuildUserTurn(request.RawText, request.Categories, request.MerchantHints);
         var recordSpendingSchema = CategorizationSchema.BuildRecordSpending(request.Categories, request.MerchantHints);
+        var recordSpendingTool = new RawSchemaFunctionDeclaration(RecordSpendingName, RecordSpendingDescription, recordSpendingSchema);
         var listMerchantsTool = new RawSchemaFunctionDeclaration(
             ListMerchantsName, ListMerchantsDescription, CategorizationSchema.BuildListMerchants());
 
         var messages = new List<ChatMessage> { new(ChatRole.User, userTurn) };
 
+        // Both tools are offered and one is forced (RequireAny, not Auto): the model answers either
+        // record_spending directly or list_merchants first, never plain text (operator, 2026-09-23).
         var firstOptions = new ChatOptions
         {
             MaxOutputTokens = options.MaxTokens,
             Instructions = CategorizationPrompt.System,
-            Tools = [listMerchantsTool],
-            ToolMode = ChatToolMode.Auto,
-            ResponseFormat = ChatResponseFormat.ForJsonSchema(recordSpendingSchema, RecordSpendingName, RecordSpendingDescription),
+            Tools = [listMerchantsTool, recordSpendingTool],
+            ToolMode = ChatToolMode.RequireAny,
         };
 
         var firstResponse = await CallAsync(chat, messages, firstOptions, cancellationToken);
 
-        if (TryGetText(firstResponse, out var firstJson))
-            return ToProposal(firstJson);
+        if (TryGetFunctionCall(firstResponse, RecordSpendingName, out var firstCall))
+            return ToProposal(firstCall);
 
         if (!TryGetFunctionCall(firstResponse, ListMerchantsName, out var call))
         {
             throw new ModelCallException(
                 ModelFailureKind.Transient,
-                $"First turn produced neither a JSON answer nor a {ListMerchantsName} call (finish reason: {firstResponse.FinishReason}).");
+                $"First turn produced neither {RecordSpendingName} nor {ListMerchantsName} (finish reason: {firstResponse.FinishReason}).");
         }
 
         // AllMerchants, not MerchantHints: the hints are the handful the local scan already found
@@ -68,25 +69,25 @@ internal sealed class AnthropicCategorizer(IAnthropicClientFactory clientFactory
         messages.Add(new ChatMessage(ChatRole.Tool,
             [new FunctionResultContent(call.CallId, JsonSerializer.Serialize(request.AllMerchants))]));
 
-        // The loop runs exactly once: this is the ONLY follow-up request this method ever sends,
-        // regardless of what it gets back. No tools are offered this time - that is what
-        // structurally rules out a third request, rather than relying on the model to behave
-        // (Locked design decision 3).
+        // The loop runs exactly once: only record_spending is offered on the follow-up, and it is
+        // forced with RequireSpecific, so there is structurally no tool left for a third request to
+        // reach for (Locked design decision 3) - enforced by the API, not by the model behaving.
         var followUpOptions = new ChatOptions
         {
             MaxOutputTokens = options.MaxTokens,
             Instructions = CategorizationPrompt.System,
-            ResponseFormat = ChatResponseFormat.ForJsonSchema(recordSpendingSchema, RecordSpendingName, RecordSpendingDescription),
+            Tools = [recordSpendingTool],
+            ToolMode = ChatToolMode.RequireSpecific(RecordSpendingName),
         };
 
         var followUpResponse = await CallAsync(chat, messages, followUpOptions, cancellationToken);
 
-        if (TryGetText(followUpResponse, out var followUpJson))
-            return ToProposal(followUpJson);
+        if (TryGetFunctionCall(followUpResponse, RecordSpendingName, out var followUpCall))
+            return ToProposal(followUpCall);
 
         throw new ModelCallException(
             ModelFailureKind.Transient,
-            $"Second turn, after answering {ListMerchantsName}, still produced no JSON answer (finish reason: {followUpResponse.FinishReason}).");
+            $"Second turn, after answering {ListMerchantsName}, still produced no {RecordSpendingName} call (finish reason: {followUpResponse.FinishReason}).");
     }
 
     public async Task<string> CanonicalizeMerchantAsync(
@@ -105,24 +106,27 @@ internal sealed class AnthropicCategorizer(IAnthropicClientFactory clientFactory
             Known merchants (id and display name, as JSON): {JsonSerializer.Serialize(knownMerchants)}
             """;
 
+        var canonicalizeMerchantTool = new RawSchemaFunctionDeclaration(
+            CanonicalizeMerchantName, CanonicalizeMerchantDescription, CanonicalizeMerchantSchema);
+
         var callOptions = new ChatOptions
         {
             MaxOutputTokens = 256,
             Instructions = instructions,
-            ResponseFormat = ChatResponseFormat.ForJsonSchema(
-                CanonicalizeMerchantSchema, CanonicalizeMerchantName, CanonicalizeMerchantDescription),
+            Tools = [canonicalizeMerchantTool],
+            ToolMode = ChatToolMode.RequireSpecific(CanonicalizeMerchantName),
         };
 
         var response = await CallAsync(chat, [new ChatMessage(ChatRole.User, merchantText)], callOptions, cancellationToken);
 
-        if (!TryGetText(response, out var json))
+        if (!TryGetFunctionCall(response, CanonicalizeMerchantName, out var call))
         {
             throw new ModelCallException(
                 ModelFailureKind.Transient,
-                $"{CanonicalizeMerchantName} produced no JSON answer (finish reason: {response.FinishReason}).");
+                $"{CanonicalizeMerchantName} produced no tool call (finish reason: {response.FinishReason}).");
         }
 
-        var payload = JsonSerializer.Deserialize<CanonicalizeMerchantPayload>(json);
+        var payload = ToPayload<CanonicalizeMerchantPayload>(call);
         if (payload is null || string.IsNullOrWhiteSpace(payload.DisplayName))
             throw new ModelCallException(ModelFailureKind.Transient, $"{CanonicalizeMerchantName} returned an empty display_name.");
 
@@ -172,20 +176,6 @@ internal sealed class AnthropicCategorizer(IAnthropicClientFactory clientFactory
     // CategorizationWorker uses this to guard against.
     static bool IsAccountLevel(HttpStatusCode statusCode) => (int)statusCode is 401 or 402 or 403;
 
-    static bool TryGetText(ChatResponse response, out string text)
-    {
-        var builder = new StringBuilder();
-        foreach (var message in response.Messages)
-        foreach (var content in message.Contents)
-        {
-            if (content is TextContent textContent)
-                builder.Append(textContent.Text);
-        }
-
-        text = builder.ToString();
-        return text.Length > 0;
-    }
-
     static bool TryGetFunctionCall(ChatResponse response, string name, out FunctionCallContent call)
     {
         foreach (var message in response.Messages)
@@ -202,14 +192,22 @@ internal sealed class AnthropicCategorizer(IAnthropicClientFactory clientFactory
         return false;
     }
 
-    static CategorizationProposal ToProposal(string json)
+    static CategorizationProposal ToProposal(FunctionCallContent call)
     {
-        var payload = JsonSerializer.Deserialize<RecordSpendingPayload>(json);
+        var payload = ToPayload<RecordSpendingPayload>(call);
         if (payload is null)
             throw new ModelCallException(ModelFailureKind.Transient, $"{RecordSpendingName} returned an empty payload.");
 
         return new CategorizationProposal([.. payload.Items.Select(i => i.ToProposedLineItem())]);
     }
+
+    // FunctionCallContent.Arguments holds one JsonElement per top-level parameter, produced by
+    // System.Text.Json with no object converter - the response's own token text, not a re-encoded
+    // value (decompiled, operator 2026-09-23; Verified facts table). Re-serialising the dictionary
+    // and deserialising it into the payload record in one step is what keeps "amount" a decimal
+    // read straight off that token text, never a double.
+    static T? ToPayload<T>(FunctionCallContent call) =>
+        JsonSerializer.Deserialize<T>(JsonSerializer.SerializeToElement(call.Arguments));
 
     static JsonElement BuildCanonicalizeMerchantSchema()
     {
@@ -230,19 +228,26 @@ internal sealed class AnthropicCategorizer(IAnthropicClientFactory clientFactory
     // AIFunctionDeclaration is abstract in Microsoft.Extensions.AI.Abstractions; this is the minimal
     // subclass needed to declare a tool from a raw JSON Schema instead of one generated by
     // reflection. Declaration-only: it is never asked to invoke anything - FunctionCallContent is
-    // handled by hand in ProposeAsync's tool loop instead.
+    // handled by hand in ProposeAsync's tool loop instead. strict defaults to true because every
+    // tool this categorizer declares already has "additionalProperties": false and every property
+    // in "required" (Global Constraints). The Anthropic adapter copies
+    // AdditionalProperties["Strict"] onto the wire Tool.strict - decompiled, not read from docs
+    // (Verified facts table).
     sealed class RawSchemaFunctionDeclaration : AIFunctionDeclaration
     {
-        public RawSchemaFunctionDeclaration(string name, string description, JsonElement schema)
+        public RawSchemaFunctionDeclaration(string name, string description, JsonElement schema, bool strict = true)
         {
             Name = name;
             Description = description;
             JsonSchema = schema;
+            if (strict)
+                AdditionalProperties = new AdditionalPropertiesDictionary { ["Strict"] = true };
         }
 
         public override string Name { get; }
         public override string Description { get; }
         public override JsonElement JsonSchema { get; }
+        public override IReadOnlyDictionary<string, object?> AdditionalProperties { get; } = new AdditionalPropertiesDictionary();
     }
 
     // Deserialisation-only DTOs, private to this file: the JSON field names the tool schema
@@ -253,15 +258,15 @@ internal sealed class AnthropicCategorizer(IAnthropicClientFactory clientFactory
 
     sealed record ProposedLineItemDto(
         [property: JsonPropertyName("description")] string Description,
-        [property: JsonPropertyName("amount_quote")] string AmountQuote,
+        [property: JsonPropertyName("amount")] decimal Amount,
         [property: JsonPropertyName("currency")] string? Currency,
         [property: JsonPropertyName("category_slug")] string CategorySlug,
         [property: JsonPropertyName("known_merchant_id")] string? KnownMerchantId,
-        [property: JsonPropertyName("merchant_quote")] string? MerchantQuote)
+        [property: JsonPropertyName("merchant_name")] string? MerchantName)
     {
         public ProposedLineItem ToProposedLineItem() => new(
-            Description, AmountQuote, Currency, CategorySlug,
-            string.IsNullOrEmpty(KnownMerchantId) ? null : Guid.Parse(KnownMerchantId), MerchantQuote);
+            Description, Amount, Currency, CategorySlug,
+            string.IsNullOrEmpty(KnownMerchantId) ? null : Guid.Parse(KnownMerchantId), MerchantName);
     }
 
     sealed record CanonicalizeMerchantPayload([property: JsonPropertyName("display_name")] string DisplayName);

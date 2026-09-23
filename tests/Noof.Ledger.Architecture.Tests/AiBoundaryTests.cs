@@ -25,27 +25,30 @@ public class AiBoundaryTests
     }
 
     [Fact]
-    public void Only_QuotedAmount_constructs_a_Money_inside_the_categorization_pipeline()
+    public void Only_ProposalMapper_constructs_a_Money_inside_the_categorization_pipeline()
     {
         var root = RepoRoot.Find().FullName;
+        var mapper = Path.Combine(root, "src", "Noof.Ledger.Application", "Categorization", "ProposalMapper.cs");
         string[] scannedRoots =
         [
             Path.Combine(root, "src", "Noof.Ledger.Ai"),
+            Path.Combine(root, "src", "Noof.Ledger.Application", "Categorization"),
             Path.Combine(root, "src", "Noof.Ledger.Host", "Workers"),
         ];
 
         var offenders = scannedRoots
             .SelectMany(dir => Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories))
+            .Where(file => !string.Equals(file, mapper, StringComparison.OrdinalIgnoreCase))
             .Where(file => File.ReadAllText(file).Contains("new Money(", StringComparison.Ordinal))
             .Select(file => Path.GetRelativePath(root, file))
             .ToArray();
 
-        // ResolvedLineItem.Amount and CategorizedLineItem.Amount both carry forward the Money that
-        // QuotedAmount.TryResolve (Noof.Ledger.Domain) already verified against the raw text. The
-        // categorization pipeline must never mint a second one - that would be a figure reaching a
-        // line item without ever being checked against what the user actually typed.
-        offenders.Should().BeEmpty(
-            "a Money in the categorization pipeline must come from QuotedAmount.TryResolve, never be constructed fresh");
+        // One door, not a check: the model's reading of an amount becomes a Money in exactly one place,
+        // so a wrong figure has exactly one place to be traced to. The verbatim check that used to live
+        // here was removed on purpose (decision D1).
+        offenders.Should().BeEmpty("a Money built from a model answer must come from ProposalMapper");
+        File.ReadAllText(mapper).Should().Contain("new Money(",
+            "the one permitted site must exist, or an empty offender list proves nothing");
     }
 
     static bool ReferencesAnthropicSdk(string source) =>

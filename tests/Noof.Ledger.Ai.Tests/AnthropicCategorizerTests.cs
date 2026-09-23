@@ -25,7 +25,7 @@ public class AnthropicCategorizerTests
     }
 
     [Fact]
-    public async Task Returns_the_proposal_when_the_first_turn_answers_with_JSON_text()
+    public async Task Returns_the_proposal_when_the_first_turn_answers_the_record_spending_tool_call()
     {
         var (categorizer, handler) = Build();
         handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingJsonAnswer);
@@ -35,14 +35,14 @@ public class AnthropicCategorizerTests
 
         proposal.Items.Should().ContainSingle();
         proposal.Items[0].Description.Should().Be("Coffee");
-        proposal.Items[0].AmountQuote.Should().Be("3.50");
+        proposal.Items[0].Amount.Should().Be(3.50m);
         proposal.Items[0].CurrencyCode.Should().Be("EUR", "the JSON field is \"currency\", not \"currency_code\" — this is the mapping Locked Decision 5 exists for");
         proposal.Items[0].CategorySlug.Should().Be("food-drink");
-        handler.Requests.Should().ContainSingle("a direct JSON answer on the first turn must not trigger a follow-up call");
+        handler.Requests.Should().ContainSingle("a direct record_spending call on the first turn must not trigger a follow-up call");
     }
 
     [Fact]
-    public async Task Sends_json_schema_output_config_and_exactly_one_tool_on_the_first_call()
+    public async Task Sends_both_tools_strict_and_forced_with_no_output_config_on_the_first_call()
     {
         var (categorizer, handler) = Build();
         handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingJsonAnswer);
@@ -51,16 +51,22 @@ public class AnthropicCategorizerTests
         await categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
 
         var sent = JsonDocument.Parse(handler.Requests[0].Body).RootElement;
-        sent.GetProperty("output_config").GetProperty("format").GetProperty("type").GetString().Should().Be("json_schema");
-        var currencyEnum = sent.GetProperty("output_config").GetProperty("format").GetProperty("schema")
-            .GetProperty("properties").GetProperty("items").GetProperty("items").GetProperty("properties")
-            .GetProperty("currency").GetProperty("enum").EnumerateArray().Select(e => e.GetString());
-        currencyEnum.Should().BeEquivalentTo(["EUR", "RSD", "USD", "RUB", "KZT"]);
+        sent.TryGetProperty("output_config", out _).Should().BeFalse("this is a tool call, not a structured-output answer");
 
         var tools = sent.GetProperty("tools");
-        tools.GetArrayLength().Should().Be(1, "guarding against the RawRepresentationFactory trap: a tool must never appear twice");
-        tools[0].GetProperty("name").GetString().Should().Be("list_merchants");
-        sent.GetProperty("tool_choice").GetProperty("type").GetString().Should().Be("auto");
+        tools.GetArrayLength().Should().Be(2, "guarding against the RawRepresentationFactory trap: a tool must never appear twice");
+        var names = tools.EnumerateArray().Select(t => t.GetProperty("name").GetString());
+        names.Should().BeEquivalentTo(["list_merchants", "record_spending"]);
+        foreach (var tool in tools.EnumerateArray())
+            tool.GetProperty("strict").GetBoolean().Should().BeTrue($"{tool.GetProperty("name").GetString()} must be strict");
+
+        var recordSpending = tools.EnumerateArray().Single(t => t.GetProperty("name").GetString() == "record_spending");
+        var currencyEnum = recordSpending.GetProperty("input_schema")
+            .GetProperty("properties").GetProperty("items").GetProperty("items").GetProperty("properties")
+            .GetProperty("currency").GetProperty("enum").EnumerateArray().Select(e => e.GetString());
+        currencyEnum.Should().BeEquivalentTo(["EUR", "RSD", "USD", "RUB", "KZT", null]);
+
+        sent.GetProperty("tool_choice").GetProperty("type").GetString().Should().Be("any");
 
         sent.TryGetProperty("temperature", out _).Should().BeFalse("ChatOptions.Temperature must never be set");
     }
@@ -79,7 +85,7 @@ public class AnthropicCategorizerTests
     }
 
     [Fact]
-    public async Task Answers_list_merchants_then_sends_one_follow_up_that_offers_no_tools()
+    public async Task Answers_list_merchants_then_sends_one_follow_up_forced_onto_record_spending()
     {
         var (categorizer, handler) = Build();
         handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.ListMerchantsToolUse);
@@ -98,13 +104,54 @@ public class AnthropicCategorizerTests
         handler.Requests.Should().HaveCount(2, "the loop runs exactly once: one first call, one follow-up, never a third");
 
         var secondSent = JsonDocument.Parse(handler.Requests[1].Body).RootElement;
-        secondSent.TryGetProperty("tools", out _).Should().BeFalse(
-            "the follow-up call offers no tools at all, which is what structurally rules out a third list_merchants call");
+        var secondTools = secondSent.GetProperty("tools");
+        secondTools.GetArrayLength().Should().Be(1, "only record_spending is offered, which is what structurally rules out a third list_merchants call");
+        secondTools[0].GetProperty("name").GetString().Should().Be("record_spending");
+        secondSent.GetProperty("tool_choice").GetProperty("type").GetString().Should().Be("tool");
+        secondSent.GetProperty("tool_choice").GetProperty("name").GetString().Should().Be("record_spending");
 
         // The answer is the FULL directory. "Maxi" is deliberately absent from the hints, so a
         // regression that answers with request.MerchantHints instead of request.AllMerchants makes
         // this line fail - and nothing else in the suite would have noticed.
         handler.Requests[1].Body.Should().Contain("Maxi");
+    }
+
+    [Fact]
+    public async Task Maps_an_amount_read_from_words_and_a_merchant_name()
+    {
+        var (categorizer, handler) = Build();
+        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingFromWordsAnswer);
+        var request = new CategorizationRequest("купил штуку евро в Lidl", Categories, NoMerchantHints, NoMerchantHints);
+
+        var proposal = await categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
+
+        var item = proposal.Items.Should().ContainSingle().Subject;
+        item.Amount.Should().Be(1000m);
+        item.CurrencyCode.Should().Be("EUR");
+        item.MerchantName.Should().Be("Lidl");
+    }
+
+    [Theory]
+    [InlineData(1000, 1000)]
+    [InlineData(45.3, 45.3)]
+    [InlineData(0.1, 0.1)]
+    public async Task An_amount_in_the_response_round_trips_into_decimal_exactly(double raw, double expected)
+    {
+        // The schema declares amount as a JSON number (not a string), and the tool call's arguments
+        // are read as a JsonElement with no object converter, so System.Text.Json reads the decimal
+        // straight from the response's own token text - no double, no separator handling. 0.1 is the
+        // classic case a binary float cannot hold exactly; decimal must (operator, 2026-09-23).
+        var (categorizer, handler) = Build();
+        handler.Enqueue(HttpStatusCode.OK, $$$"""
+            {"id":"msg_07","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
+             "content":[{"type":"tool_use","id":"toolu_07","name":"record_spending","input":{"items":[{"description":"кофе","amount":{{{raw}}},"currency":null,"category_slug":"food-drink","merchant_name":null}]}}],
+             "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
+            """);
+        var request = new CategorizationRequest("кофе", Categories, NoMerchantHints, NoMerchantHints);
+
+        var proposal = await categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
+
+        proposal.Items.Should().ContainSingle().Which.Amount.Should().Be((decimal)expected);
     }
 
     [Fact]
@@ -241,7 +288,7 @@ public class AnthropicCategorizerTests
     }
 
     [Fact]
-    public async Task CanonicalizeMerchantAsync_sends_a_single_call_with_json_schema_output_and_returns_the_display_name()
+    public async Task CanonicalizeMerchantAsync_sends_a_single_forced_strict_tool_call_and_returns_the_display_name()
     {
         var (categorizer, handler) = Build();
         handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.CanonicalizeMerchantJsonAnswer);
@@ -252,8 +299,13 @@ public class AnthropicCategorizerTests
         displayName.Should().Be("Lidl");
         handler.Requests.Should().ContainSingle();
         var sent = JsonDocument.Parse(handler.Requests[0].Body).RootElement;
-        sent.GetProperty("output_config").GetProperty("format").GetProperty("type").GetString().Should().Be("json_schema");
-        sent.TryGetProperty("tools", out _).Should().BeFalse("canonicalisation never offers a tool - it is a plain structured-output call");
+        sent.TryGetProperty("output_config", out _).Should().BeFalse("this is a tool call, not a structured-output answer");
+        var tools = sent.GetProperty("tools");
+        tools.GetArrayLength().Should().Be(1);
+        tools[0].GetProperty("name").GetString().Should().Be("canonicalize_merchant");
+        tools[0].GetProperty("strict").GetBoolean().Should().BeTrue();
+        sent.GetProperty("tool_choice").GetProperty("type").GetString().Should().Be("tool");
+        sent.GetProperty("tool_choice").GetProperty("name").GetString().Should().Be("canonicalize_merchant");
     }
 
     sealed class StubSecretStore(SecretState state, string? value) : ISecretStore

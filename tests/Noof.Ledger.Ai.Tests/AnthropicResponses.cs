@@ -1,16 +1,14 @@
 namespace Noof.Ledger.Ai.Tests;
 
 // Real response shapes, kept in one place so every test reads from the same ground truth instead
-// of each hand-rolling its own JSON. Under the response-format approach, a successful answer is a
-// plain assistant message whose one text block is the schema-constrained JSON — there is no
-// "tool_use" block for record_spending or canonicalize_merchant, unlike list_merchants, which
-// remains a genuine tool call in Anthropic's native shape.
+// of each hand-rolling its own JSON. record_spending, canonicalize_merchant and list_merchants are
+// now all genuine "tool_use" blocks, forced by tool_choice (operator, 2026-09-23).
 public static class AnthropicResponses
 {
     public const string RecordSpendingJsonAnswer = """
         {"id":"msg_01","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
-         "content":[{"type":"text","text":"{\"items\":[{\"description\":\"Coffee\",\"amount_quote\":\"3.50\",\"currency\":\"EUR\",\"category_slug\":\"food-drink\"}]}"}],
-         "stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
+         "content":[{"type":"tool_use","id":"toolu_01","name":"record_spending","input":{"items":[{"description":"Coffee","amount":3.50,"currency":"EUR","category_slug":"food-drink","merchant_name":null}]}}],
+         "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
         """;
 
     public const string ListMerchantsToolUse = """
@@ -22,9 +20,15 @@ public static class AnthropicResponses
 
     public const string CanonicalizeMerchantJsonAnswer = """
         {"id":"msg_03","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
-         "content":[{"type":"text","text":"{\"display_name\":\"Lidl\"}"}],
-         "stop_reason":"end_turn","stop_sequence":null,
+         "content":[{"type":"tool_use","id":"toolu_03","name":"canonicalize_merchant","input":{"display_name":"Lidl"}}],
+         "stop_reason":"tool_use","stop_sequence":null,
          "usage":{"input_tokens":40,"output_tokens":8}}
+        """;
+
+    public const string RecordSpendingFromWordsAnswer = """
+        {"id":"msg_05","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
+         "content":[{"type":"tool_use","id":"toolu_05","name":"record_spending","input":{"items":[{"description":"продукты","amount":1000,"currency":"EUR","category_slug":"food-drink","merchant_name":"Lidl"}]}}],
+         "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
         """;
 
     public const string NoAnswerAtAll = """

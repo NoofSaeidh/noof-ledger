@@ -18,6 +18,10 @@ public readonly record struct CurrencyCode : IComparable<CurrencyCode>, ICompara
     public static readonly CurrencyCode Rub = new("RUB");
     public static readonly CurrencyCode Kzt = new("KZT");
 
+    // Declared after the five codes on purpose: static fields initialise in textual order, so a list
+    // declared above them would hold five default codes with a null Value.
+    public static readonly IReadOnlyList<CurrencyCode> Supported = [Eur, Rsd, Usd, Rub, Kzt];
+
     public int CompareTo(CurrencyCode other) => string.CompareOrdinal(Value, other.Value);
 
     int IComparable.CompareTo(object? obj) => obj switch

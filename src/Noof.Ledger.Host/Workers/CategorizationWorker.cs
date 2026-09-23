@@ -120,8 +120,8 @@ internal sealed class CategorizationWorker(
             // it influenced would fail verification.
             var offeredMerchantIds = allMerchants.Select(merchant => merchant.Id).ToHashSet();
 
-            if (!ProposalVerification.TryResolve(
-                sub.RawText, proposal, offeredSlugs, offeredMerchantIds, options.DefaultCurrency, out var resolvedItems, out var failure))
+            if (!ProposalMapper.TryMap(
+                proposal, offeredSlugs, offeredMerchantIds, options.DefaultCurrency, out var mapped, out var failure))
             {
                 await FailTerminallyAsync(jobQueue, store, notifier, job, subject, failure, cancellationToken);
                 return;
@@ -131,14 +131,14 @@ internal sealed class CategorizationWorker(
             var aliasByFolded = aliases.ToDictionary(alias => alias.Folded, alias => alias);
             var canonicalizations = 0;
 
-            var categorizedItems = new List<CategorizedLineItem>(resolvedItems.Count);
-            var replyLines = new List<CategorizationReply.ReplyLine>(resolvedItems.Count);
+            var categorizedItems = new List<CategorizedLineItem>(mapped.Items.Count);
+            var replyLines = new List<CategorizationReply.ReplyLine>(mapped.Items.Count);
 
-            foreach (var item in resolvedItems)
+            foreach (var item in mapped.Items)
             {
                 var merchantId = item.KnownMerchantId;
 
-                if (merchantId is null && item.MerchantText is { Length: > 0 } merchantText)
+                if (merchantId is null && item.MerchantName is { Length: > 0 } merchantText)
                 {
                     var folded = MerchantName.Fold(merchantText);
 
