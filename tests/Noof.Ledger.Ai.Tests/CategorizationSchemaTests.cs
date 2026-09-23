@@ -199,7 +199,7 @@ public class CategorizationSchemaTests
     [Fact]
     public void Schema_round_trips_through_JsonElement_deserialization_unchanged()
     {
-        // The schema is handed to RawSchemaFunctionDeclaration's JsonSchema as a JsonElement
+        // The schema is handed to SchemaTool's JsonSchema as a JsonElement
         // directly, not reassembled from a dictionary — this pins the property that call site
         // actually relies on.
         var schema = CategorizationSchema.BuildRecordSpending(Categories, OneHint);

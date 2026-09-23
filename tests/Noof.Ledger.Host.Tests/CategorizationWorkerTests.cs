@@ -7,7 +7,6 @@ using NSubstitute.ExceptionExtensions;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Jobs;
-using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Host.Workers;
 
@@ -21,7 +20,7 @@ public class CategorizationWorkerTests
     static readonly CategoryEntry Groceries = new(Guid.NewGuid(), "groceries", "Groceries", "Продукты", null);
 
     static IServiceScopeFactory ScopeFactoryFor(
-        IJobQueue jobQueue, ISecretStore secretStore, ICategorizationStore? store = null,
+        IJobQueue jobQueue, IModelProvider modelProvider, ICategorizationStore? store = null,
         ICategoryCatalog? categoryCatalog = null, IMerchantDirectory? merchantDirectory = null,
         ICategorizer? categorizer = null, IChatNotifier? notifier = null)
     {
@@ -40,7 +39,7 @@ public class CategorizationWorkerTests
 
         var provider = Substitute.For<IServiceProvider>();
         provider.GetService(typeof(IJobQueue)).Returns(jobQueue);
-        provider.GetService(typeof(ISecretStore)).Returns(secretStore);
+        provider.GetService(typeof(IModelProvider)).Returns(modelProvider);
         provider.GetService(typeof(ICategorizationStore)).Returns(resolvedStore);
         provider.GetService(typeof(ICategoryCatalog)).Returns(resolvedCategoryCatalog);
         provider.GetService(typeof(IMerchantDirectory)).Returns(resolvedMerchantDirectory);
@@ -69,20 +68,15 @@ public class CategorizationWorkerTests
         return directory;
     }
 
-    static ISecretStore KeyPresent()
-    {
-        var store = Substitute.For<ISecretStore>();
-        store.GetStatusAsync(SecretKeys.AnthropicApiKey, Arg.Any<CancellationToken>())
-            .Returns(new SecretStatus(SecretState.Present, DateTimeOffset.UtcNow));
-        return store;
-    }
+    static IModelProvider KeyPresent() => ModelProvider(configured: true);
 
-    static ISecretStore KeyMissing()
+    static IModelProvider KeyMissing() => ModelProvider(configured: false);
+
+    static IModelProvider ModelProvider(bool configured)
     {
-        var store = Substitute.For<ISecretStore>();
-        store.GetStatusAsync(SecretKeys.AnthropicApiKey, Arg.Any<CancellationToken>())
-            .Returns(new SecretStatus(SecretState.Missing, null));
-        return store;
+        var modelProvider = Substitute.For<IModelProvider>();
+        modelProvider.IsConfiguredAsync(Arg.Any<CancellationToken>()).Returns(configured);
+        return modelProvider;
     }
 
     static CategorizationJob Job(
@@ -330,7 +324,7 @@ public class CategorizationWorkerTests
     }
 
     [Fact]
-    public async Task Idle_when_the_Anthropic_key_is_not_present()
+    public async Task Idle_when_the_model_provider_is_not_configured()
     {
         var jobQueue = Substitute.For<IJobQueue>();
         var worker = CreateWorker(ScopeFactoryFor(jobQueue, KeyMissing()), new FakeTimeProvider(DateTimeOffset.UtcNow));
@@ -752,7 +746,7 @@ public class CategorizationWorkerTests
     public async Task A_transient_model_failure_is_retried_and_the_captured_transaction_survives_until_it_recovers()
     {
         // Stands in for "pull the network cable": ModelCallException(Transient, ...) is exactly
-        // what AnthropicCategorizer is contractually required to throw whether the cable is out
+        // what ICategorizer is contractually required to throw whether the cable is out
         // or the API is briefly unreachable - from the worker's point of view they are the same
         // "the call did not complete."
         var jobQueue = Substitute.For<IJobQueue>();

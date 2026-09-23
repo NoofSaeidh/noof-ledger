@@ -2,12 +2,15 @@ using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using AwesomeAssertions;
+using Noof.Ledger.Ai.Anthropic;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Secrets;
 
-namespace Noof.Ledger.Ai.Tests;
+namespace Noof.Ledger.Ai.Tests.Anthropic;
 
-public class AnthropicCategorizerTests
+// The provider-neutral categoriser end to end over the real Anthropic pipeline - factory,
+// translating client, the SDK's own adapter - asserted on the HTTP body the SDK actually sent.
+public class ChatCategorizerOverAnthropicTests
 {
     static readonly IReadOnlyList<CategoryOption> Categories =
         [new CategoryOption("food-drink", "Food & Drink", "Еда и напитки", null)];
@@ -19,15 +22,15 @@ public class AnthropicCategorizerTests
         string rawText, IReadOnlyList<MerchantOption>? hints = null, IReadOnlyList<MerchantOption>? all = null) =>
         new(rawText, Today, Categories, hints ?? NoMerchantHints, all ?? NoMerchantHints);
 
-    static (AnthropicCategorizer Categorizer, StubHttpMessageHandler Handler) Build(
-        SecretState state = SecretState.Present, string? key = "sk-ant-test-key-do-not-log-me")
+    static (ChatCategorizer Categorizer, StubHttpMessageHandler Handler) Build(
+        SecretState state = SecretState.Present, string? key = "sk-ant-test-key-do-not-log-me", int maxTokens = 2048)
     {
         var handler = new StubHttpMessageHandler();
         var httpClient = new HttpClient(handler);
         var secretStore = new StubSecretStore(state, key);
-        var options = new AnthropicOptions { Model = "claude-haiku-4-5-20251001", MaxTokens = 2048, Timeout = TimeSpan.FromSeconds(90) };
-        var clientFactory = new AnthropicClientFactory(secretStore, httpClient, options);
-        return (new AnthropicCategorizer(clientFactory, options), handler);
+        var options = new AnthropicOptions { Model = "claude-haiku-4-5-20251001", MaxTokens = maxTokens, Timeout = TimeSpan.FromSeconds(90) };
+        var clientFactory = new AnthropicChatClientFactory(secretStore, httpClient, options);
+        return (new ChatCategorizer(clientFactory), handler);
     }
 
     [Fact]
@@ -113,6 +116,8 @@ public class AnthropicCategorizerTests
         var secondTools = secondSent.GetProperty("tools");
         secondTools.GetArrayLength().Should().Be(1, "only record_spending is offered, which is what structurally rules out a third list_merchants call");
         secondTools[0].GetProperty("name").GetString().Should().Be("record_spending");
+        secondTools[0].GetProperty("strict").GetBoolean().Should().BeTrue(
+            "FunctionInvokingChatClient strips every tool from this last request and AnswerToolGuard puts record_spending back - it must come back strict");
         secondSent.GetProperty("tool_choice").GetProperty("type").GetString().Should().Be("tool");
         secondSent.GetProperty("tool_choice").GetProperty("name").GetString().Should().Be("record_spending");
 
@@ -334,18 +339,19 @@ public class AnthropicCategorizerTests
         sent.GetProperty("tool_choice").GetProperty("name").GetString().Should().Be("canonicalize_merchant");
     }
 
-    sealed class StubSecretStore(SecretState state, string? value) : ISecretStore
+    [Fact]
+    public async Task A_proposal_asks_for_the_configured_output_budget_and_a_canonicalisation_for_a_small_one()
     {
-        public Task<SecretResult> GetAsync(string key, CancellationToken cancellationToken) =>
-            Task.FromResult(new SecretResult(state, value));
+        // The budget is the provider's configuration now (AnthropicOptions.MaxTokens, applied as the
+        // adapter's default); the categoriser only overrides it where it wants less.
+        var (categorizer, handler) = Build(maxTokens: 3072);
+        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingJsonAnswer);
+        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.CanonicalizeMerchantJsonAnswer);
 
-        public Task<SecretStatus> GetStatusAsync(string key, CancellationToken cancellationToken) =>
-            throw new NotSupportedException("not exercised by this test double");
+        await categorizer.ProposeAsync(Request("Coffee 3.50 EUR"), TestContext.Current.CancellationToken);
+        await categorizer.CanonicalizeMerchantAsync("lidl", [], TestContext.Current.CancellationToken);
 
-        public Task SetAsync(string key, string plaintext, CancellationToken cancellationToken) =>
-            throw new NotSupportedException("not exercised by this test double");
-
-        public Task<bool> TrySetIfMissingAsync(string key, string plaintext, CancellationToken cancellationToken) =>
-            throw new NotSupportedException("not exercised by this test double");
+        JsonDocument.Parse(handler.Requests[0].Body).RootElement.GetProperty("max_tokens").GetInt32().Should().Be(3072);
+        JsonDocument.Parse(handler.Requests[1].Body).RootElement.GetProperty("max_tokens").GetInt32().Should().Be(256);
     }
 }

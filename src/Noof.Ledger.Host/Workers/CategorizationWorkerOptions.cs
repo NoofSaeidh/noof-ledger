@@ -2,7 +2,7 @@ namespace Noof.Ledger.Host.Workers;
 
 internal sealed class CategorizationWorkerOptions
 {
-    // Several multiples of AnthropicOptions.Timeout's 90 seconds (Task 3), plus room for the DB
+    // Several multiples of the model call's own 90-second timeout (Task 3), plus room for the DB
     // write and the Telegram edit, so a normal in-flight attempt never has its own lease reclaimed
     // out from under it by ReleaseExpiredLeasesAsync. Short enough that a genuinely crashed worker's
     // job is back in play within minutes rather than hours.

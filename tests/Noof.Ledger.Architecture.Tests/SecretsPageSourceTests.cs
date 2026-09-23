@@ -44,7 +44,7 @@ public class SecretsPageSourceTests
     [Fact]
     public void The_in_flight_testing_flag_is_cleared_in_a_finally_block()
     {
-        // AnthropicKeyProbe.ProbeAsync is exception-total and should never throw, but TestAsync
+        // The model provider's ProbeAsync is exception-total and should never throw, but TestAsync
         // must not depend on that alone: whatever the probe does, row.Testing must go back to
         // false, or a surprise from a future probe implementation leaves the button permanently
         // disabled until the page is reloaded.

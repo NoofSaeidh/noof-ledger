@@ -47,6 +47,7 @@ public class PublicSurfaceTests
             "CategorizationSubject", "RecordedLine", "CategorizationOutcome", "CategoryEntry", "MerchantAliasEntry", "ICategorizationStore",
             "ICategorizer", "ICategoryCatalog", "IMerchantDirectory", "MerchantScan",
             "ModelFailureKind", "ModelCallException", "ModelCallExceptionExtensions",
+            "IModelProvider",
             "ProposalMapper", "MappedProposal", "IChatNotifier", "IJobQueue", "JobCompletionOutcome",
             "RecentLineItem", "RecentTransaction", "MonthTotal", "MonthSummary",
             "ISpendingReadModel", "ProbeResult", "ISecretProbe", "ISecretStore", "SecretKeys",
