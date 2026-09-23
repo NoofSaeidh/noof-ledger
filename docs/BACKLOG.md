@@ -677,3 +677,40 @@ labels).
 `RecordActionButtons.cs`, and a language setting for the operator to choose from — stored, not
 configuration, the same shape as the currency default above. `Category.NameRu` already exists in the
 schema and is unused by the bot today, so the category half of this is data that is already there.
+
+## Vocabulary hints for the transcriber
+
+**Wanted.** Fewer misheard merchant names in a voice transcript.
+
+**Why it is not scheduled.** Groq takes a `prompt` of up to 224 tokens. Merchant names from the
+directory would help it spell *Maxi*, *Lidl* and *Wolt*. That sends a slice of the shopping profile to
+Groq, the same trade as Q7 (`docs/OPEN-QUESTIONS.md`). It belongs to Phase 11 calibration, once there
+is a real-voice corpus to judge it against.
+
+## Keeping the audio
+
+**Wanted.** A re-transcription corpus, to compare providers or Whisper versions on real voice notes
+later.
+
+**Why it is not scheduled.** Nothing stores the voice note itself. The `file_id` can fetch it again
+while Telegram keeps it, which is enough for the current pipeline. A re-transcription corpus for Phase
+11 would need the bytes in the database, which would then be in every backup. That is a privacy
+decision for the operator, not a default to reach for.
+
+## Whisper's inventions on silence
+
+**Wanted.** Fewer fabricated transcripts from near-silent or noisy voice notes.
+
+**Why it is not scheduled.** A near-silent note can come back as *«Продолжение следует…»* or
+*«Субтитры сделал…»* — Whisper's own hallucination on low-signal audio. It is recorded as whatever the
+model makes of it, and the `🎤 "…"` line shows it as-is. P2-1 forbids a filter on what the transcript
+says. If it happens often in practice, the answer is a decision (for example, Groq's `verbose_json`
+`no_speech_prob`), not a quiet guard added later.
+
+## A second speech provider
+
+**Wanted.** A fallback when Groq is unavailable or its terms change.
+
+**Why it is not scheduled.** Groq publishes no SLA, which is a known trade-off from P3-1, accepted for
+now. `ISpeechToTextClientFactory` (V2) is the seam a fallback would use, and nothing uses one yet — no
+demonstrated need.
