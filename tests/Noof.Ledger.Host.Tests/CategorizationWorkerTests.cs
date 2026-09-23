@@ -115,7 +115,7 @@ public class CategorizationWorkerTests
     static IJobQueue QueueWith(CategorizationJob job)
     {
         var jobQueue = Substitute.For<IJobQueue>();
-        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(job);
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(job);
         jobQueue.SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>()).Returns(JobCompletionOutcome.Applied);
         jobQueue.FailAsync(JobId, WorkerId, Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(JobCompletionOutcome.Applied);
         jobQueue.RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
@@ -348,7 +348,7 @@ public class CategorizationWorkerTests
 
         // ClaimAsync is the only IJobQueue member that increments attempt_count (see EfJobQueue). Proving
         // it was never called is proof the count is unchanged, without needing a real database here.
-        await jobQueue.DidNotReceive().ClaimAsync(Arg.Any<string>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
+        await jobQueue.DidNotReceive().ClaimAsync(Arg.Any<string>(), Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -366,7 +366,7 @@ public class CategorizationWorkerTests
     public async Task Idle_when_nothing_is_pending_to_claim()
     {
         var jobQueue = Substitute.For<IJobQueue>();
-        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns((CategorizationJob?)null);
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns((CategorizationJob?)null);
         var worker = CreateWorker(ScopeFactoryFor(jobQueue, KeyPresent()), new FakeTimeProvider(DateTimeOffset.UtcNow));
 
         var result = await worker.RunTickAsync(TestContext.Current.CancellationToken);
@@ -378,7 +378,7 @@ public class CategorizationWorkerTests
     public async Task A_terminal_model_failure_calls_FailAsync_not_RetryAsync()
     {
         var jobQueue = Substitute.For<IJobQueue>();
-        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
         jobQueue.FailAsync(JobId, WorkerId, Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(JobCompletionOutcome.Applied);
         var store = Substitute.For<ICategorizationStore>();
         store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
@@ -401,7 +401,7 @@ public class CategorizationWorkerTests
         var now = DateTimeOffset.UtcNow;
         var time = new FakeTimeProvider(now);
         var jobQueue = Substitute.For<IJobQueue>();
-        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job(attemptCount: 1));
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job(attemptCount: 1));
         jobQueue.RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(JobCompletionOutcome.Applied);
         var store = Substitute.For<ICategorizationStore>();
@@ -421,7 +421,7 @@ public class CategorizationWorkerTests
     public async Task An_answer_that_does_not_map_is_terminal_and_never_retried()
     {
         var jobQueue = Substitute.For<IJobQueue>();
-        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
         jobQueue.FailAsync(JobId, WorkerId, Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(JobCompletionOutcome.Applied);
         var store = Substitute.For<ICategorizationStore>();
         store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
@@ -448,7 +448,7 @@ public class CategorizationWorkerTests
         // the job with zero line items, not be forced to invent one and not be treated as a
         // failure either - both would misrepresent what actually happened.
         var jobQueue = Substitute.For<IJobQueue>();
-        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
         jobQueue.SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>()).Returns(JobCompletionOutcome.Applied);
         var store = StoreThatRemembersWhatItApplies(Subject(rawText: "заняла у Маши 5000 рсд"));
         var categorizer = Substitute.For<ICategorizer>();
@@ -479,7 +479,7 @@ public class CategorizationWorkerTests
     public async Task NotOwned_from_SucceedAsync_does_not_trigger_a_fallback_retry_or_fail()
     {
         var jobQueue = Substitute.For<IJobQueue>();
-        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
         jobQueue.SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>()).Returns(JobCompletionOutcome.NotOwned);
         var store = Substitute.For<ICategorizationStore>();
         store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
@@ -504,7 +504,7 @@ public class CategorizationWorkerTests
     public async Task NotOwned_from_RetryAsync_does_not_mark_the_transaction_failed_or_edit_telegram()
     {
         var jobQueue = Substitute.For<IJobQueue>();
-        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job(attemptCount: 8));
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job(attemptCount: 8));
         jobQueue.RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(JobCompletionOutcome.NotOwned);
         var store = Substitute.For<ICategorizationStore>();
@@ -527,7 +527,7 @@ public class CategorizationWorkerTests
     public async Task NotOwned_from_FailAsync_does_not_mark_the_transaction_failed_or_edit_telegram()
     {
         var jobQueue = Substitute.For<IJobQueue>();
-        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
         jobQueue.FailAsync(JobId, WorkerId, Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(JobCompletionOutcome.NotOwned);
         var store = Substitute.For<ICategorizationStore>();
         store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
@@ -561,7 +561,7 @@ public class CategorizationWorkerTests
         var now = DateTimeOffset.UtcNow;
         var time = new FakeTimeProvider(now);
         var jobQueue = Substitute.For<IJobQueue>();
-        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job(attemptCount: 3));
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job(attemptCount: 3));
         jobQueue.RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(JobCompletionOutcome.Applied);
         var store = Substitute.For<ICategorizationStore>();
@@ -577,7 +577,7 @@ public class CategorizationWorkerTests
     public async Task A_Telegram_edit_failure_still_succeeds_the_job()
     {
         var jobQueue = Substitute.For<IJobQueue>();
-        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
         jobQueue.SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>()).Returns(JobCompletionOutcome.Applied);
         var store = Substitute.For<ICategorizationStore>();
         store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
@@ -600,7 +600,7 @@ public class CategorizationWorkerTests
     public async Task A_null_BotMessageId_skips_the_edit_but_still_succeeds_the_job()
     {
         var jobQueue = Substitute.For<IJobQueue>();
-        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
         jobQueue.SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>()).Returns(JobCompletionOutcome.Applied);
         var store = Substitute.For<ICategorizationStore>();
         store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject(botMessageId: null));
@@ -622,7 +622,7 @@ public class CategorizationWorkerTests
     {
         var merchantId = Guid.NewGuid();
         var jobQueue = Substitute.For<IJobQueue>();
-        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
         jobQueue.SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>()).Returns(JobCompletionOutcome.Applied);
         var store = Substitute.For<ICategorizationStore>();
         store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
@@ -653,7 +653,7 @@ public class CategorizationWorkerTests
     {
         var linkedId = Guid.NewGuid();
         var jobQueue = Substitute.For<IJobQueue>();
-        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
         jobQueue.SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>()).Returns(JobCompletionOutcome.Applied);
         var store = Substitute.For<ICategorizationStore>();
         store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
@@ -686,7 +686,7 @@ public class CategorizationWorkerTests
     public async Task A_missing_subject_fails_the_job_without_ever_calling_ApplyAsync()
     {
         var jobQueue = Substitute.For<IJobQueue>();
-        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
         jobQueue.FailAsync(JobId, WorkerId, Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(JobCompletionOutcome.Applied);
         var store = Substitute.For<ICategorizationStore>();
         store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns((CategorizationSubject?)null);
@@ -704,7 +704,7 @@ public class CategorizationWorkerTests
     public async Task Last_attempt_exhausted_by_a_transient_failure_marks_the_transaction_failed_and_notifies()
     {
         var jobQueue = Substitute.For<IJobQueue>();
-        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job(attemptCount: 8));
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job(attemptCount: 8));
         jobQueue.RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(JobCompletionOutcome.Applied);
         var store = Substitute.For<ICategorizationStore>();
@@ -727,7 +727,7 @@ public class CategorizationWorkerTests
     public async Task A_retry_with_attempts_remaining_does_not_notify_or_mark_the_transaction_failed()
     {
         var jobQueue = Substitute.For<IJobQueue>();
-        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job(attemptCount: 1));
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job(attemptCount: 1));
         jobQueue.RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(JobCompletionOutcome.Applied);
         var store = Substitute.For<ICategorizationStore>();
@@ -754,7 +754,7 @@ public class CategorizationWorkerTests
         // or the API is briefly unreachable - from the worker's point of view they are the same
         // "the call did not complete."
         var jobQueue = Substitute.For<IJobQueue>();
-        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job(attemptCount: 1));
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job(attemptCount: 1));
         jobQueue.RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(JobCompletionOutcome.Applied);
         jobQueue.SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>()).Returns(JobCompletionOutcome.Applied);
@@ -809,7 +809,7 @@ public class CategorizationWorkerTests
         // transaction back to Failed while its line items stayed in the table. The dashboard would
         // then say nothing was recorded for that message while the month totals still counted it.
         var jobQueue = Substitute.For<IJobQueue>();
-        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job(attemptCount: 8));
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job(attemptCount: 8));
         jobQueue.SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>())
             .ThrowsAsync(new InvalidOperationException("db blip right after commit"));
         jobQueue.RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
@@ -841,7 +841,7 @@ public class CategorizationWorkerTests
         // not of this job's request - one occurrence must not permanently fail the job it happened
         // to land on.
         var jobQueue = Substitute.For<IJobQueue>();
-        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job(attemptCount: 1));
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job(attemptCount: 1));
         jobQueue.RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(JobCompletionOutcome.Applied);
         var store = Substitute.For<ICategorizationStore>();
@@ -865,7 +865,7 @@ public class CategorizationWorkerTests
     {
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var jobQueue = Substitute.For<IJobQueue>();
-        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job(attemptCount: 1));
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job(attemptCount: 1));
         jobQueue.RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(JobCompletionOutcome.Applied);
         var store = Substitute.For<ICategorizationStore>();
@@ -883,7 +883,7 @@ public class CategorizationWorkerTests
         var secondTickResult = await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
         secondTickResult.Should().Be(CategorizationTickResult.Idle);
-        await jobQueue.DidNotReceive().ClaimAsync(Arg.Any<string>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
+        await jobQueue.DidNotReceive().ClaimAsync(Arg.Any<string>(), Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
         await jobQueue.Received(1).ReleaseExpiredLeasesAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
     }
 
@@ -892,7 +892,7 @@ public class CategorizationWorkerTests
     {
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var jobQueue = Substitute.For<IJobQueue>();
-        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job(attemptCount: 1));
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job(attemptCount: 1));
         jobQueue.RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(JobCompletionOutcome.Applied);
         var store = Substitute.For<ICategorizationStore>();
@@ -906,11 +906,11 @@ public class CategorizationWorkerTests
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
         time.Advance(TimeSpan.FromMinutes(1) + TimeSpan.FromSeconds(1));
         jobQueue.ClearReceivedCalls();
-        jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns((CategorizationJob?)null);
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns((CategorizationJob?)null);
 
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
-        await jobQueue.Received(1).ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
+        await jobQueue.Received(1).ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -966,6 +966,24 @@ public class CategorizationWorkerTests
         var second = CategorizationWorker.CreateWorkerId();
 
         first.Should().NotBe(second);
+    }
+
+    [Fact]
+    public async Task Claims_every_kind_but_transcription()
+    {
+        var jobQueue = QueueWith(Job());
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
+        var worker = CreateWorker(ScopeFactoryFor(jobQueue, KeyPresent(), store), new FakeTimeProvider());
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await jobQueue.Received(1).ClaimAsync(
+            WorkerId,
+            Arg.Is<IReadOnlyCollection<JobKind>>(kinds =>
+                kinds.Order().SequenceEqual(new[] { JobKind.Categorize, JobKind.Correct, JobKind.Reinterpret })),
+            Arg.Any<TimeSpan>(),
+            Arg.Any<CancellationToken>());
     }
 
     sealed class ThrowingScopeFactory : IServiceScopeFactory
