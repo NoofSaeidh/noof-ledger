@@ -137,7 +137,7 @@ public class EfMerchantDirectoryTests(PostgresFixture fixture)
     [Fact]
     public async Task LinkAliasAsync_a_new_spelling_of_a_known_merchants_display_name_attaches_to_the_existing_merchant()
     {
-        // The AnthropicCategorizer prompt tells the model to answer canonicalization with "THAT
+        // The ChatCategorizer prompt tells the model to answer canonicalization with "THAT
         // existing display name exactly" when it recognises the merchant under a new spelling
         // (e.g. "МАКСИ" for a merchant already known as "MAXI"). The folded alias key differs, so
         // the race-loser path in LinkAliasAsync never fires - reusing the merchant has to be a

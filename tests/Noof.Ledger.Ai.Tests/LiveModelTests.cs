@@ -1,4 +1,5 @@
 ﻿using AwesomeAssertions;
+using Noof.Ledger.Ai.Anthropic;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Secrets;
 
@@ -21,14 +22,13 @@ public sealed class LiveModelTests
 
     static readonly IReadOnlyList<string> OfferedSlugs = [.. OfferedCategories.Select(c => c.Slug)];
 
-    // Both the categoriser and the probe take IAnthropicClientFactory (Task 3), never a raw client:
+    // Both the categoriser and the probe go through AnthropicChatClientFactory, never a raw client:
     // the factory is what reads the key through ISecretStore and applies MaxRetries = 0. Building a
     // client here instead would test a client configured differently from the one that actually runs.
-    static AnthropicClientFactory CreateFactory(string apiKey) =>
+    static AnthropicChatClientFactory CreateFactory(string apiKey) =>
         new(new FixedSecretStore(apiKey), new HttpClient(), new AnthropicOptions());
 
-    static AnthropicCategorizer CreateCategorizer(string apiKey) =>
-        new(CreateFactory(apiKey), new AnthropicOptions());
+    static ChatCategorizer CreateCategorizer(string apiKey) => new(CreateFactory(apiKey));
 
     static CategorizationRequest Request(string rawText) =>
         new(rawText, DateOnly.FromDateTime(DateTime.Today), OfferedCategories, [], []);
@@ -168,7 +168,7 @@ public sealed class LiveModelTests
         if (!LiveModelGate.TryGetApiKey(out var apiKey))
             Assert.Skip(LiveModelGate.SkipMessage);
 
-        var probe = new AnthropicKeyProbe(CreateFactory(apiKey));
+        var probe = CreateFactory(apiKey);
 
         var result = await probe.ProbeAsync(TestContext.Current.CancellationToken);
 
@@ -184,7 +184,7 @@ public sealed class LiveModelTests
         // Deliberately does not use the real key from the environment - this exercises the
         // rejection path. GET /v1/models costs no tokens whether the key is valid or not, so this
         // carries no cost risk beyond one extra network round trip.
-        var probe = new AnthropicKeyProbe(CreateFactory("sk-ant-obviously-invalid-0000000000000000000000000000"));
+        var probe = CreateFactory("sk-ant-obviously-invalid-0000000000000000000000000000");
 
         var result = await probe.ProbeAsync(TestContext.Current.CancellationToken);
 

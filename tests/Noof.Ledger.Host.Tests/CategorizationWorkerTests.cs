@@ -752,7 +752,7 @@ public class CategorizationWorkerTests
     public async Task A_transient_model_failure_is_retried_and_the_captured_transaction_survives_until_it_recovers()
     {
         // Stands in for "pull the network cable": ModelCallException(Transient, ...) is exactly
-        // what AnthropicCategorizer is contractually required to throw whether the cable is out
+        // what ICategorizer is contractually required to throw whether the cable is out
         // or the API is briefly unreachable - from the worker's point of view they are the same
         // "the call did not complete."
         var jobQueue = Substitute.For<IJobQueue>();

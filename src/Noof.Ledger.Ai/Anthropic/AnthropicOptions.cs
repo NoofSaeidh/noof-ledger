@@ -1,4 +1,4 @@
-namespace Noof.Ledger.Ai;
+namespace Noof.Ledger.Ai.Anthropic;
 
 internal sealed class AnthropicOptions
 {
