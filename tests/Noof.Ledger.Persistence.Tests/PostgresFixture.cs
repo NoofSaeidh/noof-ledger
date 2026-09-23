@@ -27,7 +27,7 @@ public sealed class PostgresFixture : IAsyncLifetime
 
         created.Add(name);
 
-        return DatabaseSettings.For(name);
+        return WithoutPooling(DatabaseSettings.For(name));
     }
 
     internal async Task<LedgerDbContext> CreateContextAsync()
@@ -54,10 +54,24 @@ public sealed class PostgresFixture : IAsyncLifetime
 
         created.Add(name);
 
-        var connection = new NpgsqlConnection(DatabaseSettings.For(name));
+        var connection = new NpgsqlConnection(WithoutPooling(DatabaseSettings.For(name)));
         await connection.OpenAsync(TestContext.Current.CancellationToken);
         return connection;
     }
+
+    // Each of these connection strings names a database that exists for exactly one test, so
+    // Npgsql's pool buys nothing - there is no second connection to reuse it. What it costs is
+    // real: the physical connection Dispose() would normally return to that pool instead sits
+    // open, keyed by a connection string nothing else will ever reuse, until DisposeAsync below
+    // clears every pool at the very end of the whole "postgres" collection. With this collection
+    // now creating a database per test, that is dozens of idle server connections stacking up for
+    // the run's entire duration - confirmed via pg_stat_activity, which showed the count rising
+    // in lockstep with distinct noof_test_* databases until Postgres's max_connections (100) was
+    // exhausted and CREATE/OPEN calls started failing with 53300. Disabling pooling here makes
+    // Dispose() close the socket immediately, so the connection count depends on what is running
+    // concurrently, not on how many tests have run since the collection started.
+    static string WithoutPooling(string connectionString) =>
+        new NpgsqlConnectionStringBuilder(connectionString) { Pooling = false }.ConnectionString;
 
     public async ValueTask DisposeAsync()
     {
