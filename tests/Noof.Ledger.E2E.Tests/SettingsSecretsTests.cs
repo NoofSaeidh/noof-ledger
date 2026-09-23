@@ -7,6 +7,11 @@ namespace Noof.Ledger.E2E.Tests;
 
 public sealed class SettingsSecretsTests(CookieModeHostFixture fixture) : PageTest, IClassFixture<CookieModeHostFixture>
 {
+    // The model provider's secret as the page renders it into element ids. The constant left
+    // Application for the provider's own folder (operator decision D-A, 2026-09-23); the value
+    // cannot change - the operator's real key is stored under it - so every selector is as before.
+    const string AnthropicApiKey = "anthropic-api-key";
+
     [Fact]
     public async Task Anonymous_visitor_is_redirected_and_a_signed_in_visitor_saves_through_the_circuit()
     {
@@ -24,19 +29,19 @@ public sealed class SettingsSecretsTests(CookieModeHostFixture fixture) : PageTe
         await Page.GotoAsync(fixture.BaseUrl + "/settings/secrets");
         await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
-        // No "Not set" precondition here: SecretKeys.AnthropicApiKey is also saved by
+        // No "Not set" precondition here: AnthropicApiKey is also saved by
         // Testing_an_invalid_Anthropic_key_reports_failure_without_echoing_it in this same class,
         // and IClassFixture<CookieModeHostFixture> means every test here shares one database, so
         // whichever of the two runs first leaves the key already "Set" for the other. The fresh-state
         // assertion lives in SettingsSecretsFreshStateTests instead, which gets its own fixture
         // instance and therefore its own, guaranteed-empty database.
-        var status = Page.Locator($"#status-{SecretKeys.AnthropicApiKey}");
+        var status = Page.Locator($"#status-{AnthropicApiKey}");
 
         var value = $"sk-e2e-{Guid.NewGuid():N}";
         await RetryUntilAsync(async () =>
         {
-            await Page.Locator($"#secret-{SecretKeys.AnthropicApiKey}").FillAsync(value);
-            await Page.Locator($"#save-{SecretKeys.AnthropicApiKey}").ClickAsync();
+            await Page.Locator($"#secret-{AnthropicApiKey}").FillAsync(value);
+            await Page.Locator($"#save-{AnthropicApiKey}").ClickAsync();
             await Expect(status).ToContainTextAsync("Set", new() { Timeout = 2_000 });
         });
     }
@@ -130,17 +135,17 @@ public sealed class SettingsSecretsTests(CookieModeHostFixture fixture) : PageTe
         await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
         var fakeKey = $"sk-ant-invalid-{Guid.NewGuid():N}";
-        var status = Page.Locator($"#status-{SecretKeys.AnthropicApiKey}");
+        var status = Page.Locator($"#status-{AnthropicApiKey}");
 
         await RetryUntilAsync(async () =>
         {
-            await Page.Locator($"#secret-{SecretKeys.AnthropicApiKey}").FillAsync(fakeKey);
-            await Page.Locator($"#save-{SecretKeys.AnthropicApiKey}").ClickAsync();
+            await Page.Locator($"#secret-{AnthropicApiKey}").FillAsync(fakeKey);
+            await Page.Locator($"#save-{AnthropicApiKey}").ClickAsync();
             await Expect(status).ToContainTextAsync("Set", new() { Timeout = 2_000 });
         });
 
-        var result = Page.Locator($"#test-result-{SecretKeys.AnthropicApiKey}");
-        await Page.Locator($"#test-{SecretKeys.AnthropicApiKey}").ClickAsync();
+        var result = Page.Locator($"#test-result-{AnthropicApiKey}");
+        await Page.Locator($"#test-{AnthropicApiKey}").ClickAsync();
         await Expect(result).ToBeVisibleAsync(new() { Timeout = 15_000 });
 
         var message = await result.TextContentAsync() ?? string.Empty;

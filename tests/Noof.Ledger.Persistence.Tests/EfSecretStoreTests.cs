@@ -10,6 +10,9 @@ namespace Noof.Ledger.Persistence.Tests;
 [Collection("postgres")]
 public class EfSecretStoreTests(PostgresFixture fixture) : IDisposable
 {
+    // Any key: the store is key-agnostic, and none of these tests is about a particular secret.
+    const string ApiKey = "some-api-key";
+
     readonly DirectoryInfo keyRing = Directory.CreateTempSubdirectory("noof-secret-test-");
 
     public void Dispose() => keyRing.Delete(recursive: true);
@@ -36,8 +39,8 @@ public class EfSecretStoreTests(PostgresFixture fixture) : IDisposable
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
         var store = CreateStore(db);
 
-        await store.SetAsync(SecretKeys.AnthropicApiKey, "sk-ant-secret", TestContext.Current.CancellationToken);
-        var result = await store.GetAsync(SecretKeys.AnthropicApiKey, TestContext.Current.CancellationToken);
+        await store.SetAsync(ApiKey, "sk-ant-secret", TestContext.Current.CancellationToken);
+        var result = await store.GetAsync(ApiKey, TestContext.Current.CancellationToken);
 
         result.Should().Be(new SecretResult(SecretState.Present, "sk-ant-secret"));
     }
@@ -53,10 +56,10 @@ public class EfSecretStoreTests(PostgresFixture fixture) : IDisposable
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
         var store = CreateStore(db);
 
-        await store.SetAsync(SecretKeys.AnthropicApiKey, "first-value", TestContext.Current.CancellationToken);
-        await store.SetAsync(SecretKeys.AnthropicApiKey, "second-value", TestContext.Current.CancellationToken);
+        await store.SetAsync(ApiKey, "first-value", TestContext.Current.CancellationToken);
+        await store.SetAsync(ApiKey, "second-value", TestContext.Current.CancellationToken);
 
-        var result = await store.GetAsync(SecretKeys.AnthropicApiKey, TestContext.Current.CancellationToken);
+        var result = await store.GetAsync(ApiKey, TestContext.Current.CancellationToken);
         result.Should().Be(new SecretResult(SecretState.Present, "second-value"));
 
         var rowCount = await db.Secrets.CountAsync(TestContext.Current.CancellationToken);
@@ -71,9 +74,9 @@ public class EfSecretStoreTests(PostgresFixture fixture) : IDisposable
         var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
         var store = CreateStore(db, clock);
 
-        await store.SetAsync(SecretKeys.AnthropicApiKey, "first", TestContext.Current.CancellationToken);
+        await store.SetAsync(ApiKey, "first", TestContext.Current.CancellationToken);
         clock.Advance(TimeSpan.FromHours(1));
-        await store.SetAsync(SecretKeys.AnthropicApiKey, "second", TestContext.Current.CancellationToken);
+        await store.SetAsync(ApiKey, "second", TestContext.Current.CancellationToken);
 
         var row = await db.Secrets.SingleAsync(TestContext.Current.CancellationToken);
         row.UpdatedAt.Should().Be(DateTimeOffset.Parse("2026-01-01T01:00:00Z"),
@@ -119,9 +122,9 @@ public class EfSecretStoreTests(PostgresFixture fixture) : IDisposable
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
         var store = CreateStore(db, clock);
 
-        await store.SetAsync(SecretKeys.AnthropicApiKey, "sk-whatever", TestContext.Current.CancellationToken);
+        await store.SetAsync(ApiKey, "sk-whatever", TestContext.Current.CancellationToken);
 
-        var status = await store.GetStatusAsync(SecretKeys.AnthropicApiKey, TestContext.Current.CancellationToken);
+        var status = await store.GetStatusAsync(ApiKey, TestContext.Current.CancellationToken);
 
         status.State.Should().Be(SecretState.Present);
         status.UpdatedAt.Should().Be(clock.GetUtcNow());

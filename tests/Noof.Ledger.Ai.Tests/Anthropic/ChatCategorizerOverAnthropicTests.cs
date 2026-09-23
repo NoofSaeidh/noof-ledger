@@ -116,6 +116,8 @@ public class ChatCategorizerOverAnthropicTests
         var secondTools = secondSent.GetProperty("tools");
         secondTools.GetArrayLength().Should().Be(1, "only record_spending is offered, which is what structurally rules out a third list_merchants call");
         secondTools[0].GetProperty("name").GetString().Should().Be("record_spending");
+        secondTools[0].GetProperty("strict").GetBoolean().Should().BeTrue(
+            "FunctionInvokingChatClient strips every tool from this last request and AnswerToolGuard puts record_spending back - it must come back strict");
         secondSent.GetProperty("tool_choice").GetProperty("type").GetString().Should().Be("tool");
         secondSent.GetProperty("tool_choice").GetProperty("name").GetString().Should().Be("record_spending");
 

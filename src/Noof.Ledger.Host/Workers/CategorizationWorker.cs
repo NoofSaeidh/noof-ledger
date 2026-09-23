@@ -1,7 +1,6 @@
 ﻿using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Jobs;
-using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Host.Workers;
@@ -40,7 +39,7 @@ internal sealed class CategorizationWorker(
         {
             using var scope = scopeFactory.CreateScope();
             var jobQueue = scope.ServiceProvider.GetRequiredService<IJobQueue>();
-            var secretStore = scope.ServiceProvider.GetRequiredService<ISecretStore>();
+            var modelProvider = scope.ServiceProvider.GetRequiredService<IModelProvider>();
 
             var now = timeProvider.GetUtcNow();
             await jobQueue.ReleaseExpiredLeasesAsync(now, cancellationToken);
@@ -50,8 +49,7 @@ internal sealed class CategorizationWorker(
             // no verb undoes only that increment - claiming first and releasing on a missing key would
             // burn one of eight attempts on every tick until the operator pastes a key, and every job
             // captured before then would be permanently Failed within minutes.
-            var keyStatus = await secretStore.GetStatusAsync(SecretKeys.AnthropicApiKey, cancellationToken);
-            if (keyStatus.State is not SecretState.Present)
+            if (!await modelProvider.IsConfiguredAsync(cancellationToken))
                 return CategorizationTickResult.Idle;
 
             // Same reasoning, same placement, as the key-presence check above: checked before
@@ -211,7 +209,7 @@ internal sealed class CategorizationWorker(
             // so the rest of the backlog is not burned through while the key stays bad.
             accountCooldownUntil = timeProvider.GetUtcNow() + options.AccountCooldown;
             logger.LogWarning(
-                "Account-level Anthropic failure on job {JobId} ({Message}); pausing new claims for {Cooldown}",
+                "Account-level model provider failure on job {JobId} ({Message}); pausing new claims for {Cooldown}",
                 job.Id, ex.Message, options.AccountCooldown);
             await HandleModelFailureAsync(jobQueue, store, notifier, job, subject, ModelFailureKind.Transient, ex.Message, cancellationToken);
         }
