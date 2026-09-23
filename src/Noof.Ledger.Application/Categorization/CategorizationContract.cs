@@ -67,7 +67,7 @@ public sealed record CategorizationSubject(
     DateOnly OccurredOn,
     IReadOnlyList<RecordedLine> Lines);
 
-// CategoryName is the Russian name: the bot speaks Russian.
+// CategoryName is Category.NameEn: the bot speaks English for now (D-D).
 public sealed record RecordedLine(
     string Description,
     Money Amount,

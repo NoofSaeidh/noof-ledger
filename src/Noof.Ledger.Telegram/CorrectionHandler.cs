@@ -8,7 +8,7 @@ internal sealed class CorrectionHandler(IRecordEditor editor, IChatNotifier chat
 {
     readonly EchoMessage correcting = new(recordEcho.Correcting, []);
 
-    // A reply to anything other than a record's echo or its Изменить prompt is not a correction: returning
+    // A reply to anything other than a record's echo or its Edit prompt is not a correction: returning
     // false lets the router capture it as a new message.
     public async Task<bool> TryHandleReplyAsync(Message reply, Message repliedTo, string instruction, CancellationToken cancellationToken)
     {

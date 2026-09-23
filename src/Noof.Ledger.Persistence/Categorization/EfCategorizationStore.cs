@@ -37,7 +37,7 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
                 li.Description,
                 li.Amount,
                 c == null ? null : c.Slug,
-                c == null ? null : c.NameRu,
+                c == null ? null : c.NameEn,
                 m == null ? null : m.DisplayName))
             .ToListAsync(cancellationToken);
 
@@ -90,7 +90,7 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
 
         var transaction = await db.Transactions.SingleAsync(t => t.Id == transactionId, cancellationToken);
         var statusBefore = transaction.Status;
-        // A correction arriving for a cancelled record corrects it and leaves it cancelled; only Вернуть
+        // A correction arriving for a cancelled record corrects it and leaves it cancelled; only Restore
         // brings it back.
         transaction.Status = statusBefore == TransactionStatus.Cancelled ? TransactionStatus.Cancelled : TransactionStatus.Completed;
         transaction.OccurredOn = outcome.OccurredOn;

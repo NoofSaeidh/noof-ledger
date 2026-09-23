@@ -198,7 +198,7 @@ public class CategorizationWorkerTests
         await store.DidNotReceive().ApplyAsync(Arg.Any<Guid>(), Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
     }
 
-    static readonly RecordedLine StoredBread = new("Bread", new Money(250m, CurrencyCode.Rsd), "groceries", "Продукты", null);
+    static readonly RecordedLine StoredBread = new("Bread", new Money(250m, CurrencyCode.Rsd), "groceries", "Groceries", null);
 
     [Fact]
     public async Task A_correction_hands_the_model_the_current_record_and_the_instruction()
@@ -308,7 +308,7 @@ public class CategorizationWorkerTests
 
         await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
         await notifier.Received(1).EditAsync(111L, 42,
-            Arg.Is<EchoMessage>(echo => echo.Text.StartsWith("Не получилось применить исправление") && echo.Text.Contains("250.00 RSD")),
+            Arg.Is<EchoMessage>(echo => echo.Text.StartsWith("Could not apply that correction") && echo.Text.Contains("250.00 RSD")),
             Arg.Any<CancellationToken>());
     }
 
@@ -327,7 +327,7 @@ public class CategorizationWorkerTests
                 {
                     Status = TransactionStatus.Completed,
                     OccurredOn = outcome.OccurredOn,
-                    Lines = [.. outcome.Items.Select(item => new RecordedLine(item.Description, item.Amount, Groceries.Slug, Groceries.NameRu, null))],
+                    Lines = [.. outcome.Items.Select(item => new RecordedLine(item.Description, item.Amount, Groceries.Slug, Groceries.NameEn, null))],
                 };
             });
         return store;
@@ -477,7 +477,7 @@ public class CategorizationWorkerTests
             Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await notifier.Received(1).EditAsync(
             111L, 42,
-            Arg.Is<EchoMessage>(echo => echo.Text.Contains("ничего не записал")),
+            Arg.Is<EchoMessage>(echo => echo.Text.Contains("nothing recorded")),
             Arg.Any<CancellationToken>());
     }
 
@@ -926,7 +926,7 @@ public class CategorizationWorkerTests
         // model, and D4 says it must show what the database holds.
         var store = Substitute.For<ICategorizationStore>();
         var stored = Subject(status: TransactionStatus.Completed,
-            lines: [new RecordedLine("Bread", new Money(300m, CurrencyCode.Rsd), "groceries", "Продукты", null)]);
+            lines: [new RecordedLine("Bread", new Money(300m, CurrencyCode.Rsd), "groceries", "Groceries", null)]);
         store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject(), stored);
         var categorizer = Substitute.For<ICategorizer>();
         categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine(250m));

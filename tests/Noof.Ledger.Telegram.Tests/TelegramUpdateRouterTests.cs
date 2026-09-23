@@ -65,7 +65,7 @@ public class TelegramUpdateRouterTests
 
     static CategorizationSubject RecordWith(TransactionStatus status) =>
         new(Guid.NewGuid(), "кофе 250", 111L, 42, "Cash", status, new DateOnly(2026, 9, 22), new DateOnly(2026, 9, 22),
-            [new RecordedLine("кофе", new Money(250m, CurrencyCode.Rsd), "food-drink", "Еда и напитки", null)]);
+            [new RecordedLine("кофе", new Money(250m, CurrencyCode.Rsd), "food-drink", "Food & Drink", null)]);
 
     [Fact]
     public async Task Captures_replies_and_attaches_the_reply_for_the_owner()
@@ -164,7 +164,7 @@ public class TelegramUpdateRouterTests
         await editor.Received(1).CancelAsync(transactionId, Arg.Any<CancellationToken>());
         await chatNotifier.Received(1).AnswerActionAsync("cb-1", Arg.Any<CancellationToken>());
         await chatNotifier.Received(1).EditAsync(111L, 42,
-            Arg.Is<EchoMessage>(echo => echo.Text.StartsWith("Отменено") && echo.Actions.SequenceEqual(new[] { RecordAction.Restore })),
+            Arg.Is<EchoMessage>(echo => echo.Text.StartsWith("Cancelled") && echo.Actions.SequenceEqual(new[] { RecordAction.Restore })),
             Arg.Any<CancellationToken>());
     }
 

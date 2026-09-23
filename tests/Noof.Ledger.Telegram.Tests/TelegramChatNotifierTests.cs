@@ -12,7 +12,7 @@ namespace Noof.Ledger.Telegram.Tests;
 
 public class TelegramChatNotifierTests
 {
-    static readonly string[] CancelEditLabels = ["Отменить", "Изменить"];
+    static readonly string[] CancelEditLabels = ["Cancel", "Edit"];
     static readonly string[] CancelEditCallbackData = ["cancel", "edit"];
 
     [Fact]
@@ -38,11 +38,11 @@ public class TelegramChatNotifierTests
         client.SendRequest(Arg.Any<EditMessageTextRequest>(), Arg.Any<CancellationToken>()).Returns(new Message { Id = 555 });
         var notifier = new TelegramChatNotifier(new TelegramClientHandle { Current = client });
 
-        await notifier.EditAsync(42L, 555, new EchoMessage("Записал", [RecordAction.Cancel, RecordAction.Edit]),
+        await notifier.EditAsync(42L, 555, new EchoMessage("Recorded", [RecordAction.Cancel, RecordAction.Edit]),
             TestContext.Current.CancellationToken);
 
         await client.Received(1).SendRequest(
-            Arg.Is<EditMessageTextRequest>(r => r.ChatId.Identifier == 42L && r.MessageId == 555 && r.Text == "Записал"
+            Arg.Is<EditMessageTextRequest>(r => r.ChatId.Identifier == 42L && r.MessageId == 555 && r.Text == "Recorded"
                 && r.ReplyMarkup!.InlineKeyboard.Single().Select(b => b.Text).SequenceEqual(CancelEditLabels)
                 && r.ReplyMarkup.InlineKeyboard.Single().Select(b => b.CallbackData).SequenceEqual(CancelEditCallbackData)),
             Arg.Any<CancellationToken>());
@@ -55,7 +55,7 @@ public class TelegramChatNotifierTests
         client.SendRequest(Arg.Any<EditMessageTextRequest>(), Arg.Any<CancellationToken>()).Returns(new Message { Id = 555 });
         var notifier = new TelegramChatNotifier(new TelegramClientHandle { Current = client });
 
-        await notifier.EditAsync(42L, 555, new EchoMessage("Исправляю…", []), TestContext.Current.CancellationToken);
+        await notifier.EditAsync(42L, 555, new EchoMessage("Correcting…", []), TestContext.Current.CancellationToken);
 
         await client.Received(1).SendRequest(Arg.Is<EditMessageTextRequest>(r => r.ReplyMarkup == null), Arg.Any<CancellationToken>());
     }
@@ -69,7 +69,7 @@ public class TelegramChatNotifierTests
                 "Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message", 400));
         var notifier = new TelegramChatNotifier(new TelegramClientHandle { Current = client });
 
-        var act = () => notifier.EditAsync(42L, 555, new EchoMessage("Отменено", [RecordAction.Restore]), TestContext.Current.CancellationToken);
+        var act = () => notifier.EditAsync(42L, 555, new EchoMessage("Cancelled", [RecordAction.Restore]), TestContext.Current.CancellationToken);
 
         await act.Should().NotThrowAsync("a second tap produced the text the message already shows");
     }
@@ -128,11 +128,11 @@ public class TelegramChatNotifierTests
         client.SendRequest(Arg.Any<SendMessageRequest>(), Arg.Any<CancellationToken>()).Returns(new Message { Id = 77 });
         var notifier = new TelegramChatNotifier(new TelegramClientHandle { Current = client });
 
-        var promptId = await notifier.AskAsync(42L, 555, "Что исправить?", TestContext.Current.CancellationToken);
+        var promptId = await notifier.AskAsync(42L, 555, "What should I fix?", TestContext.Current.CancellationToken);
 
         promptId.Should().Be(77);
         await client.Received(1).SendRequest(
-            Arg.Is<SendMessageRequest>(r => r.Text == "Что исправить?" && r.ReplyParameters!.MessageId == 555
+            Arg.Is<SendMessageRequest>(r => r.Text == "What should I fix?" && r.ReplyParameters!.MessageId == 555
                 && r.ReplyMarkup is ForceReplyMarkup),
             Arg.Any<CancellationToken>());
     }

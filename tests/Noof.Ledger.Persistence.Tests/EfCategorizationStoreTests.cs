@@ -291,7 +291,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
         subject.SentOn.Should().Be(new DateOnly(2026, 9, 22));
         subject.OccurredOn.Should().Be(new DateOnly(2026, 9, 20));
         subject.Lines.Should().Equal(
-            new RecordedLine("Coffee", new Money(3.50m, CurrencyCode.Eur), category.Slug, "Тестовая категория", "Test merchant"));
+            new RecordedLine("Coffee", new Money(3.50m, CurrencyCode.Eur), category.Slug, "Test category", "Test merchant"));
     }
 
     [Fact]

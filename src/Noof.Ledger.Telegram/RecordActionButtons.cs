@@ -8,9 +8,9 @@ internal static class RecordActionButtons
 {
     static readonly (RecordAction Action, string Label, string Data)[] Buttons =
     [
-        (RecordAction.Cancel, "Отменить", "cancel"),
-        (RecordAction.Edit, "Изменить", "edit"),
-        (RecordAction.Restore, "Вернуть", "restore"),
+        (RecordAction.Cancel, "Cancel", "cancel"),
+        (RecordAction.Edit, "Edit", "edit"),
+        (RecordAction.Restore, "Restore", "restore"),
     ];
 
     public static InlineKeyboardButton ToButton(RecordAction action)

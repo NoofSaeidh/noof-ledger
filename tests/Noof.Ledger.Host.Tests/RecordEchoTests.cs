@@ -11,7 +11,7 @@ public class RecordEchoTests
     static readonly IRecordEcho Echo = new RecordEcho();
     static readonly DateOnly Sent = new(2026, 9, 22);
 
-    static RecordedLine Coffee => new("кофе", new Money(250m, CurrencyCode.Rsd), "food-drink", "Еда и напитки", null);
+    static RecordedLine Coffee => new("кофе", new Money(250m, CurrencyCode.Rsd), "food-drink", "Food & Drink", null);
 
     static CategorizationSubject Record(
         TransactionStatus status = TransactionStatus.Completed, DateOnly? occurredOn = null,
@@ -23,16 +23,16 @@ public class RecordEchoTests
     {
         var echo = Echo.Compose(Record());
 
-        echo.Text.Should().Be("Записал — Cash\n• кофе — 250.00 RSD · Еда и напитки\n\nИтого: 250.00 RSD");
+        echo.Text.Should().Be("Recorded — Cash\n• кофе — 250.00 RSD · Food & Drink\n\nTotal: 250.00 RSD");
         echo.Actions.Should().Equal(RecordAction.Cancel, RecordAction.Edit);
     }
 
     [Fact]
     public void A_merchant_follows_the_category()
     {
-        var line = new RecordedLine("продукты", new Money(1000m, CurrencyCode.Eur), "groceries", "Продукты", "Lidl");
+        var line = new RecordedLine("продукты", new Money(1000m, CurrencyCode.Eur), "groceries", "Groceries", "Lidl");
 
-        Echo.Compose(Record(lines: [line])).Text.Should().Contain("• продукты — 1000.00 EUR · Продукты · Lidl");
+        Echo.Compose(Record(lines: [line])).Text.Should().Contain("• продукты — 1000.00 EUR · Groceries · Lidl");
     }
 
     [Fact]
@@ -41,24 +41,24 @@ public class RecordEchoTests
         var lines = new[]
         {
             Coffee,
-            new RecordedLine("такси", new Money(1000m, CurrencyCode.Eur), "transport", "Транспорт", null),
-            new RecordedLine("хлеб", new Money(100m, CurrencyCode.Rsd), "groceries", "Продукты", null),
+            new RecordedLine("такси", new Money(1000m, CurrencyCode.Eur), "transport", "Transport", null),
+            new RecordedLine("хлеб", new Money(100m, CurrencyCode.Rsd), "groceries", "Groceries", null),
         };
 
-        Echo.Compose(Record(lines: lines)).Text.Should().EndWith("Итого: 1000.00 EUR, 350.00 RSD");
+        Echo.Compose(Record(lines: lines)).Text.Should().EndWith("Total: 1000.00 EUR, 350.00 RSD");
     }
 
     [Fact]
     public void A_record_dated_to_another_day_says_which_day()
     {
         Echo.Compose(Record(occurredOn: new DateOnly(2026, 9, 21))).Text
-            .Should().StartWith("Записал — Cash\nДата: 21.09.2026\n• кофе");
+            .Should().StartWith("Recorded — Cash\nDate: 21.09.2026\n• кофе");
     }
 
     [Fact]
     public void A_record_dated_to_the_send_day_names_no_date()
     {
-        Echo.Compose(Record()).Text.Should().NotContain("Дата:");
+        Echo.Compose(Record()).Text.Should().NotContain("Date:");
     }
 
     [Fact]
@@ -66,7 +66,7 @@ public class RecordEchoTests
     {
         var echo = Echo.Compose(Record(TransactionStatus.Cancelled));
 
-        echo.Text.Should().StartWith("Отменено — Cash\n• кофе");
+        echo.Text.Should().StartWith("Cancelled — Cash\n• кофе");
         echo.Actions.Should().Equal(RecordAction.Restore);
     }
 
@@ -75,7 +75,7 @@ public class RecordEchoTests
     {
         var echo = Echo.Compose(Record(lines: []));
 
-        echo.Text.Should().Be("Cash: не нашёл здесь трат — ничего не записал.");
+        echo.Text.Should().Be("Cash: found no spending here — nothing recorded.");
         echo.Actions.Should().Equal(RecordAction.Edit);
     }
 
@@ -101,8 +101,8 @@ public class RecordEchoTests
         var echo = Echo.ComposeCorrectionFailure(Record());
 
         echo.Text.Should().Be(
-            "Не получилось применить исправление — запись не изменилась.\n\n"
-            + "Записал — Cash\n• кофе — 250.00 RSD · Еда и напитки\n\nИтого: 250.00 RSD");
+            "Could not apply that correction — the record is unchanged.\n\n"
+            + "Recorded — Cash\n• кофе — 250.00 RSD · Food & Drink\n\nTotal: 250.00 RSD");
         echo.Actions.Should().Equal(RecordAction.Cancel, RecordAction.Edit);
     }
 
@@ -111,7 +111,7 @@ public class RecordEchoTests
     {
         var line = new RecordedLine("штраф", new Money(5m, CurrencyCode.Eur), null, null, null);
 
-        Echo.Compose(Record(lines: [line])).Text.Should().Contain("• штраф — 5.00 EUR · без категории");
+        Echo.Compose(Record(lines: [line])).Text.Should().Contain("• штраф — 5.00 EUR · uncategorised");
     }
 
     [Fact]

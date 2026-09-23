@@ -32,7 +32,7 @@ internal sealed class TelegramChatNotifier(TelegramClientHandle clientHandle) : 
     {
         var message = await Client().SendMessage(chatId, prompt,
             replyParameters: new ReplyParameters { MessageId = replyToMessageId },
-            replyMarkup: new ForceReplyMarkup { InputFieldPlaceholder = "нет, 1500" },
+            replyMarkup: new ForceReplyMarkup { InputFieldPlaceholder = "no, 1500" },
             cancellationToken: cancellationToken);
         return message.Id;
     }
