@@ -5,7 +5,8 @@ using Telegram.Bot.Types;
 
 namespace Noof.Ledger.Telegram;
 
-internal sealed class RecordActionHandler(IRecordEditor editor, ICategorizationStore store, IChatNotifier chatNotifier)
+internal sealed class RecordActionHandler(
+    IRecordEditor editor, ICategorizationStore store, IChatNotifier chatNotifier, IRecordEcho recordEcho)
 {
     public async Task HandleAsync(CallbackQuery query, Message echo, CancellationToken cancellationToken)
     {
@@ -26,7 +27,7 @@ internal sealed class RecordActionHandler(IRecordEditor editor, ICategorizationS
                 await editor.RestoreAsync(target.TransactionId, cancellationToken);
                 break;
             case RecordAction.Edit:
-                var promptId = await chatNotifier.AskAsync(echo.Chat.Id, echo.Id, RecordEcho.EditPrompt, cancellationToken);
+                var promptId = await chatNotifier.AskAsync(echo.Chat.Id, echo.Id, recordEcho.EditPrompt, cancellationToken);
                 await editor.AttachPromptAsync(target.TransactionId, promptId, cancellationToken);
                 return;
             default:
@@ -36,6 +37,6 @@ internal sealed class RecordActionHandler(IRecordEditor editor, ICategorizationS
         // Refreshed even when nothing changed: an earlier attempt may have changed the record and then failed
         // to edit the echo. An identical edit is refused by Telegram and swallowed by the notifier.
         if (await store.GetSubjectAsync(target.TransactionId, cancellationToken) is { } record)
-            await chatNotifier.EditAsync(echo.Chat.Id, echo.Id, RecordEcho.Compose(record), cancellationToken);
+            await chatNotifier.EditAsync(echo.Chat.Id, echo.Id, recordEcho.Compose(record), cancellationToken);
     }
 }

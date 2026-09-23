@@ -18,6 +18,9 @@ public class CategorizationWorkerTests
     static readonly Guid TransactionId = Guid.NewGuid();
     static readonly Guid JobId = Guid.NewGuid();
     static readonly CategoryEntry Groceries = new(Guid.NewGuid(), "groceries", "Groceries", "Продукты", null);
+    static readonly IProposalMapper Mapper = new ProposalMapper();
+    static readonly IMerchantScan Scan = new MerchantScan();
+    static readonly IRecordEcho Echo = new RecordEcho();
 
     static IServiceScopeFactory ScopeFactoryFor(
         IJobQueue jobQueue, IModelProvider modelProvider, ICategorizationStore? store = null,
@@ -106,7 +109,8 @@ public class CategorizationWorkerTests
 
     static CategorizationWorker CreateWorker(
         IServiceScopeFactory scopeFactory, FakeTimeProvider time, CategorizationWorkerOptions? options = null) =>
-        new(scopeFactory, time, options ?? new CategorizationWorkerOptions(), WorkerId, NullLogger<CategorizationWorker>.Instance);
+        new(scopeFactory, time, options ?? new CategorizationWorkerOptions(), WorkerId,
+            Mapper, Scan, Echo, NullLogger<CategorizationWorker>.Instance);
 
     static IJobQueue QueueWith(CategorizationJob job)
     {
@@ -188,7 +192,7 @@ public class CategorizationWorkerTests
         await store.DidNotReceive().ApplyAsync(Arg.Any<Guid>(), Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
     }
 
-    static readonly RecordedLine StoredBread = new("Bread", new Money(250m, CurrencyCode.Rsd), "groceries", "Продукты", null);
+    static readonly RecordedLine StoredBread = new("Bread", new Money(250m, CurrencyCode.Rsd), "groceries", "Groceries", null);
 
     [Fact]
     public async Task A_correction_hands_the_model_the_current_record_and_the_instruction()
@@ -298,7 +302,7 @@ public class CategorizationWorkerTests
 
         await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
         await notifier.Received(1).EditAsync(111L, 42,
-            Arg.Is<EchoMessage>(echo => echo.Text.StartsWith("Не получилось применить исправление") && echo.Text.Contains("250.00 RSD")),
+            Arg.Is<EchoMessage>(echo => echo.Text.StartsWith("Could not apply that correction") && echo.Text.Contains("250.00 RSD")),
             Arg.Any<CancellationToken>());
     }
 
@@ -317,7 +321,7 @@ public class CategorizationWorkerTests
                 {
                     Status = TransactionStatus.Completed,
                     OccurredOn = outcome.OccurredOn,
-                    Lines = [.. outcome.Items.Select(item => new RecordedLine(item.Description, item.Amount, Groceries.Slug, Groceries.NameRu, null))],
+                    Lines = [.. outcome.Items.Select(item => new RecordedLine(item.Description, item.Amount, Groceries.Slug, Groceries.NameEn, null))],
                 };
             });
         return store;
@@ -467,7 +471,7 @@ public class CategorizationWorkerTests
             Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await notifier.Received(1).EditAsync(
             111L, 42,
-            Arg.Is<EchoMessage>(echo => echo.Text.Contains("ничего не записал")),
+            Arg.Is<EchoMessage>(echo => echo.Text.Contains("nothing recorded")),
             Arg.Any<CancellationToken>());
     }
 
@@ -916,7 +920,7 @@ public class CategorizationWorkerTests
         // model, and D4 says it must show what the database holds.
         var store = Substitute.For<ICategorizationStore>();
         var stored = Subject(status: TransactionStatus.Completed,
-            lines: [new RecordedLine("Bread", new Money(300m, CurrencyCode.Rsd), "groceries", "Продукты", null)]);
+            lines: [new RecordedLine("Bread", new Money(300m, CurrencyCode.Rsd), "groceries", "Groceries", null)]);
         store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject(), stored);
         var categorizer = Substitute.For<ICategorizer>();
         categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine(250m));
@@ -944,7 +948,7 @@ public class CategorizationWorkerTests
 
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
-        await notifier.Received(1).EditAsync(111L, 42, RecordEcho.Failure, Arg.Any<CancellationToken>());
+        await notifier.Received(1).EditAsync(111L, 42, Echo.Failure, Arg.Any<CancellationToken>());
     }
 
     [Fact]

@@ -8,12 +8,12 @@ namespace Noof.Ledger.Application.Categorization;
 // Whether a figure is plausible, or appears in the message at all, is for the person to see in the
 // echo and correct there (D1, docs/OPEN-QUESTIONS.md P2-1). Do not add a sanity bound or a verbatim
 // check here.
-public static class ProposalMapper
+internal sealed class ProposalMapper : IProposalMapper
 {
     const int MaxDescriptionLength = 512;
     const int MaxMerchantNameLength = 256;
 
-    public static bool TryMap(
+    public bool TryMap(
         CategorizationProposal proposal,
         IReadOnlyCollection<string> offeredSlugs,
         IReadOnlyCollection<Guid> offeredMerchantIds,

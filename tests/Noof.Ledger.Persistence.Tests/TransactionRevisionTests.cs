@@ -135,6 +135,6 @@ public class TransactionRevisionTests(PostgresFixture fixture)
 
         db.ChangeTracker.Clear();
         (await db.Transactions.SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken))
-            .Status.Should().Be(TransactionStatus.Cancelled, "only Вернуть brings a cancelled record back");
+            .Status.Should().Be(TransactionStatus.Cancelled, "only Restore brings a cancelled record back");
     }
 }

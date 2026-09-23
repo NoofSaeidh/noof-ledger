@@ -27,9 +27,14 @@ public class ProjectReferenceTests
     }
 
     [Fact]
-    public void Application_has_no_package_references()
+    public void Application_package_references_are_exactly_its_allowed_set()
     {
-        Packages("Noof.Ledger.Application").Should().BeEmpty();
+        // Application registers its own services now (ApplicationRegistration.AddNoofApplication,
+        // the same AddNoofXxx pattern Persistence/Ai/Telegram/Web already follow), which needs
+        // IServiceCollection - that type lives in this one package. Widening this list further is
+        // an edit somebody has to justify, same as every other project's allowed set below.
+        Packages("Noof.Ledger.Application").Should().BeEquivalentTo(
+            "Microsoft.Extensions.DependencyInjection.Abstractions");
     }
 
     [Fact]

@@ -6,6 +6,7 @@ namespace Noof.Ledger.Persistence.Tests;
 
 public class ProposalMapperTests
 {
+    static readonly IProposalMapper Mapper = new ProposalMapper();
     static readonly string[] Slugs = ["groceries", "food-drink"];
     static readonly Guid KnownMerchant = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
@@ -15,7 +16,7 @@ public class ProposalMapperTests
         new(description, amount, currency, slug, knownMerchantId, merchantName);
 
     static bool Map(CategorizationProposal proposal, out MappedProposal mapped, out string failure) =>
-        ProposalMapper.TryMap(proposal, Slugs, [KnownMerchant], "RSD", out mapped, out failure);
+        Mapper.TryMap(proposal, Slugs, [KnownMerchant], "RSD", out mapped, out failure);
 
     [Fact]
     public void An_amount_the_message_never_wrote_in_digits_is_taken_as_the_model_gives_it()

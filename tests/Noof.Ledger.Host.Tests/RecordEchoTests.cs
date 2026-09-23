@@ -8,9 +8,10 @@ namespace Noof.Ledger.Host.Tests;
 
 public class RecordEchoTests
 {
+    static readonly IRecordEcho Echo = new RecordEcho();
     static readonly DateOnly Sent = new(2026, 9, 22);
 
-    static RecordedLine Coffee => new("кофе", new Money(250m, CurrencyCode.Rsd), "food-drink", "Еда и напитки", null);
+    static RecordedLine Coffee => new("кофе", new Money(250m, CurrencyCode.Rsd), "food-drink", "Food & Drink", null);
 
     static CategorizationSubject Record(
         TransactionStatus status = TransactionStatus.Completed, DateOnly? occurredOn = null,
@@ -20,18 +21,18 @@ public class RecordEchoTests
     [Fact]
     public void A_recorded_line_is_echoed_with_its_total_and_the_cancel_and_edit_buttons()
     {
-        var echo = RecordEcho.Compose(Record());
+        var echo = Echo.Compose(Record());
 
-        echo.Text.Should().Be("Записал — Cash\n• кофе — 250.00 RSD · Еда и напитки\n\nИтого: 250.00 RSD");
+        echo.Text.Should().Be("Recorded — Cash\n• кофе — 250.00 RSD · Food & Drink\n\nTotal: 250.00 RSD");
         echo.Actions.Should().Equal(RecordAction.Cancel, RecordAction.Edit);
     }
 
     [Fact]
     public void A_merchant_follows_the_category()
     {
-        var line = new RecordedLine("продукты", new Money(1000m, CurrencyCode.Eur), "groceries", "Продукты", "Lidl");
+        var line = new RecordedLine("продукты", new Money(1000m, CurrencyCode.Eur), "groceries", "Groceries", "Lidl");
 
-        RecordEcho.Compose(Record(lines: [line])).Text.Should().Contain("• продукты — 1000.00 EUR · Продукты · Lidl");
+        Echo.Compose(Record(lines: [line])).Text.Should().Contain("• продукты — 1000.00 EUR · Groceries · Lidl");
     }
 
     [Fact]
@@ -40,68 +41,68 @@ public class RecordEchoTests
         var lines = new[]
         {
             Coffee,
-            new RecordedLine("такси", new Money(1000m, CurrencyCode.Eur), "transport", "Транспорт", null),
-            new RecordedLine("хлеб", new Money(100m, CurrencyCode.Rsd), "groceries", "Продукты", null),
+            new RecordedLine("такси", new Money(1000m, CurrencyCode.Eur), "transport", "Transport", null),
+            new RecordedLine("хлеб", new Money(100m, CurrencyCode.Rsd), "groceries", "Groceries", null),
         };
 
-        RecordEcho.Compose(Record(lines: lines)).Text.Should().EndWith("Итого: 1000.00 EUR, 350.00 RSD");
+        Echo.Compose(Record(lines: lines)).Text.Should().EndWith("Total: 1000.00 EUR, 350.00 RSD");
     }
 
     [Fact]
     public void A_record_dated_to_another_day_says_which_day()
     {
-        RecordEcho.Compose(Record(occurredOn: new DateOnly(2026, 9, 21))).Text
-            .Should().StartWith("Записал — Cash\nДата: 21.09.2026\n• кофе");
+        Echo.Compose(Record(occurredOn: new DateOnly(2026, 9, 21))).Text
+            .Should().StartWith("Recorded — Cash\nDate: 21.09.2026\n• кофе");
     }
 
     [Fact]
     public void A_record_dated_to_the_send_day_names_no_date()
     {
-        RecordEcho.Compose(Record()).Text.Should().NotContain("Дата:");
+        Echo.Compose(Record()).Text.Should().NotContain("Date:");
     }
 
     [Fact]
     public void A_cancelled_record_offers_only_restore()
     {
-        var echo = RecordEcho.Compose(Record(TransactionStatus.Cancelled));
+        var echo = Echo.Compose(Record(TransactionStatus.Cancelled));
 
-        echo.Text.Should().StartWith("Отменено — Cash\n• кофе");
+        echo.Text.Should().StartWith("Cancelled — Cash\n• кофе");
         echo.Actions.Should().Equal(RecordAction.Restore);
     }
 
     [Fact]
     public void A_read_that_found_nothing_says_so_and_offers_only_edit()
     {
-        var echo = RecordEcho.Compose(Record(lines: []));
+        var echo = Echo.Compose(Record(lines: []));
 
-        echo.Text.Should().Be("Cash: не нашёл здесь трат — ничего не записал.");
+        echo.Text.Should().Be("Cash: found no spending here — nothing recorded.");
         echo.Actions.Should().Equal(RecordAction.Edit);
     }
 
     [Fact]
     public void A_failed_record_is_the_failure_echo()
     {
-        RecordEcho.Compose(Record(TransactionStatus.Failed, lines: [])).Should().Be(RecordEcho.Failure);
-        RecordEcho.Failure.Actions.Should().Equal(RecordAction.Edit);
+        Echo.Compose(Record(TransactionStatus.Failed, lines: [])).Should().Be(Echo.Failure);
+        Echo.Failure.Actions.Should().Equal(RecordAction.Edit);
     }
 
     [Fact]
     public void A_record_still_being_read_is_the_acknowledgement_without_buttons()
     {
-        var echo = RecordEcho.Compose(Record(TransactionStatus.Captured, lines: []));
+        var echo = Echo.Compose(Record(TransactionStatus.Captured, lines: []));
 
-        echo.Text.Should().Be(RecordEcho.Acknowledgement);
+        echo.Text.Should().Be(Echo.Acknowledgement);
         echo.Actions.Should().BeEmpty();
     }
 
     [Fact]
     public void A_failed_correction_says_so_above_the_unchanged_record()
     {
-        var echo = RecordEcho.ComposeCorrectionFailure(Record());
+        var echo = Echo.ComposeCorrectionFailure(Record());
 
         echo.Text.Should().Be(
-            "Не получилось применить исправление — запись не изменилась.\n\n"
-            + "Записал — Cash\n• кофе — 250.00 RSD · Еда и напитки\n\nИтого: 250.00 RSD");
+            "Could not apply that correction — the record is unchanged.\n\n"
+            + "Recorded — Cash\n• кофе — 250.00 RSD · Food & Drink\n\nTotal: 250.00 RSD");
         echo.Actions.Should().Equal(RecordAction.Cancel, RecordAction.Edit);
     }
 
@@ -110,7 +111,7 @@ public class RecordEchoTests
     {
         var line = new RecordedLine("штраф", new Money(5m, CurrencyCode.Eur), null, null, null);
 
-        RecordEcho.Compose(Record(lines: [line])).Text.Should().Contain("• штраф — 5.00 EUR · без категории");
+        Echo.Compose(Record(lines: [line])).Text.Should().Contain("• штраф — 5.00 EUR · uncategorised");
     }
 
     [Fact]
@@ -120,7 +121,7 @@ public class RecordEchoTests
         CultureInfo.CurrentCulture = new CultureInfo("ru-RU");
         try
         {
-            RecordEcho.Compose(Record()).Text.Should().Contain("250.00 RSD");
+            Echo.Compose(Record()).Text.Should().Contain("250.00 RSD");
         }
         finally
         {

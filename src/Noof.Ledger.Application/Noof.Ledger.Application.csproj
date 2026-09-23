@@ -1,7 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Noof.Ledger.Domain\Noof.Ledger.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Noof.Ledger.Persistence.Tests" />
+    <InternalsVisibleTo Include="Noof.Ledger.Host.Tests" />
+    <InternalsVisibleTo Include="Noof.Ledger.Telegram.Tests" />
+    <InternalsVisibleTo Include="Noof.Ledger.Ai.Tests" />
   </ItemGroup>
 
 </Project>

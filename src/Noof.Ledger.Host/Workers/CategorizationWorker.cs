@@ -12,6 +12,9 @@ internal sealed class CategorizationWorker(
     TimeProvider timeProvider,
     CategorizationWorkerOptions options,
     string workerId,
+    IProposalMapper proposalMapper,
+    IMerchantScan merchantScan,
+    IRecordEcho recordEcho,
     ILogger<CategorizationWorker> logger)
     : BackgroundService
 {
@@ -95,7 +98,7 @@ internal sealed class CategorizationWorker(
 
             var categories = await categoryCatalog.ActiveAsync(cancellationToken);
             var aliases = await merchantDirectory.AliasesAsync(cancellationToken);
-            var hints = MerchantScan.Matches(sub.RawText, aliases, options.MerchantHintLimit)
+            var hints = merchantScan.Matches(sub.RawText, aliases, options.MerchantHintLimit)
                 .DistinctBy(alias => alias.MerchantId)
                 .Select(alias => new MerchantOption(alias.MerchantId, alias.DisplayName))
                 .ToList();
@@ -120,7 +123,7 @@ internal sealed class CategorizationWorker(
             // it influenced would fail to map.
             var offeredMerchantIds = allMerchants.Select(merchant => merchant.Id).ToHashSet();
 
-            if (!ProposalMapper.TryMap(
+            if (!proposalMapper.TryMap(
                 proposal, offeredSlugs, offeredMerchantIds, options.DefaultCurrency, out var mapped, out var failure))
             {
                 await FailTerminallyAsync(jobQueue, store, notifier, job, subject, failure, cancellationToken);
@@ -251,7 +254,7 @@ internal sealed class CategorizationWorker(
             if (await store.GetSubjectAsync(job.TransactionId, cancellationToken) is not { BotMessageId: { } messageId } record)
                 return;
 
-            await notifier.EditAsync(record.TelegramChatId, messageId, RecordEcho.Compose(record), cancellationToken);
+            await notifier.EditAsync(record.TelegramChatId, messageId, recordEcho.Compose(record), cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -305,8 +308,8 @@ internal sealed class CategorizationWorker(
         try
         {
             var echo = job.Kind == JobKind.Categorize
-                ? RecordEcho.Failure
-                : RecordEcho.ComposeCorrectionFailure(await store.GetSubjectAsync(job.TransactionId, cancellationToken) ?? sub);
+                ? recordEcho.Failure
+                : recordEcho.ComposeCorrectionFailure(await store.GetSubjectAsync(job.TransactionId, cancellationToken) ?? sub);
             await notifier.EditAsync(sub.TelegramChatId, messageId, echo, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
