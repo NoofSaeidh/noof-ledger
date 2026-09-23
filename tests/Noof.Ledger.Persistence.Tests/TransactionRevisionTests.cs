@@ -5,6 +5,7 @@ using Microsoft.Extensions.Time.Testing;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Categorization;
+using Noof.Ledger.Persistence.Editing;
 using Noof.Ledger.Persistence.Revisions;
 using Npgsql;
 
@@ -116,5 +117,24 @@ public class TransactionRevisionTests(PostgresFixture fixture)
         var act = () => db.Database.ExecuteSqlRawAsync(sql, TestContext.Current.CancellationToken);
 
         (await act.Should().ThrowAsync<PostgresException>()).Which.MessageText.Should().Contain("append-only");
+    }
+
+    [Fact]
+    public async Task A_correction_applied_to_a_cancelled_record_keeps_it_cancelled()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transactionId = await SeedTransactionAsync(db);
+        var store = new EfCategorizationStore(db, Clock);
+        await store.ApplyAsync(transactionId, new CategorizationOutcome([Coffee(250m)], new DateOnly(2026, 9, 21)), TestContext.Current.CancellationToken);
+        await new EfRecordEditor(db, Clock).CancelAsync(transactionId, TestContext.Current.CancellationToken);
+
+        await store.ApplyAsync(transactionId,
+            new CategorizationOutcome([Coffee(1500m)], new DateOnly(2026, 9, 21), JobKind.Correct, "нет, 1500"),
+            TestContext.Current.CancellationToken);
+
+        db.ChangeTracker.Clear();
+        (await db.Transactions.SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken))
+            .Status.Should().Be(TransactionStatus.Cancelled, "only Вернуть brings a cancelled record back");
     }
 }

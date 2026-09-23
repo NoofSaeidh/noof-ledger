@@ -52,6 +52,7 @@ public class PublicSurfaceTests
             "ISpendingReadModel", "ProbeResult", "ISecretProbe", "ISecretStore", "SecretKeys",
             "SecretResult", "SecretState", "SecretStatus",
             "RecordAction", "EchoMessage", "RecordEcho",
+            "EchoTarget", "IRecordEditor",
         ],
         ["Noof.Ledger.Persistence"] = ["LedgerConnectionString", "PersistenceRegistration"],
         ["Noof.Ledger.Ai"] = ["AiRegistration"],

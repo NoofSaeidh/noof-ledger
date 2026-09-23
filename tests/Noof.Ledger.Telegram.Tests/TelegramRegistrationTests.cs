@@ -23,6 +23,8 @@ public class TelegramRegistrationTests
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
         services.AddScoped(_ => Substitute.For<ISecretStore>());
         services.AddScoped(_ => Substitute.For<Application.Capture.ICaptureStore>());
+        services.AddScoped(_ => Substitute.For<Application.Editing.IRecordEditor>());
+        services.AddScoped(_ => Substitute.For<Application.Categorization.ICategorizationStore>());
         services.AddNoofTelegram();
 
         using var provider = services.BuildServiceProvider();

@@ -30,6 +30,7 @@ public class CategorizationWiringTests
         scope.ServiceProvider.GetRequiredService<ICategoryCatalog>();
         scope.ServiceProvider.GetRequiredService<IMerchantDirectory>();
         scope.ServiceProvider.GetRequiredService<ICategorizer>();
+        scope.ServiceProvider.GetRequiredService<Noof.Ledger.Application.Editing.IRecordEditor>();
     }
 
     [Fact]

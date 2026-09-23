@@ -24,6 +24,7 @@ public static class TelegramRegistration
         services.AddSingleton<IChatNotifier, TelegramChatNotifier>();
         services.AddScoped<TelegramOwnerGate>();
         services.AddScoped<TelegramUpdateOffsetStore>();
+        services.AddScoped<RecordActionHandler>();
         services.AddScoped<ITelegramUpdateRouter, TelegramUpdateRouter>();
         services.AddHostedService<TelegramPollingService>();
 

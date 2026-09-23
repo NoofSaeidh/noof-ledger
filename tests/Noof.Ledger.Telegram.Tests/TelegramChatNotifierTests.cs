@@ -95,4 +95,28 @@ public class TelegramChatNotifierTests
 
         await act.Should().ThrowAsync<InvalidOperationException>();
     }
+
+    [Fact]
+    public async Task AnswerActionAsync_answers_the_callback_query()
+    {
+        var client = Substitute.For<ITelegramBotClient>();
+        var notifier = new TelegramChatNotifier(new TelegramClientHandle { Current = client });
+
+        await notifier.AnswerActionAsync("cb-1", TestContext.Current.CancellationToken);
+
+        await client.Received(1).SendRequest(Arg.Is<AnswerCallbackQueryRequest>(r => r.CallbackQueryId == "cb-1"), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task AnswerActionAsync_ignores_a_refusal_because_the_answer_is_cosmetic()
+    {
+        var client = Substitute.For<ITelegramBotClient>();
+        client.SendRequest(Arg.Any<AnswerCallbackQueryRequest>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new ApiRequestException("Bad Request: query is too old and response timeout expired or query ID is invalid", 400));
+        var notifier = new TelegramChatNotifier(new TelegramClientHandle { Current = client });
+
+        var act = () => notifier.AnswerActionAsync("cb-1", TestContext.Current.CancellationToken);
+
+        await act.Should().NotThrowAsync("a press handled after downtime must still cancel; only the spinner is lost");
+    }
 }

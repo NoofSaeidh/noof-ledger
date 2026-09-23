@@ -90,7 +90,9 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
 
         var transaction = await db.Transactions.SingleAsync(t => t.Id == transactionId, cancellationToken);
         var statusBefore = transaction.Status;
-        transaction.Status = TransactionStatus.Completed;
+        // A correction arriving for a cancelled record corrects it and leaves it cancelled; only Вернуть
+        // brings it back.
+        transaction.Status = statusBefore == TransactionStatus.Cancelled ? TransactionStatus.Cancelled : TransactionStatus.Completed;
         transaction.OccurredOn = outcome.OccurredOn;
 
         await db.SaveChangesAsync(cancellationToken);

@@ -84,7 +84,7 @@ internal sealed class TelegramPollingService(
             var updates = await clientHandle.Current!.GetUpdates(
                 offset: offset,
                 timeout: pollingSeconds,
-                allowedUpdates: [UpdateType.Message],
+                allowedUpdates: [UpdateType.Message, UpdateType.CallbackQuery],
                 cancellationToken: cancellationToken);
 
             if (updates.Length > 0)

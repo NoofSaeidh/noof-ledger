@@ -1,0 +1,64 @@
+using Microsoft.EntityFrameworkCore;
+using Noof.Ledger.Application.Editing;
+using Noof.Ledger.Domain;
+using Noof.Ledger.Persistence.Revisions;
+using Npgsql;
+
+namespace Noof.Ledger.Persistence.Editing;
+
+internal sealed class EfRecordEditor(LedgerDbContext db, TimeProvider timeProvider) : IRecordEditor
+{
+    public Task<EchoTarget?> FindByBotMessageAsync(long chatId, int messageId, CancellationToken cancellationToken) =>
+        db.Transactions.AsNoTracking()
+            .Where(t => t.TelegramChatId == chatId && t.BotMessageId == messageId)
+            .Select(t => new EchoTarget(t.Id, t.BotMessageId))
+            .SingleOrDefaultAsync(cancellationToken);
+
+    public async Task<bool> CancelAsync(Guid transactionId, CancellationToken cancellationToken)
+    {
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+        if (await LockAsync(transactionId, cancellationToken) is not { } transaction
+            || transaction.Status == TransactionStatus.Cancelled)
+            return false;
+
+        var statusBefore = transaction.Status;
+        transaction.Status = TransactionStatus.Cancelled;
+        await db.SaveChangesAsync(cancellationToken);
+        await RevisionLog.AppendAsync(db, transaction, RevisionKind.Cancel, null, statusBefore, timeProvider.GetUtcNow(), cancellationToken);
+        await tx.CommitAsync(cancellationToken);
+        return true;
+    }
+
+    public async Task<bool> RestoreAsync(Guid transactionId, CancellationToken cancellationToken)
+    {
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+        if (await LockAsync(transactionId, cancellationToken) is not { Status: TransactionStatus.Cancelled } transaction)
+            return false;
+
+        // CancelAsync is the only way a record becomes Cancelled, and it always writes this revision.
+        var statusBeforeCancel = await db.TransactionRevisions
+            .Where(r => r.TransactionId == transactionId && r.Kind == RevisionKind.Cancel)
+            .OrderByDescending(r => r.RevisionNumber)
+            .Select(r => r.StatusBefore)
+            .FirstAsync(cancellationToken);
+
+        transaction.Status = statusBeforeCancel;
+        await db.SaveChangesAsync(cancellationToken);
+        await RevisionLog.AppendAsync(db, transaction, RevisionKind.Restore, null, TransactionStatus.Cancelled,
+            timeProvider.GetUtcNow(), cancellationToken);
+        await tx.CommitAsync(cancellationToken);
+        return true;
+    }
+
+    // The same row lock EfCategorizationStore.ApplyAsync takes, so a button press and a worker writing the
+    // same record serialise instead of interleaving their revisions.
+    async Task<Transaction?> LockAsync(Guid transactionId, CancellationToken cancellationToken)
+    {
+        await db.Database.SqlQueryRaw<Guid>(
+            "SELECT id FROM transactions WHERE id = @transactionId FOR UPDATE",
+            new NpgsqlParameter("transactionId", transactionId))
+            .ToListAsync(cancellationToken);
+
+        return await db.Transactions.SingleOrDefaultAsync(t => t.Id == transactionId, cancellationToken);
+    }
+}

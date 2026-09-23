@@ -18,4 +18,19 @@ internal static class RecordActionButtons
         var button = Buttons.Single(candidate => candidate.Action == action);
         return InlineKeyboardButton.WithCallbackData(button.Label, button.Data);
     }
+
+    public static bool TryParse(string? data, out RecordAction action)
+    {
+        foreach (var button in Buttons)
+        {
+            if (string.Equals(button.Data, data, StringComparison.Ordinal))
+            {
+                action = button.Action;
+                return true;
+            }
+        }
+
+        action = default;
+        return false;
+    }
 }

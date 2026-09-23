@@ -7,15 +7,27 @@ namespace Noof.Ledger.Telegram;
 internal sealed class TelegramUpdateRouter(
     ICaptureStore captureStore,
     IChatNotifier chatNotifier,
-    TelegramOwnerGate ownerGate)
+    TelegramOwnerGate ownerGate,
+    RecordActionHandler actionHandler)
     : ITelegramUpdateRouter
 {
     public async Task HandleAsync(Update update, string timeZoneId, CancellationToken cancellationToken)
     {
-        var message = update.Message;
-        if (message is null)
-            return;
+        switch (update)
+        {
+            case { Message: { } message }:
+                await HandleMessageAsync(message, timeZoneId, cancellationToken);
+                break;
+            case { CallbackQuery: { Message: { } echo } query }:
+                // Rejected before reading Data, for the reason messages are rejected before reading Text.
+                if (await ownerGate.IsAllowedAsync(echo.Chat.Id, cancellationToken))
+                    await actionHandler.HandleAsync(query, echo, cancellationToken);
+                break;
+        }
+    }
 
+    async Task HandleMessageAsync(Message message, string timeZoneId, CancellationToken cancellationToken)
+    {
         // Reject before reading Text: a stranger's content must never be inspected, not even to
         // decide whether it looks like a spend.
         if (!await ownerGate.IsAllowedAsync(message.Chat.Id, cancellationToken))

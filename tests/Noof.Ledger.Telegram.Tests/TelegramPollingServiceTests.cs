@@ -9,6 +9,7 @@ using Noof.Ledger.Application.Secrets;
 using Telegram.Bot;
 using Telegram.Bot.Requests;
 using Telegram.Bot.Types;
+using Telegram.Bot.Types.Enums;
 
 namespace Noof.Ledger.Telegram.Tests;
 
@@ -290,6 +291,22 @@ public class TelegramPollingServiceTests
 
         result.Should().Be(TelegramPollResult.Failed);
         clientFactory.DidNotReceive().Create(Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task Asks_telegram_for_button_presses()
+    {
+        var client = Substitute.For<ITelegramBotClient>();
+        client.SendRequest(Arg.Any<GetUpdatesRequest>(), Arg.Any<CancellationToken>()).Returns([]);
+        var clientFactory = Substitute.For<ITelegramBotClientFactory>();
+        clientFactory.Create("tok1").Returns(client);
+
+        await CreateService(WithToken("tok1"), clientFactory, new TelegramClientHandle())
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        await client.Received(1).SendRequest(
+            Arg.Is<GetUpdatesRequest>(r => r.AllowedUpdates!.Contains(UpdateType.Message) && r.AllowedUpdates!.Contains(UpdateType.CallbackQuery)),
+            Arg.Any<CancellationToken>());
     }
 
     sealed class ThrowingScopeFactory : IServiceScopeFactory

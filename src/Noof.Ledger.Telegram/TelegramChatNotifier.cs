@@ -27,6 +27,19 @@ internal sealed class TelegramChatNotifier(TelegramClientHandle clientHandle) : 
         }
     }
 
+    public async Task AnswerActionAsync(string actionId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Client().AnswerCallbackQuery(actionId, cancellationToken: cancellationToken);
+        }
+        // Answering only stops the button's spinner. A press handled after the host was down gets "query is
+        // too old"; the press must still take effect, so the refusal is not allowed to fail the update.
+        catch (ApiRequestException)
+        {
+        }
+    }
+
     static InlineKeyboardMarkup? Keyboard(IReadOnlyList<RecordAction> actions) =>
         actions.Count == 0 ? null : new InlineKeyboardMarkup(actions.Select(RecordActionButtons.ToButton));
 
