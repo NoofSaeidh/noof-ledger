@@ -1,6 +1,6 @@
 # Voice capture — design
 
-**Status:** approved by the operator in conversation 2026-09-23; this document awaits their review.
+**Status:** approved by the operator 2026-09-24.
 Builds on `2026-09-22-natural-language-capture.md` (Phase 2). This is Phase 3 in that document's
 phase table.
 
