@@ -4,5 +4,5 @@ public interface IChatNotifier
 {
     Task<int> SendAsync(long chatId, string text, CancellationToken cancellationToken);
 
-    Task EditAsync(long chatId, int messageId, string text, CancellationToken cancellationToken);
+    Task EditAsync(long chatId, int messageId, EchoMessage message, CancellationToken cancellationToken);
 }

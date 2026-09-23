@@ -34,7 +34,7 @@ public class TelegramUpdateRouterTests
         var transactionId = Guid.NewGuid();
         captureStore.CaptureAsync(Arg.Any<CapturedMessage>(), "Europe/Belgrade", Arg.Any<CancellationToken>())
             .Returns(transactionId);
-        chatNotifier.SendAsync(111L, TelegramUpdateRouter.ReceiptAcknowledgement, Arg.Any<CancellationToken>())
+        chatNotifier.SendAsync(111L, RecordEcho.Acknowledgement, Arg.Any<CancellationToken>())
             .Returns(777);
 
         await router.HandleAsync(
@@ -60,7 +60,7 @@ public class TelegramUpdateRouterTests
         var sentAt = DateTimeOffset.Parse("2026-09-21T23:50:00Z");
         captureStore.CaptureAsync(Arg.Any<CapturedMessage>(), "Europe/Belgrade", Arg.Any<CancellationToken>())
             .Returns(Guid.NewGuid());
-        chatNotifier.SendAsync(111L, TelegramUpdateRouter.ReceiptAcknowledgement, Arg.Any<CancellationToken>())
+        chatNotifier.SendAsync(111L, RecordEcho.Acknowledgement, Arg.Any<CancellationToken>())
             .Returns(777);
 
         // "Processed" hours after "sent" -- exactly the outage-recovery scenario this guards.

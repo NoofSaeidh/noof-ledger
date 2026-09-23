@@ -190,6 +190,27 @@ public class CategorizationWorkerTests
         await store.DidNotReceive().ApplyAsync(Arg.Any<Guid>(), Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
     }
 
+    // Behaves like the real store for the one property the echo depends on: after ApplyAsync, reading the
+    // record back returns what was applied.
+    static ICategorizationStore StoreThatRemembersWhatItApplies(CategorizationSubject before)
+    {
+        var store = Substitute.For<ICategorizationStore>();
+        var current = before;
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(_ => current);
+        store.When(s => s.ApplyAsync(TransactionId, Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>()))
+            .Do(call =>
+            {
+                var outcome = call.Arg<CategorizationOutcome>();
+                current = current with
+                {
+                    Status = TransactionStatus.Completed,
+                    OccurredOn = outcome.OccurredOn,
+                    Lines = [.. outcome.Items.Select(item => new RecordedLine(item.Description, item.Amount, Groceries.Slug, Groceries.NameRu, null))],
+                };
+            });
+        return store;
+    }
+
     [Fact]
     public async Task Idle_when_the_Anthropic_key_is_not_present()
     {
@@ -313,9 +334,7 @@ public class CategorizationWorkerTests
         var jobQueue = Substitute.For<IJobQueue>();
         jobQueue.ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
         jobQueue.SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>()).Returns(JobCompletionOutcome.Applied);
-        var store = Substitute.For<ICategorizationStore>();
-        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
-            .Returns(Subject(rawText: "заняла у Маши 5000 рсд"));
+        var store = StoreThatRemembersWhatItApplies(Subject(rawText: "заняла у Маши 5000 рсд"));
         var categorizer = Substitute.For<ICategorizer>();
         categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>())
             .Returns(new CategorizationProposal([]));
@@ -336,7 +355,7 @@ public class CategorizationWorkerTests
             Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await notifier.Received(1).EditAsync(
             111L, 42,
-            Arg.Is<string>(text => text.Contains("nothing", StringComparison.OrdinalIgnoreCase)),
+            Arg.Is<EchoMessage>(echo => echo.Text.Contains("ничего не записал")),
             Arg.Any<CancellationToken>());
     }
 
@@ -359,7 +378,7 @@ public class CategorizationWorkerTests
 
         result.Should().Be(CategorizationTickResult.Processed);
         await store.Received(1).ApplyAsync(TransactionId, Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
-        await notifier.Received(1).EditAsync(111L, 42, Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await notifier.Received(1).EditAsync(111L, 42, Arg.Any<EchoMessage>(), Arg.Any<CancellationToken>());
         await jobQueue.DidNotReceive().RetryAsync(
             Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await jobQueue.DidNotReceive().FailAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
@@ -385,7 +404,7 @@ public class CategorizationWorkerTests
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
         await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
-        await notifier.DidNotReceive().EditAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await notifier.DidNotReceive().EditAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<EchoMessage>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -407,7 +426,7 @@ public class CategorizationWorkerTests
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
         await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
-        await notifier.DidNotReceive().EditAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await notifier.DidNotReceive().EditAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<EchoMessage>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -449,7 +468,7 @@ public class CategorizationWorkerTests
         var categorizer = Substitute.For<ICategorizer>();
         categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine());
         var notifier = Substitute.For<IChatNotifier>();
-        notifier.EditAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+        notifier.EditAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<EchoMessage>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new InvalidOperationException("message was deleted"));
         var worker = CreateWorker(
             ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer, notifier: notifier),
@@ -478,7 +497,7 @@ public class CategorizationWorkerTests
 
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
-        await notifier.DidNotReceive().EditAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await notifier.DidNotReceive().EditAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<EchoMessage>(), Arg.Any<CancellationToken>());
         await jobQueue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
     }
 
@@ -585,7 +604,7 @@ public class CategorizationWorkerTests
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
         await store.Received(1).MarkFailedAsync(TransactionId, Arg.Any<CancellationToken>());
-        await notifier.Received(1).EditAsync(111L, 42, Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await notifier.Received(1).EditAsync(111L, 42, Arg.Any<EchoMessage>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -608,7 +627,7 @@ public class CategorizationWorkerTests
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
         await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
-        await notifier.DidNotReceive().EditAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await notifier.DidNotReceive().EditAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<EchoMessage>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -623,8 +642,7 @@ public class CategorizationWorkerTests
         jobQueue.RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(JobCompletionOutcome.Applied);
         jobQueue.SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>()).Returns(JobCompletionOutcome.Applied);
-        var store = Substitute.For<ICategorizationStore>();
-        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
+        var store = StoreThatRemembersWhatItApplies(Subject());
         var categorizer = Substitute.For<ICategorizer>();
         categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new ModelCallException(ModelFailureKind.Transient, "simulated network outage"));
@@ -641,7 +659,7 @@ public class CategorizationWorkerTests
         await store.DidNotReceive().ApplyAsync(
             Arg.Any<Guid>(), Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
         await notifier.DidNotReceive().EditAsync(
-            Arg.Any<long>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+            Arg.Any<long>(), Arg.Any<int>(), Arg.Any<EchoMessage>(), Arg.Any<CancellationToken>());
         await jobQueue.Received(1).RetryAsync(
             JobId, WorkerId, Arg.Any<DateTimeOffset>(), "simulated network outage", Arg.Any<CancellationToken>());
 
@@ -660,7 +678,9 @@ public class CategorizationWorkerTests
             Arg.Any<CancellationToken>());
         await jobQueue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
         await notifier.Received(1).EditAsync(
-            111L, 42, Arg.Is<string>(text => text.Contains("250") && text.Contains("RSD")), Arg.Any<CancellationToken>());
+            111L, 42,
+            Arg.Is<EchoMessage>(echo => echo.Text.Contains("250.00 RSD") && echo.Actions.Contains(RecordAction.Cancel)),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -775,6 +795,44 @@ public class CategorizationWorkerTests
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
         await jobQueue.Received(1).ClaimAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task The_echo_is_rendered_from_the_stored_record_not_from_the_proposal()
+    {
+        // The store answers with 300 whatever was applied: if the echo said 250 it would be quoting the
+        // model, and D4 says it must show what the database holds.
+        var store = Substitute.For<ICategorizationStore>();
+        var stored = Subject(status: TransactionStatus.Completed,
+            lines: [new RecordedLine("Bread", new Money(300m, CurrencyCode.Rsd), "groceries", "Продукты", null)]);
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject(), stored);
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine(250m));
+        var notifier = Substitute.For<IChatNotifier>();
+        var worker = CreateWorker(ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, categorizer: categorizer, notifier: notifier),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(echo => echo.Text.Contains("300.00 RSD") && !echo.Text.Contains("250")), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_failed_first_reading_shows_the_failure_echo()
+    {
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new ModelCallException(ModelFailureKind.Terminal, "bad request"));
+        var notifier = Substitute.For<IChatNotifier>();
+        var worker = CreateWorker(ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, categorizer: categorizer, notifier: notifier),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await notifier.Received(1).EditAsync(111L, 42, RecordEcho.Failure, Arg.Any<CancellationToken>());
     }
 
     [Fact]

@@ -51,6 +51,7 @@ public class PublicSurfaceTests
             "RecentLineItem", "RecentTransaction", "MonthTotal", "MonthSummary",
             "ISpendingReadModel", "ProbeResult", "ISecretProbe", "ISecretStore", "SecretKeys",
             "SecretResult", "SecretState", "SecretStatus",
+            "RecordAction", "EchoMessage", "RecordEcho",
         ],
         ["Noof.Ledger.Persistence"] = ["LedgerConnectionString", "PersistenceRegistration"],
         ["Noof.Ledger.Ai"] = ["AiRegistration"],
