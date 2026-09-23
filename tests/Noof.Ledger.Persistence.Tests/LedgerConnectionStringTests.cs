@@ -2,6 +2,13 @@ using AwesomeAssertions;
 
 namespace Noof.Ledger.Persistence.Tests;
 
+// One test below rewrites NOOF_TEST_PG for the whole process, and every database test reads that
+// variable to find PostgreSQL. Run in parallel with them, it sent whichever test opened a connection
+// inside that window to "Host=from-the-env-var" - "No such host is known", in a test about wallets.
+[CollectionDefinition(nameof(ProcessEnvironmentCollection), DisableParallelization = true)]
+public sealed class ProcessEnvironmentCollection;
+
+[Collection(nameof(ProcessEnvironmentCollection))]
 public class LedgerConnectionStringTests
 {
     [Fact]
