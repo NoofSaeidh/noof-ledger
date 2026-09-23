@@ -13,26 +13,48 @@ internal sealed class RecordEcho : IRecordEcho
     public string Correcting => "Correcting…";
     public string EditPrompt => "What should I fix? Reply to this message — for example: \"no, 1500\" or \"that was yesterday\".";
 
+    public string Transcribing => "🎤 Transcribing…";
+
+    // Edit, as on Failure: a reply - typed or spoken - still records the purchase through an ordinary correction.
+    public EchoMessage HeardNothing { get; } = new("Heard nothing in that voice note.", [RecordAction.Edit]);
+
+    public EchoMessage TranscriptionFailure { get; } = new("Couldn't transcribe that voice note.", [RecordAction.Edit]);
+
     public EchoMessage Failure { get; } = new(
         "Could not read that message. It's saved — reply to this message and tell me how to record it.",
         [RecordAction.Edit]);
 
-    public EchoMessage Compose(CategorizationSubject record) => record switch
+    public EchoMessage Compose(CategorizationSubject record) => WithWhatWasHeard(record, record switch
     {
         { Status: TransactionStatus.Cancelled } =>
             new($"Cancelled — {record.WalletName}\n{Body(record)}".TrimEnd(), [RecordAction.Restore]),
         { Status: TransactionStatus.Failed } => Failure,
-        { Status: TransactionStatus.Captured } => new(Acknowledgement, []),
+        { Status: TransactionStatus.Captured } => new(Waiting(record), []),
         { Lines.Count: 0 } =>
             new($"{record.WalletName}: found no spending here — nothing recorded.", [RecordAction.Edit]),
         _ => new($"Recorded — {record.WalletName}\n{Body(record)}", [RecordAction.Cancel, RecordAction.Edit]),
-    };
+    });
+
+    public EchoMessage ComposeHeardNothing(CategorizationSubject record)
+    {
+        var current = Compose(record);
+        return current with { Text = $"{HeardNothing.Text}\n\n{current.Text}" };
+    }
 
     public EchoMessage ComposeCorrectionFailure(CategorizationSubject record)
     {
         var current = Compose(record);
         return current with { Text = $"Could not apply that correction — the record is unchanged.\n\n{current.Text}" };
     }
+
+    string Waiting(CategorizationSubject record) =>
+        record is { CaptureKind: CaptureKind.Voice, RawText.Length: 0 } ? Transcribing : Acknowledgement;
+
+    // A voice record's echo opens with what was heard (V5), so a misheard word is told apart from a misread one.
+    static EchoMessage WithWhatWasHeard(CategorizationSubject record, EchoMessage echo) =>
+        record is { CaptureKind: CaptureKind.Voice, RawText.Length: > 0, Status: not TransactionStatus.Failed }
+            ? echo with { Text = $"🎤 \"{record.RawText}\"\n{echo.Text}" }
+            : echo;
 
     static string Body(CategorizationSubject record)
     {
