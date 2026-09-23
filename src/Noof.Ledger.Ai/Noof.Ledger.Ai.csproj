@@ -1,5 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <PropertyGroup>
+    <!-- ISpeechToTextClient is [Experimental("MEAI001")] in Microsoft.Extensions.AI 10.5.1. It is the transcription
+         seam (spec V2) and is confined to Noof.Ledger.Ai; revisit this when the API is declared stable. -->
+    <NoWarn>$(NoWarn);MEAI001</NoWarn>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Anthropic" />
     <PackageReference Include="Microsoft.Extensions.AI" />
