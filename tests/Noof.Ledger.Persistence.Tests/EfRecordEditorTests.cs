@@ -112,4 +112,77 @@ public class EfRecordEditorTests(PostgresFixture fixture)
 
         (await db.TransactionRevisions.AnyAsync(TestContext.Current.CancellationToken)).Should().BeFalse();
     }
+
+    [Fact]
+    public async Task A_reply_to_the_edit_prompt_finds_the_record_and_its_echo()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = await SeedAsync(db);
+        var editor = new EfRecordEditor(db, Clock);
+
+        await editor.AttachPromptAsync(transaction.Id, 77, TestContext.Current.CancellationToken);
+
+        (await editor.FindByBotMessageAsync(111, 77, TestContext.Current.CancellationToken))
+            .Should().Be(new EchoTarget(transaction.Id, 42), "the echo, not the prompt, is what gets edited afterwards");
+    }
+
+    [Fact]
+    public async Task Finds_a_record_by_the_persons_own_message()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = await SeedAsync(db);
+
+        (await new EfRecordEditor(db, Clock).FindByUserMessageAsync(111, 5, TestContext.Current.CancellationToken))
+            .Should().Be(new EchoTarget(transaction.Id, 42));
+    }
+
+    [Fact]
+    public async Task A_correction_is_queued_once_even_when_telegram_delivers_the_reply_twice()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = await SeedAsync(db);
+        var editor = new EfRecordEditor(db, Clock);
+
+        (await editor.RequestCorrectionAsync(transaction.Id, "нет, 1500", 8, TestContext.Current.CancellationToken)).Should().BeTrue();
+        (await editor.RequestCorrectionAsync(transaction.Id, "нет, 1500", 8, TestContext.Current.CancellationToken)).Should().BeFalse();
+
+        db.ChangeTracker.Clear();
+        var job = await db.CategorizationJobs.SingleAsync(TestContext.Current.CancellationToken);
+        job.Kind.Should().Be(JobKind.Correct);
+        job.Instruction.Should().Be("нет, 1500");
+        job.SourceMessageId.Should().Be(8);
+        job.Status.Should().Be(JobStatus.Pending);
+        job.RunAfter.Should().Be(Clock.GetUtcNow());
+    }
+
+    [Fact]
+    public async Task An_edited_original_replaces_the_raw_text_and_queues_a_fresh_reading()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = await SeedAsync(db);
+        var editor = new EfRecordEditor(db, Clock);
+
+        (await editor.ReplaceRawTextAsync(transaction.Id, "кофе 300", TestContext.Current.CancellationToken)).Should().BeTrue();
+
+        db.ChangeTracker.Clear();
+        (await db.Transactions.SingleAsync(TestContext.Current.CancellationToken)).RawText.Should().Be("кофе 300");
+        (await db.CategorizationJobs.SingleAsync(TestContext.Current.CancellationToken)).Kind.Should().Be(JobKind.Reinterpret);
+    }
+
+    [Fact]
+    public async Task An_edit_that_leaves_the_text_as_it_was_queues_nothing()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = await SeedAsync(db);
+
+        (await new EfRecordEditor(db, Clock).ReplaceRawTextAsync(transaction.Id, "кофе 250", TestContext.Current.CancellationToken))
+            .Should().BeFalse();
+
+        (await db.CategorizationJobs.AnyAsync(TestContext.Current.CancellationToken)).Should().BeFalse();
+    }
 }

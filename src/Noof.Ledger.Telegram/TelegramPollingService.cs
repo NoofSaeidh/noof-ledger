@@ -84,7 +84,7 @@ internal sealed class TelegramPollingService(
             var updates = await clientHandle.Current!.GetUpdates(
                 offset: offset,
                 timeout: pollingSeconds,
-                allowedUpdates: [UpdateType.Message, UpdateType.CallbackQuery],
+                allowedUpdates: [UpdateType.Message, UpdateType.EditedMessage, UpdateType.CallbackQuery],
                 cancellationToken: cancellationToken);
 
             if (updates.Length > 0)
@@ -150,7 +150,7 @@ internal sealed class TelegramPollingService(
 
     async Task NotifyOperatorOfSkippedUpdateAsync(IServiceScope scope, Update update, CancellationToken cancellationToken)
     {
-        if (update.Message is not { } message)
+        if ((update.Message ?? update.EditedMessage ?? update.CallbackQuery?.Message) is not { } message)
             return;
 
         try

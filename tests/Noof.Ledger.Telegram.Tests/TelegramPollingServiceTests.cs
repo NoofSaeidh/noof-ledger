@@ -294,7 +294,7 @@ public class TelegramPollingServiceTests
     }
 
     [Fact]
-    public async Task Asks_telegram_for_button_presses()
+    public async Task Asks_telegram_for_edits_and_button_presses()
     {
         var client = Substitute.For<ITelegramBotClient>();
         client.SendRequest(Arg.Any<GetUpdatesRequest>(), Arg.Any<CancellationToken>()).Returns([]);
@@ -305,7 +305,8 @@ public class TelegramPollingServiceTests
             .RunTickAsync(TestContext.Current.CancellationToken);
 
         await client.Received(1).SendRequest(
-            Arg.Is<GetUpdatesRequest>(r => r.AllowedUpdates!.Contains(UpdateType.Message) && r.AllowedUpdates!.Contains(UpdateType.CallbackQuery)),
+            Arg.Is<GetUpdatesRequest>(r => r.AllowedUpdates!.Contains(UpdateType.Message) && r.AllowedUpdates!.Contains(UpdateType.CallbackQuery)
+                && r.AllowedUpdates!.Contains(UpdateType.EditedMessage)),
             Arg.Any<CancellationToken>());
     }
 

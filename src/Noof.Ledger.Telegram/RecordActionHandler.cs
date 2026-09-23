@@ -25,6 +25,10 @@ internal sealed class RecordActionHandler(IRecordEditor editor, ICategorizationS
             case RecordAction.Restore:
                 await editor.RestoreAsync(target.TransactionId, cancellationToken);
                 break;
+            case RecordAction.Edit:
+                var promptId = await chatNotifier.AskAsync(echo.Chat.Id, echo.Id, RecordEcho.EditPrompt, cancellationToken);
+                await editor.AttachPromptAsync(target.TransactionId, promptId, cancellationToken);
+                return;
             default:
                 return;
         }

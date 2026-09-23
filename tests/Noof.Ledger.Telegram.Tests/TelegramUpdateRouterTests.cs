@@ -25,7 +25,7 @@ public class TelegramUpdateRouterTests
         var editor = Substitute.For<IRecordEditor>();
         var store = Substitute.For<ICategorizationStore>();
         var router = new TelegramUpdateRouter(captureStore, chatNotifier, new TelegramOwnerGate(secretStore),
-            new RecordActionHandler(editor, store, chatNotifier));
+            new RecordActionHandler(editor, store, chatNotifier), new CorrectionHandler(editor, chatNotifier));
 
         return new Harness(router, captureStore, chatNotifier, editor, store);
     }
@@ -34,6 +34,19 @@ public class TelegramUpdateRouterTests
     {
         Id = 900,
         Message = new Message { Id = messageId, Chat = new Chat { Id = chatId }, Text = text, Date = date },
+    };
+
+    static Update ReplyTo(long chatId, int replyId, int repliedToId, string text) => new()
+    {
+        Id = 904,
+        Message = new Message
+        {
+            Id = replyId,
+            Chat = new Chat { Id = chatId },
+            Text = text,
+            Date = DateTime.UtcNow,
+            ReplyToMessage = new Message { Id = repliedToId, Chat = new Chat { Id = chatId } },
+        },
     };
 
     static Update ButtonPress(long chatId, int echoId, string data) => new()
@@ -191,5 +204,85 @@ public class TelegramUpdateRouterTests
         await chatNotifier.Received(1).AnswerActionAsync("cb-1", Arg.Any<CancellationToken>());
         await editor.DidNotReceive().CancelAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
         await chatNotifier.DidNotReceive().EditAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<EchoMessage>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_reply_to_an_echo_queues_a_correction_instead_of_a_new_capture()
+    {
+        var (router, captureStore, chatNotifier, editor, _) = CreateRouter(ownerChatId: 111L);
+        var transactionId = Guid.NewGuid();
+        editor.FindByBotMessageAsync(111L, 42, Arg.Any<CancellationToken>()).Returns(new EchoTarget(transactionId, 42));
+        editor.RequestCorrectionAsync(transactionId, "нет, 1500", 8, Arg.Any<CancellationToken>()).Returns(true);
+
+        await router.HandleAsync(ReplyTo(111L, 8, 42, "нет, 1500"), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await editor.Received(1).RequestCorrectionAsync(transactionId, "нет, 1500", 8, Arg.Any<CancellationToken>());
+        await chatNotifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(echo => echo.Text == RecordEcho.Correcting && echo.Actions.Count == 0), Arg.Any<CancellationToken>());
+        await captureStore.DidNotReceive().CaptureAsync(Arg.Any<CapturedMessage>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_redelivered_reply_edits_nothing_and_captures_nothing()
+    {
+        var (router, captureStore, chatNotifier, editor, _) = CreateRouter(ownerChatId: 111L);
+        var transactionId = Guid.NewGuid();
+        editor.FindByBotMessageAsync(111L, 42, Arg.Any<CancellationToken>()).Returns(new EchoTarget(transactionId, 42));
+        editor.RequestCorrectionAsync(transactionId, "нет, 1500", 8, Arg.Any<CancellationToken>()).Returns(false);
+
+        await router.HandleAsync(ReplyTo(111L, 8, 42, "нет, 1500"), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await chatNotifier.DidNotReceive().EditAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<EchoMessage>(), Arg.Any<CancellationToken>());
+        await captureStore.DidNotReceive().CaptureAsync(Arg.Any<CapturedMessage>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_reply_to_anything_but_an_echo_is_captured_as_a_new_message()
+    {
+        var (router, captureStore, _, editor, _) = CreateRouter(ownerChatId: 111L);
+        editor.FindByBotMessageAsync(111L, 3, Arg.Any<CancellationToken>()).Returns((EchoTarget?)null);
+
+        await router.HandleAsync(ReplyTo(111L, 8, 3, "хлеб 100"), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await captureStore.Received(1).CaptureAsync(Arg.Is<CapturedMessage>(m => m.Text == "хлеб 100"), "Europe/Belgrade", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Edit_asks_what_to_change_and_remembers_the_prompt()
+    {
+        var (router, _, chatNotifier, editor, _) = CreateRouter(ownerChatId: 111L);
+        var transactionId = Guid.NewGuid();
+        editor.FindByBotMessageAsync(111L, 42, Arg.Any<CancellationToken>()).Returns(new EchoTarget(transactionId, 42));
+        chatNotifier.AskAsync(111L, 42, RecordEcho.EditPrompt, Arg.Any<CancellationToken>()).Returns(77);
+
+        await router.HandleAsync(ButtonPress(111L, 42, "edit"), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await editor.Received(1).AttachPromptAsync(transactionId, 77, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Editing_the_original_message_re_reads_it()
+    {
+        var (router, _, chatNotifier, editor, _) = CreateRouter(ownerChatId: 111L);
+        var transactionId = Guid.NewGuid();
+        editor.FindByUserMessageAsync(111L, 5, Arg.Any<CancellationToken>()).Returns(new EchoTarget(transactionId, 42));
+        editor.ReplaceRawTextAsync(transactionId, "кофе 300", Arg.Any<CancellationToken>()).Returns(true);
+        var update = new Update { Id = 905, EditedMessage = new Message { Id = 5, Chat = new Chat { Id = 111L }, Text = "кофе 300" } };
+
+        await router.HandleAsync(update, "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await editor.Received(1).ReplaceRawTextAsync(transactionId, "кофе 300", Arg.Any<CancellationToken>());
+        await chatNotifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(echo => echo.Text == RecordEcho.Correcting), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_strangers_edit_is_ignored()
+    {
+        var (router, _, _, editor, _) = CreateRouter(ownerChatId: 111L);
+        var update = new Update { Id = 906, EditedMessage = new Message { Id = 5, Chat = new Chat { Id = 999L }, Text = "x" } };
+
+        await router.HandleAsync(update, "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await editor.DidNotReceive().FindByUserMessageAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
 }

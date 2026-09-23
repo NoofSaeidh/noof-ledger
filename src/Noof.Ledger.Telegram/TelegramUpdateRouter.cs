@@ -8,7 +8,8 @@ internal sealed class TelegramUpdateRouter(
     ICaptureStore captureStore,
     IChatNotifier chatNotifier,
     TelegramOwnerGate ownerGate,
-    RecordActionHandler actionHandler)
+    RecordActionHandler actionHandler,
+    CorrectionHandler correctionHandler)
     : ITelegramUpdateRouter
 {
     public async Task HandleAsync(Update update, string timeZoneId, CancellationToken cancellationToken)
@@ -17,6 +18,10 @@ internal sealed class TelegramUpdateRouter(
         {
             case { Message: { } message }:
                 await HandleMessageAsync(message, timeZoneId, cancellationToken);
+                break;
+            case { EditedMessage: { } edited }:
+                if (await ownerGate.IsAllowedAsync(edited.Chat.Id, cancellationToken))
+                    await correctionHandler.HandleEditAsync(edited, cancellationToken);
                 break;
             case { CallbackQuery: { Message: { } echo } query }:
                 // Rejected before reading Data, for the reason messages are rejected before reading Text.
@@ -34,6 +39,10 @@ internal sealed class TelegramUpdateRouter(
             return;
 
         if (message.Text is not { Length: > 0 } text)
+            return;
+
+        if (message.ReplyToMessage is { } repliedTo
+            && await correctionHandler.TryHandleReplyAsync(message, repliedTo, text, cancellationToken))
             return;
 
         // message.Date is when Telegram received it from the sender, not when we got around to

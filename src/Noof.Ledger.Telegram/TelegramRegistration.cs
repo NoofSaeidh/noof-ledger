@@ -25,6 +25,7 @@ public static class TelegramRegistration
         services.AddScoped<TelegramOwnerGate>();
         services.AddScoped<TelegramUpdateOffsetStore>();
         services.AddScoped<RecordActionHandler>();
+        services.AddScoped<CorrectionHandler>();
         services.AddScoped<ITelegramUpdateRouter, TelegramUpdateRouter>();
         services.AddHostedService<TelegramPollingService>();
 

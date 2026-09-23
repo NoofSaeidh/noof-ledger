@@ -8,11 +8,64 @@ namespace Noof.Ledger.Persistence.Editing;
 
 internal sealed class EfRecordEditor(LedgerDbContext db, TimeProvider timeProvider) : IRecordEditor
 {
+    const string CorrectionSourceIndex = "IX_categorization_jobs_transaction_id_source_message_id";
+
     public Task<EchoTarget?> FindByBotMessageAsync(long chatId, int messageId, CancellationToken cancellationToken) =>
         db.Transactions.AsNoTracking()
-            .Where(t => t.TelegramChatId == chatId && t.BotMessageId == messageId)
+            .Where(t => t.TelegramChatId == chatId
+                && t.BotMessageId != null
+                && (t.BotMessageId == messageId || t.PromptMessageId == messageId))
             .Select(t => new EchoTarget(t.Id, t.BotMessageId))
             .SingleOrDefaultAsync(cancellationToken);
+
+    public Task<EchoTarget?> FindByUserMessageAsync(long chatId, int messageId, CancellationToken cancellationToken) =>
+        db.Transactions.AsNoTracking()
+            .Where(t => t.TelegramChatId == chatId && t.TelegramMessageId == messageId)
+            .Select(t => new EchoTarget(t.Id, t.BotMessageId))
+            .SingleOrDefaultAsync(cancellationToken);
+
+    public async Task<bool> RequestCorrectionAsync(
+        Guid transactionId, string instruction, int sourceMessageId, CancellationToken cancellationToken)
+    {
+        var job = NewJob(transactionId, JobKind.Correct, instruction, sourceMessageId);
+        db.CategorizationJobs.Add(job);
+
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException
+        {
+            SqlState: PostgresErrorCodes.UniqueViolation,
+            ConstraintName: CorrectionSourceIndex,
+        })
+        {
+            db.Entry(job).State = EntityState.Detached;
+            return false;
+        }
+    }
+
+    public async Task<bool> ReplaceRawTextAsync(Guid transactionId, string rawText, CancellationToken cancellationToken)
+    {
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+        if (await LockAsync(transactionId, cancellationToken) is not { } transaction
+            || string.Equals(transaction.RawText, rawText, StringComparison.Ordinal))
+            return false;
+
+        transaction.RawText = rawText;
+        db.CategorizationJobs.Add(NewJob(transactionId, JobKind.Reinterpret, instruction: null, sourceMessageId: null));
+        await db.SaveChangesAsync(cancellationToken);
+        await tx.CommitAsync(cancellationToken);
+        return true;
+    }
+
+    public async Task AttachPromptAsync(Guid transactionId, int promptMessageId, CancellationToken cancellationToken)
+    {
+        var transaction = await db.Transactions.SingleAsync(t => t.Id == transactionId, cancellationToken);
+        transaction.PromptMessageId = promptMessageId;
+        await db.SaveChangesAsync(cancellationToken);
+    }
 
     public async Task<bool> CancelAsync(Guid transactionId, CancellationToken cancellationToken)
     {
@@ -48,6 +101,24 @@ internal sealed class EfRecordEditor(LedgerDbContext db, TimeProvider timeProvid
             timeProvider.GetUtcNow(), cancellationToken);
         await tx.CommitAsync(cancellationToken);
         return true;
+    }
+
+    CategorizationJob NewJob(Guid transactionId, JobKind kind, string? instruction, int? sourceMessageId)
+    {
+        var now = timeProvider.GetUtcNow();
+        return new CategorizationJob
+        {
+            Id = Guid.NewGuid(),
+            TransactionId = transactionId,
+            Kind = kind,
+            Instruction = instruction,
+            SourceMessageId = sourceMessageId,
+            Status = JobStatus.Pending,
+            AttemptCount = 0,
+            RunAfter = now,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
     }
 
     // The same row lock EfCategorizationStore.ApplyAsync takes, so a button press and a worker writing the

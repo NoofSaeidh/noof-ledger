@@ -6,6 +6,7 @@ using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Requests;
 using Telegram.Bot.Types;
+using Telegram.Bot.Types.ReplyMarkups;
 
 namespace Noof.Ledger.Telegram.Tests;
 
@@ -118,5 +119,21 @@ public class TelegramChatNotifierTests
         var act = () => notifier.AnswerActionAsync("cb-1", TestContext.Current.CancellationToken);
 
         await act.Should().NotThrowAsync("a press handled after downtime must still cancel; only the spinner is lost");
+    }
+
+    [Fact]
+    public async Task AskAsync_sends_a_force_reply_prompt_quoting_the_echo()
+    {
+        var client = Substitute.For<ITelegramBotClient>();
+        client.SendRequest(Arg.Any<SendMessageRequest>(), Arg.Any<CancellationToken>()).Returns(new Message { Id = 77 });
+        var notifier = new TelegramChatNotifier(new TelegramClientHandle { Current = client });
+
+        var promptId = await notifier.AskAsync(42L, 555, "Что исправить?", TestContext.Current.CancellationToken);
+
+        promptId.Should().Be(77);
+        await client.Received(1).SendRequest(
+            Arg.Is<SendMessageRequest>(r => r.Text == "Что исправить?" && r.ReplyParameters!.MessageId == 555
+                && r.ReplyMarkup is ForceReplyMarkup),
+            Arg.Any<CancellationToken>());
     }
 }

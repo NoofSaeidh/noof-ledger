@@ -1,6 +1,7 @@
 using Noof.Ledger.Application.Chat;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
+using Telegram.Bot.Types;
 using Telegram.Bot.Types.ReplyMarkups;
 
 namespace Noof.Ledger.Telegram;
@@ -25,6 +26,15 @@ internal sealed class TelegramChatNotifier(TelegramClientHandle clientHandle) : 
         catch (ApiRequestException exception) when (exception.Message.Contains("message is not modified", StringComparison.Ordinal))
         {
         }
+    }
+
+    public async Task<int> AskAsync(long chatId, int replyToMessageId, string prompt, CancellationToken cancellationToken)
+    {
+        var message = await Client().SendMessage(chatId, prompt,
+            replyParameters: new ReplyParameters { MessageId = replyToMessageId },
+            replyMarkup: new ForceReplyMarkup { InputFieldPlaceholder = "нет, 1500" },
+            cancellationToken: cancellationToken);
+        return message.Id;
     }
 
     public async Task AnswerActionAsync(string actionId, CancellationToken cancellationToken)
