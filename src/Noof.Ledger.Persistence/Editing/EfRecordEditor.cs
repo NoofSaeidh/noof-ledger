@@ -24,15 +24,34 @@ internal sealed class EfRecordEditor(LedgerDbContext db, TimeProvider timeProvid
             .SingleOrDefaultAsync(cancellationToken);
 
     public async Task<bool> RequestCorrectionAsync(
-        Guid transactionId, string instruction, int sourceMessageId, DateTimeOffset sentAt, CancellationToken cancellationToken)
+        Guid transactionId, string instruction, int sourceMessageId, DateTimeOffset sentAt, CancellationToken cancellationToken) =>
+        await TryQueueAsync(
+            NewJob(transactionId, JobKind.Correct, instruction, sourceMessageId,
+                await InstructionDayAsync(transactionId, sentAt, cancellationToken)),
+            cancellationToken);
+
+    public async Task<bool> RequestVoiceCorrectionAsync(
+        Guid transactionId, string voiceFileId, int sourceMessageId, DateTimeOffset sentAt, CancellationToken cancellationToken) =>
+        await TryQueueAsync(
+            NewJob(transactionId, JobKind.Transcribe, instruction: null, sourceMessageId,
+                await InstructionDayAsync(transactionId, sentAt, cancellationToken), voiceFileId),
+            cancellationToken);
+
+    // sentAt is the correction reply's own send instant, so the model's "today" for this correction is the
+    // reply's local day, not the original message's (docs/OPEN-QUESTIONS.md P2-2).
+    async Task<DateOnly?> InstructionDayAsync(Guid transactionId, DateTimeOffset sentAt, CancellationToken cancellationToken)
     {
         var timeZoneId = await db.Transactions.AsNoTracking()
             .Where(t => t.Id == transactionId)
             .Select(t => (string?)t.TimeZoneId)
             .SingleOrDefaultAsync(cancellationToken);
-        var instructionDay = timeZoneId is null ? (DateOnly?)null : ZonedClock.LocalDate(sentAt, timeZoneId);
 
-        var job = NewJob(transactionId, JobKind.Correct, instruction, sourceMessageId, instructionDay);
+        return timeZoneId is null ? null : ZonedClock.LocalDate(sentAt, timeZoneId);
+    }
+
+    // False when this exact reply is already queued: Telegram redelivers an update whose handling failed partway.
+    async Task<bool> TryQueueAsync(CategorizationJob job, CancellationToken cancellationToken)
+    {
         db.CategorizationJobs.Add(job);
 
         try
@@ -42,8 +61,7 @@ internal sealed class EfRecordEditor(LedgerDbContext db, TimeProvider timeProvid
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException
         {
-            SqlState: PostgresErrorCodes.UniqueViolation,
-            ConstraintName: CategorizationJobConfiguration.SourceMessageIndex,
+            SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: CategorizationJobConfiguration.SourceMessageIndex,
         })
         {
             db.Entry(job).State = EntityState.Detached;
@@ -108,7 +126,9 @@ internal sealed class EfRecordEditor(LedgerDbContext db, TimeProvider timeProvid
         return true;
     }
 
-    CategorizationJob NewJob(Guid transactionId, JobKind kind, string? instruction, int? sourceMessageId, DateOnly? instructionDay)
+    CategorizationJob NewJob(
+        Guid transactionId, JobKind kind, string? instruction, int? sourceMessageId, DateOnly? instructionDay,
+        string? voiceFileId = null)
     {
         var now = timeProvider.GetUtcNow();
         return new CategorizationJob
@@ -119,6 +139,7 @@ internal sealed class EfRecordEditor(LedgerDbContext db, TimeProvider timeProvid
             Instruction = instruction,
             SourceMessageId = sourceMessageId,
             InstructionDay = instructionDay,
+            VoiceFileId = voiceFileId,
             Status = JobStatus.Pending,
             AttemptCount = 0,
             RunAfter = now,

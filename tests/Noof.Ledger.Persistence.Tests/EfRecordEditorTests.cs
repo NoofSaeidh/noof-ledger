@@ -203,4 +203,26 @@ public class EfRecordEditorTests(PostgresFixture fixture)
 
         (await db.CategorizationJobs.AnyAsync(TestContext.Current.CancellationToken)).Should().BeFalse();
     }
+
+    [Fact]
+    public async Task A_spoken_correction_queues_its_voice_for_transcription_once()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = await SeedAsync(db);
+        var editor = new EfRecordEditor(db, Clock);
+        var sentAt = new DateTimeOffset(2026, 9, 23, 22, 30, 0, TimeSpan.Zero);
+
+        var first = await editor.RequestVoiceCorrectionAsync(transaction.Id, "reply-voice", 900, sentAt, TestContext.Current.CancellationToken);
+        var second = await editor.RequestVoiceCorrectionAsync(transaction.Id, "reply-voice", 900, sentAt, TestContext.Current.CancellationToken);
+
+        first.Should().BeTrue();
+        second.Should().BeFalse("Telegram redelivered the same reply");
+        var job = await db.CategorizationJobs.SingleAsync(TestContext.Current.CancellationToken);
+        job.Kind.Should().Be(JobKind.Transcribe);
+        job.VoiceFileId.Should().Be("reply-voice");
+        job.SourceMessageId.Should().Be(900);
+        job.Instruction.Should().BeNull("the instruction is whatever the transcript turns out to be");
+        job.InstructionDay.Should().Be(new DateOnly(2026, 9, 24), "22:30 UTC on the 23rd is the 24th in Belgrade");
+    }
 }

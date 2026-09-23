@@ -21,6 +21,11 @@ public interface IRecordEditor
     Task<bool> RequestCorrectionAsync(
         Guid transactionId, string instruction, int sourceMessageId, DateTimeOffset sentAt, CancellationToken cancellationToken);
 
+    // The spoken form of RequestCorrectionAsync: queues the reply's voice for transcription, and the transcript becomes
+    // the correction's instruction (V7). Same idempotency, same instruction day.
+    Task<bool> RequestVoiceCorrectionAsync(
+        Guid transactionId, string voiceFileId, int sourceMessageId, DateTimeOffset sentAt, CancellationToken cancellationToken);
+
     // False when the text is unchanged, so a redelivered edit queues nothing.
     Task<bool> ReplaceRawTextAsync(Guid transactionId, string rawText, CancellationToken cancellationToken);
 

@@ -256,4 +256,49 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
         var transaction = await db.Transactions.SingleAsync(TestContext.Current.CancellationToken);
         transaction.BotMessageId.Should().Be(555);
     }
+
+    [Fact]
+    public async Task Captures_a_voice_note_with_no_text_and_a_transcription_job()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var now = new DateTimeOffset(2026, 9, 24, 21, 30, 0, TimeSpan.Zero);
+        var store = new EfCaptureStore(db, new FakeTimeProvider(now));
+
+        var transactionId = await store.CaptureVoiceAsync(
+            new CapturedVoice(111, 5, "voice-file-1", 4, now), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        var transaction = await db.Transactions.SingleAsync(TestContext.Current.CancellationToken);
+        transaction.Id.Should().Be(transactionId);
+        transaction.CaptureKind.Should().Be(CaptureKind.Voice);
+        transaction.RawText.Should().BeNull();
+        transaction.VoiceFileId.Should().Be("voice-file-1");
+        transaction.VoiceDurationSeconds.Should().Be(4);
+        transaction.Status.Should().Be(TransactionStatus.Captured);
+        transaction.OccurredOn.Should().Be(new DateOnly(2026, 9, 24), "21:30 UTC is 23:30 in Belgrade, still the 24th");
+
+        var job = await db.CategorizationJobs.SingleAsync(TestContext.Current.CancellationToken);
+        job.TransactionId.Should().Be(transactionId);
+        job.Kind.Should().Be(JobKind.Transcribe);
+        job.VoiceFileId.Should().Be("voice-file-1");
+        job.SourceMessageId.Should().BeNull("a capture's transcription is not a correction");
+        job.Status.Should().Be(JobStatus.Pending);
+    }
+
+    [Fact]
+    public async Task A_redelivered_voice_note_is_captured_once()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var now = new DateTimeOffset(2026, 9, 24, 9, 0, 0, TimeSpan.Zero);
+        var store = new EfCaptureStore(db, new FakeTimeProvider(now));
+        var voice = new CapturedVoice(111, 5, "voice-file-1", 4, now);
+
+        var first = await store.CaptureVoiceAsync(voice, "Europe/Belgrade", TestContext.Current.CancellationToken);
+        var second = await store.CaptureVoiceAsync(voice, "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        second.Should().Be(first);
+        (await db.Transactions.CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
+        (await db.CategorizationJobs.CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
+    }
 }

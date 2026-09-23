@@ -7,9 +7,17 @@ namespace Noof.Ledger.Persistence.Capture;
 
 internal sealed class EfCaptureStore(LedgerDbContext db, TimeProvider timeProvider) : ICaptureStore
 {
-    public async Task<Guid> CaptureAsync(CapturedMessage message, string timeZoneId, CancellationToken cancellationToken)
+    public Task<Guid> CaptureAsync(CapturedMessage message, string timeZoneId, CancellationToken cancellationToken) =>
+        StoreAsync(message.ChatId, message.MessageId, message.SentAt, timeZoneId, message.Text, voice: null, cancellationToken);
+
+    public Task<Guid> CaptureVoiceAsync(CapturedVoice voice, string timeZoneId, CancellationToken cancellationToken) =>
+        StoreAsync(voice.ChatId, voice.MessageId, voice.SentAt, timeZoneId, rawText: null, voice, cancellationToken);
+
+    async Task<Guid> StoreAsync(
+        long chatId, int messageId, DateTimeOffset sentAt, string timeZoneId, string? rawText, CapturedVoice? voice,
+        CancellationToken cancellationToken)
     {
-        var existing = await FindExistingAsync(message, cancellationToken);
+        var existing = await FindExistingAsync(chatId, messageId, cancellationToken);
 
         if (existing is not null)
             return existing.Id;
@@ -27,19 +35,24 @@ internal sealed class EfCaptureStore(LedgerDbContext db, TimeProvider timeProvid
         {
             Id = transactionId,
             WalletId = wallet.Id,
-            RawText = message.Text,
+            RawText = rawText,
+            CaptureKind = voice is null ? CaptureKind.Text : CaptureKind.Voice,
+            VoiceFileId = voice?.VoiceFileId,
+            VoiceDurationSeconds = voice?.DurationSeconds,
             Status = TransactionStatus.Captured,
             TimeZoneId = timeZoneId,
-            OccurredAt = message.SentAt,
-            OccurredOn = ZonedClock.LocalDate(message.SentAt, timeZoneId),
-            TelegramChatId = message.ChatId,
-            TelegramMessageId = message.MessageId,
+            OccurredAt = sentAt,
+            OccurredOn = ZonedClock.LocalDate(sentAt, timeZoneId),
+            TelegramChatId = chatId,
+            TelegramMessageId = messageId,
             CreatedAt = now,
         };
         var job = new CategorizationJob
         {
             Id = Guid.NewGuid(),
             TransactionId = transactionId,
+            Kind = voice is null ? JobKind.Categorize : JobKind.Transcribe,
+            VoiceFileId = voice?.VoiceFileId,
             Status = JobStatus.Pending,
             AttemptCount = 0,
             RunAfter = now,
@@ -62,16 +75,16 @@ internal sealed class EfCaptureStore(LedgerDbContext db, TimeProvider timeProvid
             db.Entry(transaction).State = EntityState.Detached;
             db.Entry(job).State = EntityState.Detached;
 
-            var winner = await FindExistingAsync(message, cancellationToken)
+            var winner = await FindExistingAsync(chatId, messageId, cancellationToken)
                 ?? throw new InvalidOperationException(
                     "A unique-constraint violation on capture reported a winner that cannot be found.");
             return winner.Id;
         }
     }
 
-    Task<Transaction?> FindExistingAsync(CapturedMessage message, CancellationToken cancellationToken) =>
+    Task<Transaction?> FindExistingAsync(long chatId, int messageId, CancellationToken cancellationToken) =>
         db.Transactions.SingleOrDefaultAsync(
-            t => t.TelegramChatId == message.ChatId && t.TelegramMessageId == message.MessageId,
+            t => t.TelegramChatId == chatId && t.TelegramMessageId == messageId,
             cancellationToken);
 
     static bool IsDuplicateCaptureViolation(DbUpdateException ex) =>
