@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using AwesomeAssertions;
@@ -149,15 +150,23 @@ public class AnthropicCategorizerTests
     }
 
     [Theory]
-    [InlineData(1000, 1000)]
-    [InlineData(45.3, 45.3)]
-    [InlineData(0.1, 0.1)]
-    public async Task An_amount_in_the_response_round_trips_into_decimal_exactly(double raw, double expected)
+    [InlineData("1000", "1000")]
+    [InlineData("45.3", "45.3")]
+    [InlineData("0.1", "0.1")]
+    // Neither of these two survives a round trip through double: Decimal(double) rounds to 15
+    // significant digits, so a production path that read GetDouble() then cast to decimal would
+    // still pass the three rows above but corrupt these.
+    [InlineData("12345678901234567.89", "12345678901234567.89")]
+    [InlineData("0.30000000000000004", "0.30000000000000004")]
+    public async Task An_amount_in_the_response_round_trips_into_decimal_exactly(string raw, string expected)
     {
         // The schema declares amount as a JSON number (not a string), and the tool call's arguments
         // are read as a JsonElement with no object converter, so System.Text.Json reads the decimal
-        // straight from the response's own token text - no double, no separator handling. 0.1 is the
-        // classic case a binary float cannot hold exactly; decimal must (operator, 2026-09-23).
+        // straight from the response's own token text - no double, no separator handling. raw is
+        // spliced into the JSON verbatim (never interpolated through a numeric ToString(), which is
+        // culture-sensitive and would emit "45,3" on a machine whose culture uses a comma decimal
+        // separator, breaking the JSON for a reason unrelated to what this test guards) (operator,
+        // 2026-09-23).
         var (categorizer, handler) = Build();
         handler.Enqueue(HttpStatusCode.OK, $$$"""
             {"id":"msg_07","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
@@ -168,7 +177,7 @@ public class AnthropicCategorizerTests
 
         var proposal = await categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
 
-        proposal.Items.Should().ContainSingle().Which.Amount.Should().Be((decimal)expected);
+        proposal.Items.Should().ContainSingle().Which.Amount.Should().Be(decimal.Parse(expected, CultureInfo.InvariantCulture));
     }
 
     [Fact]
