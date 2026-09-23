@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Jobs;
+using Noof.Ledger.Application.Transcription;
 using Noof.Ledger.Host.Workers;
 using Noof.Ledger.Persistence.Jobs;
 
@@ -53,5 +54,25 @@ public class CategorizationWiringTests
         options.MerchantHintLimit.Should().Be(10);
         options.MaxCanonicalizationsPerJob.Should().Be(3);
         options.DefaultCurrency.Should().Be("RSD");
+    }
+
+    [Fact]
+    public void Every_scoped_transcription_port_resolves_without_touching_the_database()
+    {
+        using var factory = Factory();
+        using var scope = factory.Services.CreateScope();
+
+        scope.ServiceProvider.GetRequiredService<ITranscriptionStore>();
+        scope.ServiceProvider.GetRequiredService<ITranscriber>();
+        scope.ServiceProvider.GetRequiredService<ISpeechProvider>();
+        scope.ServiceProvider.GetRequiredService<IVoiceFileSource>();
+    }
+
+    [Fact]
+    public void TranscriptionWorker_is_registered_as_a_hosted_service()
+    {
+        using var factory = Factory();
+
+        factory.Services.GetServices<IHostedService>().Should().Contain(service => service is TranscriptionWorker);
     }
 }
