@@ -1,3 +1,4 @@
+using System.Globalization;
 using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
@@ -217,6 +218,25 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
         idB.Should().Be(idA, "both callers captured the identical (ChatId, MessageId); the loser must return the winner's id, not throw");
         (await dbA.Transactions.CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
         (await dbA.CategorizationJobs.CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData("2026-09-21T21:50:00Z", "2026-09-21")]
+    [InlineData("2026-09-21T22:30:00Z", "2026-09-22")]
+    public async Task Occurred_on_is_the_local_day_the_message_was_sent_in_the_capture_time_zone(string sentAt, string expectedDay)
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        // Processed the next morning: the offline queue must not move a purchase to the day it was read (D2).
+        var store = new EfCaptureStore(db, new FakeTimeProvider(new DateTimeOffset(2026, 9, 22, 8, 0, 0, TimeSpan.Zero)));
+
+        await store.CaptureAsync(
+            NewMessage(sentAt: DateTimeOffset.Parse(sentAt, CultureInfo.InvariantCulture)),
+            "Europe/Belgrade",
+            TestContext.Current.CancellationToken);
+
+        var transaction = await db.Transactions.SingleAsync(TestContext.Current.CancellationToken);
+        transaction.OccurredOn.Should().Be(DateOnly.Parse(expectedDay, CultureInfo.InvariantCulture));
     }
 
     [Fact]

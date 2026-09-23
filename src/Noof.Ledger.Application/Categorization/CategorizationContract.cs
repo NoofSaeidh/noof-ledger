@@ -48,13 +48,28 @@ public sealed record CategorizedLineItem(
     Guid CategoryId,
     Guid? MerchantId);
 
-// Everything the worker needs about the transaction it claimed, in one round trip.
+// Everything the worker and the echo need about one transaction: the message, where its echo lives, and the
+// record exactly as it is stored now. SentOn is the local day the message was sent - "today" for the model (D2).
 public sealed record CategorizationSubject(
     Guid TransactionId,
     string RawText,
     long TelegramChatId,
     int? BotMessageId,
-    string WalletName);
+    string WalletName,
+    TransactionStatus Status,
+    DateOnly SentOn,
+    DateOnly OccurredOn,
+    IReadOnlyList<RecordedLine> Lines);
+
+// CategoryName is the Russian name: the bot speaks Russian.
+public sealed record RecordedLine(
+    string Description,
+    Money Amount,
+    string? CategorySlug,
+    string? CategoryName,
+    string? MerchantName);
+
+public sealed record CategorizationOutcome(IReadOnlyList<CategorizedLineItem> Items, DateOnly OccurredOn);
 
 public sealed record CategoryEntry(Guid Id, string Slug, string NameEn, string NameRu, string? ParentSlug);
 

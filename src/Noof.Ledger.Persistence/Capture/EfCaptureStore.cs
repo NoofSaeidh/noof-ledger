@@ -31,6 +31,7 @@ internal sealed class EfCaptureStore(LedgerDbContext db, TimeProvider timeProvid
             Status = TransactionStatus.Captured,
             TimeZoneId = timeZoneId,
             OccurredAt = message.SentAt,
+            OccurredOn = ZonedClock.LocalDate(message.SentAt, timeZoneId),
             TelegramChatId = message.ChatId,
             TelegramMessageId = message.MessageId,
             CreatedAt = now,
