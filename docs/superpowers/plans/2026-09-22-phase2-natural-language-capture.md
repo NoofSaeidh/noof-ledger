@@ -22,8 +22,8 @@
 
 ## Global Constraints
 
-- **Money is `decimal` + `Currency`.** Never `double`, never `float`. A model's amount is a *string* in the schema and in the DTO, and it becomes a `decimal` only through `decimal.TryParse(..., NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, ...)` in `ProposalMapper`.
-- **Capture has no validation layer (settled 2026-09-22, D1, P2-1).** Do not add a verbatim check, an evidence span or a sanity bound anywhere. `ProposalMapper` only parses: a decimal, a supported currency, an offered slug, an offered merchant id, and an ISO date. A response that does not parse fails the job. The mapper does not judge whether a value is plausible.
+- **Money is `decimal` + `Currency`.** Never `double`, never `float`. A model's amount is a JSON *number* in the schema (`"type": "number"`), reached through the same schema-constrained structured output (`ChatResponseFormat.ForJsonSchema` → Anthropic `output_config.format`), so it arrives typed. The DTO field is `decimal`, and `System.Text.Json` deserialises the JSON number token straight into it — no string parsing, no separator handling, anywhere in the pipeline. **Amount is a JSON number deserialised directly into `decimal` (operator, 2026-09-23).**
+- **Capture has no validation layer (settled 2026-09-22, D1, P2-1).** Do not add a verbatim check, an evidence span or a sanity bound anywhere. The amount arrives already a `decimal` (it is a JSON number in the schema); `ProposalMapper` only maps and validates the rest: a supported currency, an offered slug, an offered merchant id, and an ISO date. A response that does not map fails the job. The mapper does not judge whether a value is plausible.
 - **Reports, totals and balances are computed by C#.** The echo's figures are read from the stored rows after the write (D4), never from the proposal.
 - **The bot speaks Russian.** That covers every string the bot sends, the button labels and the category names in the echo (`name_ru`).
 - **`noof_ledger` holds real credentials.** Never run a test, a manual check, `dotnet ef database update` or the published host against it. **`dotnet ef database update` without `--connection` resolves to `noof_ledger`**: `DesignTimeDbContextFactory` → `LedgerConnectionString.Resolve(null)` → the credential file → `Database=noof_ledger`. Always pass `--connection` naming `noof_ledger_test_template` (see "Updating the test template" below).
@@ -77,7 +77,6 @@ The output's last line must name the new migration. Do **not** run it without `-
 - **No voice.** Voice is Phase 3 and needs a speech-to-text decision first.
 - **No editing in the dashboard, and no rollback to an earlier revision.** Both are in `docs/BACKLOG.md` already. The revisions table is what makes both cheap later.
 - **No live-model calibration.** The prompt is written against the faked model only. Phase 11 tunes it with the operator's permission.
-- **No "lenient" amount parsing.** `"45,30"` fails the job and does not become 45.30 or 4530. The schema and the prompt both say *dot*, and a guessed separator would be a sanity layer by another name (D1). The person sees the failure echo and can reply.
 - **No per-message line ordering.** See the facts table.
 - **No change to how the dashboard marks a Failed or Captured transaction.** Cancelled rows are simply absent from it (D5).
 
@@ -151,7 +150,7 @@ public sealed record CategorizationRequest(
     IReadOnlyList<MerchantOption> MerchantHints, IReadOnlyList<MerchantOption> AllMerchants,
     CorrectionRequest? Correction = null);
 public sealed record CorrectionRequest(DateOnly CurrentOccurredOn, IReadOnlyList<RecordedLine> CurrentLines, string Instruction);
-public sealed record ProposedLineItem(string Description, string Amount, string? CurrencyCode, string CategorySlug, Guid? KnownMerchantId, string? MerchantName);
+public sealed record ProposedLineItem(string Description, decimal Amount, string? CurrencyCode, string CategorySlug, Guid? KnownMerchantId, string? MerchantName);
 public sealed record CategorizationProposal(IReadOnlyList<ProposedLineItem> Items, string? OccurredOn = null);
 public sealed record ResolvedLineItem(string Description, Money Amount, string CategorySlug, Guid? KnownMerchantId, string? MerchantName);
 public sealed record MappedProposal(IReadOnlyList<ResolvedLineItem> Items, DateOnly? OccurredOn);
@@ -209,7 +208,7 @@ public sealed record RecentTransaction(Guid Id, DateOnly OccurredOn, TimeOnly? L
 
 **Interfaces:**
 - Consumes: nothing new.
-- Produces: `CurrencyCode.Supported`. `ProposedLineItem(Description, string Amount, CurrencyCode?, CategorySlug, KnownMerchantId?, string? MerchantName)`. `ResolvedLineItem(..., string? MerchantName)`. `MappedProposal(IReadOnlyList<ResolvedLineItem> Items)` (Task 3 adds `OccurredOn`). `ProposalMapper.TryMap(proposal, offeredSlugs, offeredMerchantIds, defaultCurrency, out MappedProposal mapped, out string failure)`. JSON fields `amount` and `merchant_name` replace `amount_quote` and `merchant_quote`.
+- Produces: `CurrencyCode.Supported`. `ProposedLineItem(Description, decimal Amount, CurrencyCode?, CategorySlug, KnownMerchantId?, string? MerchantName)`. `ResolvedLineItem(..., string? MerchantName)`. `MappedProposal(IReadOnlyList<ResolvedLineItem> Items)` (Task 3 adds `OccurredOn`). `ProposalMapper.TryMap(proposal, offeredSlugs, offeredMerchantIds, defaultCurrency, out MappedProposal mapped, out string failure)`. JSON fields `amount` (a JSON number, deserialised straight into `decimal`) and `merchant_name` replace `amount_quote` and `merchant_quote`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -226,7 +225,6 @@ public sealed record RecentTransaction(Guid Id, DateOnly OccurredOn, TimeOnly? L
 Delete `tests/Noof.Ledger.Domain.Tests/QuotedAmountTests.cs` and `tests/Noof.Ledger.Persistence.Tests/ProposalVerificationTests.cs`. Create `tests/Noof.Ledger.Persistence.Tests/ProposalMapperTests.cs`:
 
 ```csharp
-using System.Globalization;
 using AwesomeAssertions;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Domain;
@@ -239,7 +237,7 @@ public class ProposalMapperTests
     static readonly Guid KnownMerchant = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
     static ProposedLineItem Line(
-        string amount, string? currency = "RSD", string slug = "groceries",
+        decimal amount, string? currency = "RSD", string slug = "groceries",
         Guid? knownMerchantId = null, string? merchantName = null, string description = "кофе") =>
         new(description, amount, currency, slug, knownMerchantId, merchantName);
 
@@ -249,57 +247,30 @@ public class ProposalMapperTests
     [Fact]
     public void An_amount_the_message_never_wrote_in_digits_is_taken_as_the_model_gives_it()
     {
-        // "купил штуку евро" has no digits at all. Accepting the model's "1000" is the whole point of D1.
-        Map(new([Line("1000", "EUR")]), out var mapped, out _).Should().BeTrue();
+        // "купил штуку евро" has no digits at all. Accepting the model's 1000 is the whole point of D1.
+        // The model answers a JSON number, so there is nothing here to parse: it is the same decimal
+        // System.Text.Json read off the response's "amount" token.
+        Map(new([Line(1000m, "EUR")]), out var mapped, out _).Should().BeTrue();
 
         mapped.Items.Single().Amount.Should().Be(new Money(1000m, CurrencyCode.Eur));
     }
 
     [Theory]
-    [InlineData("45.30", 45.30)]
-    [InlineData("0.5", 0.5)]
-    [InlineData(" 250 ", 250)]
-    public void A_plain_decimal_parses(string amount, double expected)
+    [InlineData(45.30)]
+    [InlineData(0.5)]
+    [InlineData(0.1)]
+    [InlineData(250)]
+    public void A_decimal_amount_maps_to_Money_with_no_precision_loss(decimal amount)
     {
         Map(new([Line(amount)]), out var mapped, out _).Should().BeTrue();
 
-        mapped.Items.Single().Amount.Amount.Should().Be((decimal)expected);
-    }
-
-    [Fact]
-    public void Parsing_ignores_the_machine_culture()
-    {
-        var saved = CultureInfo.CurrentCulture;
-        CultureInfo.CurrentCulture = new CultureInfo("ru-RU");
-        try
-        {
-            Map(new([Line("45.30")]), out var mapped, out _).Should().BeTrue();
-            mapped.Items.Single().Amount.Amount.Should().Be(45.30m);
-        }
-        finally
-        {
-            CultureInfo.CurrentCulture = saved;
-        }
-    }
-
-    [Theory]
-    [InlineData("двести")]
-    [InlineData("1 500")]
-    [InlineData("45,30")]
-    [InlineData("-5")]
-    [InlineData("")]
-    public void An_amount_that_is_not_a_plain_decimal_fails_the_whole_proposal(string amount)
-    {
-        Map(new([Line("100"), Line(amount)]), out var mapped, out var failure).Should().BeFalse();
-
-        mapped.Items.Should().BeEmpty("a partial answer is never recorded");
-        failure.Should().Contain("Item 2");
+        mapped.Items.Single().Amount.Amount.Should().Be(amount);
     }
 
     [Fact]
     public void No_currency_means_the_configured_default()
     {
-        Map(new([Line("250", currency: null)]), out var mapped, out _).Should().BeTrue();
+        Map(new([Line(250m, currency: null)]), out var mapped, out _).Should().BeTrue();
 
         mapped.Items.Single().Amount.Currency.Should().Be(CurrencyCode.Rsd);
     }
@@ -307,7 +278,7 @@ public class ProposalMapperTests
     [Fact]
     public void A_lower_case_currency_maps_to_the_supported_code()
     {
-        Map(new([Line("2.50", currency: "eur")]), out var mapped, out _).Should().BeTrue();
+        Map(new([Line(2.50m, currency: "eur")]), out var mapped, out _).Should().BeTrue();
 
         mapped.Items.Single().Amount.Currency.Should().Be(CurrencyCode.Eur);
     }
@@ -315,7 +286,7 @@ public class ProposalMapperTests
     [Fact]
     public void A_currency_the_ledger_does_not_support_fails()
     {
-        Map(new([Line("10", currency: "GBP")]), out _, out var failure).Should().BeFalse();
+        Map(new([Line(10m, currency: "GBP")]), out _, out var failure).Should().BeFalse();
 
         failure.Should().Contain("GBP");
     }
@@ -323,22 +294,22 @@ public class ProposalMapperTests
     [Fact]
     public void A_slug_that_was_not_offered_fails_and_a_differently_cased_one_maps_to_the_offered_spelling()
     {
-        Map(new([Line("10", slug: "rent")]), out _, out _).Should().BeFalse();
+        Map(new([Line(10m, slug: "rent")]), out _, out _).Should().BeFalse();
 
-        Map(new([Line("10", slug: "Groceries")]), out var mapped, out _).Should().BeTrue();
+        Map(new([Line(10m, slug: "Groceries")]), out var mapped, out _).Should().BeTrue();
         mapped.Items.Single().CategorySlug.Should().Be("groceries");
     }
 
     [Fact]
     public void A_known_merchant_id_that_was_not_offered_fails()
     {
-        Map(new([Line("10", knownMerchantId: Guid.NewGuid())]), out _, out _).Should().BeFalse();
+        Map(new([Line(10m, knownMerchantId: Guid.NewGuid())]), out _, out _).Should().BeFalse();
     }
 
     [Fact]
     public void A_merchant_name_is_taken_as_given_whether_or_not_the_message_spells_it_that_way()
     {
-        Map(new([Line("300", merchantName: "Starbucks")]), out var mapped, out _).Should().BeTrue();
+        Map(new([Line(300m, merchantName: "Starbucks")]), out var mapped, out _).Should().BeTrue();
 
         mapped.Items.Single().MerchantName.Should().Be("Starbucks");
     }
@@ -346,7 +317,7 @@ public class ProposalMapperTests
     [Fact]
     public void A_blank_merchant_name_is_no_merchant()
     {
-        Map(new([Line("300", merchantName: "  ")]), out var mapped, out _).Should().BeTrue();
+        Map(new([Line(300m, merchantName: "  ")]), out var mapped, out _).Should().BeTrue();
 
         mapped.Items.Single().MerchantName.Should().BeNull();
     }
@@ -354,7 +325,7 @@ public class ProposalMapperTests
     [Fact]
     public void Over_long_text_is_cut_to_the_column_widths_rather_than_failing_the_job()
     {
-        var proposal = new CategorizationProposal([Line("1", merchantName: new string('m', 300), description: new string('d', 600))]);
+        var proposal = new CategorizationProposal([Line(1m, merchantName: new string('m', 300), description: new string('d', 600))]);
 
         Map(proposal, out var mapped, out _).Should().BeTrue();
 
@@ -390,7 +361,7 @@ public class ProposalMapperTests
                 "required": ["description", "amount", "category_slug"],
                 "properties": {
                   "description": { "type": "string", "description": "What was bought, as short plain text in the language of the message." },
-                  "amount": { "type": "string", "description": "The amount the person meant, as a plain decimal number: digits, optionally a dot and decimals, no spaces, no grouping, no currency symbol - for example \"1000\" or \"45.30\". Interpret words, slang and speech: \"штуку\" is 1000, \"полтос\" is 50, \"двести пятьдесят\" is 250." },
+                  "amount": { "type": "number", "description": "The amount the person meant, as a number - for example 1000 or 45.3. Interpret words, slang and speech: \"штуку\" is 1000, \"полтос\" is 50, \"двести пятьдесят\" is 250." },
                   "currency": { "type": "string", "enum": ["EUR", "RSD", "USD", "RUB", "KZT"] },
                   "category_slug": { "type": "string", "enum": ["groceries", "food-drink"] },
                   "merchant_name": { "type": "string", "description": "The merchant's name as the person wrote it. Only when a merchant is named and it is not one of the known merchants." }
@@ -417,17 +388,17 @@ and rename the `"merchant_quote"` in `With_hints_known_merchant_id_lands_between
     }
 ```
 
-`tests/Noof.Ledger.Ai.Tests/AnthropicResponses.cs`: in `RecordSpendingJsonAnswer`, change `\"amount_quote\":\"3.50\"` to `\"amount\":\"3.50\"`, and add
+`tests/Noof.Ledger.Ai.Tests/AnthropicResponses.cs`: in `RecordSpendingJsonAnswer`, change `\"amount_quote\":\"3.50\"` to `\"amount\":3.50` (a JSON number, unquoted), and add
 
 ```csharp
     public const string RecordSpendingFromWordsAnswer = """
         {"id":"msg_05","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
-         "content":[{"type":"text","text":"{\"items\":[{\"description\":\"продукты\",\"amount\":\"1000\",\"currency\":\"EUR\",\"category_slug\":\"food-drink\",\"merchant_name\":\"Lidl\"}]}"}],
+         "content":[{"type":"text","text":"{\"items\":[{\"description\":\"продукты\",\"amount\":1000,\"currency\":\"EUR\",\"category_slug\":\"food-drink\",\"merchant_name\":\"Lidl\"}]}"}],
          "stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
         """;
 ```
 
-`tests/Noof.Ledger.Ai.Tests/AnthropicCategorizerTests.cs`: in `Returns_the_proposal_when_the_first_turn_answers_with_JSON_text` change `proposal.Items[0].AmountQuote.Should().Be("3.50");` to `proposal.Items[0].Amount.Should().Be("3.50");`, and add
+`tests/Noof.Ledger.Ai.Tests/AnthropicCategorizerTests.cs`: in `Returns_the_proposal_when_the_first_turn_answers_with_JSON_text` change `proposal.Items[0].AmountQuote.Should().Be("3.50");` to `proposal.Items[0].Amount.Should().Be(3.50m);`, and add
 
 ```csharp
     [Fact]
@@ -440,9 +411,31 @@ and rename the `"merchant_quote"` in `With_hints_known_merchant_id_lands_between
         var proposal = await categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
 
         var item = proposal.Items.Should().ContainSingle().Subject;
-        item.Amount.Should().Be("1000");
+        item.Amount.Should().Be(1000m);
         item.CurrencyCode.Should().Be("EUR");
         item.MerchantName.Should().Be("Lidl");
+    }
+
+    [Theory]
+    [InlineData(1000, 1000)]
+    [InlineData(45.3, 45.3)]
+    [InlineData(0.1, 0.1)]
+    public async Task An_amount_in_the_response_round_trips_into_decimal_exactly(double raw, double expected)
+    {
+        // The schema declares amount as a JSON number (not a string), so System.Text.Json reads the
+        // decimal straight from the response's token text - no double, no string parsing, no separator
+        // handling. 0.1 is the classic case a binary float cannot hold exactly; decimal must.
+        var (categorizer, handler) = Build();
+        handler.Enqueue(HttpStatusCode.OK, $$"""
+            {"id":"msg_07","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
+             "content":[{"type":"text","text":"{\"items\":[{\"description\":\"кофе\",\"amount\":{{raw}},\"category_slug\":\"food-drink\"}]}"}],
+             "stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
+            """);
+        var request = new CategorizationRequest("кофе", Categories, NoMerchantHints, NoMerchantHints);
+
+        var proposal = await categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
+
+        proposal.Items.Should().ContainSingle().Which.Amount.Should().Be((decimal)expected);
     }
 ```
 
@@ -479,21 +472,22 @@ and rename the `"merchant_quote"` in `With_hints_known_merchant_id_lands_between
 
 `tests/Noof.Ledger.Architecture.Tests/PublicSurfaceTests.cs`: remove `"QuotedAmount"` from the Domain list. In the Application list replace `"ProposalVerification"` with `"ProposalMapper", "MappedProposal"`.
 
-`tests/Noof.Ledger.Host.Tests/CategorizationWorkerTests.cs`: rename `A_verification_failure_is_terminal_and_never_retried` to `An_answer_that_does_not_parse_is_terminal_and_never_retried`. Replace its comment and `.Returns(OneGroceryLine(quote: "999"));` with
+`tests/Noof.Ledger.Host.Tests/CategorizationWorkerTests.cs`: rename `A_verification_failure_is_terminal_and_never_retried` to `An_answer_that_does_not_map_is_terminal_and_never_retried`. Replace its comment and `.Returns(OneGroceryLine(quote: "999"));` with
 
 ```csharp
-        // "двести" is not a decimal - ProposalMapper.TryMap refuses it, which is real production
-        // logic, not a stub.
+        // Amount is a JSON number now, so the model cannot hand back an unparsable amount - the
+        // schema rules that out. "GBP" is not a supported currency, and ProposalMapper.TryMap refuses
+        // it, which is real production logic, not a stub.
         categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>())
-            .Returns(OneGroceryLine(amount: "двести"));
+            .Returns(OneGroceryLine(currency: "GBP"));
 ```
 
-and change the helper's signature to `static CategorizationProposal OneGroceryLine(string amount = "250", string currency = "RSD") => new([new ProposedLineItem("Bread", amount, currency, "groceries", null, null)]);`.
+and change the helper's signature to `static CategorizationProposal OneGroceryLine(decimal amount = 250m, string currency = "RSD") => new([new ProposedLineItem("Bread", amount, currency, "groceries", null, null)]);`.
 
 `tests/Noof.Ledger.Ai.Tests/LiveModelTests.cs` compiles against the new contract. It is **not** run.
-- `A_single_coffee_purchase_...`: rename to `A_single_coffee_purchase_produces_one_line_item_with_the_amount_and_currency` and assert `item.Amount.Should().Be("250");`.
-- The grocery test: rename `..._with_the_amount_quote_pinned_not_the_category` to `..._with_the_amount_pinned_not_the_category` and assert `item.Amount.Should().Be("3400");`.
-- `A_message_with_two_amounts_produces_two_line_items_whose_quotes_occur_verbatim`: rename to `A_message_with_two_amounts_produces_two_line_items`, and replace its `foreach` with `proposal.Items.Select(item => item.Amount).Should().BeEquivalentTo(["500", "250"]);`.
+- `A_single_coffee_purchase_...`: rename to `A_single_coffee_purchase_produces_one_line_item_with_the_amount_and_currency` and assert `item.Amount.Should().Be(250m);`.
+- The grocery test: rename `..._with_the_amount_quote_pinned_not_the_category` to `..._with_the_amount_pinned_not_the_category` and assert `item.Amount.Should().Be(3400m);`.
+- `A_message_with_two_amounts_produces_two_line_items_whose_quotes_occur_verbatim`: rename to `A_message_with_two_amounts_produces_two_line_items`, and replace its `foreach` with `proposal.Items.Select(item => item.Amount).Should().BeEquivalentTo([500m, 250m]);`.
 - `Every_amount_quote_the_model_returns_passes_verification_against_the_raw_text`: rename to `Every_answer_the_model_returns_maps` and replace its body after the call with
   ```csharp
         var mapped = ProposalMapper.TryMap(proposal, OfferedSlugs, offeredMerchantIds: [], defaultCurrency: "RSD", out var result, out var failure);
@@ -515,7 +509,7 @@ and change the helper's signature to `static CategorizationProposal OneGroceryLi
             .ProposeAsync(Request("купил штуку евро на продукты"), TestContext.Current.CancellationToken);
 
         var item = proposal.Items.Should().ContainSingle().Subject;
-        item.Amount.Should().Be("1000");
+        item.Amount.Should().Be(1000m);
         item.CurrencyCode.Should().Be("EUR");
     }
   ```
@@ -541,12 +535,13 @@ Delete `src/Noof.Ledger.Domain/QuotedAmount.cs`. In `src/Noof.Ledger.Domain/Tran
 `src/Noof.Ledger.Application/Categorization/CategorizationContract.cs`: replace the `ProposedLineItem`, `CategorizationProposal` and `ResolvedLineItem` declarations and their comments with
 
 ```csharp
-// One line in the model's own reading of the message. Amount is the number the person meant ("1000"
-// for "штуку"), written as a plain invariant decimal. ProposalMapper parses it and nothing compares it
-// with the message (decision D1). CurrencyCode is null when the message states none.
+// One line in the model's own reading of the message. Amount is the number the person meant (1000
+// for "штуку"), answered as a JSON number and read straight into decimal by System.Text.Json — no
+// parsing step, nothing compares it with the message (decision D1). CurrencyCode is null when the
+// message states none.
 public sealed record ProposedLineItem(
     string Description,
-    string Amount,
+    decimal Amount,
     string? CurrencyCode,
     string CategorySlug,
     Guid? KnownMerchantId,
@@ -567,14 +562,15 @@ public sealed record MappedProposal(IReadOnlyList<ResolvedLineItem> Items);
 Delete `ProposalVerification.cs`. Create `src/Noof.Ledger.Application/Categorization/ProposalMapper.cs`:
 
 ```csharp
-using System.Globalization;
 using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Application.Categorization;
 
-// Parses, never judges. Whether a figure is plausible, or appears in the message at all, is for the
-// person to see in the echo and correct there (D1, docs/OPEN-QUESTIONS.md P2-1). Do not add a sanity
-// bound or a verbatim check here.
+// Maps, never judges. Amount is already a decimal by the time it reaches here — the model answered a
+// JSON number and System.Text.Json read it straight in, so there is no amount parsing left to do.
+// Whether a figure is plausible, or appears in the message at all, is for the person to see in the
+// echo and correct there (D1, docs/OPEN-QUESTIONS.md P2-1). Do not add a sanity bound or a verbatim
+// check here.
 public static class ProposalMapper
 {
     const int MaxDescriptionLength = 512;
@@ -615,12 +611,6 @@ public static class ProposalMapper
         string defaultCurrency,
         out string reason)
     {
-        if (!decimal.TryParse(item.Amount.Trim(), NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var amount))
-        {
-            reason = $"amount \"{item.Amount}\" is not a plain decimal number.";
-            return null;
-        }
-
         var code = string.IsNullOrWhiteSpace(item.CurrencyCode) ? defaultCurrency : item.CurrencyCode.Trim();
         var currency = CurrencyCode.Supported.FirstOrDefault(
             supported => string.Equals(supported.Value, code, StringComparison.OrdinalIgnoreCase));
@@ -647,7 +637,7 @@ public static class ProposalMapper
         reason = string.Empty;
         return new ResolvedLineItem(
             Truncate(item.Description, MaxDescriptionLength),
-            new Money(amount, currency),
+            new Money(item.Amount, currency),
             slug,
             item.KnownMerchantId,
             string.IsNullOrWhiteSpace(item.MerchantName) ? null : Truncate(item.MerchantName.Trim(), MaxMerchantNameLength));
@@ -661,12 +651,11 @@ public static class ProposalMapper
 
 ```csharp
     const string AmountDescription =
-        "The amount the person meant, as a plain decimal number: digits, optionally a dot and decimals, no spaces, "
-        + "no grouping, no currency symbol - for example \"1000\" or \"45.30\". Interpret words, slang and speech: "
+        "The amount the person meant, as a number - for example 1000 or 45.3. Interpret words, slang and speech: "
         + "\"штуку\" is 1000, \"полтос\" is 50, \"двести пятьдесят\" is 250.";
 ```
 
-Replace the `amount_quote` entry with `new("amount", new JsonObject { ["type"] = "string", ["description"] = AmountDescription }),`. Build the currency enum from `CurrencyCode.Supported.Select(code => (JsonNode)code.Value).ToArray()`. Replace the `merchant_quote` entry with
+Replace the `amount_quote` entry with `new("amount", new JsonObject { ["type"] = "number", ["description"] = AmountDescription }),`. Build the currency enum from `CurrencyCode.Supported.Select(code => (JsonNode)code.Value).ToArray()`. Replace the `merchant_quote` entry with
 
 ```csharp
         properties.Add(new("merchant_name", new JsonObject
@@ -694,9 +683,8 @@ and set `["required"] = new JsonArray("description", "amount", "category_slug")`
         accepts one of the slugs you were given, so pick by meaning and let the schema reject
         anything else.
 
-        For every amount, answer with the number the person meant, written as a plain decimal:
-        digits, optionally a dot and decimals, no spaces, no grouping, no currency symbol — "1000",
-        "45.30". People write amounts in words, slang and speech-recognised text: "штуку" or
+        For every amount, answer with the number the person meant — 1000, 45.3, not a word or a
+        quoted string. People write amounts in words, slang and speech-recognised text: "штуку" or
         "штука" is 1000, "пятихатка" is 500, "полтос" is 50, "двести пятьдесят" is 250, "1,5к" is
         1500, "1 500" is 1500. Never add lines up into a total the message did not ask for. If a
         line has no amount at all, do not produce that line.
@@ -716,29 +704,29 @@ and set `["required"] = new JsonArray("description", "amount", "category_slug")`
         <examples>
         <example>
         Message: "кофе 250 рсд"
-        Answer with one item: description "кофе", amount "250", currency "RSD", category_slug the
+        Answer with one item: description "кофе", amount 250, currency "RSD", category_slug the
         one whose meaning is everyday food and drink, no merchant.
         </example>
         <example>
         Message: "купил штуку евро на продукты"
-        Answer with one item: description "продукты", amount "1000", currency "EUR", category_slug
+        Answer with one item: description "продукты", amount 1000, currency "EUR", category_slug
         the one whose meaning is groceries, no merchant. "Штуку" is how people say one thousand;
         the message has no digits and does not need any.
         </example>
         <example>
         Message: "такси двести пятьдесят"
-        Answer with one item: description "такси", amount "250", category_slug the one whose
+        Answer with one item: description "такси", amount 250, category_slug the one whose
         meaning is transport, no merchant. The message names no currency, so currency is left out
         of the answer entirely — do not guess RSD, EUR or anything else.
         </example>
         <example>
         Message: "Lidl 45,30 eur продукты, потом кофе 2.50 eur"
-        Answer with two items. First: description "продукты", amount "45.30", currency "EUR",
+        Answer with two items. First: description "продукты", amount 45.3, currency "EUR",
         category_slug the one whose meaning is groceries, merchant_name "Lidl" (or
         known_merchant_id instead, if Lidl is already a known merchant). Second: description
-        "кофе", amount "2.50", currency "EUR", category_slug the one whose meaning is everyday food
-        and drink, no merchant. The comma in "45,30" is a decimal separator; the answer always
-        uses a dot.
+        "кофе", amount 2.5, currency "EUR", category_slug the one whose meaning is everyday food
+        and drink, no merchant. The comma in "45,30" is a decimal separator: the answer is the
+        number 45.3, not a string.
         </example>
         <example>
         Message: "заняла у Маши 5000 рсд"
@@ -754,7 +742,7 @@ and set `["required"] = new JsonArray("description", "amount", "category_slug")`
 ```csharp
     sealed record ProposedLineItemDto(
         [property: JsonPropertyName("description")] string Description,
-        [property: JsonPropertyName("amount")] string Amount,
+        [property: JsonPropertyName("amount")] decimal Amount,
         [property: JsonPropertyName("currency")] string? Currency,
         [property: JsonPropertyName("category_slug")] string CategorySlug,
         [property: JsonPropertyName("known_merchant_id")] string? KnownMerchantId,
@@ -1289,7 +1277,7 @@ The root `required` stays `["items"]`. Add
 ```csharp
     public const string RecordSpendingWithDateAnswer = """
         {"id":"msg_06","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
-         "content":[{"type":"text","text":"{\"items\":[{\"description\":\"продукты\",\"amount\":\"1000\",\"currency\":\"EUR\",\"category_slug\":\"food-drink\"}],\"occurred_on\":\"2026-09-21\"}"}],
+         "content":[{"type":"text","text":"{\"items\":[{\"description\":\"продукты\",\"amount\":1000,\"currency\":\"EUR\",\"category_slug\":\"food-drink\"}],\"occurred_on\":\"2026-09-21\"}"}],
          "stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
         """;
 ```
@@ -1333,7 +1321,7 @@ Replace every `new CategorizationRequest("X", Categories, NoMerchantHints, NoMer
             TestContext.Current.CancellationToken);
 
         proposal.OccurredOn.Should().Be("2026-09-21");
-        proposal.Items.Should().ContainSingle().Which.Amount.Should().Be("1000");
+        proposal.Items.Should().ContainSingle().Which.Amount.Should().Be(1000m);
     }
 ```
 
@@ -1501,7 +1489,7 @@ Replace the second example with
 ```
         <example>
         Message: "купил вчера штуку евро на продукты"
-        Answer with one item: description "продукты", amount "1000", currency "EUR", category_slug
+        Answer with one item: description "продукты", amount 1000, currency "EUR", category_slug
         the one whose meaning is groceries, no merchant, and occurred_on the day before today.
         "Штуку" is how people say one thousand; the message has no digits and does not need any.
         </example>
@@ -2010,7 +1998,7 @@ Delete `tests/Noof.Ledger.Host.Tests/CategorizationReplyTests.cs`.
             lines: [new RecordedLine("Bread", new Money(300m, CurrencyCode.Rsd), "groceries", "Продукты", null)]);
         store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject(), stored);
         var categorizer = Substitute.For<ICategorizer>();
-        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine("250"));
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine(250m));
         var notifier = Substitute.For<IChatNotifier>();
         var worker = CreateWorker(ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, categorizer: categorizer, notifier: notifier),
             new FakeTimeProvider(DateTimeOffset.UtcNow));
@@ -2489,7 +2477,7 @@ and add
         store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
             .Returns(Subject(status: TransactionStatus.Completed, occurredOn: new DateOnly(2026, 9, 20), lines: [StoredBread]));
         var categorizer = Substitute.For<ICategorizer>();
-        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine("1500"));
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine(1500m));
         var worker = CreateWorker(
             ScopeFactoryFor(QueueWith(Job(kind: JobKind.Correct, instruction: "нет, 1500")), KeyPresent(), store, categorizer: categorizer),
             new FakeTimeProvider(DateTimeOffset.UtcNow));
@@ -2515,7 +2503,7 @@ and add
         store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
             .Returns(Subject(status: TransactionStatus.Completed, occurredOn: new DateOnly(2026, 9, 20), lines: [StoredBread]));
         var categorizer = Substitute.For<ICategorizer>();
-        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine("1500"));
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine(1500m));
         var worker = CreateWorker(
             ScopeFactoryFor(QueueWith(Job(kind: JobKind.Correct, instruction: "нет, 1500")), KeyPresent(), store, categorizer: categorizer),
             new FakeTimeProvider(DateTimeOffset.UtcNow));
