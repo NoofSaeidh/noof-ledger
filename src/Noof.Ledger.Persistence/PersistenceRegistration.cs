@@ -9,6 +9,7 @@ using Noof.Ledger.Application.Editing;
 using Noof.Ledger.Application.Jobs;
 using Noof.Ledger.Application.Reporting;
 using Noof.Ledger.Application.Secrets;
+using Noof.Ledger.Application.Transcription;
 using Noof.Ledger.Persistence.Auth;
 using Noof.Ledger.Persistence.Capture;
 using Noof.Ledger.Persistence.Categorization;
@@ -16,6 +17,7 @@ using Noof.Ledger.Persistence.Editing;
 using Noof.Ledger.Persistence.Jobs;
 using Noof.Ledger.Persistence.Reporting;
 using Noof.Ledger.Persistence.Secrets;
+using Noof.Ledger.Persistence.Transcription;
 
 namespace Noof.Ledger.Persistence;
 
@@ -38,6 +40,7 @@ public static class PersistenceRegistration
         services.AddScoped<ICaptureStore, EfCaptureStore>();
         services.AddScoped<ICategorizationStore, EfCategorizationStore>();
         services.AddScoped<IRecordEditor, EfRecordEditor>();
+        services.AddScoped<ITranscriptionStore, EfTranscriptionStore>();
         services.AddScoped<ICategoryCatalog, EfCategoryCatalog>();
         services.AddScoped<IMerchantDirectory, EfMerchantDirectory>();
         services.AddScoped<ISpendingReadModel, EfSpendingReadModel>();

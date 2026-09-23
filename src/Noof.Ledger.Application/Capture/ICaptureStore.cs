@@ -9,5 +9,9 @@ public interface ICaptureStore
     // writes nothing.
     Task<Guid> CaptureAsync(CapturedMessage message, string timeZoneId, CancellationToken cancellationToken);
 
+    // CaptureAsync for a voice note: the same wallet rule, the same single database transaction and the same
+    // idempotency on (ChatId, MessageId). The record has no text yet, and its job is a Transcribe job (V3).
+    Task<Guid> CaptureVoiceAsync(CapturedVoice voice, string timeZoneId, CancellationToken cancellationToken);
+
     Task AttachBotMessageAsync(Guid transactionId, int botMessageId, CancellationToken cancellationToken);
 }
