@@ -61,7 +61,7 @@ internal static class RevisionLog
     }
 
     sealed record Snapshot(
-        [property: JsonPropertyName("raw_text")] string RawText,
+        [property: JsonPropertyName("raw_text")] string? RawText,
         [property: JsonPropertyName("occurred_on")] string OccurredOn,
         [property: JsonPropertyName("items")] IReadOnlyList<SnapshotLine> Items);
 

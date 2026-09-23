@@ -5,7 +5,16 @@ public sealed class Transaction
     public required Guid Id { get; init; }
     public required Guid WalletId { get; init; }
 
-    public required string RawText { get; set; }
+    // Null only while a voice capture waits for its transcript (or when none ever came); a check
+    // constraint requires it for every text capture.
+    public required string? RawText { get; set; }
+
+    public CaptureKind CaptureKind { get; init; }
+
+    // Telegram's id for the voice note. It is enough to download the audio again, so the audio itself is never stored.
+    public string? VoiceFileId { get; init; }
+
+    public int? VoiceDurationSeconds { get; init; }
 
     public required TransactionStatus Status { get; set; }
 

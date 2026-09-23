@@ -65,7 +65,8 @@ public sealed record CategorizationSubject(
     TransactionStatus Status,
     DateOnly SentOn,
     DateOnly OccurredOn,
-    IReadOnlyList<RecordedLine> Lines);
+    IReadOnlyList<RecordedLine> Lines,
+    CaptureKind CaptureKind = CaptureKind.Text);
 
 // CategoryName is Category.NameEn: the bot speaks English for now (D-D).
 public sealed record RecordedLine(

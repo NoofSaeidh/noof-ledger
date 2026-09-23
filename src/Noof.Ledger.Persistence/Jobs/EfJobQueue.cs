@@ -35,7 +35,7 @@ internal sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, 
                     FOR UPDATE OF j SKIP LOCKED
                 )
                 RETURNING id, transaction_id, status, attempt_count, run_after, claimed_at, claimed_by, last_error,
-                          created_at, updated_at, kind, instruction, source_message_id, instruction_day
+                          created_at, updated_at, kind, instruction, source_message_id, instruction_day, voice_file_id
                 """,
                 new NpgsqlParameter("now", now),
                 new NpgsqlParameter("workerId", workerId),

@@ -34,7 +34,7 @@ public class PublicSurfaceTests
     {
         ["Noof.Ledger.Domain"] =
         [
-            "AppUser", "CategorizationAuthority", "CategorizationJob", "Category", "CurrencyCode",
+            "AppUser", "CaptureKind", "CategorizationAuthority", "CategorizationJob", "Category", "CurrencyCode",
             "CurrencyMismatchException", "JobKind", "JobStatus", "LineItem", "Merchant", "MerchantAlias",
             "MerchantKind", "MerchantName", "Money", "Transaction",
             "TransactionStatus", "Wallet",
