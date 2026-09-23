@@ -72,6 +72,9 @@ public class ProjectReferenceTests
     {
         Packages("Noof.Ledger.Ai").Should().BeEquivalentTo(
             "Anthropic",
+            // FunctionInvokingChatClient runs the list_merchants round trip. Pinned to the version
+            // whose Abstractions dependency is exactly the one the Anthropic SDK was built against.
+            "Microsoft.Extensions.AI",
             "Microsoft.Extensions.DependencyInjection.Abstractions",
             "Microsoft.Extensions.Configuration.Binder",
             "Microsoft.Extensions.Http");
