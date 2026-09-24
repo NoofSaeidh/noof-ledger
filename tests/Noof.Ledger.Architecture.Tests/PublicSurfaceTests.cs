@@ -56,6 +56,7 @@ public class PublicSurfaceTests
             "RecordAction", "EchoMessage", "IRecordEcho",
             "EchoTarget", "IRecordEditor", "ApplicationRegistration",
             "ITranscriber", "ISpeechProvider", "CapturedVoice", "ITranscriptionStore", "IVoiceFileSource",
+            "BackupRunRecord", "BackupStatus", "DumpResult", "IBackupLog", "IDatabaseDumper",
         ],
         ["Noof.Ledger.Persistence"] = ["LedgerConnectionString", "PersistenceRegistration"],
         ["Noof.Ledger.Ai"] = ["AiRegistration"],
