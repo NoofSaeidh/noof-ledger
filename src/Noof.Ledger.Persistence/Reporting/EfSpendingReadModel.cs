@@ -13,18 +13,21 @@ internal sealed class EfSpendingReadModel(LedgerDbContext db, TimeProvider timeP
 
     public async Task<IReadOnlyList<RecentTransaction>> RecentAsync(int limit, CancellationToken cancellationToken)
     {
-        var headers = await db.Transactions
-            .Where(t => t.Status != TransactionStatus.Cancelled)
-            .Join(db.Wallets, t => t.WalletId, w => w.Id, (t, w) => new
-            {
-                t.Id,
-                t.OccurredOn,
-                t.OccurredAt,
-                t.TimeZoneId,
-                RawText = t.RawText ?? string.Empty,
-                t.Status,
-                WalletName = w.Name,
-            })
+        var headers = await (
+                from t in db.Transactions
+                where t.Status != TransactionStatus.Cancelled
+                join w in db.Wallets on t.WalletId equals (Guid?)w.Id into walletJoin
+                from w in walletJoin.DefaultIfEmpty()
+                select new
+                {
+                    t.Id,
+                    t.OccurredOn,
+                    t.OccurredAt,
+                    t.TimeZoneId,
+                    RawText = t.RawText ?? string.Empty,
+                    t.Status,
+                    WalletName = w == null ? string.Empty : w.Name,
+                })
             .OrderByDescending(h => h.OccurredOn)
             .ThenByDescending(h => h.OccurredAt)
             .ThenByDescending(h => h.Id)

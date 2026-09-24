@@ -18,12 +18,13 @@ public class TransactionRevisionTests(PostgresFixture fixture)
     static readonly Guid DefaultWalletId = new("00000000-0000-0000-0000-000000000001");
     static readonly Guid CoffeeCategoryId = new("00000000-0000-0000-0001-000000000017");
 
-    static async Task<Guid> SeedTransactionAsync(LedgerDbContext db)
+    static async Task<Guid> SeedTransactionAsync(LedgerDbContext db, TransactionKind kind = TransactionKind.Expense)
     {
         var transaction = new Transaction
         {
             Id = Guid.NewGuid(),
             WalletId = DefaultWalletId,
+            Kind = kind,
             RawText = "кофе 250",
             Status = TransactionStatus.Captured,
             TimeZoneId = "Europe/Belgrade",
@@ -136,5 +137,25 @@ public class TransactionRevisionTests(PostgresFixture fixture)
         db.ChangeTracker.Clear();
         (await db.Transactions.SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken))
             .Status.Should().Be(TransactionStatus.Cancelled, "only Restore brings a cancelled record back");
+    }
+
+    [Theory]
+    [InlineData(TransactionKind.Expense, "Expense")]
+    [InlineData(TransactionKind.Income, "Income")]
+    public async Task A_snapshot_names_the_records_kind_and_its_wallet(TransactionKind kind, string expected)
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transactionId = await SeedTransactionAsync(db, kind);
+
+        await new EfCategorizationStore(db, Clock).ApplyAsync(transactionId,
+            new CategorizationOutcome([Coffee(250m)], new DateOnly(2026, 9, 21)), TestContext.Current.CancellationToken);
+
+        db.ChangeTracker.Clear();
+        var revision = await db.TransactionRevisions.SingleAsync(TestContext.Current.CancellationToken);
+        using var snapshot = JsonDocument.Parse(revision.Snapshot);
+        snapshot.RootElement.GetProperty("kind").GetString().Should().Be(expected);
+        snapshot.RootElement.GetProperty("wallet_id").GetGuid().Should().Be(DefaultWalletId);
+        snapshot.RootElement.GetProperty("raw_text").GetString().Should().Be("кофе 250", "the existing keys do not move");
     }
 }
