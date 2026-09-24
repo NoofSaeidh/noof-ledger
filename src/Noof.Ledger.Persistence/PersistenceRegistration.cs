@@ -10,6 +10,7 @@ using Noof.Ledger.Application.Jobs;
 using Noof.Ledger.Application.Reporting;
 using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Application.Transcription;
+using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Persistence.Auth;
 using Noof.Ledger.Persistence.Balances;
 using Noof.Ledger.Persistence.Capture;
@@ -19,6 +20,7 @@ using Noof.Ledger.Persistence.Jobs;
 using Noof.Ledger.Persistence.Reporting;
 using Noof.Ledger.Persistence.Secrets;
 using Noof.Ledger.Persistence.Transcription;
+using Noof.Ledger.Persistence.Wallets;
 
 namespace Noof.Ledger.Persistence;
 
@@ -46,6 +48,7 @@ public static class PersistenceRegistration
         services.AddScoped<IMerchantDirectory, EfMerchantDirectory>();
         services.AddScoped<ISpendingReadModel, EfSpendingReadModel>();
         services.AddScoped<IBalanceReadModel, EfBalanceReadModel>();
+        services.AddScoped<IWalletDirectory, EfWalletDirectory>();
         services.AddScoped<IJobQueue>(sp => new EfJobQueue(
             sp.GetRequiredService<LedgerDbContext>(),
             sp.GetRequiredService<TimeProvider>(),

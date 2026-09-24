@@ -18,7 +18,7 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
             select new
             {
                 t.Id, t.RawText, t.TelegramChatId, t.BotMessageId, WalletName = w == null ? string.Empty : w.Name,
-                t.Status, t.OccurredAt, t.TimeZoneId, t.OccurredOn, t.CaptureKind,
+                t.Status, t.OccurredAt, t.TimeZoneId, t.OccurredOn, t.CaptureKind, t.WalletId,
             })
             .SingleOrDefaultAsync(cancellationToken);
 
@@ -48,7 +48,7 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
         return new CategorizationSubject(
             header.Id, header.RawText ?? string.Empty, header.TelegramChatId ?? 0, header.BotMessageId, header.WalletName,
             header.Status, ZonedClock.LocalDate(header.OccurredAt, header.TimeZoneId), header.OccurredOn, lines,
-            header.CaptureKind);
+            header.CaptureKind, WalletId: header.WalletId);
     }
 
     public async Task ApplyAsync(Guid transactionId, CategorizationOutcome outcome, CancellationToken cancellationToken)
