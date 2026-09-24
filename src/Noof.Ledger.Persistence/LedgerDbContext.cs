@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Backup;
+using Noof.Ledger.Persistence.Diagnostics;
 using Noof.Ledger.Persistence.Revisions;
 using Noof.Ledger.Persistence.Secrets;
 
@@ -21,6 +22,7 @@ internal sealed class LedgerDbContext(DbContextOptions<LedgerDbContext> options)
     public DbSet<TransactionRevision> TransactionRevisions => Set<TransactionRevision>();
     public DbSet<AppSecret> Secrets => Set<AppSecret>();
     public DbSet<BackupRun> BackupRuns => Set<BackupRun>();
+    public DbSet<AppLogEntry> AppLogs => Set<AppLogEntry>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder builder)
     {
