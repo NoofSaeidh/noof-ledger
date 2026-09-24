@@ -27,7 +27,11 @@ $psql = Join-Path $PgRoot 'bin\psql.exe'
 $pgRestore = Join-Path $PgRoot 'bin\pg_restore.exe'
 
 if (-not $DumpPath) {
-    $DumpPath = Get-ChildItem $BackupDirectory -Filter 'noof_ledger-*.dump' -ErrorAction SilentlyContinue |
+    # M-3 (Phase 4 final review): a hand-named file such as "noof_ledger-manual.dump" sorts as
+    # newest forever under a loose "noof_ledger-*.dump" glob ('m' > '2', ordinally), so this
+    # would check it instead of a real dump. Match only the automated file-name shape.
+    $DumpPath = Get-ChildItem $BackupDirectory -Filter 'noof_ledger-????????-??????.dump' -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^noof_ledger-\d{8}-\d{6}\.dump$' } |
         Sort-Object Name -Descending | Select-Object -First 1 -ExpandProperty FullName
     if (-not $DumpPath) { throw "No dump found in $BackupDirectory and none given via -DumpPath." }
 }
