@@ -103,7 +103,16 @@ public sealed record CategorizationSubject(
     DateOnly OccurredOn,
     IReadOnlyList<RecordedLine> Lines,
     CaptureKind CaptureKind = CaptureKind.Text,
+    TransactionKind Kind = TransactionKind.Expense,
+    CurrencyCode? WalletCurrency = null,
+    IReadOnlyList<Money>? WalletBalances = null,
+    BalanceStatement? Statement = null,
     Guid? WalletId = null);
+
+// The stated amount of a balance-check transaction, and what the app had computed for that wallet
+// and currency just before it - history for the echo (M6), never a figure anything reads back as
+// the current balance.
+public sealed record BalanceStatement(Money Stated, decimal ComputedBefore);
 
 // CategoryName is Category.NameEn: the bot speaks English for now (D-D).
 public sealed record RecordedLine(
