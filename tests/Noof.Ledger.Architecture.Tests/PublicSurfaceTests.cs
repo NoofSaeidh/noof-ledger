@@ -51,6 +51,7 @@ public class PublicSurfaceTests
             "IProposalMapper", "MappedProposal", "IChatNotifier", "IJobQueue", "JobCompletionOutcome",
             "WalletOption", "ProposedKind",
             "RecentLineItem", "RecentTransaction", "MonthTotal", "MonthSummary",
+            "WalletBalance", "IBalanceReadModel",
             "ISpendingReadModel", "ProbeResult", "ISecretProbe", "ISecretStore", "SecretKeys",
             "SecretResult", "SecretState", "SecretStatus",
             "RecordAction", "EchoMessage", "IRecordEcho",
