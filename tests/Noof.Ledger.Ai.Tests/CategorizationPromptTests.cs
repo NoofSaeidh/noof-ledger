@@ -1,4 +1,4 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Domain;
@@ -38,12 +38,13 @@ public class CategorizationPromptTests
     }
 
     [Fact]
-    public void System_prompt_has_between_three_and_five_examples()
+    public void System_prompt_has_between_three_and_seven_examples()
     {
+        // Widened from [3,5] (M9): the income and balance examples added below bring the count to 7.
         var opening = Regex.Matches(CategorizationPrompt.System, "<example>").Count;
         var closing = Regex.Matches(CategorizationPrompt.System, "</example>").Count;
 
-        opening.Should().BeInRange(3, 5);
+        opening.Should().BeInRange(3, 7);
         closing.Should().Be(opening);
     }
 
@@ -53,6 +54,27 @@ public class CategorizationPromptTests
         CategorizationPrompt.System.Should().NotContain("sk-ant");
         CategorizationPrompt.System.Should().NotMatchRegex("(?i)api[_-]?key");
         CategorizationPrompt.System.Should().NotMatchRegex("[A-Za-z0-9_-]{32,}");
+    }
+
+    [Fact]
+    public void System_prompt_explains_kind_and_that_a_balance_has_no_items()
+    {
+        CategorizationPrompt.System.Should().Contain("\"balance\"");
+        CategorizationPrompt.System.Should().Contain("items must be empty");
+    }
+
+    [Fact]
+    public void System_prompt_explains_wallet_id_falls_back_to_the_currencys_default_wallet()
+    {
+        CategorizationPrompt.System.Should().Contain("wallet_id");
+        CategorizationPrompt.System.Should().Contain("default wallet for the spending's currency");
+    }
+
+    [Fact]
+    public void System_prompt_has_an_income_example_and_a_balance_example()
+    {
+        CategorizationPrompt.System.Should().Contain("kind \"income\"");
+        CategorizationPrompt.System.Should().Contain("kind \"balance\"");
     }
 
     [Fact]
@@ -87,6 +109,27 @@ public class CategorizationPromptTests
     }
 
     [Fact]
+    public void Render_wallets_lists_id_name_currency_aliases_and_the_default_marker()
+    {
+        IReadOnlyList<WalletOption> wallets =
+        [
+            new WalletOption(Guid.Parse("11111111-1111-1111-1111-111111111111"), "Cash", CurrencyCode.Rsd, ["наличка", "cash"], true),
+        ];
+
+        var rendered = CategorizationPrompt.RenderWallets(wallets);
+
+        rendered.Should().Contain("11111111-1111-1111-1111-111111111111: Cash (RSD)");
+        rendered.Should().Contain("also called наличка, cash");
+        rendered.Should().Contain("the default wallet for RSD");
+    }
+
+    [Fact]
+    public void Render_wallets_says_so_when_there_are_none()
+    {
+        CategorizationPrompt.RenderWallets([]).Should().Contain("wallet_id must be null");
+    }
+
+    [Fact]
     public void Build_user_turn_gives_today_with_its_weekday_then_the_message_categories_and_hints()
     {
         IReadOnlyList<CategoryOption> categories = [new CategoryOption("groceries", "Groceries", "Продукты", null)];
@@ -98,6 +141,24 @@ public class CategorizationPromptTests
         turn.Should().Contain("купил вчера штуку евро");
         turn.Should().Contain("groceries: Groceries / Продукты");
         turn.Should().Contain("No known merchants");
+    }
+
+    [Fact]
+    public void Build_user_turn_includes_the_offered_wallets()
+    {
+        IReadOnlyList<WalletOption> wallets =
+            [new WalletOption(Guid.Parse("11111111-1111-1111-1111-111111111111"), "Cash", CurrencyCode.Rsd, [], true)];
+        var request = new CategorizationRequest("кофе 250", new DateOnly(2026, 9, 22), [], [], [], Wallets: wallets);
+
+        CategorizationPrompt.BuildUserTurn(request).Should().Contain("Cash (RSD)");
+    }
+
+    [Fact]
+    public void Build_user_turn_says_no_wallets_are_offered_when_none_are_given()
+    {
+        var request = new CategorizationRequest("кофе 250", new DateOnly(2026, 9, 22), [], [], []);
+
+        CategorizationPrompt.BuildUserTurn(request).Should().Contain("wallet_id must be null");
     }
 
     [Fact]

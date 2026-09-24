@@ -20,14 +20,14 @@ public class AnthropicTranslatingChatClientTests
     public async Task A_tool_marked_strict_reaches_the_SDK_adapter_carrying_its_Strict_property()
     {
         var inner = new ScriptedChatClient().Answer(new TextContent("ok"));
-        var tool = new SchemaTool("record_spending", "The answer.", NoArguments);
+        var tool = new SchemaTool("record_transaction", "The answer.", NoArguments);
 
         await new AnthropicTranslatingChatClient(inner).GetResponseAsync(
             UserTurn, new ChatOptions { Tools = [tool] }, TestContext.Current.CancellationToken);
 
         var sent = inner.Requests.Should().ContainSingle().Subject.Options!.Tools.Should().ContainSingle()
             .Which.Should().BeAssignableTo<AIFunctionDeclaration>().Subject;
-        sent.Name.Should().Be("record_spending");
+        sent.Name.Should().Be("record_transaction");
         sent.Description.Should().Be("The answer.");
         sent.JsonSchema.GetRawText().Should().Be(NoArguments.GetRawText());
         // The name the SDK adapter reads (nameof(Anthropic.Models.Messages.Tool.Strict)) - it copies
@@ -51,7 +51,7 @@ public class AnthropicTranslatingChatClientTests
     public async Task The_callers_options_are_left_as_they_were()
     {
         var inner = new ScriptedChatClient().Answer(new TextContent("ok"));
-        var tool = new SchemaTool("record_spending", "The answer.", NoArguments);
+        var tool = new SchemaTool("record_transaction", "The answer.", NoArguments);
         var options = new ChatOptions { Tools = [tool] };
 
         await new AnthropicTranslatingChatClient(inner).GetResponseAsync(UserTurn, options, TestContext.Current.CancellationToken);

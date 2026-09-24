@@ -1,13 +1,14 @@
 namespace Noof.Ledger.Ai.Tests;
 
 // Real response shapes, kept in one place so every test reads from the same ground truth instead
-// of each hand-rolling its own JSON. record_spending, canonicalize_merchant and list_merchants are
-// now all genuine "tool_use" blocks, forced by tool_choice (operator, 2026-09-23).
+// of each hand-rolling its own JSON. record_transaction, canonicalize_merchant and list_merchants
+// are all genuine "tool_use" blocks, forced by tool_choice (operator, 2026-09-23; renamed for M9,
+// 2026-09-24).
 public static class AnthropicResponses
 {
-    public const string RecordSpendingJsonAnswer = """
+    public const string RecordTransactionJsonAnswer = """
         {"id":"msg_01","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
-         "content":[{"type":"tool_use","id":"toolu_01","name":"record_spending","input":{"items":[{"description":"Coffee","amount":3.50,"currency":"EUR","category_slug":"food-drink","merchant_name":null}]}}],
+         "content":[{"type":"tool_use","id":"toolu_01","name":"record_transaction","input":{"items":[{"description":"Coffee","amount":3.50,"currency":"EUR","category_slug":"food-drink","merchant_name":null}],"occurred_on":null,"kind":"expense","wallet_id":null,"balance_amount":null,"balance_currency":null}}],
          "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
         """;
 
@@ -25,15 +26,15 @@ public static class AnthropicResponses
          "usage":{"input_tokens":40,"output_tokens":8}}
         """;
 
-    public const string RecordSpendingFromWordsAnswer = """
+    public const string RecordTransactionFromWordsAnswer = """
         {"id":"msg_05","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
-         "content":[{"type":"tool_use","id":"toolu_05","name":"record_spending","input":{"items":[{"description":"продукты","amount":1000,"currency":"EUR","category_slug":"food-drink","merchant_name":"Lidl"}]}}],
+         "content":[{"type":"tool_use","id":"toolu_05","name":"record_transaction","input":{"items":[{"description":"продукты","amount":1000,"currency":"EUR","category_slug":"food-drink","merchant_name":"Lidl"}],"occurred_on":null,"kind":"expense","wallet_id":null,"balance_amount":null,"balance_currency":null}}],
          "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
         """;
 
-    public const string RecordSpendingWithDateAnswer = """
+    public const string RecordTransactionWithDateAnswer = """
         {"id":"msg_06","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
-         "content":[{"type":"tool_use","id":"toolu_06","name":"record_spending","input":{"items":[{"description":"продукты","amount":1000,"currency":"EUR","category_slug":"food-drink","merchant_name":null}],"occurred_on":"2026-09-21"}}],
+         "content":[{"type":"tool_use","id":"toolu_06","name":"record_transaction","input":{"items":[{"description":"продукты","amount":1000,"currency":"EUR","category_slug":"food-drink","merchant_name":null}],"occurred_on":"2026-09-21","kind":"expense","wallet_id":null,"balance_amount":null,"balance_currency":null}}],
          "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
         """;
 

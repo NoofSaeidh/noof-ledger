@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
 using Noof.Ledger.Application.Categorization;
@@ -10,8 +10,9 @@ namespace Noof.Ledger.Ai;
 // factory hands out, and every failure it can have arrives here already as a ModelCallException.
 internal sealed class ChatCategorizer(IChatClientFactory clientFactory) : ICategorizer
 {
-    const string RecordSpendingName = "record_spending";
-    const string RecordSpendingDescription = "Record every distinct spending line item found in the message.";
+    const string RecordTransactionName = "record_transaction";
+    const string RecordTransactionDescription =
+        "Record the spending, income or balance statement described in the message.";
 
     const string ListMerchantsName = "list_merchants";
     const string ListMerchantsDescription =
@@ -26,9 +27,9 @@ internal sealed class ChatCategorizer(IChatClientFactory clientFactory) : ICateg
 
     public async Task<CategorizationProposal> ProposeAsync(CategorizationRequest request, CancellationToken cancellationToken)
     {
-        var recordSpending = new SchemaTool(
-            RecordSpendingName, RecordSpendingDescription,
-            CategorizationSchema.BuildRecordSpending(request.Categories, request.MerchantHints));
+        var recordTransaction = new SchemaTool(
+            RecordTransactionName, RecordTransactionDescription,
+            CategorizationSchema.BuildRecordTransaction(request.Categories, request.MerchantHints, request.Wallets ?? []));
 
         // AllMerchants, not MerchantHints: the hints are the handful the local scan already found and
         // the model has already seen. It only calls this tool when none of them fit, so answering with
@@ -37,38 +38,38 @@ internal sealed class ChatCategorizer(IChatClientFactory clientFactory) : ICateg
             ListMerchantsName, ListMerchantsDescription,
             CategorizationSchema.BuildListMerchants(), () => JsonSerializer.Serialize(request.AllMerchants));
 
-        // record_spending is declaration-only, so a call to it ends the loop and comes back here;
+        // record_transaction is declaration-only, so a call to it ends the loop and comes back here;
         // list_merchants is answered locally and sent back. AnswerToolGuard makes that follow-up offer
-        // record_spending alone and force it, so there is structurally no second lookup to reach for
+        // record_transaction alone and force it, so there is structurally no second lookup to reach for
         // (Locked design decision 3) - enforced by the API, not by the model behaving.
         //
         // 1, not 2: the limit counts round trips, and once it is reached FunctionInvokingChatClient
         // still sends one last request with every declaration stripped - which the guard re-arms.
         // So 1 means at most two provider calls; 2 lets a second lookup through and makes three.
         using var chat = new FunctionInvokingChatClient(
-            new AnswerToolGuard(await clientFactory.CreateAsync(cancellationToken), recordSpending))
+            new AnswerToolGuard(await clientFactory.CreateAsync(cancellationToken), recordTransaction))
         {
             MaximumIterationsPerRequest = 1,
         };
 
         // Both tools are offered and one is forced (RequireAny, not Auto): the model answers either
-        // record_spending directly or list_merchants first, never plain text (operator, 2026-09-23).
+        // record_transaction directly or list_merchants first, never plain text (operator, 2026-09-23).
         // System is the same across turns; per-request data lives only in the user turn.
         var response = await chat.GetResponseAsync(
             [new ChatMessage(ChatRole.User, CategorizationPrompt.BuildUserTurn(request))],
             new ChatOptions
             {
                 Instructions = CategorizationPrompt.System,
-                Tools = [listMerchants, recordSpending],
+                Tools = [listMerchants, recordTransaction],
                 ToolMode = ChatToolMode.RequireAny,
             },
             cancellationToken);
 
-        return FindCall(response, RecordSpendingName) is { } call
+        return FindCall(response, RecordTransactionName) is { } call
             ? ToProposal(call)
             : throw new ModelCallException(
                 ModelFailureKind.Transient,
-                $"The model answered without a {RecordSpendingName} call (finish reason: {response.FinishReason}).");
+                $"The model answered without a {RecordTransactionName} call (finish reason: {response.FinishReason}).");
     }
 
     public async Task<string> CanonicalizeMerchantAsync(
@@ -119,18 +120,24 @@ internal sealed class ChatCategorizer(IChatClientFactory clientFactory) : ICateg
 
     static CategorizationProposal ToProposal(FunctionCallContent call)
     {
-        var payload = ToPayload<RecordSpendingPayload>(call);
+        var payload = ToPayload<RecordTransactionPayload>(call);
         if (payload is null)
-            throw new ModelCallException(ModelFailureKind.Transient, $"{RecordSpendingName} returned an empty payload.");
+            throw new ModelCallException(ModelFailureKind.Transient, $"{RecordTransactionName} returned an empty payload.");
 
-        return new CategorizationProposal([.. payload.Items.Select(i => i.ToProposedLineItem())], payload.OccurredOn);
+        return new CategorizationProposal(
+            [.. payload.Items.Select(i => i.ToProposedLineItem())],
+            payload.OccurredOn,
+            payload.Kind,
+            string.IsNullOrEmpty(payload.WalletId) ? null : Guid.Parse(payload.WalletId),
+            payload.BalanceAmount,
+            payload.BalanceCurrency);
     }
 
     // FunctionCallContent.Arguments holds one JsonElement per top-level parameter, produced by
     // System.Text.Json with no object converter - the response's own token text, not a re-encoded
     // value (decompiled, operator 2026-09-23; Verified facts table). Re-serialising the dictionary
-    // and deserialising it into the payload record in one step is what keeps "amount" a decimal
-    // read straight off that token text, never a double.
+    // and deserialising it into the payload record in one step is what keeps "amount" and
+    // "balance_amount" decimals read straight off that token text, never a double.
     static T? ToPayload<T>(FunctionCallContent call) =>
         JsonSerializer.Deserialize<T>(JsonSerializer.SerializeToElement(call.Arguments));
 
@@ -151,12 +158,16 @@ internal sealed class ChatCategorizer(IChatClientFactory clientFactory) : ICateg
     }
 
     // Deserialisation-only DTOs, private to this file: the JSON field names the tool schema
-    // promises ("currency", not "currency_code") do not all match ProposedLineItem's C# property
-    // names, so this maps explicitly, field by field, rather than trusting a naming-policy
-    // convention that is wrong for exactly one field.
-    sealed record RecordSpendingPayload(
+    // promises ("currency", not "currency_code"; "wallet_id", not "walletId") do not all match the
+    // application-layer records' own property names, so this maps explicitly, field by field,
+    // rather than trusting a naming-policy convention that is wrong for more than one field.
+    sealed record RecordTransactionPayload(
         [property: JsonPropertyName("items")] IReadOnlyList<ProposedLineItemDto> Items,
-        [property: JsonPropertyName("occurred_on")] string? OccurredOn);
+        [property: JsonPropertyName("occurred_on")] string? OccurredOn,
+        [property: JsonPropertyName("kind")] string Kind,
+        [property: JsonPropertyName("wallet_id")] string? WalletId,
+        [property: JsonPropertyName("balance_amount")] decimal? BalanceAmount,
+        [property: JsonPropertyName("balance_currency")] string? BalanceCurrency);
 
     sealed record ProposedLineItemDto(
         [property: JsonPropertyName("description")] string Description,

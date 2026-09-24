@@ -19,8 +19,8 @@ public class ChatCategorizerFunctionInvokerTests
             [new CategoryOption("food-drink", "Food & Drink", "Еда и напитки", null)],
             hints ?? [], all ?? [Lidl, Maxi]);
 
-    static FunctionCallContent RecordSpendingCall(string callId, decimal amount) =>
-        new(callId, "record_spending", new Dictionary<string, object?>
+    static FunctionCallContent RecordTransactionCall(string callId, decimal amount) =>
+        new(callId, "record_transaction", new Dictionary<string, object?>
         {
             ["items"] = new object[]
             {
@@ -31,6 +31,10 @@ public class ChatCategorizerFunctionInvokerTests
                 },
             },
             ["occurred_on"] = null,
+            ["kind"] = "expense",
+            ["wallet_id"] = null,
+            ["balance_amount"] = null,
+            ["balance_currency"] = null,
         });
 
     static FunctionCallContent ListMerchantsCall(string callId) =>
@@ -39,9 +43,9 @@ public class ChatCategorizerFunctionInvokerTests
     static ChatCategorizer Build(ScriptedChatClient provider) => new(new FixedChatClientFactory(provider));
 
     [Fact]
-    public async Task A_direct_record_spending_answer_on_the_first_call_ends_the_loop_in_one_call()
+    public async Task A_direct_record_transaction_answer_on_the_first_call_ends_the_loop_in_one_call()
     {
-        var provider = new ScriptedChatClient().Answer(RecordSpendingCall("call_1", 12345678901234567.89m));
+        var provider = new ScriptedChatClient().Answer(RecordTransactionCall("call_1", 12345678901234567.89m));
         var categorizer = Build(provider);
 
         var proposal = await categorizer.ProposeAsync(Request(), TestContext.Current.CancellationToken);
@@ -51,7 +55,7 @@ public class ChatCategorizerFunctionInvokerTests
             "amount is read as a JSON number straight into decimal, never through double");
 
         var call1 = provider.Requests[0].Options!;
-        call1.Tools!.Select(t => t.Name).Should().BeEquivalentTo(["list_merchants", "record_spending"]);
+        call1.Tools!.Select(t => t.Name).Should().BeEquivalentTo(["list_merchants", "record_transaction"]);
         call1.Tools!.Should().OnlyContain(tool => tool.IsStrict(), "every tool this layer offers is strict");
         call1.ToolMode.Should().Be(ChatToolMode.RequireAny, "the model must answer one of the two, never plain text");
     }
@@ -59,7 +63,7 @@ public class ChatCategorizerFunctionInvokerTests
     [Fact]
     public async Task A_tiny_amount_also_round_trips_into_decimal_exactly()
     {
-        var provider = new ScriptedChatClient().Answer(RecordSpendingCall("call_1", 0.1m));
+        var provider = new ScriptedChatClient().Answer(RecordTransactionCall("call_1", 0.1m));
         var categorizer = Build(provider);
 
         var proposal = await categorizer.ProposeAsync(Request(), TestContext.Current.CancellationToken);
@@ -68,11 +72,11 @@ public class ChatCategorizerFunctionInvokerTests
     }
 
     [Fact]
-    public async Task Calling_list_merchants_first_is_answered_locally_and_the_follow_up_offers_only_record_spending_forced()
+    public async Task Calling_list_merchants_first_is_answered_locally_and_the_follow_up_offers_only_record_transaction_forced()
     {
         var provider = new ScriptedChatClient()
             .Answer(ListMerchantsCall("call_1"))
-            .Answer(RecordSpendingCall("call_2", 3.5m));
+            .Answer(RecordTransactionCall("call_2", 3.5m));
         var categorizer = Build(provider);
 
         var proposal = await categorizer.ProposeAsync(Request([Lidl], [Lidl, Maxi]), TestContext.Current.CancellationToken);
@@ -81,10 +85,10 @@ public class ChatCategorizerFunctionInvokerTests
         proposal.Items.Should().ContainSingle();
 
         var call2 = provider.Requests[1];
-        call2.Options!.Tools!.Select(t => t.Name).Should().BeEquivalentTo(["record_spending"],
-            "record_spending is structurally the only tool left to call, ruling out a second lookup");
+        call2.Options!.Tools!.Select(t => t.Name).Should().BeEquivalentTo(["record_transaction"],
+            "record_transaction is structurally the only tool left to call, ruling out a second lookup");
         call2.Options.Tools!.Should().OnlyContain(tool => tool.IsStrict());
-        call2.Options.ToolMode.Should().Be(ChatToolMode.RequireSpecific("record_spending"));
+        call2.Options.ToolMode.Should().Be(ChatToolMode.RequireSpecific("record_transaction"));
 
         var results = call2.Messages.SelectMany(m => m.Contents).OfType<FunctionResultContent>().ToList();
         var result = results.Should().ContainSingle().Which;
@@ -138,14 +142,14 @@ public class ChatCategorizerFunctionInvokerTests
     }
 
     [Fact]
-    public async Task Calling_both_tools_at_once_on_the_first_turn_is_read_as_record_spending_with_no_follow_up()
+    public async Task Calling_both_tools_at_once_on_the_first_turn_is_read_as_record_transaction_with_no_follow_up()
     {
-        var provider = new ScriptedChatClient().Answer(ListMerchantsCall("call_1a"), RecordSpendingCall("call_1b", 3.5m));
+        var provider = new ScriptedChatClient().Answer(ListMerchantsCall("call_1a"), RecordTransactionCall("call_1b", 3.5m));
         var categorizer = Build(provider);
 
         var proposal = await categorizer.ProposeAsync(Request(), TestContext.Current.CancellationToken);
 
-        provider.Requests.Should().ContainSingle("record_spending answers the request outright even when list_merchants was also called");
+        provider.Requests.Should().ContainSingle("record_transaction answers the request outright even when list_merchants was also called");
         proposal.Items.Should().ContainSingle().Which.Amount.Should().Be(3.5m);
     }
 

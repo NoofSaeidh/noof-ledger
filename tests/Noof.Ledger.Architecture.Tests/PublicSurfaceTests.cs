@@ -49,6 +49,7 @@ public class PublicSurfaceTests
             "ModelFailureKind", "ModelCallException", "ModelCallExceptionExtensions",
             "IModelProvider",
             "IProposalMapper", "MappedProposal", "IChatNotifier", "IJobQueue", "JobCompletionOutcome",
+            "WalletOption", "ProposedKind",
             "RecentLineItem", "RecentTransaction", "MonthTotal", "MonthSummary",
             "ISpendingReadModel", "ProbeResult", "ISecretProbe", "ISecretStore", "SecretKeys",
             "SecretResult", "SecretState", "SecretStatus",
