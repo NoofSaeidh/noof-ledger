@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Noof.Ledger.Application.Auth;
+using Noof.Ledger.Application.Backup;
 using Noof.Ledger.Application.Capture;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Editing;
@@ -12,6 +13,7 @@ using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Application.Transcription;
 using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Persistence.Auth;
+using Noof.Ledger.Persistence.Backup;
 using Noof.Ledger.Persistence.Balances;
 using Noof.Ledger.Persistence.Capture;
 using Noof.Ledger.Persistence.Categorization;
@@ -35,8 +37,9 @@ public static class PersistenceRegistration
     public static IServiceCollection AddNoofPersistence(
         this IServiceCollection services, IConfiguration configuration, int maxJobAttempts)
     {
-        services.AddDbContext<LedgerDbContext>(options =>
-            options.UseNpgsql(LedgerConnectionString.Resolve(configuration.GetConnectionString("Ledger"))));
+        var connectionString = LedgerConnectionString.Resolve(configuration.GetConnectionString("Ledger"));
+
+        services.AddDbContext<LedgerDbContext>(options => options.UseNpgsql(connectionString));
 
         services.AddScoped<IUserStore, EfUserStore>();
         services.AddScoped<ISecretStore, EfSecretStore>();
@@ -54,6 +57,9 @@ public static class PersistenceRegistration
             sp.GetRequiredService<LedgerDbContext>(),
             sp.GetRequiredService<TimeProvider>(),
             maxJobAttempts));
+        services.AddScoped<IBackupLog, EfBackupLog>();
+        services.AddScoped<IDatabaseDumper>(_ => new PgDumpDatabaseDumper(
+            connectionString, configuration["Backup:PgDumpPath"] ?? PgDumpDatabaseDumper.DefaultPath));
 
         return services;
     }
