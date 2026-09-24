@@ -3,9 +3,13 @@
 @implements IDisposable
 @using System.Data.Common
 @using System.Globalization
+@using Noof.Ledger.Application.Backup
 @using Noof.Ledger.Application.Reporting
 @using Noof.Ledger.Domain
 @inject ISpendingReadModel ReadModel
+@inject IBalanceReadModel BalanceReadModel
+@inject IBackupLog BackupLog
+@inject TimeProvider TimeProvider
 
 <PageTitle>Ledger</PageTitle>
 
@@ -26,6 +30,49 @@
 }
 else
 {
+    <MudPaper id="balances" Outlined="true" Elevation="0" Class="pa-5 mb-8">
+        <MudText HtmlTag="h2" Typo="Typo.h6" Class="mb-3">Balances</MudText>
+
+        @if (activeBalances.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">No active wallets yet.</MudText>
+        }
+        else
+        {
+            @* noof-balance-row is a plain layout hook, not yet defined in the app stylesheet -
+               harmless if unstyled, and no test asserts on its CSS. *@
+            @foreach (var wallet in activeBalances)
+            {
+                <div id="@($"balance-{wallet.WalletId}")" class="noof-balance-row mb-2">
+                    <MudText Typo="Typo.body1">@wallet.WalletName</MudText>
+                    <MudText Typo="Typo.body1" Class="noof-amount">@FormatBalances(wallet.Balances)</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        @(wallet.LastCheckedOn is { } checkedOn
+                            ? $"Reconciled {checkedOn.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}"
+                            : "Not yet reconciled")
+                    </MudText>
+                </div>
+            }
+
+            @if (currencyTotals.Count > 0)
+            {
+                <MudDivider Class="my-3" />
+
+                @foreach (var total in currencyTotals)
+                {
+                    <MudText id="@($"balance-total-{total.Currency}")" Typo="Typo.subtitle2">
+                        Total @total.Currency: @FormatAmount(total.Amount)
+                    </MudText>
+                }
+            }
+        }
+    </MudPaper>
+
+    <MudText id="backup-status" Typo="Typo.caption" Class="mb-8"
+             Color="@(BackupIsStale() ? Color.Warning : Color.Default)">
+        @DescribeBackup()
+    </MudText>
+
     <MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">
         This month, from @summaryFirstDay.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
     </MudText>
@@ -157,10 +204,15 @@ else
 @code {
     IReadOnlyList<RecentTransaction> recent = [];
     IReadOnlyList<CurrencyGroup> currencyGroups = [];
+    IReadOnlyList<WalletBalance> activeBalances = [];
+    IReadOnlyList<CurrencyTotal> currencyTotals = [];
+    BackupStatus? backupStatus;
     DateOnly summaryFirstDay;
     bool databaseUnavailable;
 
     readonly CancellationTokenSource cancellation = new();
+
+    sealed record CurrencyTotal(string Currency, decimal Amount);
 
     sealed record CurrencyGroup(string Currency, IReadOnlyList<MonthTotal> Totals)
     {
@@ -192,6 +244,24 @@ else
                             .ThenBy(total => total.CategoryName, StringComparer.Ordinal),
                     ])),
             ];
+
+            var allBalances = await BalanceReadModel.BalancesAsync(cancellation.Token);
+            activeBalances =
+            [
+                .. allBalances
+                    .Where(wallet => !wallet.Archived)
+                    .OrderBy(wallet => wallet.WalletName, StringComparer.Ordinal),
+            ];
+            currencyTotals =
+            [
+                .. activeBalances
+                    .SelectMany(wallet => wallet.Balances)
+                    .GroupBy(money => money.Currency.Value)
+                    .OrderBy(group => group.Key, StringComparer.Ordinal)
+                    .Select(group => new CurrencyTotal(group.Key, group.Sum(money => money.Amount))),
+            ];
+
+            backupStatus = await BackupLog.StatusAsync(cancellation.Token);
         }
         // Navigating away before the query returns cancels it via our own token, not a database
         // failure - it must not land in the databaseUnavailable branch below, or leaving the page
@@ -228,6 +298,30 @@ else
     static string FormatAmount(decimal amount) => amount.ToString("N2", CultureInfo.InvariantCulture);
 
     static string FormatMoney(Money money) => $"{FormatAmount(money.Amount)} {money.Currency}";
+
+    static string FormatBalances(IReadOnlyList<Money> balances) =>
+        balances.Count == 0 ? "—" : string.Join(", ", balances.Select(FormatMoney));
+
+    string DescribeBackup() => backupStatus switch
+    {
+        null => "Last backup: unavailable",
+        { LastRunFailed: true } => "Last backup: failed",
+        { LastSuccessAt: null } => "Last backup: never",
+        { LastSuccessAt: { } at } => $"Last backup: {FormatAgo(TimeProvider.GetUtcNow() - at)} ago",
+    };
+
+    static string FormatAgo(TimeSpan elapsed) => elapsed switch
+    {
+        { TotalMinutes: < 1 } => "just now",
+        { TotalHours: < 1 } => $"{(int)elapsed.TotalMinutes} min",
+        { TotalDays: < 1 } => $"{(int)elapsed.TotalHours} h",
+        _ => $"{(int)elapsed.TotalDays} d",
+    };
+
+    // B3's own staleness threshold: amber past 36 hours since the last success, or on any failed run,
+    // or when nothing has ever succeeded.
+    bool BackupIsStale() => backupStatus is null or { LastRunFailed: true } or { LastSuccessAt: null }
+        || backupStatus.LastSuccessAt is { } at && TimeProvider.GetUtcNow() - at > TimeSpan.FromHours(36);
 
     static string FormatOccurred(RecentTransaction transaction)
     {
