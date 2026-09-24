@@ -11,6 +11,11 @@
     <ProjectReference Include="..\Noof.Ledger.Web\Noof.Ledger.Web.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Serilog.AspNetCore" />
+    <PackageReference Include="Serilog.Sinks.File" />
+  </ItemGroup>
+
   <PropertyGroup>
     <IsDeployableApp>true</IsDeployableApp>
     <RequiresAspNetWebAssets>true</RequiresAspNetWebAssets>

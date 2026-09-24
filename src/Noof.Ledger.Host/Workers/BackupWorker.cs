@@ -68,7 +68,7 @@ internal sealed class BackupWorker(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogError(ex, "Backup worker tick failed");
+            logger.BackupTickFailed(ex);
             return new BackupTickOutcome(BackupTickResult.Failed, null);
         }
     }
@@ -115,7 +115,7 @@ internal sealed class BackupWorker(
             cancellationToken);
 
         if (!result.Succeeded)
-            logger.LogError("Backup failed: {Error}", result.Error);
+            logger.BackupFailed(result.Error);
 
         return result.Succeeded ? BackupTickResult.BackedUp : BackupTickResult.Failed;
     }
@@ -142,4 +142,16 @@ internal sealed class BackupWorker(
         foreach (var name in BackupRetention.ToDelete(fileNames, options.KeepCount))
             File.Delete(Path.Combine(options.BackupDirectory, name));
     }
+}
+
+// A sibling top-level static class, not nested inside BackupWorker: a [LoggerMessage] extension
+// method nested inside a non-static class fails to compile here with CS1109 ("Extension methods
+// must be defined in a top level static class"), verified by a clean rebuild, not by documentation.
+internal static partial class BackupWorkerLog
+{
+    [LoggerMessage(EventId = 1101, Level = LogLevel.Error, Message = "Backup worker tick failed")]
+    public static partial void BackupTickFailed(this ILogger logger, Exception exception);
+
+    [LoggerMessage(EventId = 1102, Level = LogLevel.Error, Message = "Backup failed: {Error}")]
+    public static partial void BackupFailed(this ILogger logger, string? error);
 }

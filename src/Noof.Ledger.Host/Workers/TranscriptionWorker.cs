@@ -3,6 +3,7 @@ using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Jobs;
 using Noof.Ledger.Application.Transcription;
 using Noof.Ledger.Domain;
+using Noof.Ledger.Host.Workers.TranscriptionLogging;
 
 namespace Noof.Ledger.Host.Workers;
 
@@ -62,7 +63,7 @@ internal sealed class TranscriptionWorker(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogError(ex, "Transcription worker tick failed");
+            logger.TickFailed(ex);
             return CategorizationTickResult.Failed;
         }
     }
@@ -103,7 +104,7 @@ internal sealed class TranscriptionWorker(
                 : await transcriptionStore.CompleteCaptureAsync(job.TransactionId, transcript, cancellationToken);
 
             if (!handedOn)
-                logger.LogInformation("Job {JobId}'s transcript was already handed on by an earlier run", job.Id);
+                logger.TranscriptAlreadyHandedOn(job.Id);
 
             // The hand-off is committed. As in CategorizationWorker, nothing past this line may count as the job
             // failing: that would mark Failed a record whose reading is already queued.
@@ -114,9 +115,7 @@ internal sealed class TranscriptionWorker(
             // 401/402/403: the key, not this note, is what is broken. Retried, never failed, and claiming pauses so the
             // backlog is not burned through while the key stays bad.
             accountCooldownUntil = timeProvider.GetUtcNow() + options.AccountCooldown;
-            logger.LogWarning(
-                "Account-level speech provider failure on job {JobId} ({Message}); pausing new claims for {Cooldown}",
-                job.Id, ex.Message, options.AccountCooldown);
+            logger.AccountLevelFailure(job.Id, ex.Message, options.AccountCooldown);
             await HandleFailureAsync(jobQueue, store, notifier, job, record, ModelFailureKind.Transient, ex.Message, cancellationToken);
         }
         catch (ModelCallException ex)
@@ -198,8 +197,7 @@ internal sealed class TranscriptionWorker(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogWarning(ex, "Failed to edit Telegram message {MessageId} for transaction {TransactionId}",
-                messageId, record.TransactionId);
+            logger.EditFailed(ex, messageId, record.TransactionId);
         }
     }
 
@@ -208,11 +206,11 @@ internal sealed class TranscriptionWorker(
         try
         {
             if (await jobQueue.SucceedAsync(job.Id, workerId, cancellationToken) == JobCompletionOutcome.NotOwned)
-                logger.LogWarning("Job {JobId} was already reclaimed by another worker; not retrying", job.Id);
+                logger.JobAlreadyReclaimed(job.Id);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogWarning(ex, "SucceedAsync failed for job {JobId} after its transcript was already handed on", job.Id);
+            logger.SucceedAfterHandOffFailed(ex, job.Id);
         }
     }
 }
