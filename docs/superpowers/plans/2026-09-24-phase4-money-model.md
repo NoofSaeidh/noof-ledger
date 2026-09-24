@@ -8649,7 +8649,7 @@ try {
 }
 ```
 
-Expected PASS: every test green, including the three new `WalletsPageSourceTests` and the three new
+Expected PASS: every test green, including the four new `WalletsPageSourceTests` and the three new
 `WalletsTests` E2E cases.
 
 ```
@@ -8680,7 +8680,7 @@ EOF
 - Modify: `src/Noof.Ledger.Host/Program.cs`
 - Modify: `tests/Noof.Ledger.E2E.Tests/CookieModeHostFixture.cs` — add `Backup__Enabled = false` to the in-process host's configuration overrides.
 - Modify: `tests/Noof.Ledger.E2E.Tests/UnreachableDatabaseHostFixture.cs` — same.
-- Modify: every other `WebApplicationFactory<Program>` construction in `Noof.Ledger.Host.Tests` (`ThemeTests`, `CategorizationWiringTests`, `LoginEndpointTests`, and any other file in that project building one) — add `builder.UseSetting("Backup:Enabled", "false")`.
+- Modify: every other `WebApplicationFactory<Program>` construction in `Noof.Ledger.Host.Tests` (`ThemeTests`, `CategorizationWiringTests`, `AuthenticationTests`, `BootTests`, `LoginEndpointTests`, `AnthropicHttpClientLoggingTests`, `TelegramHttpClientLoggingTests`, `DataProtectionWiringTests`) — add `builder.UseSetting("Backup:Enabled", "false")`.
 - Test: `tests/Noof.Ledger.Host.Tests/BackupWorkerTests.cs` (new), `tests/Noof.Ledger.Host.Tests/BackupWorkerWiringTests.cs` (new), `tests/Noof.Ledger.Host.Tests/BackupRetentionTests.cs` (new).
 
 > **Contract correction (review, contract finding 6 and Task 13 finding 1 — blocker):** `BackupWorkerOptions` gains `public bool Enabled { get; init; } = true;`, and `WorkerRegistration.AddNoofWorkers` registers `BackupWorker` only when it is true. Without this, `BackupWorker` runs inside every E2E host (`CookieModeHostFixture` starts the real published host with only `Database__MigrateOnStartup` and `ConnectionStrings__Ledger` set) and would `pg_dump` every E2E clone into the operator's own `%LOCALAPPDATA%\NoofLedger\backups`, and — because test dumps carry the newest timestamps — `Prune()` would delete the operator's real backups to stay at 14. Every `WebApplicationFactory<Program>` in `Noof.Ledger.Host.Tests` disables it too, since those point at an unreachable database and the worker would otherwise log a failed tick after a 2-second timeout on every test run.
@@ -9196,7 +9196,7 @@ EOF
 
   In `tests/Noof.Ledger.E2E.Tests/UnreachableDatabaseHostFixture.cs`, add the same entry to its configuration overrides.
 
-  In every other `Noof.Ledger.Host.Tests` file that builds a `WebApplicationFactory<Program>` (grep `new WebApplicationFactory<Program>()` under `tests/Noof.Ledger.Host.Tests/` — this includes at least `ThemeTests`, `CategorizationWiringTests`, `LoginEndpointTests`), add inside its `.WithWebHostBuilder(builder => { ... })` block:
+  In every other `Noof.Ledger.Host.Tests` file that builds a `WebApplicationFactory<Program>` (grep `new WebApplicationFactory<Program>()` under `tests/Noof.Ledger.Host.Tests/` — this is `ThemeTests`, `CategorizationWiringTests`, `AuthenticationTests`, `BootTests`, `LoginEndpointTests`, `AnthropicHttpClientLoggingTests`, `TelegramHttpClientLoggingTests` and `DataProtectionWiringTests`, eight files in total), add inside every `.WithWebHostBuilder(builder => { ... })` block it builds:
   ```csharp
   builder.UseSetting("Backup:Enabled", "false");
   ```
@@ -9309,7 +9309,7 @@ EOF
 - [ ] **Step 9: Commit**
 
   ```powershell
-  git add src/Noof.Ledger.Host/Workers/BackupWorkerOptions.cs src/Noof.Ledger.Host/Workers/BackupWorker.cs src/Noof.Ledger.Host/Workers/BackupRetention.cs src/Noof.Ledger.Host/Workers/WorkerRegistration.cs src/Noof.Ledger.Host/Program.cs tests/Noof.Ledger.Host.Tests/BackupWorkerTests.cs tests/Noof.Ledger.Host.Tests/BackupWorkerWiringTests.cs tests/Noof.Ledger.Host.Tests/BackupRetentionTests.cs tests/Noof.Ledger.Host.Tests/ThemeTests.cs tests/Noof.Ledger.Host.Tests/CategorizationWiringTests.cs tests/Noof.Ledger.Host.Tests/LoginEndpointTests.cs tests/Noof.Ledger.E2E.Tests/CookieModeHostFixture.cs tests/Noof.Ledger.E2E.Tests/UnreachableDatabaseHostFixture.cs
+  git add src/Noof.Ledger.Host/Workers/BackupWorkerOptions.cs src/Noof.Ledger.Host/Workers/BackupWorker.cs src/Noof.Ledger.Host/Workers/BackupRetention.cs src/Noof.Ledger.Host/Workers/WorkerRegistration.cs src/Noof.Ledger.Host/Program.cs tests/Noof.Ledger.Host.Tests/BackupWorkerTests.cs tests/Noof.Ledger.Host.Tests/BackupWorkerWiringTests.cs tests/Noof.Ledger.Host.Tests/BackupRetentionTests.cs tests/Noof.Ledger.Host.Tests/ThemeTests.cs tests/Noof.Ledger.Host.Tests/CategorizationWiringTests.cs tests/Noof.Ledger.Host.Tests/AuthenticationTests.cs tests/Noof.Ledger.Host.Tests/BootTests.cs tests/Noof.Ledger.Host.Tests/LoginEndpointTests.cs tests/Noof.Ledger.Host.Tests/AnthropicHttpClientLoggingTests.cs tests/Noof.Ledger.Host.Tests/TelegramHttpClientLoggingTests.cs tests/Noof.Ledger.Host.Tests/DataProtectionWiringTests.cs tests/Noof.Ledger.E2E.Tests/CookieModeHostFixture.cs tests/Noof.Ledger.E2E.Tests/UnreachableDatabaseHostFixture.cs
   git commit -m "$(cat <<'EOF'
   Add BackupWorker: a daily pg_dump, kept 14 deep, that never crashes the host (B1)
 
@@ -11196,25 +11196,13 @@ EOF
       [InlineData("sr-Latn-RS")]
       public async Task The_served_dashboard_html_is_culture_independent(string cultureName)
       {
-          var adminConnectionString = Environment.GetEnvironmentVariable("NOOF_TEST_PG") ?? DatabaseSettings.AdminConnectionString;
-          var adminBuilder = new NpgsqlConnectionStringBuilder(adminConnectionString);
+          if (!await DatabaseIsReachableAsync(TestContext.Current.CancellationToken))
+              Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
           var databaseName = $"noof_dashboard_culture_{Guid.NewGuid():N}";
+          await CreateCloneAsync(databaseName, TestContext.Current.CancellationToken);
 
-          await using (var admin = new NpgsqlConnection(adminBuilder.ConnectionString))
-          {
-              await admin.OpenAsync(TestContext.Current.CancellationToken);
-              try
-              {
-                  await admin.ExecuteNonQueryOrSkipAsync(
-                      $"CREATE DATABASE \"{databaseName}\" TEMPLATE {DatabaseSettings.TemplateDatabase}");
-              }
-              catch (PostgresException)
-              {
-                  Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
-              }
-          }
-
-          var cloneBuilder = new NpgsqlConnectionStringBuilder(adminConnectionString) { Database = databaseName };
+          var cloneBuilder = new NpgsqlConnectionStringBuilder(DatabaseSettings.AdminConnectionString) { Database = databaseName };
 
           var previousCulture = CultureInfo.CurrentCulture;
           var previousUiCulture = CultureInfo.CurrentUICulture;
@@ -11287,15 +11275,57 @@ EOF
               CultureInfo.CurrentCulture = previousCulture;
               CultureInfo.CurrentUICulture = previousUiCulture;
 
-              await using var admin = new NpgsqlConnection(adminBuilder.ConnectionString);
-              await admin.OpenAsync(TestContext.Current.CancellationToken);
-              await admin.ExecuteNonQueryOrSkipAsync($"DROP DATABASE IF EXISTS \"{databaseName}\" WITH (FORCE)");
+              await DropCloneAsync(databaseName);
           }
+      }
+
+      static async Task<bool> DatabaseIsReachableAsync(CancellationToken cancellationToken)
+      {
+          try
+          {
+              await using var connection = new NpgsqlConnection(DatabaseSettings.AdminConnectionString);
+              await connection.OpenAsync(cancellationToken);
+              return true;
+          }
+          catch
+          {
+              return false;
+          }
+      }
+
+      static async Task CreateCloneAsync(string name, CancellationToken cancellationToken)
+      {
+          await using var admin = new NpgsqlConnection(DatabaseSettings.AdminConnectionString);
+          await admin.OpenAsync(cancellationToken);
+          await using var create = new NpgsqlCommand(
+              $"CREATE DATABASE \"{name}\" TEMPLATE {DatabaseSettings.TemplateDatabase}", admin);
+          await create.ExecuteNonQueryAsync(cancellationToken);
+      }
+
+      static async Task DropCloneAsync(string name)
+      {
+          NpgsqlConnection.ClearAllPools();
+
+          await using var admin = new NpgsqlConnection(DatabaseSettings.AdminConnectionString);
+          await admin.OpenAsync(CancellationToken.None);
+          // DROP DATABASE waits on a Postgres checkpoint before it can remove the files, which can
+          // exceed Npgsql's default 30s command timeout under load - same reason PostgresFixture and
+          // CookieModeHostFixture both raise it.
+          await using var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)", admin)
+          {
+              CommandTimeout = 120,
+          };
+          await drop.ExecuteNonQueryAsync(CancellationToken.None);
       }
   }
   ```
 
-  This task must first find the real names `FakeUserStore`, `LoginHelper.PostWithTokenAsync`, `DatabaseSettings.TemplateDatabase`/`AdminConnectionString`, and whatever helper the existing Host.Tests suite already uses to run a raw SQL statement against the admin connection (the sketch above calls a placeholder `ExecuteNonQueryOrSkipAsync` — replace it with `NpgsqlCommand.ExecuteNonQueryAsync` directly, or the project's own equivalent, once the real helper names are confirmed against the actual test files) and match them exactly — these are read from the real Host.Tests and TestKit source, not invented here, per this task's binding rule to verify every name against the real code before citing it. `[Collection("culture")]` keeps this test from running in parallel with anything else that reads `CultureInfo.CurrentCulture` on the same process.
+  The reachability check, clone creation and clone teardown above are the same pattern
+  `CookieModeHostFixture.DatabaseIsReachableAsync`/`CreateCloneAsync` and `PostgresFixture` already use
+  elsewhere in this solution — a plain `NpgsqlConnection` + `NpgsqlCommand.ExecuteNonQueryAsync`
+  against `DatabaseSettings.AdminConnectionString`/`TemplateDatabase`, no placeholder helper.
+  `[Collection("culture")]` keeps this test from running in parallel with anything else that reads
+  `CultureInfo.CurrentCulture` on the same process.
 
   Run: `dotnet test --project tests/Noof.Ledger.Host.Tests --filter DashboardCultureTests`
   Expected FAIL until Task 9's dashboard renders the balances in `N2`/`InvariantCulture`; PASS once Task 9 is correct.
@@ -11343,7 +11373,13 @@ EOF
           await using (var db = new LedgerDbContext(new DbContextOptionsBuilder<LedgerDbContext>().UseNpgsql(sourceConnectionString).Options))
           {
               await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
-              await BalanceSeed.SeedTwoWalletsWithAStatementAndTwoCurrenciesAsync(db, TestContext.Current.CancellationToken);
+              var eurWallet = BalanceSeed.AddWallet(db, CurrencyCode.Eur, "Wise EUR");
+              var rsdWallet = BalanceSeed.AddWallet(db, CurrencyCode.Rsd, "Raiffeisen RSD");
+              BalanceSeed.State(db, eurWallet, 1000.00m, new DateOnly(2026, 9, 1), new DateTimeOffset(2026, 9, 1, 8, 0, 0, TimeSpan.Zero));
+              BalanceSeed.Spend(db, eurWallet, 0.30m, new DateOnly(2026, 9, 2), new DateTimeOffset(2026, 9, 2, 8, 0, 0, TimeSpan.Zero));
+              BalanceSeed.State(db, rsdWallet, 44_800.00m, new DateOnly(2026, 9, 1), new DateTimeOffset(2026, 9, 1, 8, 0, 0, TimeSpan.Zero));
+              BalanceSeed.Earn(db, rsdWallet, 200.00m, new DateOnly(2026, 9, 2), new DateTimeOffset(2026, 9, 2, 8, 0, 0, TimeSpan.Zero));
+              await db.SaveChangesAsync(TestContext.Current.CancellationToken);
           }
 
           tempDump = Path.Combine(Path.GetTempPath(), $"noof-restore-roundtrip-{Guid.NewGuid():N}.dump");
@@ -11375,6 +11411,8 @@ EOF
               .ToListAsync(TestContext.Current.CancellationToken);
           restoredBalances.Should().BeEquivalentTo(sourceBalances);
 
+          (await restored.Wallets.CountAsync(TestContext.Current.CancellationToken))
+              .Should().Be(await source.Wallets.CountAsync(TestContext.Current.CancellationToken));
           (await restored.Transactions.CountAsync(TestContext.Current.CancellationToken))
               .Should().Be(await source.Transactions.CountAsync(TestContext.Current.CancellationToken));
           (await restored.Entries.CountAsync(TestContext.Current.CancellationToken))
@@ -11385,7 +11423,7 @@ EOF
   }
   ```
 
-  This task must confirm against the real `Noof.Ledger.TestKit` whether a `BalanceSeed` helper already exists from an earlier task; if it does not, write the seeding inline in this test the same way `MoneyExactnessTests.SeedAsync` does (two wallets, a checkpoint each, a couple of entries in each of two currencies) rather than inventing a `BalanceSeed` type this task does not otherwise need.
+  This test uses the real `BalanceSeed` helper Task 3 defines in `Noof.Ledger.Persistence.Tests` (`AddWallet`, `Spend`, `Earn`, `State`) — not `Noof.Ledger.TestKit`, and not a `SeedTwoWalletsWithAStatementAndTwoCurrenciesAsync` method, which does not exist anywhere. The seeding above is inline, built directly from those helpers: two wallets, an opening/statement checkpoint on each, then an entry in each wallet's own currency.
 
   Run: `dotnet test --project tests/Noof.Ledger.Persistence.Tests --filter RestoreRoundTripTests`
   Expected: Skipped if `pg_dump.exe`/`pg_restore.exe` are absent, else PASS (both dump and restore go through the same schema, so nothing here should legitimately fail once Task 12's dumper and Task 1/3's schema are in place).
@@ -11523,7 +11561,7 @@ EOF
 - [ ] **Step 13: Commit**
 
   ```powershell
-  git add tests/Noof.Ledger.TestKit/CultureScope.cs tests/Noof.Ledger.Persistence.Tests/MoneyExactnessTests.cs tests/Noof.Ledger.Persistence.Tests/RestoreRoundTripTests.cs tests/Noof.Ledger.Host.Tests/DashboardCultureTests.cs tests/Noof.Ledger.E2E.Tests/MoneyExactnessDashboardTests.cs ops/restore-check.ps1
+  git add tests/Noof.Ledger.TestKit/CultureScope.cs tests/Noof.Ledger.Persistence.Tests/MoneyExactnessTests.cs tests/Noof.Ledger.Persistence.Tests/RestoreRoundTripTests.cs tests/Noof.Ledger.Host.Tests/DashboardCultureTests.cs tests/Noof.Ledger.Host.Tests/Noof.Ledger.Host.Tests.csproj tests/Noof.Ledger.E2E.Tests/MoneyExactnessDashboardTests.cs ops/restore-check.ps1
   git commit -m "$(cat <<'EOF'
   Prove balances exact under ru-RU and sr-Latn-RS, and check a restore (M12, B4)
 
@@ -11753,7 +11791,8 @@ EOF
 
   `BackupWorker` runs inside the host, not as a separate process. On start it checks
   `backup_runs` for the newest successful run; if there is none, or it is older than 24 hours, it
-  backs up immediately, then checks again once a day for as long as the host keeps running.
+  backs up immediately. It then checks again 24 hours after each success, or 1 hour after a failed
+  attempt rather than waiting a full day, for as long as the host keeps running.
 
   **Where:** `%LOCALAPPDATA%\NoofLedger\backups\noof_ledger-yyyyMMdd-HHmmss.dump` (UTC timestamp in
   the file name). Written under a `.tmp` name first and renamed only on success, so a half-written
@@ -11763,8 +11802,10 @@ EOF
   order (the timestamp in the name sorts the same as time, so no file needs to be opened to prune).
 
   **Checking status:** every run — success or failure — is a row in `backup_runs`. The dashboard's
-  home page shows *Last backup: n h ago*, amber past 36 hours or after a failed run. From a database
-  connection directly:
+  home page shows *Last backup: never* until the first success, then *Last backup: N min/h/d ago*
+  after one, or *Last backup: failed* whenever the most recent run failed (even after an earlier
+  success) — amber whenever nothing has ever succeeded, the last run failed, or the last success is
+  older than 36 hours. From a database connection directly:
   ```sql
   SELECT started_at, finished_at, succeeded, file_name, size_bytes, error
   FROM backup_runs ORDER BY started_at DESC LIMIT 5;
