@@ -1,5 +1,6 @@
 ﻿using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Jobs;
 using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
@@ -16,6 +17,7 @@ internal sealed class CategorizationWorker(
     IProposalMapper proposalMapper,
     IMerchantScan merchantScan,
     IRecordEcho recordEcho,
+    IDatabaseGate gate,
     ILogger<CategorizationWorker> logger)
     : BackgroundService
 {
@@ -30,6 +32,8 @@ internal sealed class CategorizationWorker(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        await gate.WaitUntilReadyAsync(stoppingToken);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             var result = await RunTickAsync(stoppingToken);

@@ -1,6 +1,7 @@
 ﻿
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
+using Noof.Ledger.Application.Diagnostics;
 
 namespace Noof.Ledger.Host.Workers;
 
@@ -19,6 +20,7 @@ internal static class WorkerRegistration
             sp.GetRequiredService<IProposalMapper>(),
             sp.GetRequiredService<IMerchantScan>(),
             sp.GetRequiredService<IRecordEcho>(),
+            sp.GetRequiredService<IDatabaseGate>(),
             sp.GetRequiredService<ILogger<CategorizationWorker>>()));
 
         services.AddHostedService(sp => new TranscriptionWorker(

@@ -6,6 +6,7 @@ using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Jobs;
 using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
@@ -125,9 +126,17 @@ public class CategorizationWorkerTests
         new([new ProposedLineItem("Bread", amount, currency, "groceries", null, null)]);
 
     static CategorizationWorker CreateWorker(
-        IServiceScopeFactory scopeFactory, FakeTimeProvider time, CategorizationWorkerOptions? options = null) =>
+        IServiceScopeFactory scopeFactory, FakeTimeProvider time, CategorizationWorkerOptions? options = null,
+        IDatabaseGate? gate = null) =>
         new(scopeFactory, time, options ?? new CategorizationWorkerOptions(), WorkerId,
-            Mapper, Scan, Echo, NullLogger<CategorizationWorker>.Instance);
+            Mapper, Scan, Echo, gate ?? ReadyGate(), NullLogger<CategorizationWorker>.Instance);
+
+    static IDatabaseGate ReadyGate()
+    {
+        var gate = Substitute.For<IDatabaseGate>();
+        gate.WaitUntilReadyAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        return gate;
+    }
 
     static IJobQueue QueueWith(CategorizationJob job)
     {
@@ -1207,5 +1216,26 @@ public class CategorizationWorkerTests
                 kinds.Order().SequenceEqual(new[] { JobKind.Categorize, JobKind.Correct, JobKind.Reinterpret })),
             Arg.Any<TimeSpan>(),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task The_loop_waits_for_the_database_gate_before_its_first_claim()
+    {
+        var jobQueue = Substitute.For<IJobQueue>();
+        var gateSource = new TaskCompletionSource();
+        var gate = Substitute.For<IDatabaseGate>();
+        gate.WaitUntilReadyAsync(Arg.Any<CancellationToken>()).Returns(gateSource.Task);
+        var worker = CreateWorker(ScopeFactoryFor(jobQueue, KeyPresent()), new FakeTimeProvider(), gate: gate);
+
+        await worker.StartAsync(TestContext.Current.CancellationToken);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        await jobQueue.DidNotReceive().ClaimAsync(
+            WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
+
+        gateSource.SetResult();
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        await jobQueue.Received().ReleaseExpiredLeasesAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+
+        await worker.StopAsync(TestContext.Current.CancellationToken);
     }
 }
