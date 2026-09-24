@@ -103,12 +103,18 @@ internal sealed class EfSpendingReadModel(LedgerDbContext db, TimeProvider timeP
                 WHERE t.occurred_on >= @firstDay
                   AND t.occurred_on < @firstDayNextMonth
                   AND t.status <> @cancelled
+                  AND t.kind = @expense
                 GROUP BY COALESCE(c.name_en, @uncategorised), li.currency
                 """;
             command.Parameters.Add(new NpgsqlParameter("uncategorised", UncategorisedLabel));
             command.Parameters.Add(new NpgsqlParameter("firstDay", firstDay));
             command.Parameters.Add(new NpgsqlParameter("firstDayNextMonth", firstDayNextMonth));
             command.Parameters.Add(new NpgsqlParameter("cancelled", (int)TransactionStatus.Cancelled));
+            // TransactionKind.Expense is 0, a compile-time constant int, so an inline cast here is ambiguous
+            // between NpgsqlParameter's NpgsqlDbType and DbType overloads (C#'s "constant zero converts to
+            // any enum" rule). A local variable is not a compile-time constant, so it resolves to (string, object).
+            var expenseKind = (int)TransactionKind.Expense;
+            command.Parameters.Add(new NpgsqlParameter("expense", expenseKind));
 
             var totals = new List<MonthTotal>();
             await using (var reader = await command.ExecuteReaderAsync(cancellationToken))

@@ -42,6 +42,7 @@ public class PersistenceRegistrationTests
         scope.ServiceProvider.GetRequiredService<ICategoryCatalog>().Should().NotBeNull();
         scope.ServiceProvider.GetRequiredService<IMerchantDirectory>().Should().NotBeNull();
         scope.ServiceProvider.GetRequiredService<ISpendingReadModel>().Should().NotBeNull();
+        scope.ServiceProvider.GetRequiredService<IBalanceReadModel>().Should().NotBeNull();
         scope.ServiceProvider.GetRequiredService<IJobQueue>().Should().NotBeNull();
     }
 }
