@@ -19,6 +19,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Noof.Ledger.Host.Tests" />
     <InternalsVisibleTo Include="Noof.Ledger.E2E.Tests" />
+    <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
   </ItemGroup>
 
 </Project>
