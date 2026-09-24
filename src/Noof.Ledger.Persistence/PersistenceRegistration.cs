@@ -63,6 +63,7 @@ public static class PersistenceRegistration
         services.AddScoped<IDatabaseDumper>(_ => new PgDumpDatabaseDumper(
             connectionString, configuration["Backup:PgDumpPath"] ?? PgDumpDatabaseDumper.DefaultPath));
         services.AddScoped<ILogQuery, EfLogQuery>();
+        services.AddScoped<ILogRetention, EfLogRetention>();
 
         return services;
     }
