@@ -38,6 +38,7 @@ internal static class WorkerRegistration
                 sp.GetRequiredService<IServiceScopeFactory>(),
                 sp.GetRequiredService<TimeProvider>(),
                 backupOptions,
+                sp.GetRequiredService<IDatabaseGate>(),
                 sp.GetRequiredService<ILogger<BackupWorker>>()));
         }
 
