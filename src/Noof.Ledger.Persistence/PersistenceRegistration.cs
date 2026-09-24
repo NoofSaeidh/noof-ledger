@@ -6,6 +6,7 @@ using Noof.Ledger.Application.Auth;
 using Noof.Ledger.Application.Backup;
 using Noof.Ledger.Application.Capture;
 using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Editing;
 using Noof.Ledger.Application.Jobs;
 using Noof.Ledger.Application.Reporting;
@@ -17,6 +18,7 @@ using Noof.Ledger.Persistence.Backup;
 using Noof.Ledger.Persistence.Balances;
 using Noof.Ledger.Persistence.Capture;
 using Noof.Ledger.Persistence.Categorization;
+using Noof.Ledger.Persistence.Diagnostics;
 using Noof.Ledger.Persistence.Editing;
 using Noof.Ledger.Persistence.Jobs;
 using Noof.Ledger.Persistence.Reporting;
@@ -60,6 +62,7 @@ public static class PersistenceRegistration
         services.AddScoped<IBackupLog, EfBackupLog>();
         services.AddScoped<IDatabaseDumper>(_ => new PgDumpDatabaseDumper(
             connectionString, configuration["Backup:PgDumpPath"] ?? PgDumpDatabaseDumper.DefaultPath));
+        services.AddScoped<ILogQuery, EfLogQuery>();
 
         return services;
     }
