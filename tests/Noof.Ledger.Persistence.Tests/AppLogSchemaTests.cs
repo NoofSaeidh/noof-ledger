@@ -32,21 +32,6 @@ public class AppLogSchemaTests(PostgresFixture fixture)
             "properties jsonb");
     }
 
-    [Theory]
-    [InlineData("app_log_logged_at_idx")]
-    [InlineData("IX_app_log_logged_at")]
-    public async Task An_index_on_logged_at_exists(string possibleName)
-    {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
-
-        var count = await IndexCountAsync(db, possibleName);
-        if (count == 0)
-            return; // only one of the two InlineData names will match this migration's real index name
-
-        count.Should().Be(1);
-    }
-
     [Fact]
     public async Task Indexes_on_logged_at_transaction_id_and_level_logged_at_all_exist()
     {
@@ -65,9 +50,4 @@ public class AppLogSchemaTests(PostgresFixture fixture)
         indexes.Should().Contain(name => name.Contains("level", StringComparison.OrdinalIgnoreCase)
             && name.Contains("logged_at", StringComparison.OrdinalIgnoreCase));
     }
-
-    static async Task<int> IndexCountAsync(LedgerDbContext db, string name) =>
-        (await db.Database.SqlQuery<int>(
-            $"SELECT count(*)::int AS \"Value\" FROM pg_indexes WHERE schemaname = 'public' AND indexname = {name}")
-            .ToListAsync(TestContext.Current.CancellationToken)).Single();
 }
