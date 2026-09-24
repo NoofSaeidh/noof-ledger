@@ -1,6 +1,7 @@
 using System.Net;
 using AwesomeAssertions;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Configuration;
 using Noof.Ledger.Ai.Groq;
 using Noof.Ledger.Application.Categorization;
 
@@ -41,6 +42,26 @@ public class GroqSpeechToTextClientTests
             .And.Contain("name=language").And.Contain("ru")
             .And.Contain("name=response_format").And.Contain("json")
             .And.NotContain(".oga", "Groq refuses Telegram's own extension");
+    }
+
+    [Fact]
+    public async Task An_operator_override_missing_its_trailing_slash_still_posts_under_its_own_path()
+    {
+        // GroqOptions.BaseAddress is combined with a relative path via `new Uri(base, relative)`. Uri's own
+        // relative-resolution rules treat a base with no trailing slash as ending in a "file" - the last
+        // path segment - and drop it, so an override of "https://example.test/openai/v1" would otherwise
+        // silently post to ".../openai/audio/transcriptions" instead of ".../openai/v1/audio/transcriptions".
+        var options = new GroqOptions();
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["BaseAddress"] = "https://example.test/openai/v1" })
+            .Build()
+            .Bind(options);
+        var handler = new StubHttpMessageHandler().Enqueue(HttpStatusCode.OK, """{"text":"кофе 250"}""");
+
+        await TranscribeAsync(new GroqSpeechToTextClient(new HttpClient(handler), ApiKey, options));
+
+        var request = handler.Requests.Should().ContainSingle().Subject;
+        request.Uri.Should().Be(new Uri("https://example.test/openai/v1/audio/transcriptions"));
     }
 
     [Fact]

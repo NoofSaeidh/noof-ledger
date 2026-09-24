@@ -14,15 +14,21 @@ internal sealed class EfTranscriptionStore(LedgerDbContext db, TimeProvider time
 
         // Only a record still without text takes a transcript: the condition is what makes a re-run of the same
         // Transcribe job, after this commit landed and its SucceedAsync did not, a no-op.
-        var updated = await db.Database.ExecuteSqlRawAsync(
-            "UPDATE transactions SET raw_text = @transcript WHERE id = @transactionId AND raw_text IS NULL",
-            [new NpgsqlParameter("transcript", transcript), new NpgsqlParameter("transactionId", transactionId)],
-            cancellationToken);
+        var capturedAt = await db.Database.SqlQueryRaw<DateTimeOffset>(
+                "UPDATE transactions SET raw_text = @transcript WHERE id = @transactionId AND raw_text IS NULL RETURNING created_at",
+                new NpgsqlParameter("transcript", transcript), new NpgsqlParameter("transactionId", transactionId))
+            .ToListAsync(cancellationToken);
 
-        if (updated == 0)
+        if (capturedAt.Count == 0)
             return false;
 
-        db.CategorizationJobs.Add(NewJob(transactionId, JobKind.Categorize, instruction: null, sourceMessageId: null, instructionDay: null));
+        // The Categorize job takes the capture's own position in the queue (the transaction's own
+        // created_at), not the moment transcription happened to finish. EfJobQueue.ClaimAsync orders
+        // a transaction's jobs by created_at, so a Categorize job stamped "now" could land after a
+        // Correct job queued while transcription was still pending - the correction would then be
+        // claimed and applied first, only for this reading to overwrite it once it arrives.
+        db.CategorizationJobs.Add(NewJob(
+            transactionId, JobKind.Categorize, instruction: null, sourceMessageId: null, instructionDay: null, createdAt: capturedAt[0]));
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return true;
@@ -49,7 +55,9 @@ internal sealed class EfTranscriptionStore(LedgerDbContext db, TimeProvider time
         }
     }
 
-    CategorizationJob NewJob(Guid transactionId, JobKind kind, string? instruction, int? sourceMessageId, DateOnly? instructionDay)
+    CategorizationJob NewJob(
+        Guid transactionId, JobKind kind, string? instruction, int? sourceMessageId, DateOnly? instructionDay,
+        DateTimeOffset? createdAt = null)
     {
         var now = timeProvider.GetUtcNow();
         return new CategorizationJob
@@ -63,7 +71,7 @@ internal sealed class EfTranscriptionStore(LedgerDbContext db, TimeProvider time
             Status = JobStatus.Pending,
             AttemptCount = 0,
             RunAfter = now,
-            CreatedAt = now,
+            CreatedAt = createdAt ?? now,
             UpdatedAt = now,
         };
     }
