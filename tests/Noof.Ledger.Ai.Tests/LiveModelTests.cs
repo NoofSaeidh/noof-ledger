@@ -34,8 +34,8 @@ public sealed class LiveModelTests
 
     static ChatCategorizer CreateCategorizer(string apiKey) => new(CreateFactory(apiKey));
 
-    static CategorizationRequest Request(string rawText) =>
-        new(rawText, DateOnly.FromDateTime(DateTime.Today), OfferedCategories, [], []);
+    static CategorizationRequest Request(string rawText, IReadOnlyList<CategoryOption>? categories = null) =>
+        new(rawText, DateOnly.FromDateTime(DateTime.Today), categories ?? OfferedCategories, [], []);
 
     [Fact]
     public async Task A_single_coffee_purchase_produces_one_line_item_with_the_amount_and_currency()
@@ -133,23 +133,27 @@ public sealed class LiveModelTests
     }
 
     [Fact]
-    public async Task A_loan_received_is_not_spending_and_produces_no_items()
+    public async Task A_loan_received_is_recorded_as_income_not_left_unrecorded()
     {
         if (!LiveModelGate.TryGetApiKey(out var apiKey))
             Assert.Skip(LiveModelGate.SkipMessage);
 
-        // The exact case that motivated Defect 1: "заняла у Маши 5000 рсд" states an amount but
-        // describes a loan received, not a purchase. CategorizationPrompt's system prompt
-        // instructs the model to answer with no items at all for this message, and
-        // CategorizationSchema now sets minItems 0 so the model is structurally free to do so.
-        // Before that fix the schema forced at least one item, and the model would answer "5000"
-        // as a fabricated spend line that ProposalMapper could not tell apart from a real
-        // one - money the operator borrowed recorded as money they spent.
+        // I-3 (Phase 4 final review): "заняла у Маши 5000 рсд" states an amount and describes a
+        // loan received, not a purchase - but the kind paragraph says a loan you were given is
+        // income, so it must post an item under other-income, not nothing at all. An earlier
+        // version of this test asserted the opposite (zero items), which is exactly the
+        // self-contradiction the review found: the wallet would end up 5000 short of what the
+        // bank shows (M1) if the model followed that instruction instead of this one.
+        IReadOnlyList<CategoryOption> categoriesWithIncome =
+            [.. OfferedCategories, new CategoryOption("other-income", "Other income", "Прочие доходы", null)];
         const string rawText = "заняла у Маши 5000 рсд";
         var proposal = await CreateCategorizer(apiKey)
-            .ProposeAsync(Request(rawText), TestContext.Current.CancellationToken);
+            .ProposeAsync(Request(rawText, categoriesWithIncome), TestContext.Current.CancellationToken);
 
-        proposal.Items.Should().BeEmpty();
+        proposal.Kind.Should().Be(ProposedKind.Income);
+        var item = proposal.Items.Should().ContainSingle().Subject;
+        item.Amount.Should().Be(5000m);
+        item.CurrencyCode.Should().Be("RSD");
     }
 
     [Fact]

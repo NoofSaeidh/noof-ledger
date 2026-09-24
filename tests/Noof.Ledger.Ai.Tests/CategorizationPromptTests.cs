@@ -78,6 +78,18 @@ public class CategorizationPromptTests
     }
 
     [Fact]
+    public void System_prompt_records_a_loan_received_as_income_with_one_item_not_zero_items()
+    {
+        // I-3 (Phase 4 final review): the kind paragraph says a loan you were given is income, so
+        // the example must post an item under other-income - otherwise the model is told both "a
+        // loan is income" and "record nothing for a loan" in the same prompt, and the wallet ends
+        // up short of what the bank shows (M1).
+        CategorizationPrompt.System.Should().Contain("заняла у Маши");
+        CategorizationPrompt.System.Should().Contain("category_slug the one whose meaning is other income");
+        CategorizationPrompt.System.Should().NotContain("Answer with no items at all.");
+    }
+
+    [Fact]
     public void Render_categories_shows_both_names_and_the_parent_when_present()
     {
         IReadOnlyList<CategoryOption> categories =

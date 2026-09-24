@@ -114,9 +114,10 @@ internal static class CategorizationPrompt
         </example>
         <example>
         Message: "заняла у Маши 5000 рсд"
-        Answer with no items at all. The message states an amount but describes a loan received,
-        not a purchase — there is nothing here to record as spending. Kind is "income" (money the
-        person now has), not "expense".
+        Answer with kind "income" and one item: description "заняла у Маши", amount 5000,
+        currency "RSD", category_slug the one whose meaning is other income, no merchant. A loan
+        received is money the person now has, not a purchase, but it still belongs in the wallet
+        the same way a salary would — record it as an item under "income", not as nothing at all.
         </example>
         <example>
         Message: "пришла зарплата 2000 евро на Wise"
