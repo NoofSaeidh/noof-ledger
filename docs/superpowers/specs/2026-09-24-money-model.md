@@ -1,6 +1,6 @@
 # Money model and a restored backup — design
 
-**Status:** agreed with the operator in conversation 2026-09-24; this document awaits their review.
+**Status:** approved by the operator 2026-09-24.
 This is Phase 4 in the phase table of `2026-09-22-natural-language-capture.md`. It amends
 `2026-09-19-noof-finance-design.md` §6 (ledger and wallets) where noted.
 
