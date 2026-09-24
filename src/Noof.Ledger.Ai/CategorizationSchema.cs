@@ -19,8 +19,25 @@ internal static class CategorizationSchema
         "The day the purchase happened, as an ISO date (YYYY-MM-DD), worked out from today's date given with the "
         + "message, or null when the message names no day.";
 
-    public static JsonElement BuildRecordSpending(
-        IReadOnlyList<CategoryOption> categories, IReadOnlyList<MerchantOption> merchantHints)
+    const string KindDescription =
+        "What kind of record this is: \"expense\" for money spent, \"income\" for money received, or "
+        + "\"balance\" when the person states what a wallet's balance is right now rather than a purchase "
+        + "or a deposit - items must be empty for kind \"balance\".";
+
+    const string WalletIdDescription =
+        "The id of the wallet the person means, chosen from the wallets you were offered, or null when no "
+        + "wallet is named or none of the offered wallets fits - the ledger then uses the default wallet "
+        + "for the spending's currency.";
+
+    const string BalanceAmountDescription =
+        "The balance the person stated, as a number, when kind is \"balance\"; null for every other kind.";
+
+    const string BalanceCurrencyDescription =
+        "The currency of the stated balance, when kind is \"balance\" and the person named one; null for "
+        + "every other kind, or when they named none - the wallet's own currency is used then.";
+
+    public static JsonElement BuildRecordTransaction(
+        IReadOnlyList<CategoryOption> categories, IReadOnlyList<MerchantOption> merchantHints, IReadOnlyList<WalletOption> wallets)
     {
         var properties = new List<KeyValuePair<string, JsonNode?>>
         {
@@ -81,17 +98,18 @@ internal static class CategorizationSchema
         {
             ["type"] = "object",
             ["additionalProperties"] = false,
-            ["required"] = new JsonArray("items", "occurred_on"),
+            // kind/wallet_id/balance_amount/balance_currency are root properties, not line-item
+            // ones (M3, M9): one message records one transaction, in one wallet, of one kind.
+            ["required"] = new JsonArray("items", "occurred_on", "kind", "wallet_id", "balance_amount", "balance_currency"),
             ["properties"] = new JsonObject
             {
                 ["items"] = new JsonObject
                 {
                     ["type"] = "array",
                     // 0, not 1: a message can genuinely describe zero purchases (a loan received,
-                    // not a purchase - see CategorizationPrompt's "заняла у Маши" example). Only 0
-                    // and 1 are valid values for minItems under this API's schema subset, and
-                    // requiring at least one item here would force the model to invent a spend it
-                    // was just told not to record.
+                    // not a purchase - see CategorizationPrompt's "заняла у Маши" example, and every
+                    // "balance" answer, which never has items at all). Only 0 and 1 are valid values
+                    // for minItems under this API's schema subset.
                     ["minItems"] = 0,
                     ["items"] = lineItem,
                 },
@@ -99,6 +117,35 @@ internal static class CategorizationSchema
                 {
                     ["type"] = new JsonArray("string", "null"),
                     ["description"] = OccurredOnDescription,
+                },
+                ["kind"] = new JsonObject
+                {
+                    ["type"] = "string",
+                    ["enum"] = new JsonArray("expense", "income", "balance"),
+                    ["description"] = KindDescription,
+                },
+                ["wallet_id"] = new JsonObject
+                {
+                    // Kept as a nullable-string enum even with zero wallets offered (rather than
+                    // omitting the property, as known_merchant_id does on the no-hints path):
+                    // wallet_id is a root property that always exists on this tool, so strict mode's
+                    // "every declared property is required" would otherwise force a property that
+                    // sometimes isn't there - the enum instead narrows to [null], which is what the
+                    // API's schema subset offers for "this value can only ever be null".
+                    ["type"] = new JsonArray("string", "null"),
+                    ["enum"] = new JsonArray([.. wallets.Select(w => (JsonNode)w.Id.ToString()), null]),
+                    ["description"] = WalletIdDescription,
+                },
+                ["balance_amount"] = new JsonObject
+                {
+                    ["type"] = new JsonArray("number", "null"),
+                    ["description"] = BalanceAmountDescription,
+                },
+                ["balance_currency"] = new JsonObject
+                {
+                    ["type"] = new JsonArray("string", "null"),
+                    ["enum"] = new JsonArray([.. CurrencyCode.Supported.Select(code => (JsonNode)code.Value), null]),
+                    ["description"] = BalanceCurrencyDescription,
                 },
             },
         };

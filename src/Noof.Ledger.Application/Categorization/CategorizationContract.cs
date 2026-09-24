@@ -9,16 +9,25 @@ public sealed record CategoryOption(string Slug, string NameEn, string NameRu, s
 // A merchant the database already knows. Id is what the model returns when it accepts one.
 public sealed record MerchantOption(Guid Id, string DisplayName);
 
+// A wallet the model may pick for a transaction (M3). Aliases are the words the operator uses for
+// it in speech ("с налички" for a wallet named "Cash"); IsDefaultForCurrency marks the wallet the
+// mapper falls back to when the model names none.
+public sealed record WalletOption(Guid Id, string Name, CurrencyCode Currency, IReadOnlyList<string> Aliases, bool IsDefaultForCurrency);
+
 // Today is the local day the message was SENT, never the day the job runs: a message that waited in the
 // offline queue overnight must not move a day (D2). For a Correct job specifically, "the message" is the
 // correction reply itself, not the original capture (docs/OPEN-QUESTIONS.md P2-2).
+// Wallets is null, not an empty list, when the caller offers none at all - CategorizationSchema and
+// CategorizationPrompt both treat null the same as empty (M9), but the distinction stays in the type
+// so a future caller can tell "no wallets exist yet" from "I forgot to pass them".
 public sealed record CategorizationRequest(
     string RawText,
     DateOnly Today,
     IReadOnlyList<CategoryOption> Categories,
     IReadOnlyList<MerchantOption> MerchantHints,
     IReadOnlyList<MerchantOption> AllMerchants,
-    CorrectionRequest? Correction = null);
+    CorrectionRequest? Correction = null,
+    IReadOnlyList<WalletOption>? Wallets = null);
 
 // The record as it stands and what the person asked to change. The model answers with the complete corrected
 // record, which replaces the model-authored lines exactly as a first reading does (D6).
@@ -36,7 +45,27 @@ public sealed record ProposedLineItem(
     Guid? KnownMerchantId,
     string? MerchantName);
 
-public sealed record CategorizationProposal(IReadOnlyList<ProposedLineItem> Items, string? OccurredOn = null);
+// The closed set of strings the model answers "kind" with (M9). Kept as string constants, not an
+// enum, because this record crosses the model boundary as JSON before anything maps it - the same
+// reason ProposedLineItem.CurrencyCode is a string, not a CurrencyCode, until ProposalMapper resolves it.
+public static class ProposedKind
+{
+    public const string Expense = "expense";
+    public const string Income = "income";
+    public const string Balance = "balance";
+}
+
+// Kind defaults to Expense so every existing positional construction of this record (a plain
+// spending answer) keeps meaning exactly what it always meant. WalletId/BalanceAmount/BalanceCurrency
+// travel flat, mirroring record_transaction's own wire shape (the "expensive to reverse" note in
+// plan-00-header.md) rather than as a nested object the strict schema cannot express as cleanly.
+public sealed record CategorizationProposal(
+    IReadOnlyList<ProposedLineItem> Items,
+    string? OccurredOn = null,
+    string Kind = ProposedKind.Expense,
+    Guid? WalletId = null,
+    decimal? BalanceAmount = null,
+    string? BalanceCurrency = null);
 
 public sealed record ResolvedLineItem(
     string Description,

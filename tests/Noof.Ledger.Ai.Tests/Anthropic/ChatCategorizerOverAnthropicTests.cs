@@ -34,10 +34,10 @@ public class ChatCategorizerOverAnthropicTests
     }
 
     [Fact]
-    public async Task Returns_the_proposal_when_the_first_turn_answers_the_record_spending_tool_call()
+    public async Task Returns_the_proposal_when_the_first_turn_answers_the_record_transaction_tool_call()
     {
         var (categorizer, handler) = Build();
-        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingJsonAnswer);
+        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordTransactionJsonAnswer);
         var request = Request("Coffee 3.50 EUR");
 
         var proposal = await categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
@@ -47,14 +47,14 @@ public class ChatCategorizerOverAnthropicTests
         proposal.Items[0].Amount.Should().Be(3.50m);
         proposal.Items[0].CurrencyCode.Should().Be("EUR", "the JSON field is \"currency\", not \"currency_code\" — this is the mapping Locked Decision 5 exists for");
         proposal.Items[0].CategorySlug.Should().Be("food-drink");
-        handler.Requests.Should().ContainSingle("a direct record_spending call on the first turn must not trigger a follow-up call");
+        handler.Requests.Should().ContainSingle("a direct record_transaction call on the first turn must not trigger a follow-up call");
     }
 
     [Fact]
     public async Task Sends_both_tools_strict_and_forced_with_no_output_config_on_the_first_call()
     {
         var (categorizer, handler) = Build();
-        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingJsonAnswer);
+        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordTransactionJsonAnswer);
         var request = Request("Coffee 3.50 EUR");
 
         await categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
@@ -65,12 +65,12 @@ public class ChatCategorizerOverAnthropicTests
         var tools = sent.GetProperty("tools");
         tools.GetArrayLength().Should().Be(2, "guarding against the RawRepresentationFactory trap: a tool must never appear twice");
         var names = tools.EnumerateArray().Select(t => t.GetProperty("name").GetString());
-        names.Should().BeEquivalentTo(["list_merchants", "record_spending"]);
+        names.Should().BeEquivalentTo(["list_merchants", "record_transaction"]);
         foreach (var tool in tools.EnumerateArray())
             tool.GetProperty("strict").GetBoolean().Should().BeTrue($"{tool.GetProperty("name").GetString()} must be strict");
 
-        var recordSpending = tools.EnumerateArray().Single(t => t.GetProperty("name").GetString() == "record_spending");
-        var currencyEnum = recordSpending.GetProperty("input_schema")
+        var recordTransaction = tools.EnumerateArray().Single(t => t.GetProperty("name").GetString() == "record_transaction");
+        var currencyEnum = recordTransaction.GetProperty("input_schema")
             .GetProperty("properties").GetProperty("items").GetProperty("items").GetProperty("properties")
             .GetProperty("currency").GetProperty("enum").EnumerateArray().Select(e => e.GetString());
         currencyEnum.Should().BeEquivalentTo(["EUR", "RSD", "USD", "RUB", "KZT", null]);
@@ -84,7 +84,7 @@ public class ChatCategorizerOverAnthropicTests
     public async Task No_request_carries_an_anthropic_beta_header()
     {
         var (categorizer, handler) = Build();
-        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingJsonAnswer);
+        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordTransactionJsonAnswer);
         var request = Request("Coffee 3.50 EUR");
 
         await categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
@@ -94,11 +94,11 @@ public class ChatCategorizerOverAnthropicTests
     }
 
     [Fact]
-    public async Task Answers_list_merchants_then_sends_one_follow_up_forced_onto_record_spending()
+    public async Task Answers_list_merchants_then_sends_one_follow_up_forced_onto_record_transaction()
     {
         var (categorizer, handler) = Build();
         handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.ListMerchantsToolUse);
-        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingJsonAnswer);
+        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordTransactionJsonAnswer);
         var hints = new List<MerchantOption> { new(Guid.Parse("11111111-1111-1111-1111-111111111111"), "Lidl") };
         var all = new List<MerchantOption>
         {
@@ -114,12 +114,12 @@ public class ChatCategorizerOverAnthropicTests
 
         var secondSent = JsonDocument.Parse(handler.Requests[1].Body).RootElement;
         var secondTools = secondSent.GetProperty("tools");
-        secondTools.GetArrayLength().Should().Be(1, "only record_spending is offered, which is what structurally rules out a third list_merchants call");
-        secondTools[0].GetProperty("name").GetString().Should().Be("record_spending");
+        secondTools.GetArrayLength().Should().Be(1, "only record_transaction is offered, which is what structurally rules out a third list_merchants call");
+        secondTools[0].GetProperty("name").GetString().Should().Be("record_transaction");
         secondTools[0].GetProperty("strict").GetBoolean().Should().BeTrue(
-            "FunctionInvokingChatClient strips every tool from this last request and AnswerToolGuard puts record_spending back - it must come back strict");
+            "FunctionInvokingChatClient strips every tool from this last request and AnswerToolGuard puts record_transaction back - it must come back strict");
         secondSent.GetProperty("tool_choice").GetProperty("type").GetString().Should().Be("tool");
-        secondSent.GetProperty("tool_choice").GetProperty("name").GetString().Should().Be("record_spending");
+        secondSent.GetProperty("tool_choice").GetProperty("name").GetString().Should().Be("record_transaction");
 
         // The answer is the FULL directory. "Maxi" is deliberately absent from the hints, so a
         // regression that answers with request.MerchantHints instead of request.AllMerchants makes
@@ -131,7 +131,7 @@ public class ChatCategorizerOverAnthropicTests
     public async Task Maps_an_amount_read_from_words_and_a_merchant_name()
     {
         var (categorizer, handler) = Build();
-        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingFromWordsAnswer);
+        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordTransactionFromWordsAnswer);
         var request = Request("купил штуку евро в Lidl");
 
         var proposal = await categorizer.ProposeAsync(request, TestContext.Current.CancellationToken);
@@ -146,7 +146,7 @@ public class ChatCategorizerOverAnthropicTests
     public async Task Tells_the_model_today_and_maps_the_day_it_answers()
     {
         var (categorizer, handler) = Build();
-        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingWithDateAnswer);
+        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordTransactionWithDateAnswer);
 
         var proposal = await categorizer.ProposeAsync(Request("купил вчера штуку евро"), TestContext.Current.CancellationToken);
 
@@ -175,7 +175,7 @@ public class ChatCategorizerOverAnthropicTests
         var (categorizer, handler) = Build();
         handler.Enqueue(HttpStatusCode.OK, $$$"""
             {"id":"msg_07","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
-             "content":[{"type":"tool_use","id":"toolu_07","name":"record_spending","input":{"items":[{"description":"кофе","amount":{{{raw}}},"currency":null,"category_slug":"food-drink","merchant_name":null}]}}],
+             "content":[{"type":"tool_use","id":"toolu_07","name":"record_transaction","input":{"items":[{"description":"кофе","amount":{{{raw}}},"currency":null,"category_slug":"food-drink","merchant_name":null}],"occurred_on":null,"kind":"expense","wallet_id":null,"balance_amount":null,"balance_currency":null}}],
              "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
             """);
         var request = Request("кофе");
@@ -345,7 +345,7 @@ public class ChatCategorizerOverAnthropicTests
         // The budget is the provider's configuration now (AnthropicOptions.MaxTokens, applied as the
         // adapter's default); the categoriser only overrides it where it wants less.
         var (categorizer, handler) = Build(maxTokens: 3072);
-        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordSpendingJsonAnswer);
+        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordTransactionJsonAnswer);
         handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.CanonicalizeMerchantJsonAnswer);
 
         await categorizer.ProposeAsync(Request("Coffee 3.50 EUR"), TestContext.Current.CancellationToken);
