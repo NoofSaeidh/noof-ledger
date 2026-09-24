@@ -1,4 +1,5 @@
 using Noof.Ledger.Application.Backup;
+using Noof.Ledger.Application.Diagnostics;
 
 namespace Noof.Ledger.Host.Workers;
 
@@ -13,6 +14,7 @@ internal sealed class BackupWorker(
     IServiceScopeFactory scopeFactory,
     TimeProvider timeProvider,
     BackupWorkerOptions options,
+    IDatabaseGate gate,
     ILogger<BackupWorker> logger)
     : BackgroundService
 {
@@ -23,6 +25,8 @@ internal sealed class BackupWorker(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        await gate.WaitUntilReadyAsync(stoppingToken);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             var outcome = await RunTickCoreAsync(stoppingToken);

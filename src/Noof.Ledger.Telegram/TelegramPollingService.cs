@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Noof.Ledger.Application.Chat;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Secrets;
 using Telegram.Bot;
 using Telegram.Bot.Types;
@@ -18,6 +19,7 @@ internal sealed class TelegramPollingService(
     TelegramClientHandle clientHandle,
     IConfiguration configuration,
     TimeProvider timeProvider,
+    IDatabaseGate gate,
     ILogger<TelegramPollingService> logger)
     : BackgroundService
 {
@@ -35,6 +37,8 @@ internal sealed class TelegramPollingService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        await gate.WaitUntilReadyAsync(stoppingToken);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             var result = await RunTickAsync(stoppingToken);

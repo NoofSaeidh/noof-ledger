@@ -5,6 +5,7 @@ using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Noof.Ledger.Application.Backup;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Host.Workers;
 
 namespace Noof.Ledger.Host.Tests;
@@ -48,8 +49,16 @@ public class BackupWorkerTests : IDisposable
         return log;
     }
 
-    static BackupWorker CreateWorker(IServiceScopeFactory scopeFactory, FakeTimeProvider time, BackupWorkerOptions options) =>
-        new(scopeFactory, time, options, NullLogger<BackupWorker>.Instance);
+    static BackupWorker CreateWorker(
+        IServiceScopeFactory scopeFactory, FakeTimeProvider time, BackupWorkerOptions options, IDatabaseGate? gate = null) =>
+        new(scopeFactory, time, options, gate ?? ReadyGate(), NullLogger<BackupWorker>.Instance);
+
+    static IDatabaseGate ReadyGate()
+    {
+        var gate = Substitute.For<IDatabaseGate>();
+        gate.WaitUntilReadyAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        return gate;
+    }
 
     [Fact]
     public async Task A_backup_that_never_ran_before_is_taken_immediately()
@@ -292,5 +301,26 @@ public class BackupWorkerTests : IDisposable
         if (result.Succeeded)
             File.WriteAllText(targetPath, "fake dump contents");
         return Task.FromResult(result);
+    }
+
+    [Fact]
+    public async Task The_loop_waits_for_the_database_gate_before_its_first_tick()
+    {
+        var log = LogWithStatus(new BackupStatus(null, false, null));
+        var dumper = Substitute.For<IDatabaseDumper>();
+        var gateSource = new TaskCompletionSource();
+        var gate = Substitute.For<IDatabaseGate>();
+        gate.WaitUntilReadyAsync(Arg.Any<CancellationToken>()).Returns(gateSource.Task);
+        var worker = CreateWorker(ScopeFactoryFor(log, dumper), new FakeTimeProvider(), Options(), gate);
+
+        await worker.StartAsync(TestContext.Current.CancellationToken);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        await log.DidNotReceive().StatusAsync(Arg.Any<CancellationToken>());
+
+        gateSource.SetResult();
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        await log.Received().StatusAsync(Arg.Any<CancellationToken>());
+
+        await worker.StopAsync(TestContext.Current.CancellationToken);
     }
 }

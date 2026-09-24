@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Noof.Ledger.Application.Chat;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Secrets;
 using Telegram.Bot;
 using Telegram.Bot.Requests;
@@ -59,14 +60,23 @@ public class TelegramPollingServiceTests
         ITelegramBotClientFactory clientFactory,
         TelegramClientHandle handle,
         ITelegramUpdateRouter? router = null,
-        IChatNotifier? chatNotifier = null) =>
+        IChatNotifier? chatNotifier = null,
+        IDatabaseGate? gate = null) =>
         new(
             ScopeFactoryFor(secretStore, router, chatNotifier),
             clientFactory,
             handle,
             new ConfigurationBuilder().Build(),
             TimeProvider.System,
+            gate ?? ReadyGate(),
             NullLogger<TelegramPollingService>.Instance);
+
+    static IDatabaseGate ReadyGate()
+    {
+        var gate = Substitute.For<IDatabaseGate>();
+        gate.WaitUntilReadyAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        return gate;
+    }
 
     [Fact]
     public async Task Stays_idle_when_no_token_has_been_saved_yet()
@@ -285,6 +295,7 @@ public class TelegramPollingServiceTests
             new TelegramClientHandle(),
             new ConfigurationBuilder().Build(),
             TimeProvider.System,
+            ReadyGate(),
             NullLogger<TelegramPollingService>.Instance);
 
         var result = await service.RunTickAsync(TestContext.Current.CancellationToken);
@@ -328,5 +339,26 @@ public class TelegramPollingServiceTests
                     ? throw new InvalidOperationException("the container cannot resolve ISecretStore")
                     : null;
         }
+    }
+
+    [Fact]
+    public async Task The_loop_waits_for_the_database_gate_before_its_first_poll()
+    {
+        var clientFactory = Substitute.For<ITelegramBotClientFactory>();
+        var gateSource = new TaskCompletionSource();
+        var gate = Substitute.For<IDatabaseGate>();
+        gate.WaitUntilReadyAsync(Arg.Any<CancellationToken>()).Returns(gateSource.Task);
+        var service = CreateService(NoTokenYet(), clientFactory, new TelegramClientHandle(), gate: gate);
+
+        await service.StartAsync(TestContext.Current.CancellationToken);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        clientFactory.DidNotReceive().Create(Arg.Any<string>());
+
+        gateSource.SetResult();
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        // NoTokenYet() never has a token, so the only observable effect of the gate releasing is
+        // that the loop starts ticking at all - proven by not throwing/hanging past StopAsync.
+
+        await service.StopAsync(TestContext.Current.CancellationToken);
     }
 }

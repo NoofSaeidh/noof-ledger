@@ -6,6 +6,7 @@ using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Jobs;
 using Noof.Ledger.Application.Transcription;
 using Noof.Ledger.Domain;
@@ -98,9 +99,17 @@ public class TranscriptionWorkerTests
         return new Harness(queue, speechProvider, store, transcriptionStore, voiceFiles, transcriber, Substitute.For<IChatNotifier>());
     }
 
-    static TranscriptionWorker CreateWorker(IServiceScopeFactory scopeFactory, FakeTimeProvider? time = null) =>
+    static TranscriptionWorker CreateWorker(
+        IServiceScopeFactory scopeFactory, FakeTimeProvider? time = null, IDatabaseGate? gate = null) =>
         new(scopeFactory, time ?? new FakeTimeProvider(new DateTimeOffset(2026, 9, 24, 9, 0, 0, TimeSpan.Zero)),
-            new CategorizationWorkerOptions(), WorkerId, Echo, NullLogger<TranscriptionWorker>.Instance);
+            new CategorizationWorkerOptions(), WorkerId, Echo, gate ?? ReadyGate(), NullLogger<TranscriptionWorker>.Instance);
+
+    static IDatabaseGate ReadyGate()
+    {
+        var gate = Substitute.For<IDatabaseGate>();
+        gate.WaitUntilReadyAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        return gate;
+    }
 
     static Task<CategorizationTickResult> TickAsync(Harness harness) =>
         CreateWorker(harness.ScopeFactory()).RunTickAsync(TestContext.Current.CancellationToken);
@@ -304,5 +313,42 @@ public class TranscriptionWorkerTests
         var worker = CreateWorker(new ThrowingScopeFactory());
 
         (await worker.RunTickAsync(TestContext.Current.CancellationToken)).Should().Be(CategorizationTickResult.Failed);
+    }
+
+    [Fact]
+    public async Task The_loop_waits_for_the_database_gate_before_its_first_claim()
+    {
+        // Not Setup(CaptureJob()): that configures ClaimAsync to always return a job, which - once
+        // the gate opens - makes ExecuteAsync's zero-delay "Processed" path a tight loop with no
+        // bound (this actually happened: an earlier version of this test ran the process out to
+        // ~28 GB before it was killed). An unconfigured ClaimAsync returns null (Idle), so the loop
+        // takes exactly one tick before PollInterval bounds it - the same shape
+        // CategorizationWorkerTests' equivalent test already uses safely.
+        var queue = Substitute.For<IJobQueue>();
+        var speechProvider = Substitute.For<ISpeechProvider>();
+        speechProvider.IsConfiguredAsync(Arg.Any<CancellationToken>()).Returns(true);
+
+        var provider = Substitute.For<IServiceProvider>();
+        provider.GetService(typeof(IJobQueue)).Returns(queue);
+        provider.GetService(typeof(ISpeechProvider)).Returns(speechProvider);
+        var scope = Substitute.For<IServiceScope>();
+        scope.ServiceProvider.Returns(provider);
+        var factory = Substitute.For<IServiceScopeFactory>();
+        factory.CreateScope().Returns(scope);
+
+        var gateSource = new TaskCompletionSource();
+        var gate = Substitute.For<IDatabaseGate>();
+        gate.WaitUntilReadyAsync(Arg.Any<CancellationToken>()).Returns(gateSource.Task);
+        var worker = CreateWorker(factory, gate: gate);
+
+        await worker.StartAsync(TestContext.Current.CancellationToken);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        await queue.DidNotReceive().ReleaseExpiredLeasesAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+
+        gateSource.SetResult();
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        await queue.Received().ReleaseExpiredLeasesAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+
+        await worker.StopAsync(TestContext.Current.CancellationToken);
     }
 }
