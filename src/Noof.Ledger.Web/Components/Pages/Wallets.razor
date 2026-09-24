@@ -1,0 +1,293 @@
+@page "/wallets"
+@attribute [Authorize]
+@implements IDisposable
+@using System.Globalization
+@using Noof.Ledger.Application.Wallets
+@using Noof.Ledger.Domain
+@inject IWalletAdmin WalletAdmin
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+
+<PageTitle>Wallets</PageTitle>
+
+<MudText HtmlTag="h1" Typo="Typo.h4" Class="mb-1">Wallets</MudText>
+<MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">
+    Create, rename and archive wallets here. Income and balance statements are told to the bot.
+</MudText>
+
+@if (error is not null)
+{
+    <MudAlert id="wallets-error" Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-4">@error</MudAlert>
+}
+@if (saved is not null)
+{
+    <MudAlert id="wallets-saved" Severity="Severity.Success" Variant="Variant.Outlined" Class="mb-4">@saved</MudAlert>
+}
+@if (missingDefaultCurrencies.Count > 0)
+{
+    <MudAlert id="wallets-warning" Severity="Severity.Warning" Variant="Variant.Outlined" Class="mb-4">
+        @foreach (var currency in missingDefaultCurrencies)
+        {
+            <div>No default wallet for @currency — messages that name no wallet cannot be recorded until one is made default.</div>
+        }
+    </MudAlert>
+}
+
+@foreach (var wallet in wallets)
+{
+    <MudPaper id="@($"wallet-{wallet.Id}")" Outlined="true" Elevation="0" Class="pa-5 mb-4">
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">@wallet.Currency</MudText>
+        <div class="noof-wallet-row">
+            <MudTextField T="string" InputId="@($"wallet-name-{wallet.Id}")" @bind-Value="wallet.PendingName"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Label="Name" />
+            <MudButton id="@($"rename-{wallet.Id}")" Variant="Variant.Outlined"
+                       OnClick="@(() => RenameAsync(wallet))">
+                Rename
+            </MudButton>
+        </div>
+        <div class="noof-wallet-row mt-2">
+            <MudTextField T="string" InputId="@($"wallet-aliases-{wallet.Id}")" @bind-Value="wallet.PendingAliases"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Label="Aliases (comma-separated)" />
+            <MudButton id="@($"save-aliases-{wallet.Id}")" Variant="Variant.Outlined"
+                       OnClick="@(() => SaveAliasesAsync(wallet))">
+                Save aliases
+            </MudButton>
+        </div>
+        <div class="noof-wallet-row mt-2">
+            @if (wallet.IsDefaultForCurrency)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">
+                    Default for @wallet.Currency
+                </MudChip>
+            }
+            else
+            {
+                <MudButton id="@($"make-default-{wallet.Id}")" Variant="Variant.Text"
+                           OnClick="@(() => MakeDefaultAsync(wallet))">
+                    Make default for @wallet.Currency
+                </MudButton>
+            }
+
+            @if (wallet.Archived)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">Archived</MudChip>
+            }
+            else
+            {
+                <MudButton id="@($"archive-{wallet.Id}")" Variant="Variant.Text" Color="Color.Error"
+                           OnClick="@(() => ArchiveAsync(wallet))">
+                    Archive
+                </MudButton>
+            }
+        </div>
+    </MudPaper>
+}
+
+<MudPaper Outlined="true" Elevation="0" Class="pa-5">
+    <MudText Typo="Typo.subtitle1" Class="mb-3">New wallet</MudText>
+
+    <MudTextField T="string" InputId="new-wallet-name" @bind-Value="newName"
+                  Variant="Variant.Outlined" Margin="Margin.Dense" Label="Name" Class="mb-3" />
+
+    <MudText Typo="Typo.caption" Class="mud-text-secondary">Currency</MudText>
+    <select id="new-wallet-currency" @bind="newCurrency" class="noof-native-select mb-3">
+        @foreach (var currency in CurrencyCode.Supported)
+        {
+            <option value="@currency.Value">@currency.Value</option>
+        }
+    </select>
+
+    <MudNumericField T="decimal" InputId="new-wallet-opening" @bind-Value="newOpeningBalance"
+                     Culture="@CultureInfo.InvariantCulture"
+                     Variant="Variant.Outlined" Margin="Margin.Dense" Label="Opening balance" Class="mb-3" />
+
+    <MudTextField T="DateOnly?" InputId="new-wallet-date" @bind-Value="newOpeningDate" InputType="InputType.Date"
+                  Culture="@CultureInfo.InvariantCulture" Format="yyyy-MM-dd"
+                  Variant="Variant.Outlined" Margin="Margin.Dense" Label="Opening date" Class="mb-3" />
+
+    <MudTextField T="string" InputId="new-wallet-aliases" @bind-Value="newAliases"
+                  Variant="Variant.Outlined" Margin="Margin.Dense" Label="Aliases (comma-separated)" Class="mb-3" />
+
+    <MudCheckBox T="bool" id="new-wallet-default" @bind-Value="newIsDefault"
+                Label="Default for its currency" Class="mb-3" />
+
+    <MudButton id="create-wallet" Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateAsync">
+        Create wallet
+    </MudButton>
+</MudPaper>
+
+@code {
+    sealed class Row
+    {
+        public required Guid Id { get; init; }
+        public required CurrencyCode Currency { get; init; }
+        public required bool IsDefaultForCurrency { get; set; }
+        public required bool Archived { get; set; }
+        public string PendingName { get; set; } = string.Empty;
+        public string PendingAliases { get; set; } = string.Empty;
+    }
+
+    List<Row> wallets = [];
+    List<string> missingDefaultCurrencies = [];
+    string? error;
+    string? saved;
+
+    string newName = string.Empty;
+    string newCurrency = CurrencyCode.Rsd.Value;
+    decimal newOpeningBalance;
+    DateOnly? newOpeningDate = DateOnly.FromDateTime(DateTime.Today);
+    string newAliases = string.Empty;
+    bool newIsDefault;
+
+    readonly CancellationTokenSource cancellation = new();
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    async Task ReloadAsync()
+    {
+        var details = await WalletAdmin.ListAsync(cancellation.Token);
+        wallets =
+        [
+            .. details.Select(wallet => new Row
+            {
+                Id = wallet.Id,
+                Currency = wallet.Currency,
+                IsDefaultForCurrency = wallet.IsDefaultForCurrency,
+                Archived = wallet.Archived,
+                PendingName = wallet.Name,
+                PendingAliases = string.Join(", ", wallet.Aliases),
+            }),
+        ];
+
+        missingDefaultCurrencies =
+        [
+            .. details
+                .Where(wallet => !wallet.Archived)
+                .GroupBy(wallet => wallet.Currency.Value)
+                .Where(group => !group.Any(wallet => wallet.IsDefaultForCurrency))
+                .Select(group => group.Key)
+                .OrderBy(currency => currency, StringComparer.Ordinal),
+        ];
+    }
+
+    static IReadOnlyList<string> SplitAliases(string raw) =>
+        [.. raw.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)];
+
+    async Task CreateAsync()
+    {
+        error = null;
+        saved = null;
+
+        var name = newName.Trim();
+        if (name.Length == 0)
+        {
+            error = "Enter a wallet name.";
+            return;
+        }
+
+        if (newOpeningDate is not { } openingDate)
+        {
+            error = "Enter an opening date.";
+            return;
+        }
+
+        try
+        {
+            await WalletAdmin.CreateAsync(
+                new NewWallet(name, new CurrencyCode(newCurrency), newOpeningBalance, openingDate,
+                    SplitAliases(newAliases), newIsDefault),
+                cancellation.Token);
+
+            newName = string.Empty;
+            newOpeningBalance = 0m;
+            newAliases = string.Empty;
+            newIsDefault = false;
+            saved = $"Created {name}.";
+            await ReloadAsync();
+        }
+        catch (Exception exception)
+        {
+            error = $"Could not create the wallet: {exception.Message}";
+        }
+    }
+
+    async Task RenameAsync(Row wallet)
+    {
+        error = null;
+        saved = null;
+
+        var name = wallet.PendingName.Trim();
+        if (name.Length == 0)
+        {
+            error = "Enter a wallet name.";
+            return;
+        }
+
+        try
+        {
+            await WalletAdmin.RenameAsync(wallet.Id, name, cancellation.Token);
+            saved = "Renamed.";
+            await ReloadAsync();
+        }
+        catch (Exception exception)
+        {
+            error = $"Could not rename the wallet: {exception.Message}";
+        }
+    }
+
+    async Task SaveAliasesAsync(Row wallet)
+    {
+        error = null;
+        saved = null;
+
+        try
+        {
+            await WalletAdmin.SetAliasesAsync(wallet.Id, SplitAliases(wallet.PendingAliases), cancellation.Token);
+            saved = "Aliases saved.";
+            await ReloadAsync();
+        }
+        catch (Exception exception)
+        {
+            error = $"Could not save the aliases: {exception.Message}";
+        }
+    }
+
+    async Task MakeDefaultAsync(Row wallet)
+    {
+        error = null;
+        saved = null;
+
+        try
+        {
+            await WalletAdmin.MakeDefaultForCurrencyAsync(wallet.Id, cancellation.Token);
+            saved = "Made default.";
+            await ReloadAsync();
+        }
+        catch (Exception exception)
+        {
+            error = $"Could not make it the default: {exception.Message}";
+        }
+    }
+
+    async Task ArchiveAsync(Row wallet)
+    {
+        error = null;
+        saved = null;
+
+        try
+        {
+            await WalletAdmin.ArchiveAsync(wallet.Id, cancellation.Token);
+            saved = "Archived.";
+            await ReloadAsync();
+        }
+        catch (Exception exception)
+        {
+            error = $"Could not archive the wallet: {exception.Message}";
+        }
+    }
+
+    public void Dispose()
+    {
+        cancellation.Cancel();
+        cancellation.Dispose();
+    }
+}
