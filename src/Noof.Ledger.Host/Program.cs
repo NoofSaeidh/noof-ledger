@@ -138,6 +138,7 @@ try
 catch (Exception ex) when (ex is not HostAbortedException)
 {
     Log.Fatal(ex, "Host terminated unexpectedly");
+    Environment.ExitCode = 1;
 }
 finally
 {
