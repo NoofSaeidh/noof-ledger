@@ -61,6 +61,7 @@ public class PublicSurfaceTests
             "IWalletDirectory",
             "WalletDetails", "NewWallet", "IWalletAdmin",
             "BackupRunRecord", "BackupStatus", "DumpResult", "IBackupLog", "IDatabaseDumper",
+            "IDatabaseGate", "DatabaseState",
         ],
         ["Noof.Ledger.Persistence"] = ["LedgerConnectionString", "PersistenceRegistration"],
         ["Noof.Ledger.Ai"] = ["AiRegistration"],
