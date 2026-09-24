@@ -74,7 +74,14 @@ public sealed record ResolvedLineItem(
     Guid? KnownMerchantId,
     string? MerchantName);
 
-public sealed record MappedProposal(IReadOnlyList<ResolvedLineItem> Items, DateOnly? OccurredOn);
+// WalletId is always a wallet the request offered: the one the model named, or the default wallet of the
+// spending's currency, or the default wallet of the configured default currency (M3).
+public sealed record MappedProposal(
+    IReadOnlyList<ResolvedLineItem> Items,
+    DateOnly? OccurredOn,
+    TransactionKind Kind = TransactionKind.Expense,
+    Guid WalletId = default,
+    Money? StatedBalance = null);
 
 // A line ready to be written: identity resolved, slug resolved to a real row.
 public sealed record CategorizedLineItem(
@@ -95,7 +102,8 @@ public sealed record CategorizationSubject(
     DateOnly SentOn,
     DateOnly OccurredOn,
     IReadOnlyList<RecordedLine> Lines,
-    CaptureKind CaptureKind = CaptureKind.Text);
+    CaptureKind CaptureKind = CaptureKind.Text,
+    Guid? WalletId = null);
 
 // CategoryName is Category.NameEn: the bot speaks English for now (D-D).
 public sealed record RecordedLine(
@@ -105,11 +113,15 @@ public sealed record RecordedLine(
     string? CategoryName,
     string? MerchantName);
 
+// Kind is the job that produced this outcome; TransactionKind is what the record is. Never confuse the two.
 public sealed record CategorizationOutcome(
     IReadOnlyList<CategorizedLineItem> Items,
     DateOnly OccurredOn,
     JobKind Kind = JobKind.Categorize,
-    string? Instruction = null);
+    string? Instruction = null,
+    TransactionKind TransactionKind = TransactionKind.Expense,
+    Guid? WalletId = null,
+    Money? StatedBalance = null);
 
 public sealed record CategoryEntry(Guid Id, string Slug, string NameEn, string NameRu, string? ParentSlug);
 

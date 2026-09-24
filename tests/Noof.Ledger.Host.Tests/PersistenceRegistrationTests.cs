@@ -7,6 +7,7 @@ using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Jobs;
 using Noof.Ledger.Application.Reporting;
 using Noof.Ledger.Application.Secrets;
+using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Persistence;
 
 namespace Noof.Ledger.Host.Tests;
@@ -43,5 +44,6 @@ public class PersistenceRegistrationTests
         scope.ServiceProvider.GetRequiredService<IMerchantDirectory>().Should().NotBeNull();
         scope.ServiceProvider.GetRequiredService<ISpendingReadModel>().Should().NotBeNull();
         scope.ServiceProvider.GetRequiredService<IJobQueue>().Should().NotBeNull();
+        scope.ServiceProvider.GetRequiredService<IWalletDirectory>().Should().NotBeNull();
     }
 }

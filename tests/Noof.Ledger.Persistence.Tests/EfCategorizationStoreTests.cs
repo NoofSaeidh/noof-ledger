@@ -287,6 +287,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
         subject.TelegramChatId.Should().Be(777);
         subject.BotMessageId.Should().Be(42);
         subject.WalletName.Should().Be("Main Wallet");
+        subject.WalletId.Should().Be(wallet.Id);
         subject.Status.Should().Be(TransactionStatus.Captured);
         subject.SentOn.Should().Be(new DateOnly(2026, 9, 22));
         subject.OccurredOn.Should().Be(new DateOnly(2026, 9, 20));
@@ -320,6 +321,22 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
         var subject = await store.GetSubjectAsync(Guid.NewGuid(), TestContext.Current.CancellationToken);
 
         subject.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetSubjectAsync_names_no_wallet_for_a_capture_that_has_not_been_read_yet()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = NewTransaction(SeededDefaultWalletId);
+        transaction.WalletId = null;
+        db.Transactions.Add(transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var store = new EfCategorizationStore(db, Clock);
+
+        var subject = await store.GetSubjectAsync(transaction.Id, TestContext.Current.CancellationToken);
+
+        subject!.WalletId.Should().BeNull("the wallet is chosen when the message is read, not when it is captured");
     }
 
     [Fact]

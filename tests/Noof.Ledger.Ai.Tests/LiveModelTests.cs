@@ -2,6 +2,7 @@
 using Noof.Ledger.Ai.Anthropic;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Secrets;
+using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Ai.Tests;
 
@@ -21,6 +22,9 @@ public sealed class LiveModelTests
     ];
 
     static readonly IReadOnlyList<string> OfferedSlugs = [.. OfferedCategories.Select(c => c.Slug)];
+
+    static readonly IReadOnlyList<WalletOption> OfferedWallets =
+        [new WalletOption(Guid.Parse("00000000-0000-0000-0000-000000000001"), "Main Wallet", CurrencyCode.Rsd, [], true)];
 
     // Both the categoriser and the probe go through AnthropicChatClientFactory, never a raw client:
     // the factory is what reads the key through ISecretStore and applies MaxRetries = 0. Building a
@@ -90,7 +94,8 @@ public sealed class LiveModelTests
         var proposal = await CreateCategorizer(apiKey)
             .ProposeAsync(Request(rawText), TestContext.Current.CancellationToken);
 
-        var mapped = new ProposalMapper().TryMap(proposal, OfferedSlugs, offeredMerchantIds: [], defaultCurrency: "RSD", out var result, out var failure);
+        var mapped = new ProposalMapper().TryMap(
+            proposal, OfferedSlugs, offeredMerchantIds: [], wallets: OfferedWallets, defaultCurrency: "RSD", out var result, out var failure);
 
         mapped.Should().BeTrue(failure);
         result.Items.Should().NotBeEmpty();
