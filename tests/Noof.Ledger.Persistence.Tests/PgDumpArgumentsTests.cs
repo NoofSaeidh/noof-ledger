@@ -16,6 +16,7 @@ public class PgDumpArgumentsTests
 
         args.Should().ContainInOrder("-h", "db.example.internal", "-p", "5433", "-U", "noof", "-d", "noof_ledger", "-f", @"C:\backups\out.dump");
         args.Should().Contain("-Fc");
+        args.Should().Contain("--no-password");
         args.Should().NotContain(a => a.Contains("correct-horse-battery-staple", StringComparison.Ordinal));
     }
 }

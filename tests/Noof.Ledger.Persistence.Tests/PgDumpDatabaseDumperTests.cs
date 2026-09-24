@@ -30,7 +30,7 @@ public class PgDumpDatabaseDumperTests(PostgresFixture fixture) : IAsyncLifetime
 
         await using var clone = await fixture.CreateDatabaseAsync();
         tempDump = Path.Combine(Path.GetTempPath(), $"noof-backup-test-{Guid.NewGuid():N}.dump");
-        var dumper = new PgDumpDatabaseDumper(clone.ConnectionString, PgDumpPath);
+        var dumper = new PgDumpDatabaseDumper(DatabaseSettings.For(clone.Database), PgDumpPath);
 
         var result = await dumper.DumpAsync(tempDump, TestContext.Current.CancellationToken);
 
@@ -65,23 +65,32 @@ public class PgDumpDatabaseDumperTests(PostgresFixture fixture) : IAsyncLifetime
         tempDump = Path.Combine(Path.GetTempPath(), $"noof-backup-test-{Guid.NewGuid():N}.dump");
         var dumper = new PgDumpDatabaseDumper(admin.ConnectionString, PgDumpPath);
 
-        // Bounds libpq's own connection attempt: this sandbox's DNS resolver does not return
-        // NXDOMAIN for an unreachable ".invalid" host, so an unbounded pg_dump hangs indefinitely
-        // instead of failing fast. PgDumpDatabaseDumper.DumpAsync copies the test process's own
-        // environment into the child process, so setting it here reaches pg_dump without changing
-        // production code, which sets no connect timeout of its own.
-        Environment.SetEnvironmentVariable("PGCONNECT_TIMEOUT", "3");
-        try
-        {
-            var result = await dumper.DumpAsync(tempDump, TestContext.Current.CancellationToken);
+        using var bound = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        var result = await dumper.DumpAsync(tempDump, bound.Token);
 
-            result.Succeeded.Should().BeFalse();
-            result.Error.Should().NotBeNull();
-            result.Error.Should().NotContain("marker-password-never-appears");
-        }
-        finally
+        result.Succeeded.Should().BeFalse();
+        result.Error.Should().NotBeNullOrEmpty();
+        result.Error.Should().NotContain("marker-password-never-appears");
+    }
+
+    [Fact]
+    public async Task A_clone_with_no_password_fails_quickly_instead_of_hanging_on_a_console_prompt()
+    {
+        if (!File.Exists(PgDumpPath))
+            Assert.Skip($"pg_dump.exe not found at {PgDumpPath} - install PostgreSQL 18 or set Backup:PgDumpPath (test override: NOOF_TEST_PGDUMP).");
+
+        await using var clone = await fixture.CreateDatabaseAsync();
+        var noPassword = new NpgsqlConnectionStringBuilder(DatabaseSettings.For(clone.Database))
         {
-            Environment.SetEnvironmentVariable("PGCONNECT_TIMEOUT", null);
-        }
+            Password = null,
+        };
+        tempDump = Path.Combine(Path.GetTempPath(), $"noof-backup-test-{Guid.NewGuid():N}.dump");
+        var dumper = new PgDumpDatabaseDumper(noPassword.ConnectionString, PgDumpPath);
+
+        using var bound = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        var result = await dumper.DumpAsync(tempDump, bound.Token);
+
+        result.Succeeded.Should().BeFalse();
+        result.Error.Should().NotBeNullOrEmpty();
     }
 }

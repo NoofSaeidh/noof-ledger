@@ -18,6 +18,7 @@ internal static class PgDumpArguments
         "-U", connection.Username ?? string.Empty,
         "-d", connection.Database ?? string.Empty,
         "-f", targetPath,
+        "--no-password",
     ];
 }
 
@@ -35,15 +36,20 @@ internal sealed class PgDumpDatabaseDumper(string connectionString, string pgDum
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            RedirectStandardInput = true,
         };
         foreach (var argument in PgDumpArguments.Build(connection, targetPath))
             start.ArgumentList.Add(argument);
 
         // The one and only place the password reaches the child process (CLAUDE.md §4).
         start.Environment["PGPASSWORD"] = connection.Password ?? string.Empty;
+        // Bounds libpq's own connection attempt, so an unreachable host fails within seconds
+        // instead of pg_dump hanging until a caller-supplied cancellation ever fires.
+        start.Environment["PGCONNECT_TIMEOUT"] = "10";
 
         using var process = new Process { StartInfo = start };
         process.Start();
+        process.StandardInput.Close();
         var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
         var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
