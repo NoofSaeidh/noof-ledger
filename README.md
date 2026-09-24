@@ -11,7 +11,7 @@ wallets and currencies.
 > евро"* is recorded as 1000 EUR dated yesterday, echoed back in the chat, and can be cancelled
 > with one tap or corrected by a reply. Voice notes work the same way: say it, and the bot records
 > what it heard.
-> 675 tests, all green — browser tests included.
+> 677 tests, all green — browser tests included.
 >
 > Still missing before it can carry a year of real spending: **balances** (there is no arithmetic
 > over wallets yet), **receipt photos**, **currency exchange**, and — the one that matters most —
