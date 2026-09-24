@@ -149,7 +149,7 @@ public class TransactionRevisionTests(PostgresFixture fixture)
         var transactionId = await SeedTransactionAsync(db, kind);
 
         await new EfCategorizationStore(db, Clock).ApplyAsync(transactionId,
-            new CategorizationOutcome([Coffee(250m)], new DateOnly(2026, 9, 21)), TestContext.Current.CancellationToken);
+            new CategorizationOutcome([Coffee(250m)], new DateOnly(2026, 9, 21), TransactionKind: kind), TestContext.Current.CancellationToken);
 
         db.ChangeTracker.Clear();
         var revision = await db.TransactionRevisions.SingleAsync(TestContext.Current.CancellationToken);
@@ -157,5 +157,40 @@ public class TransactionRevisionTests(PostgresFixture fixture)
         snapshot.RootElement.GetProperty("kind").GetString().Should().Be(expected);
         snapshot.RootElement.GetProperty("wallet_id").GetGuid().Should().Be(DefaultWalletId);
         snapshot.RootElement.GetProperty("raw_text").GetString().Should().Be("кофе 250", "the existing keys do not move");
+    }
+
+    [Fact]
+    public async Task A_revision_records_the_kind_the_wallet_and_the_stated_balance()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transactionId = await SeedTransactionAsync(db);
+        var store = new EfCategorizationStore(db, Clock);
+
+        await store.ApplyAsync(transactionId,
+            new CategorizationOutcome([Coffee(250m)], new DateOnly(2026, 9, 21), WalletId: DefaultWalletId),
+            TestContext.Current.CancellationToken);
+        await store.ApplyAsync(transactionId,
+            new CategorizationOutcome([], new DateOnly(2026, 9, 21), JobKind.Correct, "на самом деле на главном 45 тысяч",
+                TransactionKind.BalanceCheck, DefaultWalletId, new Money(45000m, CurrencyCode.Rsd)),
+            TestContext.Current.CancellationToken);
+
+        db.ChangeTracker.Clear();
+        var revisions = await db.TransactionRevisions.OrderBy(r => r.RevisionNumber).ToListAsync(TestContext.Current.CancellationToken);
+
+        using var expense = JsonDocument.Parse(revisions[0].Snapshot);
+        expense.RootElement.GetProperty("kind").GetString().Should().Be("Expense");
+        expense.RootElement.GetProperty("wallet_id").GetGuid().Should().Be(DefaultWalletId);
+        expense.RootElement.GetProperty("stated_balance").ValueKind.Should().Be(JsonValueKind.Null);
+
+        using var statement = JsonDocument.Parse(revisions[1].Snapshot);
+        statement.RootElement.GetProperty("kind").GetString().Should().Be("BalanceCheck");
+        statement.RootElement.GetProperty("wallet_id").GetGuid().Should().Be(DefaultWalletId);
+        statement.RootElement.GetProperty("items").GetArrayLength().Should().Be(0);
+        statement.RootElement.GetProperty("raw_text").GetString().Should().Be("кофе 250", "every existing key stays");
+        var stated = statement.RootElement.GetProperty("stated_balance");
+        stated.GetProperty("amount").ValueKind.Should().Be(JsonValueKind.String, "an amount is never a JSON number");
+        decimal.Parse(stated.GetProperty("amount").GetString()!, System.Globalization.CultureInfo.InvariantCulture).Should().Be(45000m);
+        stated.GetProperty("currency").GetString().Should().Be("RSD");
     }
 }
