@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
@@ -343,5 +344,61 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
         reloaded.RawText.Should().Be(transaction.RawText);
         reloaded.TimeZoneId.Should().Be(transaction.TimeZoneId);
         reloaded.BotMessageId.Should().Be(transaction.BotMessageId);
+    }
+
+    static readonly Guid SeededDefaultWalletId = new("00000000-0000-0000-0000-000000000001");
+
+    static Transaction VoiceAwaitingTranscript() => new()
+    {
+        Id = Guid.NewGuid(),
+        WalletId = SeededDefaultWalletId,
+        RawText = null,
+        CaptureKind = CaptureKind.Voice,
+        VoiceFileId = "voice-file-1",
+        VoiceDurationSeconds = 4,
+        Status = TransactionStatus.Failed,
+        TimeZoneId = "Europe/Belgrade",
+        OccurredAt = new DateTimeOffset(2026, 9, 21, 10, 0, 0, TimeSpan.Zero),
+        OccurredOn = new DateOnly(2026, 9, 21),
+        TelegramChatId = 111,
+        TelegramMessageId = 77,
+        BotMessageId = 78,
+        CreatedAt = new DateTimeOffset(2026, 9, 21, 10, 0, 0, TimeSpan.Zero),
+    };
+
+    [Fact]
+    public async Task A_voice_capture_with_no_transcript_reads_back_as_voice_with_empty_text()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = VoiceAwaitingTranscript();
+        db.Transactions.Add(transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var store = new EfCategorizationStore(db, Clock);
+
+        var subject = await store.GetSubjectAsync(transaction.Id, TestContext.Current.CancellationToken);
+
+        subject!.CaptureKind.Should().Be(CaptureKind.Voice);
+        subject.RawText.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_record_with_no_transcript_still_gets_a_revision()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = VoiceAwaitingTranscript();
+        db.Transactions.Add(transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+        var store = new EfCategorizationStore(db, Clock);
+
+        await store.ApplyAsync(
+            transaction.Id,
+            new CategorizationOutcome([], new DateOnly(2026, 9, 21), JobKind.Correct, "это было 250 динаров за кофе"),
+            TestContext.Current.CancellationToken);
+
+        var revision = await db.TransactionRevisions.SingleAsync(TestContext.Current.CancellationToken);
+        JsonDocument.Parse(revision.Snapshot).RootElement.GetProperty("raw_text").ValueKind.Should().Be(JsonValueKind.Null);
     }
 }

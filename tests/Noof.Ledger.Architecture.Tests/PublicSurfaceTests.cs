@@ -34,7 +34,7 @@ public class PublicSurfaceTests
     {
         ["Noof.Ledger.Domain"] =
         [
-            "AppUser", "CategorizationAuthority", "CategorizationJob", "Category", "CurrencyCode",
+            "AppUser", "CaptureKind", "CategorizationAuthority", "CategorizationJob", "Category", "CurrencyCode",
             "CurrencyMismatchException", "JobKind", "JobStatus", "LineItem", "Merchant", "MerchantAlias",
             "MerchantKind", "MerchantName", "Money", "Transaction",
             "TransactionStatus", "Wallet",
@@ -54,6 +54,7 @@ public class PublicSurfaceTests
             "SecretResult", "SecretState", "SecretStatus",
             "RecordAction", "EchoMessage", "IRecordEcho",
             "EchoTarget", "IRecordEditor", "ApplicationRegistration",
+            "ITranscriber", "ISpeechProvider", "CapturedVoice", "ITranscriptionStore", "IVoiceFileSource",
         ],
         ["Noof.Ledger.Persistence"] = ["LedgerConnectionString", "PersistenceRegistration"],
         ["Noof.Ledger.Ai"] = ["AiRegistration"],

@@ -128,4 +128,80 @@ public class RecordEchoTests
             CultureInfo.CurrentCulture = saved;
         }
     }
+
+    static CategorizationSubject Voice(
+        string heard, TransactionStatus status = TransactionStatus.Completed, IReadOnlyList<RecordedLine>? lines = null) =>
+        new(Guid.NewGuid(), heard, 111L, 42, "Cash", status, Sent, Sent, lines ?? [Coffee], CaptureKind.Voice);
+
+    [Fact]
+    public void Transcribing_is_the_voice_notes_acknowledgement()
+    {
+        Echo.Transcribing.Should().Be("🎤 Transcribing…");
+    }
+
+    [Fact]
+    public void A_voice_record_starts_with_what_was_heard()
+    {
+        var echo = Echo.Compose(Voice("кофе двести пятьдесят"));
+
+        echo.Text.Should().Be("🎤 \"кофе двести пятьдесят\"\nRecorded — Cash\n• кофе — 250.00 RSD · Food & Drink\n\nTotal: 250.00 RSD");
+        echo.Actions.Should().Equal(RecordAction.Cancel, RecordAction.Edit);
+    }
+
+    [Fact]
+    public void A_typed_record_has_no_heard_line()
+    {
+        Echo.Compose(Record()).Text.Should().StartWith("Recorded — Cash");
+    }
+
+    [Fact]
+    public void A_voice_record_with_no_transcript_shows_no_heard_line()
+    {
+        Echo.Compose(Voice(heard: "")).Text.Should().StartWith("Recorded — Cash");
+    }
+
+    [Fact]
+    public void A_voice_note_waiting_for_its_transcript_says_it_is_transcribing()
+    {
+        var echo = Echo.Compose(Voice(heard: "", status: TransactionStatus.Captured, lines: []));
+
+        echo.Text.Should().Be("🎤 Transcribing…");
+        echo.Actions.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_voice_note_being_read_shows_what_was_heard_above_the_acknowledgement()
+    {
+        Echo.Compose(Voice("кофе 250", status: TransactionStatus.Captured, lines: [])).Text
+            .Should().Be("🎤 \"кофе 250\"\nRecording…");
+    }
+
+    [Fact]
+    public void A_cancelled_voice_record_keeps_what_was_heard()
+    {
+        Echo.Compose(Voice("кофе 250", status: TransactionStatus.Cancelled)).Text.Should().StartWith("🎤 \"кофе 250\"\nCancelled — Cash");
+    }
+
+    [Fact]
+    public void Heard_nothing_says_so_and_offers_edit()
+    {
+        Echo.HeardNothing.Text.Should().Be("Heard nothing in that voice note.");
+        Echo.HeardNothing.Actions.Should().Equal(RecordAction.Edit);
+    }
+
+    [Fact]
+    public void A_note_that_could_not_be_transcribed_says_so_and_offers_edit()
+    {
+        Echo.TranscriptionFailure.Text.Should().Be("Couldn't transcribe that voice note.");
+        Echo.TranscriptionFailure.Actions.Should().Equal(RecordAction.Edit);
+    }
+
+    [Fact]
+    public void Hearing_nothing_in_a_spoken_correction_shows_the_record_unchanged_below()
+    {
+        var echo = Echo.ComposeHeardNothing(Record());
+
+        echo.Text.Should().Be("Heard nothing in that voice note.\n\nRecorded — Cash\n• кофе — 250.00 RSD · Food & Drink\n\nTotal: 250.00 RSD");
+        echo.Actions.Should().Equal(RecordAction.Cancel, RecordAction.Edit);
+    }
 }

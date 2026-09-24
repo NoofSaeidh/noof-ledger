@@ -58,6 +58,18 @@ dotnet ef database update --project src/Noof.Ledger.Persistence --startup-projec
 
 The output's last line must name the new migration. Do **not** run it without `--connection`.
 
+## Speech-to-text (Groq)
+
+1. Create a key at console.groq.com (API Keys). The free tier needs no card.
+2. In the Groq console, under Data Controls, turn on **Zero Data Retention**. Without it Groq may
+   keep request logs up to 30 days for troubleshooting.
+3. In the app, open Settings → Secrets, paste the key into **Groq API key**, save, and press
+   **Test**. The test calls Groq's free `GET /models`.
+4. Without a key the bot still acknowledges voice notes with `🎤 Transcribing…` and keeps them
+   queued. They are transcribed once a key is saved. Nothing is lost and no attempt is spent.
+5. Rate limits: 20 requests/minute on the free tier. A burst of notes is retried with backoff, not
+   failed.
+
 ## Solution-wide accessibility sweep
 
 `ops/inspect.ps1` runs `dotnet jb inspectcode` (`JetBrains.ReSharper.GlobalTools`,

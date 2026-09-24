@@ -17,7 +17,7 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
             select new
             {
                 t.Id, t.RawText, t.TelegramChatId, t.BotMessageId, WalletName = w.Name,
-                t.Status, t.OccurredAt, t.TimeZoneId, t.OccurredOn,
+                t.Status, t.OccurredAt, t.TimeZoneId, t.OccurredOn, t.CaptureKind,
             })
             .SingleOrDefaultAsync(cancellationToken);
 
@@ -41,9 +41,12 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
                 m == null ? null : m.DisplayName))
             .ToListAsync(cancellationToken);
 
+        // A voice capture has no text until its transcript arrives, and none at all when nothing was heard;
+        // the pipeline and the echo read that as empty, which is what it is.
         return new CategorizationSubject(
-            header.Id, header.RawText, header.TelegramChatId, header.BotMessageId, header.WalletName,
-            header.Status, ZonedClock.LocalDate(header.OccurredAt, header.TimeZoneId), header.OccurredOn, lines);
+            header.Id, header.RawText ?? string.Empty, header.TelegramChatId, header.BotMessageId, header.WalletName,
+            header.Status, ZonedClock.LocalDate(header.OccurredAt, header.TimeZoneId), header.OccurredOn, lines,
+            header.CaptureKind);
     }
 
     public async Task ApplyAsync(Guid transactionId, CategorizationOutcome outcome, CancellationToken cancellationToken)

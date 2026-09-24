@@ -677,3 +677,71 @@ labels).
 `RecordActionButtons.cs`, and a language setting for the operator to choose from — stored, not
 configuration, the same shape as the currency default above. `Category.NameRu` already exists in the
 schema and is unused by the bot today, so the category half of this is data that is already there.
+
+## Vocabulary hints for the transcriber
+
+**Wanted.** Fewer misheard merchant names in a voice transcript.
+
+**Why it is not scheduled.** Groq takes a `prompt` of up to 224 tokens. Merchant names from the
+directory would help it spell *Maxi*, *Lidl* and *Wolt*. That sends a slice of the shopping profile to
+Groq, the same trade as Q7 (`docs/OPEN-QUESTIONS.md`). It belongs to Phase 11 calibration, once there
+is a real-voice corpus to judge it against.
+
+## Keeping the audio
+
+**Wanted.** A re-transcription corpus, to compare providers or Whisper versions on real voice notes
+later.
+
+**Why it is not scheduled.** Nothing stores the voice note itself. The `file_id` can fetch it again
+while Telegram keeps it, which is enough for the current pipeline. A re-transcription corpus for Phase
+11 would need the bytes in the database, which would then be in every backup. That is a privacy
+decision for the operator, not a default to reach for.
+
+## Whisper's inventions on silence
+
+**Wanted.** Fewer fabricated transcripts from near-silent or noisy voice notes.
+
+**Why it is not scheduled.** A near-silent note can come back as *«Продолжение следует…»* or
+*«Субтитры сделал…»* — Whisper's own hallucination on low-signal audio. It is recorded as whatever the
+model makes of it, and the `🎤 "…"` line shows it as-is. P2-1 forbids a filter on what the transcript
+says. If it happens often in practice, the answer is a decision (for example, Groq's `verbose_json`
+`no_speech_prob`), not a quiet guard added later.
+
+## A second speech provider
+
+**Wanted.** A fallback when Groq is unavailable or its terms change.
+
+**Why it is not scheduled.** Groq publishes no SLA, which is a known trade-off from P3-1, accepted for
+now. `ISpeechToTextClientFactory` (V2) is the seam a fallback would use, and nothing uses one yet — no
+demonstrated need.
+
+---
+
+## Loose ends from the Phase 3 closing review
+
+Recorded 2026-09-24 by the Phase 3 closing review (Fable 5.1, a different model family from the one
+that wrote the code). Both are real, cheap-to-verify UX gaps rather than proven defects; neither blocks
+the phase.
+
+**The dashboard names the wrong stage for a voice record awaiting or missing its transcript.**
+`RecentTransaction` (`src/Noof.Ledger.Application/Reporting/ISpendingReadModel.cs`) carries no capture
+kind, so `Home.razor` cannot tell a still-transcribing voice note from a captured text message: a voice
+note with no transcript yet shows an empty description under "Awaiting categorisation - this message
+has not been read by the categoriser yet" (`src/Noof.Ledger.Web/Components/Pages/Home.razor:111-113`),
+and a "Heard nothing" record (`RecordEcho.HeardNothing`,
+`src/Noof.Ledger.Application/Chat/RecordEcho.cs:19`) shows "Categorisation failed. Nothing was recorded
+for this message." (`Home.razor:115-119`) — a `Failed` transaction status, which this is not; the audio
+was heard, it just held no speech. Fix later by carrying `CaptureKind` (and, for the second case, the
+distinction between "never categorised" and "heard nothing") into `RecentTransaction`, and phrasing the
+two states for what actually happened.
+
+**A spoken correction's own transcript is never shown.** `RecordEcho.WithWhatWasHeard`
+(`src/Noof.Ledger.Application/Chat/RecordEcho.cs:54-57`) prepends `🎤 "{record.RawText}"` from the
+transaction's original transcript only — `RawText` is written once, by `CompleteCaptureAsync`'s
+`IS NULL` guard, and never again. A correction spoken as a reply stores its own transcript in
+`CategorizationJob.Instruction`, which the final echo never surfaces: after a spoken correction, the
+echo shows the *original* 🎤 line and the corrected body, but not what the correction itself was heard
+as — exactly the ambiguity V5 was built to remove, just not for this path. A fix would prepend
+🎤 "<instruction>" when the latest revision is a spoken correction; deferred because it needs a small
+spec decision from the operator (which revision's transcript to show, and how it composes with the
+original 🎤 line already shown above the body).

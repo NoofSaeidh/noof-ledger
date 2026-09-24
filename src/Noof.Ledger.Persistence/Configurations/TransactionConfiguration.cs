@@ -8,13 +8,18 @@ internal sealed class TransactionConfiguration : IEntityTypeConfiguration<Transa
 {
     public void Configure(EntityTypeBuilder<Transaction> builder)
     {
-        builder.ToTable("transactions");
+        builder.ToTable("transactions", table => table.HasCheckConstraint(
+            "ck_transactions_capture_has_content",
+            "(capture_kind = 0 AND raw_text IS NOT NULL) OR (capture_kind = 1 AND voice_file_id IS NOT NULL)"));
 
         builder.HasKey(t => t.Id);
 
         builder.Property(t => t.Id).HasColumnName("id");
         builder.Property(t => t.WalletId).HasColumnName("wallet_id");
-        builder.Property(t => t.RawText).HasColumnName("raw_text").IsRequired();
+        builder.Property(t => t.RawText).HasColumnName("raw_text");
+        builder.Property(t => t.CaptureKind).HasColumnName("capture_kind");
+        builder.Property(t => t.VoiceFileId).HasColumnName("voice_file_id");
+        builder.Property(t => t.VoiceDurationSeconds).HasColumnName("voice_duration_seconds");
         builder.Property(t => t.Status).HasColumnName("status");
         builder.Property(t => t.TimeZoneId).HasColumnName("time_zone_id").HasMaxLength(64).IsRequired();
         builder.Property(t => t.OccurredAt).HasColumnName("occurred_at");

@@ -111,17 +111,24 @@ namespace Noof.Ledger.Persistence.Migrations
                         .HasColumnType("timestamptz")
                         .HasColumnName("updated_at");
 
+                    b.Property<string>("VoiceFileId")
+                        .HasColumnType("text")
+                        .HasColumnName("voice_file_id");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Status", "RunAfter");
 
-                    b.HasIndex("TransactionId", "SourceMessageId")
+                    b.HasIndex("TransactionId", "SourceMessageId", "Kind")
                         .IsUnique()
+                        .HasDatabaseName("IX_categorization_jobs_transaction_id_source_message_id_kind")
                         .HasFilter("source_message_id IS NOT NULL");
 
                     b.ToTable("categorization_jobs", "public", t =>
                         {
                             t.HasCheckConstraint("ck_categorization_jobs_correction_has_instruction", "kind <> 1 OR instruction IS NOT NULL");
+
+                            t.HasCheckConstraint("ck_categorization_jobs_transcription_has_voice_file", "kind <> 3 OR voice_file_id IS NOT NULL");
                         });
                 });
 
@@ -279,6 +286,10 @@ namespace Noof.Ledger.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("bot_message_id");
 
+                    b.Property<int>("CaptureKind")
+                        .HasColumnType("integer")
+                        .HasColumnName("capture_kind");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
@@ -296,7 +307,6 @@ namespace Noof.Ledger.Persistence.Migrations
                         .HasColumnName("prompt_message_id");
 
                     b.Property<string>("RawText")
-                        .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("raw_text");
 
@@ -318,6 +328,14 @@ namespace Noof.Ledger.Persistence.Migrations
                         .HasColumnType("character varying(64)")
                         .HasColumnName("time_zone_id");
 
+                    b.Property<int?>("VoiceDurationSeconds")
+                        .HasColumnType("integer")
+                        .HasColumnName("voice_duration_seconds");
+
+                    b.Property<string>("VoiceFileId")
+                        .HasColumnType("text")
+                        .HasColumnName("voice_file_id");
+
                     b.Property<Guid>("WalletId")
                         .HasColumnType("uuid")
                         .HasColumnName("wallet_id");
@@ -329,7 +347,10 @@ namespace Noof.Ledger.Persistence.Migrations
                     b.HasIndex("TelegramChatId", "TelegramMessageId")
                         .IsUnique();
 
-                    b.ToTable("transactions", "public");
+                    b.ToTable("transactions", "public", t =>
+                        {
+                            t.HasCheckConstraint("ck_transactions_capture_has_content", "(capture_kind = 0 AND raw_text IS NOT NULL) OR (capture_kind = 1 AND voice_file_id IS NOT NULL)");
+                        });
                 });
 
             modelBuilder.Entity("Noof.Ledger.Domain.Wallet", b =>

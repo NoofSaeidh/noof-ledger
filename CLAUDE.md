@@ -2,7 +2,7 @@
 
 Personal finance tracker. Telegram bot captures spending (text, voice, receipt photos), an LLM categorises it per line item, a local Blazor dashboard shows it across multiple wallets and currencies. C# / .NET 10, EF Core, strict TDD, local hosting, **public repo**.
 
-> **Status:** spec approved (`docs/superpowers/specs/2026-09-19-noof-finance-design.md`); **Phases 0, 0b, 1A, 1B, 1C, 1D and 2 complete** — solution, EF Core model and migrations, PostgreSQL money-storage gate, cookie authentication as the sole mode, the `user set-password` verb, the loopback interlock (unconditional now, not tied to an auth mode), a Blazor Server shell, Telegram capture with a durable queue, natural-language capture — the model reads amounts and dates from how people talk, the bot echoes the stored record in English with Cancel · Edit, a reply or an edit corrects it, and every state is kept in an append-only revision history — with a write-once merchant identity table, a dashboard reading it all back through a read model, each assembly's public surface shrunk to what actually crosses its boundary, and the whole interface rebuilt on MudBlazor with a dark theme, a navigation bar and sign-out. 577 solution tests, all green — the Playwright browser tests are in the solution now, so `dotnet test --solution` runs them too and needs Chromium present. An opt-in live-model suite of 10 stays skipped unless `NOOF_LEDGER_LIVE_ANTHROPIC_KEY` is set; `ops/publish.ps1` produces a runnable host. Next is Phase 3, voice (a speech-to-text decision comes first); the money model is Phase 4. Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
+> **Status:** spec approved (`docs/superpowers/specs/2026-09-19-noof-finance-design.md`); **Phases 0, 0b, 1A, 1B, 1C, 1D, 2 and 3 complete** — solution, EF Core model and migrations, PostgreSQL money-storage gate, cookie authentication as the sole mode, the `user set-password` verb, the loopback interlock (unconditional now, not tied to an auth mode), a Blazor Server shell, Telegram capture with a durable queue, natural-language capture — the model reads amounts and dates from how people talk, the bot echoes the stored record in English with Cancel · Edit, a reply or an edit corrects it, and every state is kept in an append-only revision history — with a write-once merchant identity table, a dashboard reading it all back through a read model, each assembly's public surface shrunk to what actually crosses its boundary, and the whole interface rebuilt on MudBlazor with a dark theme, a navigation bar and sign-out — and voice notes are transcribed by Groq's whisper-large-v3 behind `ISpeechToTextClient`, echoed with what was heard, and a spoken reply corrects a record. 677 solution tests, all green — the Playwright browser tests are in the solution now, so `dotnet test --solution` runs them too and needs Chromium present. Live suites stay skipped unless `NOOF_LEDGER_LIVE_ANTHROPIC_KEY` / `NOOF_LEDGER_LIVE_GROQ_KEY` + `NOOF_LEDGER_LIVE_VOICE_FILE` are set; `ops/publish.ps1` produces a runnable host. Next is Phase 4, the money model. Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
 >
 > Deferred **decisions** live in `docs/OPEN-QUESTIONS.md`; deferred **work** lives in `docs/BACKLOG.md`. Check both before proposing something as missing.
 >
@@ -138,13 +138,16 @@ register it into) — named because they are exceptions, not a licence to invent
   `Noof.Ledger.Ai/Anthropic/`, and `ChatToolMode.RequireAny`/`RequireSpecific` becomes `tool_choice`.
   Assert both on the captured HTTP body, not from documentation. (Phase 1B had used
   `output_config.format`; that was an agent's choice, not the operator's.)
+- Forced tool use is unsupported on Claude Opus 5.5, Fable 5.1 and Mythos 5.1 — `docs/OPEN-QUESTIONS.md` P3-2.
 - **Amounts are JSON numbers read straight into `decimal`** — from the argument's `JsonElement`,
   never via `double`.
 - **Never set temperature.** It is `[Obsolete]` in the SDK and therefore a compile error here.
   Determinism comes from the schema's enums.
-- **Nothing depends on the LLM provider except its `IChatClientFactory` implementation**, in
-  `src/Noof.Ledger.Ai/Anthropic/` *(operator decision D-A, 2026-09-23)* — asserted by
-  `AiBoundaryTests`, not convention.
+- **Nothing depends on an AI provider except its factory**: `IChatClientFactory` for the model and
+  `ISpeechToTextClientFactory` for speech, each implemented in its own folder under
+  `src/Noof.Ledger.Ai/<Provider>/` *(D-A, 2026-09-23; speech P3-1)*. Asserted by `AiBoundaryTests`.
+  `ISpeechToTextClient` is experimental (`MEAI001`), and the warning is suppressed in
+  `Noof.Ledger.Ai` and its tests only.
 - **The tool loop runs through `FunctionInvokingChatClient`** *(D-B)*, with a guard
   `DelegatingChatClient` below it that re-forces `record_spending` on the follow-up request: FICC
   resets a required `ToolMode` after the first round and strips every tool declaration on its own

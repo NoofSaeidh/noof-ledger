@@ -20,6 +20,14 @@ internal static class WorkerRegistration
             sp.GetRequiredService<IRecordEcho>(),
             sp.GetRequiredService<ILogger<CategorizationWorker>>()));
 
+        services.AddHostedService(sp => new TranscriptionWorker(
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            sp.GetRequiredService<TimeProvider>(),
+            options,
+            CategorizationWorker.CreateWorkerId(),
+            sp.GetRequiredService<IRecordEcho>(),
+            sp.GetRequiredService<ILogger<TranscriptionWorker>>()));
+
         return services;
     }
 }

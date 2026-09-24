@@ -7,7 +7,8 @@ namespace Noof.Ledger.Persistence.Jobs;
 
 internal sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, int maxAttempts) : IJobQueue
 {
-    public async Task<CategorizationJob?> ClaimAsync(string workerId, TimeSpan lease, CancellationToken cancellationToken)
+    public async Task<CategorizationJob?> ClaimAsync(
+        string workerId, IReadOnlyCollection<JobKind> kinds, TimeSpan lease, CancellationToken cancellationToken)
     {
         var now = timeProvider.GetUtcNow();
         var leaseExpiry = now + lease;
@@ -24,7 +25,7 @@ internal sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, 
                     updated_at = @now
                 WHERE id = (
                     SELECT j.id FROM categorization_jobs j
-                    WHERE j.status = 0 AND j.run_after <= @now
+                    WHERE j.status = 0 AND j.run_after <= @now AND j.kind = ANY(@kinds)
                       AND NOT EXISTS (
                           SELECT 1 FROM categorization_jobs earlier
                           WHERE earlier.transaction_id = j.transaction_id
@@ -35,11 +36,12 @@ internal sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, 
                     FOR UPDATE OF j SKIP LOCKED
                 )
                 RETURNING id, transaction_id, status, attempt_count, run_after, claimed_at, claimed_by, last_error,
-                          created_at, updated_at, kind, instruction, source_message_id, instruction_day
+                          created_at, updated_at, kind, instruction, source_message_id, instruction_day, voice_file_id
                 """,
                 new NpgsqlParameter("now", now),
                 new NpgsqlParameter("workerId", workerId),
-                new NpgsqlParameter("leaseExpiry", leaseExpiry))
+                new NpgsqlParameter("leaseExpiry", leaseExpiry),
+                new NpgsqlParameter("kinds", kinds.Select(kind => (int)kind).ToArray()))
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 

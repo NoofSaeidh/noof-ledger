@@ -12,6 +12,10 @@ public sealed class SettingsSecretsTests(CookieModeHostFixture fixture) : PageTe
     // cannot change - the operator's real key is stored under it - so every selector is as before.
     const string AnthropicApiKey = "anthropic-api-key";
 
+    // The speech provider's secret as the page renders it into element ids (spec V11). Tests may name the provider;
+    // the page may not.
+    const string GroqApiKey = "groq-api-key";
+
     [Fact]
     public async Task Anonymous_visitor_is_redirected_and_a_signed_in_visitor_saves_through_the_circuit()
     {
@@ -151,6 +155,21 @@ public sealed class SettingsSecretsTests(CookieModeHostFixture fixture) : PageTe
         var message = await result.TextContentAsync() ?? string.Empty;
         message.Should().NotBeEmpty();
         message.Should().NotContain(fakeKey, "the probe's failure message must never echo the key it was testing");
+    }
+
+    [Fact]
+    public async Task The_speech_key_has_its_own_row_with_a_Test_button()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/settings/secrets");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        await Expect(Page.GetByText("Groq API key")).ToBeVisibleAsync();
+        await Expect(Page.Locator($"#status-{GroqApiKey}")).ToBeVisibleAsync();
+        await Expect(Page.Locator($"#test-{GroqApiKey}")).ToBeVisibleAsync();
     }
 
     [Fact]
