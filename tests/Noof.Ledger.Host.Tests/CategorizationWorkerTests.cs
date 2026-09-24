@@ -665,10 +665,11 @@ public class CategorizationWorkerTests
     [Fact]
     public async Task A_proposal_with_no_items_completes_the_job_honestly_instead_of_recording_a_loan_as_spending()
     {
-        // The defect this guards against: "заняла у Маши 5000 рсд" is a loan received, not a
-        // purchase. A model that (correctly, per the prompt) answers with zero items must succeed
-        // the job with zero line items, not be forced to invent one and not be treated as a
-        // failure either - both would misrepresent what actually happened.
+        // A message can still come back with zero items (the prompt no longer asks for this on a
+        // loan specifically - see CategorizationPromptTests - but a purely conversational message
+        // with a figure and nothing to record against it can). A model that answers with zero
+        // items must succeed the job with zero line items, not be forced to invent one and not be
+        // treated as a failure either - both would misrepresent what actually happened.
         var jobQueue = Substitute.For<IJobQueue>();
         jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
         jobQueue.SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>()).Returns(JobCompletionOutcome.Applied);

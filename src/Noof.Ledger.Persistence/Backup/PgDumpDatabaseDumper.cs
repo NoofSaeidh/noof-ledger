@@ -52,7 +52,20 @@ internal sealed class PgDumpDatabaseDumper(string connectionString, string pgDum
         process.StandardInput.Close();
         var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
         var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            // WaitForExitAsync returning on cancellation does not stop pg_dump - left alone, it
+            // keeps running and keeps writing the .tmp file. Killing the tree, not just this
+            // process, matters if pg_dump ever shells out to a helper (it does not today, but
+            // nothing here should rely on that staying true).
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+            throw;
+        }
         var stderr = Scrub(await stderrTask, connection.Password);
         await stdoutTask;
 

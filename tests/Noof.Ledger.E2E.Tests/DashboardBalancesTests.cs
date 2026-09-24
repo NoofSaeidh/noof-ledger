@@ -183,12 +183,15 @@ public sealed class DashboardBalancesTests(CookieModeHostFixture fixture) : Page
     }
 
     [Fact]
-    public async Task Backup_status_reports_a_failed_run_even_after_an_older_success()
+    public async Task Backup_status_reports_a_failed_run_and_when_the_last_success_was()
     {
+        // M-5 (Phase 4 final review): "Last backup: failed" alone hid whether an earlier backup
+        // still exists at all - the operator could not tell "yesterday's dump is fine, tonight's
+        // just failed" from "nothing has ever worked" without a database connection.
         if (fixture.DatabaseUnavailable)
             Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
 
-        var oldSuccess = DateTimeOffset.UtcNow.AddDays(-2);
+        var oldSuccess = DateTimeOffset.UtcNow.AddHours(-3);
         var recentFailure = DateTimeOffset.UtcNow.AddMinutes(-10);
 
         await using (var db = OpenDb())
@@ -222,7 +225,7 @@ public sealed class DashboardBalancesTests(CookieModeHostFixture fixture) : Page
         await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
         var status = Page.Locator("#backup-status");
-        await Expect(status).ToContainTextAsync("Last backup: failed");
+        await Expect(status).ToContainTextAsync("Last backup: failed · last success 3 h ago");
         await Expect(status).ToHaveClassAsync(new Regex("mud-warning-text"));
     }
 

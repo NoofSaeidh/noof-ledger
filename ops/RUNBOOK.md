@@ -146,8 +146,10 @@ naming what it could not remove, pointing here.
 
 `BackupWorker` runs inside the host, not as a separate process. On start it checks
 `backup_runs` for the newest successful run; if there is none, or it is older than 24 hours, it
-backs up immediately. It then checks again 24 hours after each success, or 1 hour after a failed
-attempt rather than waiting a full day, for as long as the host keeps running.
+backs up immediately. Otherwise it wakes again when that success turns 24 hours old — not 24 hours
+from whenever it happened to start — so a host that is not always on still backs up roughly once a
+day rather than falling to every other day; a failed attempt is retried after 1 hour instead of
+waiting for the next scheduled day.
 
 **Where:** `%LOCALAPPDATA%\NoofLedger\backups\noof_ledger-yyyyMMdd-HHmmss.dump` (UTC timestamp in
 the file name). Written under a `.tmp` name first and renamed only on success, so a half-written
@@ -177,17 +179,36 @@ $env:PGPASSWORD = $p['Password']
 ```
 Drop `noof_ledger_restored` when you are done inspecting it — `psql ... -c "DROP DATABASE noof_ledger_restored"`.
 
+A dump contains only the database — the data-protection key ring (`%LOCALAPPDATA%\NoofLedger\dp-keys`)
+and the connection string (`%LOCALAPPDATA%\NoofLedger\db.connection`) live outside it. Secrets stored
+in `app_secret` are encrypted with that key ring, so a dump restored on another machine, or after the
+key ring is lost, has unreadable secrets until they are re-entered through the UI — copy the `dp-keys`
+folder alongside the dump if a restore is meant to also carry the secrets forward.
+
 **`ops/restore-check.ps1`** automates the check above and compares the result against a source
 database instead of leaving that to your own eyes: it restores a dump (the newest one by default, or
 `-DumpPath` for a specific one) into a throwaway scratch database, compares `wallet_balances` and
-every public table's row count against `-SourceDatabase` (default `noof_ledger_test_template`),
+every ledger table's row count against `-SourceDatabase` (default `noof_ledger_test_template`),
 prints the result, and drops the scratch database either way. It refuses to let the scratch target
 ever be `noof_ledger`, `noof_ledger_test_template`, `postgres`, or either template database, by exact
 name.
 
+`backup_runs` is deliberately excluded from that row-count comparison (printed as an informational
+line instead): `BackupWorker` writes the run's own `backup_runs` row *after* the dump finishes, so a
+dump the worker made will always have one fewer `backup_runs` row than the live database it was taken
+from — comparing it would report MISMATCH on every worker-made dump, by construction, not because
+anything is wrong.
+
+The comparison overall is against the database as it stands **right now**, not as it stood when the
+dump was taken — anything written since (a captured message, a job row, a new backup run) shows up as
+a difference against `-SourceDatabase`. Run it while the host is idle (no capture in flight), or point
+`-DumpPath` at a dump you just took and compare before anything else writes to the database.
+
 `Backup:Enabled=false` disables the worker (the test fixtures set it); `Backup:PgDumpPath` overrides
-the `pg_dump.exe`/`pg_restore.exe` binary location, if it is not at the default
-`C:\Program Files\PostgreSQL\18\bin\`.
+the `pg_dump.exe` binary location for the worker's own dumps, if it is not at the default
+`C:\Program Files\PostgreSQL\18\bin\`. `restore-check.ps1` does not read that setting at all — it
+takes its own `-PgRoot` parameter (default the same path) and finds `psql.exe`/`pg_restore.exe` under
+it directly.
 
 **The one real run against `noof_ledger`, per the operator's decision (B5):** this must be run by the
 operator, or with the operator's explicit permission, since it reads the real ledger:

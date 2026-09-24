@@ -13,9 +13,10 @@ wallets and currencies.
 > by your own balance statements — is exact in all five supported currencies (EUR, RSD, USD, RUB,
 > KZT), proven under both `ru-RU` and `sr-Latn-RS`. Wallets are created and managed on a `/wallets`
 > page; income and balance statements are ordinary messages to the bot, typed or spoken. The app
-> backs its own database up daily and a restore has been checked against it — `ops/restore-check.ps1`
-> restores a dump into a scratch database and compares every wallet's balance and row counts against
-> the source.
+> backs its own database up daily, and `ops/restore-check.ps1` restores a dump into a scratch
+> database and compares every wallet's balance and row count against the source — proven so far
+> against a template clone; the one restore check against the live ledger itself is the operator's
+> to run (see `ops/RUNBOOK.md`).
 > 677 tests, all green — browser tests included.
 >
 > Still missing: **receipt photos** and **currency exchange** (a spend in a currency other than its

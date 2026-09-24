@@ -302,9 +302,13 @@ else
     static string FormatBalances(IReadOnlyList<Money> balances) =>
         balances.Count == 0 ? "—" : string.Join(", ", balances.Select(FormatMoney));
 
+    // M-5 (Phase 4 final review): "Last backup: failed" alone hid whether an earlier backup still
+    // exists - the failed-with-a-prior-success arm must come before the bare failed arm, or it
+    // never matches.
     string DescribeBackup() => backupStatus switch
     {
         null => "Last backup: unavailable",
+        { LastRunFailed: true, LastSuccessAt: { } at } => $"Last backup: failed · last success {FormatAgo(TimeProvider.GetUtcNow() - at)} ago",
         { LastRunFailed: true } => "Last backup: failed",
         { LastSuccessAt: null } => "Last backup: never",
         { LastSuccessAt: { } at } => $"Last backup: {FormatAgo(TimeProvider.GetUtcNow() - at)} ago",

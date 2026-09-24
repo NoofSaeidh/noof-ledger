@@ -181,6 +181,70 @@ public class BackupWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_skipped_tick_wakes_when_the_last_success_turns_a_day_old_not_a_full_interval_later()
+    {
+        // I-2 (Phase 4 final review): a host restarted 20 h after the last success used to sleep a
+        // full 24 h from *now* on a Skipped tick, so the cadence degraded to every other day on a
+        // machine that is not always on. It must instead wake ~4 h later - when the last success
+        // actually turns a day old - not 24 h later.
+        var now = new DateTimeOffset(2026, 9, 24, 3, 0, 0, TimeSpan.Zero);
+        var time = new FakeTimeProvider(now);
+        var lastSuccess = now.AddHours(-20);
+        var log = LogWithStatus(new BackupStatus(lastSuccess, false, null));
+        var dumper = Substitute.For<IDatabaseDumper>();
+        var worker = CreateWorker(ScopeFactoryFor(log, dumper), time, Options());
+
+        await worker.StartAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
+            await log.Received(1).StatusAsync(Arg.Any<CancellationToken>());
+
+            time.Advance(TimeSpan.FromHours(4) - TimeSpan.FromMinutes(1));
+            await Task.Delay(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
+            await log.Received(1).StatusAsync(Arg.Any<CancellationToken>());
+
+            time.Advance(TimeSpan.FromMinutes(1));
+            await Task.Delay(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
+            await log.Received(2).StatusAsync(Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            await worker.StopAsync(TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task A_skipped_tick_never_sleeps_less_than_a_minute_even_when_almost_due()
+    {
+        var now = new DateTimeOffset(2026, 9, 24, 3, 0, 0, TimeSpan.Zero);
+        var time = new FakeTimeProvider(now);
+        var lastSuccess = now - TimeSpan.FromHours(24) + TimeSpan.FromSeconds(10);
+        var log = LogWithStatus(new BackupStatus(lastSuccess, false, null));
+        var dumper = Substitute.For<IDatabaseDumper>();
+        var worker = CreateWorker(ScopeFactoryFor(log, dumper), time, Options());
+
+        await worker.StartAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
+            await log.Received(1).StatusAsync(Arg.Any<CancellationToken>());
+
+            time.Advance(TimeSpan.FromSeconds(30));
+            await Task.Delay(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
+            await log.Received(1).StatusAsync(Arg.Any<CancellationToken>());
+
+            time.Advance(TimeSpan.FromSeconds(31));
+            await Task.Delay(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
+            await log.Received(2).StatusAsync(Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            await worker.StopAsync(TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
     public async Task A_successful_backup_prunes_down_to_the_configured_count()
     {
         Directory.CreateDirectory(backupDirectory);
@@ -199,6 +263,28 @@ public class BackupWorkerTests : IDisposable
 
         var remaining = Directory.GetFiles(backupDirectory, "noof_ledger-*.dump").Select(Path.GetFileName).ToArray();
         remaining.Should().BeEquivalentTo(["noof_ledger-20260903-030000.dump", "noof_ledger-20260924-030000.dump"]);
+    }
+
+    [Fact]
+    public async Task An_orphan_tmp_file_from_an_interrupted_run_is_deleted_before_the_next_attempt()
+    {
+        // M-4 (Phase 4 final review): a cancelled dump used to leave its .tmp file behind forever -
+        // Prune only ever matched *.dump, so nothing would ever notice or remove it.
+        Directory.CreateDirectory(backupDirectory);
+        var orphan = Path.Combine(backupDirectory, "noof_ledger-20260101-000000.dump.tmp");
+        File.WriteAllText(orphan, "half-written");
+
+        var now = new DateTimeOffset(2026, 9, 24, 3, 0, 0, TimeSpan.Zero);
+        var time = new FakeTimeProvider(now);
+        var log = LogWithStatus(new BackupStatus(null, false, null));
+        var dumper = Substitute.For<IDatabaseDumper>();
+        dumper.DumpAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(ci => WriteFakeDumpAsync(ci.Arg<string>(), new DumpResult(true, null)));
+        var worker = CreateWorker(ScopeFactoryFor(log, dumper), time, Options());
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        File.Exists(orphan).Should().BeFalse("an orphan .tmp from a previous interrupted run must not linger forever");
     }
 
     static Task<DumpResult> WriteFakeDumpAsync(string targetPath, DumpResult result)

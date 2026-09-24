@@ -756,10 +756,33 @@ moving target that would need its own history to stay honest in a re-read old tr
 scheduled until a rate source is chosen.
 
 **Transfers between wallets (Phase 7).** `TransactionKind.Transfer = 3` and `EntryRole.Fee` are
-reserved in the enum but not implemented — a transfer becomes two entries (one per wallet) with no
-schema change needed when that phase arrives. Moving cash between wallets today is two separate
-manual transactions (an expense from one, an income to the other), which loses the "this was the same
-money" relationship a real transfer would keep.
+reserved values, not declared members of the enum (`MoneyModelEnumTests` pins the current member
+counts) — a transfer becomes two entries (one per wallet) with no schema change needed when that
+phase arrives. Moving cash between wallets today is two separate manual transactions (an expense
+from one, an income to the other), which loses the "this was the same money" relationship a real
+transfer would keep.
+
+**Loans are recorded as other-income until Phase 7 models transfers/liabilities.** A loan received
+("заняла у Маши 5000 рсд") is recorded as kind `income` under the `other-income` category
+(`CategorizationPrompt`'s I-3 fix, Phase 4 final review) so the wallet matches the bank — but a loan
+is a liability, not earned income, and there is no `Transfer`/liability kind yet to record it more
+precisely. Until Phase 7, this means the dashboard's income totals include money that was borrowed,
+not earned. Revisit once transfers (above) are built.
+
+**The Recent list shows income and opening balances indistinguishable from spending.**
+`RecentTransaction` (`src/Noof.Ledger.Application/Reporting/ISpendingReadModel.cs`) carries no
+`Kind`, so a 2000 EUR salary and a wallet's "Opening balance" checkpoint appear in the dashboard's
+"Recent" list exactly like an expense — money is not wrong ("This month" is filtered by kind), but a
+reader cannot tell +2000 from −2000 at a glance (M-6, Phase 4 final review). Fix by carrying `Kind`
+into `RecentTransaction` and giving the list a marker (a chip, a sign) per row.
+
+**A correction to a record whose wallet was archived moves it to the currency default.**
+`CategorizationWorker.KeepingTheRecordsWallet` (`src/Noof.Ledger.Host/Workers/CategorizationWorker.cs`)
+keeps a record's existing wallet only while it is still active; correcting a record whose wallet has
+since been archived silently falls back to the default wallet for that currency, so "hidden from
+capture, history kept" is no longer quite true for a corrected record (M-7, Phase 4 final review).
+Pinned as intended by `A_correction_whose_wallet_was_archived_falls_back_to_the_default`. Acceptable
+for a single operator; revisit if a second wallet per currency becomes common.
 
 **The same-day checkpoint ordering edge.** A purchase dated to the same local day as a balance
 statement, but sent to the bot after the statement, is ordered after it (M6's `(occurred_on,

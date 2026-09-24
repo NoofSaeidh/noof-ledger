@@ -106,10 +106,10 @@ internal static class CategorizationSchema
                 ["items"] = new JsonObject
                 {
                     ["type"] = "array",
-                    // 0, not 1: a message can genuinely describe zero purchases (a loan received,
-                    // not a purchase - see CategorizationPrompt's "заняла у Маши" example, and every
-                    // "balance" answer, which never has items at all). Only 0 and 1 are valid values
-                    // for minItems under this API's schema subset.
+                    // 0, not 1: every "balance" answer has no items at all (there is nothing to
+                    // categorise, only a balance to state), and a message can otherwise mention a
+                    // figure with nothing to record against it. Only 0 and 1 are valid values for
+                    // minItems under this API's schema subset.
                     ["minItems"] = 0,
                     ["items"] = lineItem,
                 },
