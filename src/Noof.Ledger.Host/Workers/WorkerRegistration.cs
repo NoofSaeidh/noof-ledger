@@ -29,6 +29,7 @@ internal static class WorkerRegistration
             options,
             CategorizationWorker.CreateWorkerId(),
             sp.GetRequiredService<IRecordEcho>(),
+            sp.GetRequiredService<IDatabaseGate>(),
             sp.GetRequiredService<ILogger<TranscriptionWorker>>()));
 
         if (backupOptions.Enabled)

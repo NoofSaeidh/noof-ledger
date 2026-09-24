@@ -1,5 +1,6 @@
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Jobs;
 using Noof.Ledger.Application.Transcription;
 using Noof.Ledger.Domain;
@@ -14,6 +15,7 @@ internal sealed class TranscriptionWorker(
     CategorizationWorkerOptions options,
     string workerId,
     IRecordEcho recordEcho,
+    IDatabaseGate gate,
     ILogger<TranscriptionWorker> logger)
     : BackgroundService
 {
@@ -24,6 +26,8 @@ internal sealed class TranscriptionWorker(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        await gate.WaitUntilReadyAsync(stoppingToken);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             var result = await RunTickAsync(stoppingToken);
