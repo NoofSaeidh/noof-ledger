@@ -58,6 +58,7 @@ public class PublicSurfaceTests
             "EchoTarget", "IRecordEditor", "ApplicationRegistration",
             "ITranscriber", "ISpeechProvider", "CapturedVoice", "ITranscriptionStore", "IVoiceFileSource",
             "IWalletDirectory",
+            "WalletDetails", "NewWallet", "IWalletAdmin",
         ],
         ["Noof.Ledger.Persistence"] = ["LedgerConnectionString", "PersistenceRegistration"],
         ["Noof.Ledger.Ai"] = ["AiRegistration"],
