@@ -499,8 +499,7 @@ cannot**. The blockers are architectural rather than sloppy: `EfJobQueue.ClaimAs
 table with `FOR UPDATE SKIP LOCKED` and depends on being the only writer; `EfSpendingReadModel`
 aggregates across every row by design; `EfSecretStoreTests`, `EfUserStoreTests` and
 `MerchantAliasWriteOnceTests` reuse fixed natural keys (`SecretKeys.AnthropicApiKey`, `"noof"`,
-`"TEST MERCHANT"`) that would collide; `EfCaptureStoreTests` deletes the seeded default wallet that
-`WalletDefaultTests` depends on; and `SeedDataTests` renames the seeded coffee category its own
+`"TEST MERCHANT"`) that would collide; and `SeedDataTests` renames the seeded coffee category its own
 sibling asserts on. So sharing buys a ~55% cut in database creations, not the ~95% the idea
 suggests — worth perhaps 18 of those 32 seconds, against a real risk of turning deterministic
 failures into timing-dependent ones.
@@ -651,7 +650,7 @@ update burns three poison attempts for no reason. Consider
 **Wanted.** A sixth currency code, or at least a clean failure when one is meant, instead of the
 silent RSD default.
 
-**Why it is not scheduled.** `record_spending`'s response schema constrains `currency` to a
+**Why it is not scheduled.** `record_spending`'s (renamed to `record_transaction` in Phase 4) response schema constrains `currency` to a
 compile-time enum of the five supported codes, so the model has no way to answer with a sixth even
 when a message names one — it lands on `CategorizationWorkerOptions.DefaultCurrency` (RSD) instead,
 visible only in the echo if the operator happens to notice the wrong code. Widening it safely is
@@ -745,3 +744,36 @@ as — exactly the ambiguity V5 was built to remove, just not for this path. A f
 🎤 "<instruction>" when the latest revision is a spoken correction; deferred because it needs a small
 spec decision from the operator (which revision's transcript to show, and how it composes with the
 original 🎤 line already shown above the body).
+
+---
+
+## Deferred from Phase 4 (money model and backup)
+
+**Cross-currency conversion.** A spend in a currency other than its wallet's own (M10) is recorded as
+a separate currency line on that wallet's balance, not converted. Building this needs a rate source
+decision (Q4 in the original design's open questions) the operator has not made, and a rate is a
+moving target that would need its own history to stay honest in a re-read old transaction. Not
+scheduled until a rate source is chosen.
+
+**Transfers between wallets (Phase 7).** `TransactionKind.Transfer = 3` and `EntryRole.Fee` are
+reserved in the enum but not implemented — a transfer becomes two entries (one per wallet) with no
+schema change needed when that phase arrives. Moving cash between wallets today is two separate
+manual transactions (an expense from one, an income to the other), which loses the "this was the same
+money" relationship a real transfer would keep.
+
+**The same-day checkpoint ordering edge.** A purchase dated to the same local day as a balance
+statement, but sent to the bot after the statement, is ordered after it (M6's `(occurred_on,
+occurred_at)` rule) — so the *next* statement absorbs it instead of the one it was dated alongside.
+This is a known, accepted approximation (recorded in the spec's "Known limits"), not a bug: the
+alternative (ordering by `occurred_on` alone, ties broken arbitrarily) would make a statement's
+"adjustment" figure depend on transcription order rather than anything the operator said.
+
+**Encrypted backups.** `BackupWorker`'s dumps sit unencrypted under `%LOCALAPPDATA%\NoofLedger\backups`,
+protected only by the user profile's own permissions — the same trust boundary the credential file
+already relies on. OneDrive sync (Q8 in the original design) is Phase 10 and would want this decided
+first, since syncing an unencrypted financial dump to the cloud is a different risk than a dump that
+never leaves the machine.
+
+**A separate PostgreSQL instance for tests** (own port, fsync off, no real data on it) — faster
+database tests, no shared lock between worktrees, and test clones never on the server that holds
+`noof_ledger`; deferred by the operator on 2026-09-24 as a follow-up after Phase 4.
