@@ -797,8 +797,19 @@ already relies on. OneDrive sync (Q8 in the original design) is Phase 10 and wou
 first, since syncing an unencrypted financial dump to the cloud is a different risk than a dump that
 never leaves the machine.
 
-**A separate PostgreSQL instance for tests** (own port, fsync off, no real data on it) — faster
-database tests, no shared lock between worktrees, and test clones never on the server that holds
-`noof_ledger`. Proposed here, not yet an operator decision — no ruling to this effect appears in
-`progress.md`'s ruling log, the brief, the plan or the spec. Worth raising with the operator as a
-follow-up after Phase 4, but not recorded as settled until they say so.
+**A separate PostgreSQL instance for tests** (own port, `fsync` off, no real data on it). Phase 4's
+subagents spent most of their time in database test runs and in waiting on the shared suite lock:
+every worktree's `DROP DATABASE` waits on the one server's checkpoints, and under parallel load the
+fixtures' cleanup timed out and failed tests that were not broken. A test-only cluster pointed at
+through the existing `NOOF_TEST_PG` variable would make clones cheap, retire the lock, and keep test
+clones off the server that holds `noof_ledger`. Costs a second cluster to start after a reboot and a
+small ops script. The operator has seen the trade-offs (2026-09-24) and not decided; the Phase 4
+rule of running database and E2E tests filtered, and in full once per phase, removed most of the
+contention in the meantime.
+
+**A cancelled dump can be recorded as a failed run.** `PgDumpDatabaseDumper` kills `pg_dump` on
+cancellation with `if (!process.HasExited) process.Kill(entireProcessTree: true)`; if `pg_dump` exits
+between the check and the kill, `Kill` throws `InvalidOperationException`, which replaces the pending
+cancellation, and `BackupWorker` records an ordinary failed run. A microsecond window at host
+shutdown, no data lost — wrap the `Kill` in a `catch (InvalidOperationException)` when next in the
+file (Phase 4 fix-wave re-review).

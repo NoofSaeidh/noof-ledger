@@ -17,7 +17,7 @@ wallets and currencies.
 > database and compares every wallet's balance and row count against the source — proven so far
 > against a template clone; the one restore check against the live ledger itself is the operator's
 > to run (see `ops/RUNBOOK.md`).
-> 677 tests, all green — browser tests included.
+> 852 tests, all green — browser tests included.
 >
 > Still missing: **receipt photos** and **currency exchange** (a spend in a currency other than its
 > wallet's own is recorded as-is, in its own currency, not converted).
