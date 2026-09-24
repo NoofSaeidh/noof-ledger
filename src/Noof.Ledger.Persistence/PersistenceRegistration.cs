@@ -71,4 +71,17 @@ public static class PersistenceRegistration
         await scope.ServiceProvider.GetRequiredService<LedgerDbContext>()
             .Database.MigrateAsync(cancellationToken);
     }
+
+    // Opens the raw ADO.NET connection rather than Database.OpenConnectionAsync: that goes through
+    // EF's execution strategy, which wraps a connection failure in InvalidOperationException as a
+    // "consider enabling retry" hint - masking the NpgsqlException this startup probe needs to
+    // classify (connection-refused vs. everything else).
+    public static async Task OpenNoofDatabaseConnectionAsync(
+        this IServiceProvider services, CancellationToken cancellationToken = default)
+    {
+        using var scope = services.CreateScope();
+        var connection = scope.ServiceProvider.GetRequiredService<LedgerDbContext>().Database.GetDbConnection();
+        await connection.OpenAsync(cancellationToken);
+        await connection.CloseAsync();
+    }
 }
