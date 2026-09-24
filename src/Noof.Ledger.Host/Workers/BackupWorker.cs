@@ -77,6 +77,7 @@ internal sealed class BackupWorker(
         IBackupLog backupLog, IDatabaseDumper dumper, DateTimeOffset started, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(options.BackupDirectory);
+        DeleteOrphanTempFiles();
         var fileName = $"noof_ledger-{started:yyyyMMdd-HHmmss}.dump";
         var finalPath = Path.Combine(options.BackupDirectory, fileName);
 
@@ -117,6 +118,17 @@ internal sealed class BackupWorker(
             logger.LogError("Backup failed: {Error}", result.Error);
 
         return result.Succeeded ? BackupTickResult.BackedUp : BackupTickResult.Failed;
+    }
+
+    // M-4 (Phase 4 final review): a cancelled dump used to leave its .tmp file behind forever -
+    // Prune only ever matches *.dump, and RunBackupAsync's own cleanup never runs when the dump
+    // itself throws OperationCanceledException. Runs are serial (this worker is a single
+    // BackgroundService looping one tick at a time), so any *.tmp found here can only be a
+    // leftover from an earlier run that never finished, never one currently in progress.
+    void DeleteOrphanTempFiles()
+    {
+        foreach (var path in Directory.EnumerateFiles(options.BackupDirectory, "*.tmp"))
+            File.Delete(path);
     }
 
     void Prune()

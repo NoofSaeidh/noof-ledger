@@ -265,6 +265,28 @@ public class BackupWorkerTests : IDisposable
         remaining.Should().BeEquivalentTo(["noof_ledger-20260903-030000.dump", "noof_ledger-20260924-030000.dump"]);
     }
 
+    [Fact]
+    public async Task An_orphan_tmp_file_from_an_interrupted_run_is_deleted_before_the_next_attempt()
+    {
+        // M-4 (Phase 4 final review): a cancelled dump used to leave its .tmp file behind forever -
+        // Prune only ever matched *.dump, so nothing would ever notice or remove it.
+        Directory.CreateDirectory(backupDirectory);
+        var orphan = Path.Combine(backupDirectory, "noof_ledger-20260101-000000.dump.tmp");
+        File.WriteAllText(orphan, "half-written");
+
+        var now = new DateTimeOffset(2026, 9, 24, 3, 0, 0, TimeSpan.Zero);
+        var time = new FakeTimeProvider(now);
+        var log = LogWithStatus(new BackupStatus(null, false, null));
+        var dumper = Substitute.For<IDatabaseDumper>();
+        dumper.DumpAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(ci => WriteFakeDumpAsync(ci.Arg<string>(), new DumpResult(true, null)));
+        var worker = CreateWorker(ScopeFactoryFor(log, dumper), time, Options());
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        File.Exists(orphan).Should().BeFalse("an orphan .tmp from a previous interrupted run must not linger forever");
+    }
+
     static Task<DumpResult> WriteFakeDumpAsync(string targetPath, DumpResult result)
     {
         if (result.Succeeded)

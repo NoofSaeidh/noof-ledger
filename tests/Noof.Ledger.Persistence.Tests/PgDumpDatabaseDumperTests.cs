@@ -74,6 +74,56 @@ public class PgDumpDatabaseDumperTests(PostgresFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Cancelling_mid_dump_kills_the_pg_dump_process_instead_of_leaving_it_running()
+    {
+        // M-4 (Phase 4 final review): WaitForExitAsync(cancellationToken) used to return on cancel
+        // while pg_dump kept running and kept writing the .tmp file. Checking "is the process gone
+        // shortly after cancellation" only proves something if pg_dump would otherwise still be
+        // running at that point - so this first times an uncancelled dump of the same table, then
+        // cancels a second one at a quarter of that time and requires the process to be gone within
+        // another quarter, well before it could ever finish on its own.
+        if (!File.Exists(PgDumpPath))
+            Assert.Skip($"pg_dump.exe not found at {PgDumpPath} - install PostgreSQL 18 or set Backup:PgDumpPath (test override: NOOF_TEST_PGDUMP).");
+
+        await using var clone = await fixture.CreateDatabaseAsync();
+        await using (var connection = new NpgsqlConnection(DatabaseSettings.For(clone.Database)))
+        {
+            await connection.OpenAsync(TestContext.Current.CancellationToken);
+            await using var seed = new NpgsqlCommand(
+                "CREATE TABLE bulk_filler AS SELECT g, md5(g::text) AS payload FROM generate_series(1, 5000000) g;",
+                connection)
+            { CommandTimeout = 180 };
+            await seed.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
+
+        var dumper = new PgDumpDatabaseDumper(DatabaseSettings.For(clone.Database), PgDumpPath);
+
+        var calibrationPath = Path.Combine(Path.GetTempPath(), $"noof-backup-test-{Guid.NewGuid():N}-calibration.dump");
+        var stopwatch = Stopwatch.StartNew();
+        var calibration = await dumper.DumpAsync(calibrationPath, TestContext.Current.CancellationToken);
+        stopwatch.Stop();
+        File.Delete(calibrationPath);
+        calibration.Succeeded.Should().BeTrue(calibration.Error);
+        stopwatch.Elapsed.Should().BeGreaterThan(TimeSpan.FromSeconds(1),
+            "the test needs a dump slow enough to still be running a quarter of the way through - raise the row count if this machine dumped it faster than that");
+
+        tempDump = Path.Combine(Path.GetTempPath(), $"noof-backup-test-{Guid.NewGuid():N}.dump");
+        var before = Process.GetProcessesByName("pg_dump").Length;
+        using var cts = new CancellationTokenSource();
+        cts.CancelAfter(stopwatch.Elapsed / 4);
+        var act = async () => await dumper.DumpAsync(tempDump, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+
+        var deadline = DateTime.UtcNow + stopwatch.Elapsed / 4;
+        while (Process.GetProcessesByName("pg_dump").Length > before && DateTime.UtcNow < deadline)
+            await Task.Delay(TimeSpan.FromMilliseconds(20), TestContext.Current.CancellationToken);
+
+        Process.GetProcessesByName("pg_dump").Length.Should().Be(
+            before, "the cancelled dump's pg_dump process must be killed, not left running");
+    }
+
+    [Fact]
     public async Task A_clone_with_no_password_fails_quickly_instead_of_hanging_on_a_console_prompt()
     {
         if (!File.Exists(PgDumpPath))
