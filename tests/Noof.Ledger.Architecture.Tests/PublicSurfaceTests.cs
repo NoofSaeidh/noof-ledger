@@ -34,9 +34,9 @@ public class PublicSurfaceTests
     {
         ["Noof.Ledger.Domain"] =
         [
-            "AppUser", "CaptureKind", "CategorizationAuthority", "CategorizationJob", "Category", "CurrencyCode",
-            "CurrencyMismatchException", "JobKind", "JobStatus", "LineItem", "Merchant", "MerchantAlias",
-            "MerchantKind", "MerchantName", "Money", "Transaction",
+            "AppUser", "BalanceCheck", "CaptureKind", "CategorizationAuthority", "CategorizationJob", "Category", "CurrencyCode",
+            "CurrencyMismatchException", "Entry", "EntryRole", "JobKind", "JobStatus", "LineItem", "Merchant", "MerchantAlias",
+            "MerchantKind", "MerchantName", "Money", "Transaction", "TransactionKind",
             "TransactionStatus", "Wallet",
         ],
         ["Noof.Ledger.Application"] =

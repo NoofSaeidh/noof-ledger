@@ -57,13 +57,17 @@ internal static class RevisionLog
                 line.Amount.Currency.Value,
                 line.CategorySlug,
                 line.MerchantId,
-                (int)line.CategorizedBy))]));
+                (int)line.CategorizedBy))],
+            transaction.Kind.ToString(),
+            transaction.WalletId));
     }
 
     sealed record Snapshot(
         [property: JsonPropertyName("raw_text")] string? RawText,
         [property: JsonPropertyName("occurred_on")] string OccurredOn,
-        [property: JsonPropertyName("items")] IReadOnlyList<SnapshotLine> Items);
+        [property: JsonPropertyName("items")] IReadOnlyList<SnapshotLine> Items,
+        [property: JsonPropertyName("kind")] string Kind,
+        [property: JsonPropertyName("wallet_id")] Guid? WalletId);
 
     sealed record SnapshotLine(
         [property: JsonPropertyName("description")] string Description,

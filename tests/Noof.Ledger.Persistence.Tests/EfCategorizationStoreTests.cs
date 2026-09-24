@@ -18,11 +18,10 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
         Id = Guid.NewGuid(),
         Name = name,
         Currency = CurrencyCode.Eur,
-        IsDefault = false,
     };
 
     static Transaction NewTransaction(
-        Guid walletId, long chatId = 1, int messageId = 1,
+        Guid? walletId, long chatId = 1, int messageId = 1,
         DateTimeOffset? occurredAt = null, DateOnly? occurredOn = null) => new()
     {
         Id = Guid.NewGuid(),
@@ -400,5 +399,52 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
 
         var revision = await db.TransactionRevisions.SingleAsync(TestContext.Current.CancellationToken);
         JsonDocument.Parse(revision.Snapshot).RootElement.GetProperty("raw_text").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task GetSubjectAsync_reads_a_capture_that_has_no_wallet_yet_with_an_empty_wallet_name()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = NewTransaction(walletId: null, chatId: 777, messageId: 9,
+            occurredAt: new DateTimeOffset(2026, 9, 21, 10, 0, 0, TimeSpan.Zero), occurredOn: new DateOnly(2026, 9, 21));
+        db.Transactions.Add(transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var store = new EfCategorizationStore(db, Clock);
+
+        var subject = await store.GetSubjectAsync(transaction.Id, TestContext.Current.CancellationToken);
+
+        subject.Should().NotBeNull("a capture waits for its reading to name a wallet; it must not vanish from the pipeline meanwhile");
+        subject!.WalletName.Should().BeEmpty();
+        subject.TelegramChatId.Should().Be(777);
+    }
+
+    [Fact]
+    public async Task GetSubjectAsync_maps_a_manual_record_with_no_chat_to_chat_zero()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var opening = new Transaction
+        {
+            Id = Guid.NewGuid(),
+            WalletId = SeededDefaultWalletId,
+            Kind = TransactionKind.BalanceCheck,
+            RawText = "Opening balance",
+            CaptureKind = CaptureKind.Manual,
+            Status = TransactionStatus.Completed,
+            TimeZoneId = "Europe/Belgrade",
+            OccurredAt = new DateTimeOffset(2026, 9, 20, 22, 0, 0, TimeSpan.Zero),
+            OccurredOn = new DateOnly(2026, 9, 21),
+            CreatedAt = new DateTimeOffset(2026, 9, 21, 10, 0, 0, TimeSpan.Zero),
+        };
+        db.Transactions.Add(opening);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var store = new EfCategorizationStore(db, Clock);
+
+        var subject = await store.GetSubjectAsync(opening.Id, TestContext.Current.CancellationToken);
+
+        subject!.TelegramChatId.Should().Be(0);
+        subject.WalletName.Should().Be("Main Wallet");
+        subject.CaptureKind.Should().Be(CaptureKind.Manual);
     }
 }

@@ -22,19 +22,12 @@ internal sealed class EfCaptureStore(LedgerDbContext db, TimeProvider timeProvid
         if (existing is not null)
             return existing.Id;
 
-        // Checked before the wallet lookup: a replay of an already captured message must still
-        // succeed even after the default wallet has been unmarked.
-        var wallet = await db.Wallets.SingleOrDefaultAsync(w => w.IsDefault, cancellationToken)
-            ?? throw new InvalidOperationException(
-                "No wallet is marked as the default. Capture cannot proceed without one.");
-
         var now = timeProvider.GetUtcNow();
         var transactionId = Guid.NewGuid();
 
         var transaction = new Transaction
         {
             Id = transactionId,
-            WalletId = wallet.Id,
             RawText = rawText,
             CaptureKind = voice is null ? CaptureKind.Text : CaptureKind.Voice,
             VoiceFileId = voice?.VoiceFileId,

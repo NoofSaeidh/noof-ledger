@@ -48,11 +48,13 @@ public class SeedDataTests(PostgresFixture fixture)
 
         var categoryCountBefore = await db.Categories.CountAsync(TestContext.Current.CancellationToken);
 
+        // AddCaptureModel.SeedDefaultWalletSql names is_default, which AddMoneyModel renamed; it only ever runs inside
+        // its own migration now, against the schema it was written for.
         var act = async () =>
         {
             await db.Database.ExecuteSqlRawAsync(AddCaptureModel.SeedTopLevelCategoriesSql, TestContext.Current.CancellationToken);
-            await db.Database.ExecuteSqlRawAsync(AddCaptureModel.SeedDefaultWalletSql, TestContext.Current.CancellationToken);
             await db.Database.ExecuteSqlRawAsync(AddCaptureModel.SeedSubCategoriesSql, TestContext.Current.CancellationToken);
+            await db.Database.ExecuteSqlRawAsync(AddMoneyModel.SeedIncomeCategoriesSql, TestContext.Current.CancellationToken);
         };
 
         await act.Should().NotThrowAsync("the seed insert must be safe to run against a database that already has these rows");
@@ -81,5 +83,37 @@ public class SeedDataTests(PostgresFixture fixture)
             "the migration mechanism running again must not overwrite an operator's rename");
         reloaded.NameRu.Should().Be("Эспрессо-бар",
             "the migration mechanism running again must not overwrite an operator's rename");
+    }
+
+    [Fact]
+    public async Task Income_has_its_own_categories_under_an_income_parent()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+
+        var categories = await db.Categories.AsNoTracking().ToListAsync(TestContext.Current.CancellationToken);
+        var income = categories.Single(c => c.Slug == "income");
+
+        income.ParentId.Should().BeNull("income is a subtree of its own, beside the spending ones, not under one of them");
+        categories.Where(c => c.ParentId == income.Id).Select(c => c.Slug)
+            .Should().BeEquivalentTo(["salary", "refund", "gift", "other-income"]);
+        categories.Where(c => c.Id == income.Id || c.ParentId == income.Id).Should().OnlyContain(c => c.IsActive);
+    }
+
+    [Fact]
+    public async Task Reapplying_the_income_seed_changes_nothing_and_keeps_an_operators_rename()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var salary = await db.Categories.SingleAsync(c => c.Slug == "salary", TestContext.Current.CancellationToken);
+        salary.NameEn = "Paycheck";
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var countBefore = await db.Categories.CountAsync(TestContext.Current.CancellationToken);
+
+        await db.Database.ExecuteSqlRawAsync(AddMoneyModel.SeedIncomeCategoriesSql, TestContext.Current.CancellationToken);
+
+        (await db.Categories.CountAsync(TestContext.Current.CancellationToken)).Should().Be(countBefore);
+        (await db.Categories.AsNoTracking().SingleAsync(c => c.Slug == "salary", TestContext.Current.CancellationToken))
+            .NameEn.Should().Be("Paycheck", "the migration mechanism running again must not overwrite an operator's rename");
     }
 }

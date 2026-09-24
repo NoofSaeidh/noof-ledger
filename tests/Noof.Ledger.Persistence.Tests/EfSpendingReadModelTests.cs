@@ -17,7 +17,6 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
         Id = Guid.NewGuid(),
         Name = "Cash",
         Currency = currency,
-        IsDefault = false,
     };
 
     static Category NewCategory(string slug, string nameEn) => new()
@@ -37,7 +36,7 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
     };
 
     static Transaction NewTransaction(
-        Guid walletId, DateTimeOffset occurredAt, string timeZoneId, TransactionStatus status,
+        Guid? walletId, DateTimeOffset occurredAt, string timeZoneId, TransactionStatus status,
         DateOnly? occurredOn = null) => new()
     {
         Id = Guid.NewGuid(),
@@ -334,5 +333,24 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
         var summary = await readModel.ThisMonthAsync(TestContext.Current.CancellationToken);
 
         summary.Totals.Should().ContainSingle().Which.Should().BeEquivalentTo(new MonthTotal("Groceries", CurrencyCode.Eur, 2m));
+    }
+
+    [Fact]
+    public async Task RecentAsync_shows_a_capture_that_has_no_wallet_yet()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var now = new DateTimeOffset(2026, 9, 15, 12, 0, 0, TimeSpan.Zero);
+        var captured = NewTransaction(null, now, "Europe/Belgrade", TransactionStatus.Captured);
+        db.Transactions.Add(captured);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var readModel = new EfSpendingReadModel(db, new FakeTimeProvider(now), TimeZoneInfo.Utc);
+
+        var recent = await readModel.RecentAsync(10, TestContext.Current.CancellationToken);
+
+        recent.Should().ContainSingle(r => r.Id == captured.Id, "a message awaiting its reading has no wallet yet and must still show")
+            .Which.WalletName.Should().BeEmpty();
     }
 }

@@ -17,7 +17,6 @@ public class EfJobQueueTests(PostgresFixture fixture)
         Id = Guid.NewGuid(),
         Name = "Cash",
         Currency = CurrencyCode.Eur,
-        IsDefault = false,
     };
 
     static Transaction NewTransaction(Guid walletId, DateTimeOffset now) => new()

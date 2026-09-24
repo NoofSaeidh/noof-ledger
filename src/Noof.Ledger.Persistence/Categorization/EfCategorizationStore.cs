@@ -12,11 +12,12 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
     {
         var header = await (
             from t in db.Transactions.AsNoTracking()
-            join w in db.Wallets.AsNoTracking() on t.WalletId equals w.Id
             where t.Id == transactionId
+            join w in db.Wallets.AsNoTracking() on t.WalletId equals (Guid?)w.Id into walletJoin
+            from w in walletJoin.DefaultIfEmpty()
             select new
             {
-                t.Id, t.RawText, t.TelegramChatId, t.BotMessageId, WalletName = w.Name,
+                t.Id, t.RawText, t.TelegramChatId, t.BotMessageId, WalletName = w == null ? string.Empty : w.Name,
                 t.Status, t.OccurredAt, t.TimeZoneId, t.OccurredOn, t.CaptureKind,
             })
             .SingleOrDefaultAsync(cancellationToken);
@@ -42,9 +43,10 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
             .ToListAsync(cancellationToken);
 
         // A voice capture has no text until its transcript arrives, and none at all when nothing was heard;
-        // the pipeline and the echo read that as empty, which is what it is.
+        // the pipeline and the echo read that as empty, which is what it is. Only a Manual record has no chat,
+        // and nothing categorises or echoes one, so 0 stands in for it.
         return new CategorizationSubject(
-            header.Id, header.RawText ?? string.Empty, header.TelegramChatId, header.BotMessageId, header.WalletName,
+            header.Id, header.RawText ?? string.Empty, header.TelegramChatId ?? 0, header.BotMessageId, header.WalletName,
             header.Status, ZonedClock.LocalDate(header.OccurredAt, header.TimeZoneId), header.OccurredOn, lines,
             header.CaptureKind);
     }

@@ -8,14 +8,22 @@ internal sealed class TransactionConfiguration : IEntityTypeConfiguration<Transa
 {
     public void Configure(EntityTypeBuilder<Transaction> builder)
     {
-        builder.ToTable("transactions", table => table.HasCheckConstraint(
-            "ck_transactions_capture_has_content",
-            "(capture_kind = 0 AND raw_text IS NOT NULL) OR (capture_kind = 1 AND voice_file_id IS NOT NULL)"));
+        builder.ToTable("transactions", table =>
+        {
+            table.HasCheckConstraint(
+                "ck_transactions_capture_has_content",
+                "(capture_kind IN (0, 2) AND raw_text IS NOT NULL) OR (capture_kind = 1 AND voice_file_id IS NOT NULL)");
+            table.HasCheckConstraint(
+                "ck_transactions_telegram_ids_match_capture_kind",
+                "(capture_kind = 2 AND telegram_chat_id IS NULL AND telegram_message_id IS NULL) "
+                + "OR (capture_kind <> 2 AND telegram_chat_id IS NOT NULL AND telegram_message_id IS NOT NULL)");
+        });
 
         builder.HasKey(t => t.Id);
 
         builder.Property(t => t.Id).HasColumnName("id");
         builder.Property(t => t.WalletId).HasColumnName("wallet_id");
+        builder.Property(t => t.Kind).HasColumnName("kind");
         builder.Property(t => t.RawText).HasColumnName("raw_text");
         builder.Property(t => t.CaptureKind).HasColumnName("capture_kind");
         builder.Property(t => t.VoiceFileId).HasColumnName("voice_file_id");
@@ -30,7 +38,10 @@ internal sealed class TransactionConfiguration : IEntityTypeConfiguration<Transa
         builder.Property(t => t.PromptMessageId).HasColumnName("prompt_message_id");
         builder.Property(t => t.CreatedAt).HasColumnName("created_at");
 
-        builder.HasIndex(t => new { t.TelegramChatId, t.TelegramMessageId }).IsUnique();
+        // The name stays EF's default: EfCaptureStore recognises a redelivered message by it.
+        builder.HasIndex(t => new { t.TelegramChatId, t.TelegramMessageId })
+            .IsUnique()
+            .HasFilter("telegram_chat_id IS NOT NULL");
 
         builder.HasOne<Wallet>()
             .WithMany()
