@@ -34,11 +34,7 @@ internal sealed partial class DatabaseStartupService(
             if (result == DatabaseStartupResult.Ready)
                 return;
 
-            var delay = result == DatabaseStartupResult.FailedRetry
-                ? FailedRetryInterval
-                : ConnectionBackoff(connectionAttempt);
-
-            await DelayQuietlyAsync(delay, stoppingToken);
+            await DelayQuietlyAsync(NextDelay(), stoppingToken);
         }
     }
 
@@ -83,8 +79,13 @@ internal sealed partial class DatabaseStartupService(
         }
     }
 
-    TimeSpan ConnectionBackoff(int attempt) =>
-        ConnectionBackoffSteps[Math.Min(Math.Max(attempt, 1) - 1, ConnectionBackoffSteps.Length - 1)];
+    // The delay ExecuteAsync waits before its next attempt, given the outcome RunAttemptAsync just
+    // recorded. Public so the backoff sequence itself is a fast, non-timing assertion.
+    public TimeSpan NextDelay() => gate.State switch
+    {
+        DatabaseState.Failed => FailedRetryInterval,
+        _ => ConnectionBackoffSteps[Math.Min(Math.Max(connectionAttempt, 1) - 1, ConnectionBackoffSteps.Length - 1)],
+    };
 
     async Task DelayQuietlyAsync(TimeSpan delay, CancellationToken stoppingToken)
     {

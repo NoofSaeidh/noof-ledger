@@ -129,4 +129,53 @@ public class DatabaseStartupServiceTests
         result.Should().Be(DatabaseStartupResult.FailedRetry);
         gate.State.Should().Be(DatabaseState.Failed);
     }
+
+    [Fact]
+    public async Task The_backoff_sequence_is_2_4_8_16_30_then_30_forever()
+    {
+        var probe = Substitute.For<IDatabaseStartupProbe>();
+        probe.OpenConnectionAsync(Arg.Any<CancellationToken>())
+            .ThrowsAsync(new NpgsqlException("Connection refused"));
+        var gate = new DatabaseGate();
+        var time = new FakeTimeProvider();
+        var service = CreateService(probe, gate, time);
+
+        TimeSpan[] expected =
+        [
+            TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(8),
+            TimeSpan.FromSeconds(16), TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30),
+        ];
+
+        List<TimeSpan> observed = [];
+        foreach (var _ in expected)
+        {
+            await service.RunAttemptAsync(TestContext.Current.CancellationToken);
+
+            // RunAttemptAsync itself never delays (ExecuteAsync does, between attempts) - this test
+            // exercises the pure backoff function the loop consults, driven the same way
+            // CategorizationWorkerTests drives RunTickAsync in a loop.
+            observed.Add(service.NextDelay());
+            time.Advance(observed[^1]);
+        }
+
+        observed.Should().Equal(expected);
+    }
+
+    [Fact]
+    public async Task Logs_the_first_ten_connection_failures_then_only_every_tenth()
+    {
+        var probe = Substitute.For<IDatabaseStartupProbe>();
+        probe.OpenConnectionAsync(Arg.Any<CancellationToken>())
+            .ThrowsAsync(new NpgsqlException("Connection refused"));
+        var gate = new DatabaseGate();
+        var logger = new ListLogger<DatabaseStartupService>();
+        var service = new DatabaseStartupService(
+            probe, gate, new ConfigurationBuilder().Build(), new FakeTimeProvider(), logger);
+
+        for (var attempt = 1; attempt <= 21; attempt++)
+            await service.RunAttemptAsync(TestContext.Current.CancellationToken);
+
+        // Attempts 1-10, then 20: 11 log lines out of 21 failures.
+        logger.Entries.Should().HaveCount(11);
+    }
 }
