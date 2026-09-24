@@ -9,16 +9,25 @@ public sealed record CategoryOption(string Slug, string NameEn, string NameRu, s
 // A merchant the database already knows. Id is what the model returns when it accepts one.
 public sealed record MerchantOption(Guid Id, string DisplayName);
 
+// A wallet the model may pick for a transaction (M3). Aliases are the words the operator uses for
+// it in speech ("с налички" for a wallet named "Cash"); IsDefaultForCurrency marks the wallet the
+// mapper falls back to when the model names none.
+public sealed record WalletOption(Guid Id, string Name, CurrencyCode Currency, IReadOnlyList<string> Aliases, bool IsDefaultForCurrency);
+
 // Today is the local day the message was SENT, never the day the job runs: a message that waited in the
 // offline queue overnight must not move a day (D2). For a Correct job specifically, "the message" is the
 // correction reply itself, not the original capture (docs/OPEN-QUESTIONS.md P2-2).
+// Wallets is null, not an empty list, when the caller offers none at all - CategorizationSchema and
+// CategorizationPrompt both treat null the same as empty (M9), but the distinction stays in the type
+// so a future caller can tell "no wallets exist yet" from "I forgot to pass them".
 public sealed record CategorizationRequest(
     string RawText,
     DateOnly Today,
     IReadOnlyList<CategoryOption> Categories,
     IReadOnlyList<MerchantOption> MerchantHints,
     IReadOnlyList<MerchantOption> AllMerchants,
-    CorrectionRequest? Correction = null);
+    CorrectionRequest? Correction = null,
+    IReadOnlyList<WalletOption>? Wallets = null);
 
 // The record as it stands and what the person asked to change. The model answers with the complete corrected
 // record, which replaces the model-authored lines exactly as a first reading does (D6).
@@ -36,7 +45,27 @@ public sealed record ProposedLineItem(
     Guid? KnownMerchantId,
     string? MerchantName);
 
-public sealed record CategorizationProposal(IReadOnlyList<ProposedLineItem> Items, string? OccurredOn = null);
+// The closed set of strings the model answers "kind" with (M9). Kept as string constants, not an
+// enum, because this record crosses the model boundary as JSON before anything maps it - the same
+// reason ProposedLineItem.CurrencyCode is a string, not a CurrencyCode, until ProposalMapper resolves it.
+public static class ProposedKind
+{
+    public const string Expense = "expense";
+    public const string Income = "income";
+    public const string Balance = "balance";
+}
+
+// Kind defaults to Expense so every existing positional construction of this record (a plain
+// spending answer) keeps meaning exactly what it always meant. WalletId/BalanceAmount/BalanceCurrency
+// travel flat, mirroring record_transaction's own wire shape (the "expensive to reverse" note in
+// plan-00-header.md) rather than as a nested object the strict schema cannot express as cleanly.
+public sealed record CategorizationProposal(
+    IReadOnlyList<ProposedLineItem> Items,
+    string? OccurredOn = null,
+    string Kind = ProposedKind.Expense,
+    Guid? WalletId = null,
+    decimal? BalanceAmount = null,
+    string? BalanceCurrency = null);
 
 public sealed record ResolvedLineItem(
     string Description,
@@ -45,7 +74,14 @@ public sealed record ResolvedLineItem(
     Guid? KnownMerchantId,
     string? MerchantName);
 
-public sealed record MappedProposal(IReadOnlyList<ResolvedLineItem> Items, DateOnly? OccurredOn);
+// WalletId is always a wallet the request offered: the one the model named, or the default wallet of the
+// spending's currency, or the default wallet of the configured default currency (M3).
+public sealed record MappedProposal(
+    IReadOnlyList<ResolvedLineItem> Items,
+    DateOnly? OccurredOn,
+    TransactionKind Kind = TransactionKind.Expense,
+    Guid WalletId = default,
+    Money? StatedBalance = null);
 
 // A line ready to be written: identity resolved, slug resolved to a real row.
 public sealed record CategorizedLineItem(
@@ -66,7 +102,17 @@ public sealed record CategorizationSubject(
     DateOnly SentOn,
     DateOnly OccurredOn,
     IReadOnlyList<RecordedLine> Lines,
-    CaptureKind CaptureKind = CaptureKind.Text);
+    CaptureKind CaptureKind = CaptureKind.Text,
+    TransactionKind Kind = TransactionKind.Expense,
+    CurrencyCode? WalletCurrency = null,
+    IReadOnlyList<Money>? WalletBalances = null,
+    BalanceStatement? Statement = null,
+    Guid? WalletId = null);
+
+// The stated amount of a balance-check transaction, and what the app had computed for that wallet
+// and currency just before it - history for the echo (M6), never a figure anything reads back as
+// the current balance.
+public sealed record BalanceStatement(Money Stated, decimal ComputedBefore);
 
 // CategoryName is Category.NameEn: the bot speaks English for now (D-D).
 public sealed record RecordedLine(
@@ -76,11 +122,15 @@ public sealed record RecordedLine(
     string? CategoryName,
     string? MerchantName);
 
+// Kind is the job that produced this outcome; TransactionKind is what the record is. Never confuse the two.
 public sealed record CategorizationOutcome(
     IReadOnlyList<CategorizedLineItem> Items,
     DateOnly OccurredOn,
     JobKind Kind = JobKind.Categorize,
-    string? Instruction = null);
+    string? Instruction = null,
+    TransactionKind TransactionKind = TransactionKind.Expense,
+    Guid? WalletId = null,
+    Money? StatedBalance = null);
 
 public sealed record CategoryEntry(Guid Id, string Slug, string NameEn, string NameRu, string? ParentSlug);
 

@@ -18,11 +18,10 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
         Id = Guid.NewGuid(),
         Name = name,
         Currency = CurrencyCode.Eur,
-        IsDefault = false,
     };
 
     static Transaction NewTransaction(
-        Guid walletId, long chatId = 1, int messageId = 1,
+        Guid? walletId, long chatId = 1, int messageId = 1,
         DateTimeOffset? occurredAt = null, DateOnly? occurredOn = null) => new()
     {
         Id = Guid.NewGuid(),
@@ -288,6 +287,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
         subject.TelegramChatId.Should().Be(777);
         subject.BotMessageId.Should().Be(42);
         subject.WalletName.Should().Be("Main Wallet");
+        subject.WalletId.Should().Be(wallet.Id);
         subject.Status.Should().Be(TransactionStatus.Captured);
         subject.SentOn.Should().Be(new DateOnly(2026, 9, 22));
         subject.OccurredOn.Should().Be(new DateOnly(2026, 9, 20));
@@ -321,6 +321,22 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
         var subject = await store.GetSubjectAsync(Guid.NewGuid(), TestContext.Current.CancellationToken);
 
         subject.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetSubjectAsync_names_no_wallet_for_a_capture_that_has_not_been_read_yet()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = NewTransaction(SeededDefaultWalletId);
+        transaction.WalletId = null;
+        db.Transactions.Add(transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var store = new EfCategorizationStore(db, Clock);
+
+        var subject = await store.GetSubjectAsync(transaction.Id, TestContext.Current.CancellationToken);
+
+        subject!.WalletId.Should().BeNull("the wallet is chosen when the message is read, not when it is captured");
     }
 
     [Fact]
@@ -400,5 +416,122 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
 
         var revision = await db.TransactionRevisions.SingleAsync(TestContext.Current.CancellationToken);
         JsonDocument.Parse(revision.Snapshot).RootElement.GetProperty("raw_text").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task GetSubjectAsync_reads_a_capture_that_has_no_wallet_yet_with_an_empty_wallet_name()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = NewTransaction(walletId: null, chatId: 777, messageId: 9,
+            occurredAt: new DateTimeOffset(2026, 9, 21, 10, 0, 0, TimeSpan.Zero), occurredOn: new DateOnly(2026, 9, 21));
+        db.Transactions.Add(transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var store = new EfCategorizationStore(db, Clock);
+
+        var subject = await store.GetSubjectAsync(transaction.Id, TestContext.Current.CancellationToken);
+
+        subject.Should().NotBeNull("a capture waits for its reading to name a wallet; it must not vanish from the pipeline meanwhile");
+        subject!.WalletName.Should().BeEmpty();
+        subject.TelegramChatId.Should().Be(777);
+        subject.WalletCurrency.Should().BeNull("no wallet has been chosen yet, the same reason WalletName reads empty");
+        subject.WalletBalances.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetSubjectAsync_fills_kind_wallet_currency_balance_and_the_statement_for_a_balance_check()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var wallet = new Wallet
+        {
+            Id = Guid.NewGuid(),
+            Name = "Raiffeisen RSD",
+            Currency = CurrencyCode.Rsd,
+            Aliases = [],
+            IsDefaultForCurrency = false,
+            Archived = false,
+            CreatedAt = Clock.GetUtcNow(),
+        };
+        var transaction = NewTransaction(wallet.Id);
+        transaction.Kind = TransactionKind.BalanceCheck;
+        transaction.Status = TransactionStatus.Completed;
+        db.AddRange(wallet, transaction);
+        db.BalanceChecks.Add(new BalanceCheck
+        {
+            TransactionId = transaction.Id,
+            WalletId = wallet.Id,
+            Stated = new Money(45000m, CurrencyCode.Rsd),
+            ComputedBefore = 44800m,
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var store = new EfCategorizationStore(db, Clock);
+
+        var subject = await store.GetSubjectAsync(transaction.Id, TestContext.Current.CancellationToken);
+
+        subject.Should().NotBeNull();
+        subject!.Kind.Should().Be(TransactionKind.BalanceCheck);
+        subject.WalletCurrency.Should().Be(CurrencyCode.Rsd);
+        subject.Statement.Should().Be(new BalanceStatement(new Money(45000m, CurrencyCode.Rsd), 44800m));
+        subject.WalletBalances.Should().Equal(new Money(45000m, CurrencyCode.Rsd));
+        subject.WalletId.Should().Be(wallet.Id, "Task 4's keep-the-wallet correction rule reads this field back for every correction, and a regression here would silently move money between wallets");
+    }
+
+    [Fact]
+    public async Task GetSubjectAsync_reports_no_balance_row_as_an_empty_list()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var wallet = new Wallet
+        {
+            Id = Guid.NewGuid(),
+            Name = "Fresh EUR wallet",
+            Currency = CurrencyCode.Eur,
+            Aliases = [],
+            IsDefaultForCurrency = false,
+            Archived = false,
+            CreatedAt = Clock.GetUtcNow(),
+        };
+        var transaction = NewTransaction(wallet.Id);
+        db.AddRange(wallet, transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var store = new EfCategorizationStore(db, Clock);
+
+        var subject = await store.GetSubjectAsync(transaction.Id, TestContext.Current.CancellationToken);
+
+        subject.Should().NotBeNull();
+        subject!.Kind.Should().Be(TransactionKind.Expense);
+        subject.WalletCurrency.Should().Be(CurrencyCode.Eur);
+        subject.WalletBalances.Should().BeEmpty("no checkpoint or entry has ever touched this wallet yet");
+        subject.Statement.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetSubjectAsync_maps_a_manual_record_with_no_chat_to_chat_zero()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var opening = new Transaction
+        {
+            Id = Guid.NewGuid(),
+            WalletId = SeededDefaultWalletId,
+            Kind = TransactionKind.BalanceCheck,
+            RawText = "Opening balance",
+            CaptureKind = CaptureKind.Manual,
+            Status = TransactionStatus.Completed,
+            TimeZoneId = "Europe/Belgrade",
+            OccurredAt = new DateTimeOffset(2026, 9, 20, 22, 0, 0, TimeSpan.Zero),
+            OccurredOn = new DateOnly(2026, 9, 21),
+            CreatedAt = new DateTimeOffset(2026, 9, 21, 10, 0, 0, TimeSpan.Zero),
+        };
+        db.Transactions.Add(opening);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var store = new EfCategorizationStore(db, Clock);
+
+        var subject = await store.GetSubjectAsync(opening.Id, TestContext.Current.CancellationToken);
+
+        subject!.TelegramChatId.Should().Be(0);
+        subject.WalletName.Should().Be("Main Wallet");
+        subject.CaptureKind.Should().Be(CaptureKind.Manual);
     }
 }

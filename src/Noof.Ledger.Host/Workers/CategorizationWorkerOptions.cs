@@ -41,10 +41,9 @@ internal sealed class CategorizationWorkerOptions
     // stop hammering, short enough that a fixed key recovers within minutes, not hours.
     public TimeSpan AccountCooldown { get; init; } = TimeSpan.FromMinutes(5);
 
-    // The currency substituted when a message states no currency at all - the schema no longer
-    // forces the model to guess one (see ProposalMapper.TryMap). Deliberately a single
-    // hard default rather than an operator-chosen one for now; see docs/BACKLOG.md for the
-    // deferred bot command that would let the operator set it.
+    // The currency whose default wallet takes a record when neither the model nor the spending's own
+    // currency picks one (M3). A line that states no currency takes its wallet's currency, not this. A
+    // single hard default for now; see docs/BACKLOG.md for the deferred bot command that would set it.
     public string DefaultCurrency { get; init; } = "RSD";
 
     public TimeSpan ComputeBackoff(int attemptCount)

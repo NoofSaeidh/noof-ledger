@@ -20,6 +20,7 @@ public class TelegramHttpClientLoggingTests
         using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Database:MigrateOnStartup", "false");
+            builder.UseSetting("Backup:Enabled", "false");
             builder.UseSetting("ConnectionStrings:Ledger",
                 "Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none;Timeout=2");
             builder.ConfigureLogging(logging => logging.AddProvider(new CapturingLoggerProvider(lines)));
@@ -48,6 +49,7 @@ public class TelegramHttpClientLoggingTests
         using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Database:MigrateOnStartup", "false");
+            builder.UseSetting("Backup:Enabled", "false");
             builder.UseSetting("ConnectionStrings:Ledger",
                 "Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none;Timeout=2");
             builder.UseSetting("Logging:LogLevel:System.Net.Http.HttpClient.telegram.LogicalHandler", "Information");

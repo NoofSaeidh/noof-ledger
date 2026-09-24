@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Domain;
+using Noof.Ledger.Persistence.Balances;
 using Noof.Ledger.Persistence.Revisions;
 
 namespace Noof.Ledger.Persistence.Categorization;
@@ -12,12 +13,24 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
     {
         var header = await (
             from t in db.Transactions.AsNoTracking()
-            join w in db.Wallets.AsNoTracking() on t.WalletId equals w.Id
             where t.Id == transactionId
+            join w in db.Wallets.AsNoTracking() on t.WalletId equals (Guid?)w.Id into walletJoin
+            from w in walletJoin.DefaultIfEmpty()
             select new
             {
-                t.Id, t.RawText, t.TelegramChatId, t.BotMessageId, WalletName = w.Name,
-                t.Status, t.OccurredAt, t.TimeZoneId, t.OccurredOn, t.CaptureKind,
+                t.Id,
+                t.RawText,
+                t.TelegramChatId,
+                t.BotMessageId,
+                WalletName = w == null ? string.Empty : w.Name,
+                WalletCurrency = w == null ? (CurrencyCode?)null : w.Currency,
+                t.Status,
+                t.OccurredAt,
+                t.TimeZoneId,
+                t.OccurredOn,
+                t.CaptureKind,
+                t.Kind,
+                t.WalletId,
             })
             .SingleOrDefaultAsync(cancellationToken);
 
@@ -41,12 +54,24 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
                 m == null ? null : m.DisplayName))
             .ToListAsync(cancellationToken);
 
+        var balances = header.WalletId is { } walletId
+            ? await new EfBalanceReadModel(db).BalanceOfAsync(walletId, cancellationToken)
+            : [];
+
+        var statement = header.Kind == TransactionKind.BalanceCheck
+            ? await db.BalanceChecks.AsNoTracking()
+                .Where(bc => bc.TransactionId == transactionId)
+                .Select(bc => new BalanceStatement(bc.Stated, bc.ComputedBefore))
+                .SingleOrDefaultAsync(cancellationToken)
+            : null;
+
         // A voice capture has no text until its transcript arrives, and none at all when nothing was heard;
-        // the pipeline and the echo read that as empty, which is what it is.
+        // the pipeline and the echo read that as empty, which is what it is. Only a Manual record has no chat,
+        // and nothing categorises or echoes one, so 0 stands in for it.
         return new CategorizationSubject(
-            header.Id, header.RawText ?? string.Empty, header.TelegramChatId, header.BotMessageId, header.WalletName,
+            header.Id, header.RawText ?? string.Empty, header.TelegramChatId ?? 0, header.BotMessageId, header.WalletName,
             header.Status, ZonedClock.LocalDate(header.OccurredAt, header.TimeZoneId), header.OccurredOn, lines,
-            header.CaptureKind);
+            header.CaptureKind, header.Kind, header.WalletCurrency, balances, statement, WalletId: header.WalletId);
     }
 
     public async Task ApplyAsync(Guid transactionId, CategorizationOutcome outcome, CancellationToken cancellationToken)
@@ -97,8 +122,11 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
         // brings it back.
         transaction.Status = statusBefore == TransactionStatus.Cancelled ? TransactionStatus.Cancelled : TransactionStatus.Completed;
         transaction.OccurredOn = outcome.OccurredOn;
+        transaction.Kind = outcome.TransactionKind;
+        transaction.WalletId = outcome.WalletId ?? transaction.WalletId;
 
         await db.SaveChangesAsync(cancellationToken);
+        await LedgerPostings.RewriteAsync(db, transaction, outcome.StatedBalance, cancellationToken);
         await RevisionLog.AppendAsync(db, transaction, RevisionKindFor(outcome.Kind), outcome.Instruction,
             statusBefore, timeProvider.GetUtcNow(), cancellationToken);
         await tx.CommitAsync(cancellationToken);

@@ -10,7 +10,7 @@ public class AnswerToolGuardTests
     static readonly JsonElement NoArguments = JsonDocument.Parse(
         """{"type":"object","additionalProperties":false,"properties":{},"required":[]}""").RootElement.Clone();
 
-    static readonly SchemaTool Answer = new("record_spending", "The answer.", NoArguments);
+    static readonly SchemaTool Answer = new("record_transaction", "The answer.", NoArguments);
     static readonly SchemaFunction Lookup = new("list_merchants", "A lookup.", NoArguments, () => "[]");
 
     static readonly ChatMessage UserTurn = new(ChatRole.User, "кофе 250");
@@ -45,7 +45,7 @@ public class AnswerToolGuardTests
 
         var sent = inner.Requests.Should().ContainSingle().Subject.Options!;
         sent.Tools.Should().ContainSingle().Which.Should().BeSameAs(Answer);
-        sent.ToolMode.Should().BeOfType<RequiredChatToolMode>().Which.RequiredFunctionName.Should().Be("record_spending");
+        sent.ToolMode.Should().BeOfType<RequiredChatToolMode>().Which.RequiredFunctionName.Should().Be("record_transaction");
     }
 
     [Fact]
@@ -60,7 +60,7 @@ public class AnswerToolGuardTests
 
         var sent = inner.Requests.Should().ContainSingle().Subject.Options!;
         sent.Tools.Should().ContainSingle().Which.Should().BeSameAs(Answer);
-        sent.ToolMode.Should().BeOfType<RequiredChatToolMode>().Which.RequiredFunctionName.Should().Be("record_spending");
+        sent.ToolMode.Should().BeOfType<RequiredChatToolMode>().Which.RequiredFunctionName.Should().Be("record_transaction");
         sent.Instructions.Should().Be("system prompt");
         sent.MaxOutputTokens.Should().Be(256);
     }

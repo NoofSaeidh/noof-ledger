@@ -2,7 +2,7 @@
 
 Personal finance tracker. Telegram bot captures spending (text, voice, receipt photos), an LLM categorises it per line item, a local Blazor dashboard shows it across multiple wallets and currencies. C# / .NET 10, EF Core, strict TDD, local hosting, **public repo**.
 
-> **Status:** spec approved (`docs/superpowers/specs/2026-09-19-noof-finance-design.md`); **Phases 0, 0b, 1A, 1B, 1C, 1D, 2 and 3 complete** — solution, EF Core model and migrations, PostgreSQL money-storage gate, cookie authentication as the sole mode, the `user set-password` verb, the loopback interlock (unconditional now, not tied to an auth mode), a Blazor Server shell, Telegram capture with a durable queue, natural-language capture — the model reads amounts and dates from how people talk, the bot echoes the stored record in English with Cancel · Edit, a reply or an edit corrects it, and every state is kept in an append-only revision history — with a write-once merchant identity table, a dashboard reading it all back through a read model, each assembly's public surface shrunk to what actually crosses its boundary, and the whole interface rebuilt on MudBlazor with a dark theme, a navigation bar and sign-out — and voice notes are transcribed by Groq's whisper-large-v3 behind `ISpeechToTextClient`, echoed with what was heard, and a spoken reply corrects a record. 677 solution tests, all green — the Playwright browser tests are in the solution now, so `dotnet test --solution` runs them too and needs Chromium present. Live suites stay skipped unless `NOOF_LEDGER_LIVE_ANTHROPIC_KEY` / `NOOF_LEDGER_LIVE_GROQ_KEY` + `NOOF_LEDGER_LIVE_VOICE_FILE` are set; `ops/publish.ps1` produces a runnable host. Next is Phase 4, the money model. Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
+> **Status:** spec approved (`docs/superpowers/specs/2026-09-24-money-model.md`); **Phases 0, 0b, 1A, 1B, 1C, 1D, 2, 3 and 4 complete** — solution, EF Core model and migrations, PostgreSQL money-storage gate, cookie authentication as the sole mode, the `user set-password` verb, the loopback interlock, a Blazor Server shell, Telegram capture with a durable queue, natural-language capture, voice notes transcribed by Groq's whisper-large-v3, and now the money model: every wallet's balance — opening balance, minus spending, plus income, re-anchored by the operator's own balance statements — is exact in all five currencies (EUR, RSD, USD, RUB, KZT) under `ru-RU` and `sr-Latn-RS`. Transactions carry a `Kind` (`Expense`/`Income`/`BalanceCheck`); expense and income transactions own signed double-entry-lite `entries`; a balance statement is a `balance_checks` checkpoint; a wallet's balance is computed by the `wallet_balances` SQL view and read back by `IBalanceReadModel`, never stored. The model's answer tool is `record_transaction` (was `record_spending`) and now names a wallet and, for a balance statement, the stated amount. `/wallets` manages wallets on the dashboard; income and balance statements are ordinary messages to the bot. The app also backs itself up daily — `pg_dump -Fc` into `%LOCALAPPDATA%\NoofLedger\backups`, the newest 14 kept, every run logged to `backup_runs` — and `ops/restore-check.ps1` proves a dump restores to the same balances, checked so far against a template clone; the one check against the live ledger itself is the operator's to run (`ops/RUNBOOK.md`). 852 solution tests, all green — the Playwright browser tests are in the solution now, so `dotnet test --solution` runs them too and needs Chromium present. Live suites stay skipped unless `NOOF_LEDGER_LIVE_ANTHROPIC_KEY` / `NOOF_LEDGER_LIVE_GROQ_KEY` + `NOOF_LEDGER_LIVE_VOICE_FILE` are set; `ops/publish.ps1` produces a runnable host. Cross-currency conversion, transfers and receipt photos remain future phases. Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
 >
 > Deferred **decisions** live in `docs/OPEN-QUESTIONS.md`; deferred **work** lives in `docs/BACKLOG.md`. Check both before proposing something as missing.
 >
@@ -73,6 +73,13 @@ register it into) — named because they are exceptions, not a licence to invent
 - **Capture is the exception** *(settled 2026-09-22)*: the model interprets amounts and dates from
   natural speech with no validation layer. The safety is the echo in Telegram plus cancel and correct,
   not rejection. Do not re-add verbatim checks or sanity bounds — `docs/OPEN-QUESTIONS.md` P2-1.
+- **A wallet's balance is derived, never stored** *(settled 2026-09-24, Phase 4)*. No column anywhere
+  holds a running balance. It is the latest `balance_checks` checkpoint for that wallet and currency
+  plus the sum of `entries` after it (no checkpoint → the sum of all entries), computed by the
+  `wallet_balances` SQL view and read back through `IBalanceReadModel`. A checkpoint's recorded
+  `computed_before` is history for the echo, not a balance anything reads back as current — never add
+  a cached-balance column "for speed" without re-deriving it from entries on every write; that is
+  exactly the drift this model exists to prevent.
 
 **Architecture**
 - Projects are split: `Domain` ← `Application` ← (`Persistence` · `Ai` · `Fx` · `Receipts` · `Telegram` · `Web`) ← `Host`.
@@ -110,6 +117,17 @@ register it into) — named because they are exceptions, not a licence to invent
   code that changes a record writes a revision inside the same database transaction, through
   `RevisionLog.AppendAsync`.
 - Tests run against a real database, never the EF InMemory provider.
+- **An external process never receives a secret as an argument** *(settled 2026-09-24, Phase 4)*.
+  `BackupWorker`'s `pg_dump` is the first production code in this repo to shell out to another
+  process; its connection password goes through `ProcessStartInfo.Environment["PGPASSWORD"]` only —
+  never `ArgumentList`, a log line, or a recorded `backup_runs.error`. Any future external process
+  (another database tool, a future export) follows the same rule: `UseShellExecute = false`,
+  `ArgumentList` for arguments, environment variables for anything that must not appear in a process
+  list or a log.
+- **`wallet_balances` reads `transactions`, `entries` and `balance_checks`.** A migration that alters
+  or drops a column any of those three still expose to the view must `DROP VIEW wallet_balances`
+  first and re-create it in the same migration, or the migration fails on the dependency.
+  `schema.expected.sql` never shows views or triggers — `WalletBalancesViewTests` is their detector.
 
 **Testing**
 - TDD: a failing test first, for all behaviour. Exempt: migrations, DTOs, `Program.cs` wiring.
@@ -127,13 +145,19 @@ register it into) — named because they are exceptions, not a licence to invent
   `BeCloseTo`. This shipped twice before it was caught.
 - `global.json` must contain `{"test":{"runner":"Microsoft.Testing.Platform"}}` or `dotnet test` fails outright on SDK 10.0.204.
 - The inner red-green loop never touches the network or a real model. Live model calls live in an opt-in suite that is skipped by default.
+- **Database and E2E test projects run filtered to the classes a change touches, and in full once at
+  the end of a phase** *(operator's decision, 2026-09-24)*. Both share a PostgreSQL server across
+  worktrees, so an unfiltered run outside that one end-of-phase pass risks colliding with parallel
+  work instead of catching anything the filtered run would not.
 
 **The model** *(settled)*
 - Reached through **`Microsoft.Extensions.AI`'s `IChatClient`** — the Anthropic factory calls
   `AsIChatClient(options.Model, options.MaxTokens)` on the SDK client — not the SDK's native
   `Messages.Create`. Operator's decision.
 - **The answer is a forced tool call with `strict: true`, not structured outputs** *(settled
-  2026-09-23, operator's preference)*. `record_spending`'s arguments are the answer; strictness is a
+  2026-09-23, operator's preference)*. `record_transaction`'s arguments are the answer (renamed from
+  `record_spending` in Phase 4: it now records income and balance statements too, and names a `kind`,
+  an optional `wallet_id`, and — for `kind = "balance"` — the stated `balance_amount`); strictness is a
   provider-neutral marker (`StrictTool.Marker()`), translated to the wire's own `"Strict"` key inside
   `Noof.Ledger.Ai/Anthropic/`, and `ChatToolMode.RequireAny`/`RequireSpecific` becomes `tool_choice`.
   Assert both on the captured HTTP body, not from documentation. (Phase 1B had used
@@ -149,7 +173,7 @@ register it into) — named because they are exceptions, not a licence to invent
   `ISpeechToTextClient` is experimental (`MEAI001`), and the warning is suppressed in
   `Noof.Ledger.Ai` and its tests only.
 - **The tool loop runs through `FunctionInvokingChatClient`** *(D-B)*, with a guard
-  `DelegatingChatClient` below it that re-forces `record_spending` on the follow-up request: FICC
+  `DelegatingChatClient` below it that re-forces `record_transaction` on the follow-up request: FICC
   resets a required `ToolMode` after the first round and strips every tool declaration on its own
   last iteration — verified by decompiling, not by its docs.
 

@@ -3,7 +3,11 @@ namespace Noof.Ledger.Domain;
 public sealed class Transaction
 {
     public required Guid Id { get; init; }
-    public required Guid WalletId { get; init; }
+
+    // Null until the record is read: the model names the wallet, or the default for the currency is used (M3).
+    public Guid? WalletId { get; set; }
+
+    public TransactionKind Kind { get; set; }
 
     // Null only while a voice capture waits for its transcript (or when none ever came); a check
     // constraint requires it for every text capture.
@@ -27,10 +31,11 @@ public sealed class Transaction
     // name the same local day the time of day is known, otherwise only the day is (decision D3).
     public required DateOnly OccurredOn { get; set; }
 
-    public required long TelegramChatId { get; init; }
+    // Both null for a Manual record and only for one; a check constraint holds that.
+    public long? TelegramChatId { get; init; }
 
     // The user's own message.
-    public required int TelegramMessageId { get; init; }
+    public int? TelegramMessageId { get; init; }
 
     // Our reply, attached after capture and edited as categorization finishes -
     // unlike TelegramMessageId, it starts unset.

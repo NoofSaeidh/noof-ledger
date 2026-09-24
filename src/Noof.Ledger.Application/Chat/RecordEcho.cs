@@ -27,12 +27,19 @@ internal sealed class RecordEcho : IRecordEcho
     public EchoMessage Compose(CategorizationSubject record) => WithWhatWasHeard(record, record switch
     {
         { Status: TransactionStatus.Cancelled } =>
-            new($"Cancelled — {record.WalletName}\n{Body(record)}".TrimEnd(), [RecordAction.Restore]),
+            new($"Cancelled — {record.WalletName} · balance {Balances(record)}\n{CancelledBody(record)}".TrimEnd(),
+                [RecordAction.Restore]),
         { Status: TransactionStatus.Failed } => Failure,
         { Status: TransactionStatus.Captured } => new(Waiting(record), []),
+        { Kind: TransactionKind.BalanceCheck, Status: TransactionStatus.Completed } =>
+            new(StatementLine(record), [RecordAction.Cancel, RecordAction.Edit]),
+        { Kind: TransactionKind.Income, Lines.Count: 0 } =>
+            new($"{record.WalletName}: found no income here — nothing recorded.", [RecordAction.Edit]),
         { Lines.Count: 0 } =>
             new($"{record.WalletName}: found no spending here — nothing recorded.", [RecordAction.Edit]),
-        _ => new($"Recorded — {record.WalletName}\n{Body(record)}", [RecordAction.Cancel, RecordAction.Edit]),
+        { Kind: TransactionKind.Income } =>
+            new($"Income — {record.WalletName} · balance {Balances(record)}\n{Body(record)}", [RecordAction.Cancel, RecordAction.Edit]),
+        _ => new($"Recorded — {record.WalletName} · balance {Balances(record)}\n{Body(record)}", [RecordAction.Cancel, RecordAction.Edit]),
     });
 
     public EchoMessage ComposeHeardNothing(CategorizationSubject record)
@@ -71,7 +78,47 @@ internal sealed class RecordEcho : IRecordEcho
             lines.Add($"Total: {Totals(record.Lines)}");
         }
 
+        // M10: a spending in a currency other than its wallet's is not converted - visible as a
+        // separate currency line in the balance, and flagged here so it never looks like an
+        // oversight.
+        if (record.WalletCurrency is { } currency && record.Lines.Any(line => line.Amount.Currency != currency))
+            lines.Add("Not in the wallet's currency — no conversion yet.");
+
         return string.Join('\n', lines);
+    }
+
+    // A BalanceCheck's own body is the statement it recorded, not a line-item body - it has no lines
+    // (the mapper discards a balance statement's Items, per the contract).
+    static string CancelledBody(CategorizationSubject record) =>
+        record is { Kind: TransactionKind.BalanceCheck, Statement: { } statement }
+            ? $"Statement: {FormatAmount(statement.Stated.Amount)} {statement.Stated.Currency}"
+            : Body(record);
+
+    static string StatementLine(CategorizationSubject record)
+    {
+        // A Completed BalanceCheck always has a balance_checks row - the mapper and RewriteAsync both
+        // guarantee it - but a null-forgiving `!` would turn a bug into a crashed Telegram edit rather
+        // than a wrong-looking message, so a missing row degrades instead of throwing.
+        if (record.Statement is not { } statement)
+            return $"{record.WalletName}: balance statement recorded.";
+
+        var currency = statement.Stated.Currency;
+        var before = statement.ComputedBefore;
+        var stated = statement.Stated.Amount;
+        var diff = stated - before;
+        var tail = diff == 0m
+            ? "matches"
+            : $"adjusted {(diff > 0 ? "+" : "-")}{FormatAmount(Math.Abs(diff))} {currency}";
+
+        return $"{record.WalletName}: balance was {FormatAmount(before)} {currency}, you said {FormatAmount(stated)} {currency} — {tail}";
+    }
+
+    static string Balances(CategorizationSubject record)
+    {
+        if (record.WalletBalances is not { Count: > 0 } balances)
+            return record.WalletCurrency is { } currency ? $"0.00 {currency}" : "0.00";
+
+        return string.Join(", ", balances.Select(money => $"{FormatAmount(money.Amount)} {money.Currency}"));
     }
 
     static string FormatLine(RecordedLine line)

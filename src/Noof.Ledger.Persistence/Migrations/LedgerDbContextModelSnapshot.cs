@@ -51,6 +51,44 @@ namespace Noof.Ledger.Persistence.Migrations
                     b.ToTable("app_user", "public");
                 });
 
+            modelBuilder.Entity("Noof.Ledger.Domain.BalanceCheck", b =>
+                {
+                    b.Property<Guid>("TransactionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("transaction_id");
+
+                    b.Property<decimal>("ComputedBefore")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("computed_before");
+
+                    b.Property<Guid>("WalletId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("wallet_id");
+
+                    b.ComplexProperty(typeof(Dictionary<string, object>), "Stated", "Noof.Ledger.Domain.BalanceCheck.Stated#Money", b1 =>
+                        {
+                            b1.IsRequired();
+
+                            b1.Property<decimal>("Amount")
+                                .HasPrecision(19, 4)
+                                .HasColumnType("numeric(19,4)")
+                                .HasColumnName("stated_amount");
+
+                            b1.Property<string>("Currency")
+                                .IsRequired()
+                                .HasMaxLength(3)
+                                .HasColumnType("character varying(3)")
+                                .HasColumnName("currency");
+                        });
+
+                    b.HasKey("TransactionId");
+
+                    b.HasIndex("WalletId");
+
+                    b.ToTable("balance_checks", "public");
+                });
+
             modelBuilder.Entity("Noof.Ledger.Domain.CategorizationJob", b =>
                 {
                     b.Property<Guid>("Id")
@@ -175,6 +213,51 @@ namespace Noof.Ledger.Persistence.Migrations
                     b.ToTable("categories", "public");
                 });
 
+            modelBuilder.Entity("Noof.Ledger.Domain.Entry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("Role")
+                        .HasColumnType("integer")
+                        .HasColumnName("role");
+
+                    b.Property<Guid>("TransactionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("transaction_id");
+
+                    b.Property<Guid>("WalletId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("wallet_id");
+
+                    b.ComplexProperty(typeof(Dictionary<string, object>), "Amount", "Noof.Ledger.Domain.Entry.Amount#Money", b1 =>
+                        {
+                            b1.IsRequired();
+
+                            b1.Property<decimal>("Amount")
+                                .HasPrecision(19, 4)
+                                .HasColumnType("numeric(19,4)")
+                                .HasColumnName("amount");
+
+                            b1.Property<string>("Currency")
+                                .IsRequired()
+                                .HasMaxLength(3)
+                                .HasColumnType("character varying(3)")
+                                .HasColumnName("currency");
+                        });
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TransactionId");
+
+                    b.HasIndex("WalletId")
+                        .HasDatabaseName("ix_entries_wallet_id");
+
+                    b.ToTable("entries", "public");
+                });
+
             modelBuilder.Entity("Noof.Ledger.Domain.LineItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -294,6 +377,10 @@ namespace Noof.Ledger.Persistence.Migrations
                         .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
 
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer")
+                        .HasColumnName("kind");
+
                     b.Property<DateTimeOffset>("OccurredAt")
                         .HasColumnType("timestamptz")
                         .HasColumnName("occurred_at");
@@ -314,11 +401,11 @@ namespace Noof.Ledger.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("status");
 
-                    b.Property<long>("TelegramChatId")
+                    b.Property<long?>("TelegramChatId")
                         .HasColumnType("bigint")
                         .HasColumnName("telegram_chat_id");
 
-                    b.Property<int>("TelegramMessageId")
+                    b.Property<int?>("TelegramMessageId")
                         .HasColumnType("integer")
                         .HasColumnName("telegram_message_id");
 
@@ -336,7 +423,7 @@ namespace Noof.Ledger.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("voice_file_id");
 
-                    b.Property<Guid>("WalletId")
+                    b.Property<Guid?>("WalletId")
                         .HasColumnType("uuid")
                         .HasColumnName("wallet_id");
 
@@ -345,11 +432,14 @@ namespace Noof.Ledger.Persistence.Migrations
                     b.HasIndex("WalletId");
 
                     b.HasIndex("TelegramChatId", "TelegramMessageId")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("telegram_chat_id IS NOT NULL");
 
                     b.ToTable("transactions", "public", t =>
                         {
-                            t.HasCheckConstraint("ck_transactions_capture_has_content", "(capture_kind = 0 AND raw_text IS NOT NULL) OR (capture_kind = 1 AND voice_file_id IS NOT NULL)");
+                            t.HasCheckConstraint("ck_transactions_capture_has_content", "(capture_kind IN (0, 2) AND raw_text IS NOT NULL) OR (capture_kind = 1 AND voice_file_id IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_transactions_telegram_ids_match_capture_kind", "(capture_kind = 2 AND telegram_chat_id IS NULL AND telegram_message_id IS NULL) OR (capture_kind <> 2 AND telegram_chat_id IS NOT NULL AND telegram_message_id IS NOT NULL)");
                         });
                 });
 
@@ -360,15 +450,34 @@ namespace Noof.Ledger.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.PrimitiveCollection<string[]>("Aliases")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasColumnName("aliases")
+                        .HasDefaultValueSql("'{}'");
+
+                    b.Property<bool>("Archived")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("archived");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
                     b.Property<string>("Currency")
                         .IsRequired()
                         .HasMaxLength(3)
                         .HasColumnType("character varying(3)")
                         .HasColumnName("currency");
 
-                    b.Property<bool>("IsDefault")
+                    b.Property<bool>("IsDefaultForCurrency")
                         .HasColumnType("boolean")
-                        .HasColumnName("is_default");
+                        .HasColumnName("is_default_for_currency");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -378,7 +487,48 @@ namespace Noof.Ledger.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("Currency")
+                        .IsUnique()
+                        .HasDatabaseName("ix_wallets_one_default_per_currency")
+                        .HasFilter("is_default_for_currency");
+
                     b.ToTable("wallets", "public");
+                });
+
+            modelBuilder.Entity("Noof.Ledger.Persistence.Backup.BackupRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("text")
+                        .HasColumnName("error");
+
+                    b.Property<string>("FileName")
+                        .HasColumnType("text")
+                        .HasColumnName("file_name");
+
+                    b.Property<DateTimeOffset>("FinishedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("finished_at");
+
+                    b.Property<long?>("SizeBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("size_bytes");
+
+                    b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("started_at");
+
+                    b.Property<bool>("Succeeded")
+                        .HasColumnType("boolean")
+                        .HasColumnName("succeeded");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("backup_runs", "public");
                 });
 
             modelBuilder.Entity("Noof.Ledger.Persistence.Revisions.TransactionRevision", b =>
@@ -449,6 +599,21 @@ namespace Noof.Ledger.Persistence.Migrations
                     b.ToTable("app_secret", "public");
                 });
 
+            modelBuilder.Entity("Noof.Ledger.Domain.BalanceCheck", b =>
+                {
+                    b.HasOne("Noof.Ledger.Domain.Transaction", null)
+                        .WithOne()
+                        .HasForeignKey("Noof.Ledger.Domain.BalanceCheck", "TransactionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Noof.Ledger.Domain.Wallet", null)
+                        .WithMany()
+                        .HasForeignKey("WalletId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Noof.Ledger.Domain.CategorizationJob", b =>
                 {
                     b.HasOne("Noof.Ledger.Domain.Transaction", null)
@@ -464,6 +629,21 @@ namespace Noof.Ledger.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("ParentId")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Noof.Ledger.Domain.Entry", b =>
+                {
+                    b.HasOne("Noof.Ledger.Domain.Transaction", null)
+                        .WithMany()
+                        .HasForeignKey("TransactionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Noof.Ledger.Domain.Wallet", null)
+                        .WithMany()
+                        .HasForeignKey("WalletId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Noof.Ledger.Domain.LineItem", b =>
@@ -499,8 +679,7 @@ namespace Noof.Ledger.Persistence.Migrations
                     b.HasOne("Noof.Ledger.Domain.Wallet", null)
                         .WithMany()
                         .HasForeignKey("WalletId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("Noof.Ledger.Persistence.Revisions.TransactionRevision", b =>

@@ -13,18 +13,21 @@ internal sealed class EfSpendingReadModel(LedgerDbContext db, TimeProvider timeP
 
     public async Task<IReadOnlyList<RecentTransaction>> RecentAsync(int limit, CancellationToken cancellationToken)
     {
-        var headers = await db.Transactions
-            .Where(t => t.Status != TransactionStatus.Cancelled)
-            .Join(db.Wallets, t => t.WalletId, w => w.Id, (t, w) => new
-            {
-                t.Id,
-                t.OccurredOn,
-                t.OccurredAt,
-                t.TimeZoneId,
-                RawText = t.RawText ?? string.Empty,
-                t.Status,
-                WalletName = w.Name,
-            })
+        var headers = await (
+                from t in db.Transactions
+                where t.Status != TransactionStatus.Cancelled
+                join w in db.Wallets on t.WalletId equals (Guid?)w.Id into walletJoin
+                from w in walletJoin.DefaultIfEmpty()
+                select new
+                {
+                    t.Id,
+                    t.OccurredOn,
+                    t.OccurredAt,
+                    t.TimeZoneId,
+                    RawText = t.RawText ?? string.Empty,
+                    t.Status,
+                    WalletName = w == null ? string.Empty : w.Name,
+                })
             .OrderByDescending(h => h.OccurredOn)
             .ThenByDescending(h => h.OccurredAt)
             .ThenByDescending(h => h.Id)
@@ -100,12 +103,18 @@ internal sealed class EfSpendingReadModel(LedgerDbContext db, TimeProvider timeP
                 WHERE t.occurred_on >= @firstDay
                   AND t.occurred_on < @firstDayNextMonth
                   AND t.status <> @cancelled
+                  AND t.kind = @expense
                 GROUP BY COALESCE(c.name_en, @uncategorised), li.currency
                 """;
             command.Parameters.Add(new NpgsqlParameter("uncategorised", UncategorisedLabel));
             command.Parameters.Add(new NpgsqlParameter("firstDay", firstDay));
             command.Parameters.Add(new NpgsqlParameter("firstDayNextMonth", firstDayNextMonth));
             command.Parameters.Add(new NpgsqlParameter("cancelled", (int)TransactionStatus.Cancelled));
+            // TransactionKind.Expense is 0, a compile-time constant int, so an inline cast here is ambiguous
+            // between NpgsqlParameter's NpgsqlDbType and DbType overloads (C#'s "constant zero converts to
+            // any enum" rule). A local variable is not a compile-time constant, so it resolves to (string, object).
+            var expenseKind = (int)TransactionKind.Expense;
+            command.Parameters.Add(new NpgsqlParameter("expense", expenseKind));
 
             var totals = new List<MonthTotal>();
             await using (var reader = await command.ExecuteReaderAsync(cancellationToken))

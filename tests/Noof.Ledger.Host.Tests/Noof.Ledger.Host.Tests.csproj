@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Noof.Ledger.Host\Noof.Ledger.Host.csproj" />
+    <ProjectReference Include="..\Noof.Ledger.TestKit\Noof.Ledger.TestKit.csproj" />
   </ItemGroup>
 
 </Project>

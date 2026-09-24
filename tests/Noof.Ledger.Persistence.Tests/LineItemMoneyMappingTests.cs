@@ -8,7 +8,7 @@ namespace Noof.Ledger.Persistence.Tests;
 public class LineItemMoneyMappingTests(PostgresFixture fixture)
 {
     static Wallet NewWallet() => new()
-        { Id = Guid.NewGuid(), Name = "Test wallet", Currency = CurrencyCode.Eur, IsDefault = false };
+        { Id = Guid.NewGuid(), Name = "Test wallet", Currency = CurrencyCode.Eur };
 
     static Transaction NewTransaction(Guid walletId) => new()
     {

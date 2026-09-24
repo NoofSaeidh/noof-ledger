@@ -1,6 +1,7 @@
 ﻿using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Jobs;
+using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Host.Workers;
@@ -85,6 +86,7 @@ internal sealed class CategorizationWorker(
         var merchantDirectory = scope.ServiceProvider.GetRequiredService<IMerchantDirectory>();
         var categorizer = scope.ServiceProvider.GetRequiredService<ICategorizer>();
         var notifier = scope.ServiceProvider.GetRequiredService<IChatNotifier>();
+        var walletDirectory = scope.ServiceProvider.GetRequiredService<IWalletDirectory>();
 
         CategorizationSubject? subject = null;
 
@@ -107,6 +109,7 @@ internal sealed class CategorizationWorker(
                 .ToList();
 
             var allMerchants = await merchantDirectory.MerchantsAsync(cancellationToken);
+            var wallets = await walletDirectory.ActiveAsync(cancellationToken);
 
             var request = new CategorizationRequest(
                 sub.RawText,
@@ -114,7 +117,8 @@ internal sealed class CategorizationWorker(
                 [.. categories.Select(category => new CategoryOption(category.Slug, category.NameEn, category.NameRu, category.ParentSlug))],
                 hints,
                 allMerchants,
-                CorrectionFor(job, sub));
+                CorrectionFor(job, sub),
+                wallets);
 
             var proposal = await categorizer.ProposeAsync(request, cancellationToken);
 
@@ -127,7 +131,8 @@ internal sealed class CategorizationWorker(
             var offeredMerchantIds = allMerchants.Select(merchant => merchant.Id).ToHashSet();
 
             if (!proposalMapper.TryMap(
-                proposal, offeredSlugs, offeredMerchantIds, options.DefaultCurrency, out var mapped, out var failure))
+                KeepingTheRecordsWallet(job, sub, proposal, wallets), offeredSlugs, offeredMerchantIds, wallets,
+                options.DefaultCurrency, out var mapped, out var failure))
             {
                 await FailTerminallyAsync(jobQueue, store, notifier, job, subject, failure, cancellationToken);
                 return;
@@ -179,7 +184,10 @@ internal sealed class CategorizationWorker(
 
             var occurredOn = mapped.OccurredOn ?? DefaultDay(job, sub);
             await store.ApplyAsync(
-                job.TransactionId, new CategorizationOutcome(categorizedItems, occurredOn, job.Kind, job.Instruction), cancellationToken);
+                job.TransactionId,
+                new CategorizationOutcome(
+                    categorizedItems, occurredOn, job.Kind, job.Instruction, mapped.Kind, mapped.WalletId, mapped.StatedBalance),
+                cancellationToken);
 
             // From this line on, the transaction's line items and Completed status are already
             // committed. Nothing past here may ever be treated as a job failure - that would run
@@ -248,6 +256,18 @@ internal sealed class CategorizationWorker(
     // day the message was sent (D2).
     static DateOnly DefaultDay(CategorizationJob job, CategorizationSubject record) =>
         job.Kind == JobKind.Correct ? record.OccurredOn : record.SentOn;
+
+    // The model is shown a correction's lines, not its wallet, so a correction that names no wallet means "leave it
+    // where it is", not "the default": otherwise "нет, 300" would quietly move a Raiffeisen purchase into the RSD
+    // default and both balances would drift (M1). A re-read starts from scratch and resolves the wallet afresh (M3).
+    static CategorizationProposal KeepingTheRecordsWallet(
+        CategorizationJob job, CategorizationSubject record, CategorizationProposal proposal, IReadOnlyList<WalletOption> wallets) =>
+        job.Kind == JobKind.Correct
+        && proposal.WalletId is null
+        && record.WalletId is { } current
+        && wallets.Any(wallet => wallet.Id == current)
+            ? proposal with { WalletId = current }
+            : proposal;
 
     async Task EchoAsync(ICategorizationStore store, IChatNotifier notifier, CategorizationJob job, CancellationToken cancellationToken)
     {

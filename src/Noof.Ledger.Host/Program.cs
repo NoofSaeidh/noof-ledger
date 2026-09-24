@@ -42,6 +42,9 @@ builder.Services.AddSingleton<IPasswordHasher, PasswordHasherAdapter>();
 var categorizationOptions = new CategorizationWorkerOptions();
 builder.Configuration.GetSection("Categorization").Bind(categorizationOptions);
 
+var backupOptions = new BackupWorkerOptions();
+builder.Configuration.GetSection("Backup").Bind(backupOptions);
+
 builder.Services.AddNoofPersistence(builder.Configuration, categorizationOptions.MaxAttempts);
 
 builder.Services.AddAuthentication(AuthSchemes.Cookie)
@@ -65,7 +68,7 @@ builder.Services.AddNoofTelegram();
 
 builder.Services.AddNoofAi(builder.Configuration);
 
-builder.Services.AddNoofWorkers(categorizationOptions);
+builder.Services.AddNoofWorkers(categorizationOptions, backupOptions);
 
 var app = builder.Build();
 

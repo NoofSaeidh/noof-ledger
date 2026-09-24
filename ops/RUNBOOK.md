@@ -142,6 +142,83 @@ mutated from parallel tests, and one failed drop used to abort the loop and skip
 every remaining database. Teardown now continues past a failure and ends by
 naming what it could not remove, pointing here.
 
+## Backups
+
+`BackupWorker` runs inside the host, not as a separate process. On start it checks
+`backup_runs` for the newest successful run; if there is none, or it is older than 24 hours, it
+backs up immediately. Otherwise it wakes again when that success turns 24 hours old — not 24 hours
+from whenever it happened to start — so a host that is not always on still backs up roughly once a
+day rather than falling to every other day; a failed attempt is retried after 1 hour instead of
+waiting for the next scheduled day.
+
+**Where:** `%LOCALAPPDATA%\NoofLedger\backups\noof_ledger-yyyyMMdd-HHmmss.dump` (UTC timestamp in
+the file name). Written under a `.tmp` name first and renamed only on success, so a half-written
+dump never looks finished to anything that lists the directory.
+
+**How many:** the newest 14. Older ones are deleted right after a successful backup, by file name
+order (the timestamp in the name sorts the same as time, so no file needs to be opened to prune).
+
+**Checking status:** every run — success or failure — is a row in `backup_runs`. The dashboard's
+home page shows *Last backup: never* until the first success, then *Last backup: N min/h/d ago*
+after one, or *Last backup: failed* whenever the most recent run failed (even after an earlier
+success) — amber whenever nothing has ever succeeded, the last run failed, or the last success is
+older than 36 hours. From a database connection directly:
+```sql
+SELECT started_at, finished_at, succeeded, file_name, size_bytes, error
+FROM backup_runs ORDER BY started_at DESC LIMIT 5;
+```
+
+**Restoring a dump by hand** (into a *new* database — never over `noof_ledger` directly):
+```powershell
+$c = (Get-Content "$env:LOCALAPPDATA\NoofLedger\db.connection" -Raw).Trim()
+$p = @{}; foreach ($x in $c.Split(';')) { if ($x -match '^\s*([^=]+)=(.*)$') { $p[$Matches[1].Trim()] = $Matches[2].Trim() } }
+$env:PGPASSWORD = $p['Password']
+& 'C:\Program Files\PostgreSQL\18\bin\psql.exe' -h $p['Host'] -p $p['Port'] -U $p['Username'] -d postgres -c "CREATE DATABASE noof_ledger_restored"
+& 'C:\Program Files\PostgreSQL\18\bin\pg_restore.exe' -h $p['Host'] -p $p['Port'] -U $p['Username'] -d noof_ledger_restored --no-owner --no-privileges `
+    "$env:LOCALAPPDATA\NoofLedger\backups\<the .dump file>"
+```
+Drop `noof_ledger_restored` when you are done inspecting it — `psql ... -c "DROP DATABASE noof_ledger_restored"`.
+
+A dump contains only the database — the data-protection key ring (`%LOCALAPPDATA%\NoofLedger\dp-keys`)
+and the connection string (`%LOCALAPPDATA%\NoofLedger\db.connection`) live outside it. Secrets stored
+in `app_secret` are encrypted with that key ring, so a dump restored on another machine, or after the
+key ring is lost, has unreadable secrets until they are re-entered through the UI — copy the `dp-keys`
+folder alongside the dump if a restore is meant to also carry the secrets forward.
+
+**`ops/restore-check.ps1`** automates the check above and compares the result against a source
+database instead of leaving that to your own eyes: it restores a dump (the newest one by default, or
+`-DumpPath` for a specific one) into a throwaway scratch database, compares `wallet_balances` and
+every ledger table's row count against `-SourceDatabase` (default `noof_ledger_test_template`),
+prints the result, and drops the scratch database either way. It refuses to let the scratch target
+ever be `noof_ledger`, `noof_ledger_test_template`, `postgres`, or either template database, by exact
+name.
+
+`backup_runs` is deliberately excluded from that row-count comparison (printed as an informational
+line instead): `BackupWorker` writes the run's own `backup_runs` row *after* the dump finishes, so a
+dump the worker made will always have one fewer `backup_runs` row than the live database it was taken
+from — comparing it would report MISMATCH on every worker-made dump, by construction, not because
+anything is wrong.
+
+The comparison overall is against the database as it stands **right now**, not as it stood when the
+dump was taken — anything written since (a captured message, a job row, a new backup run) shows up as
+a difference against `-SourceDatabase`. Run it while the host is idle (no capture in flight), or point
+`-DumpPath` at a dump you just took and compare before anything else writes to the database.
+
+`Backup:Enabled=false` disables the worker (the test fixtures set it); `Backup:PgDumpPath` overrides
+the `pg_dump.exe` binary location for the worker's own dumps, if it is not at the default
+`C:\Program Files\PostgreSQL\18\bin\`. `restore-check.ps1` does not read that setting at all — it
+takes its own `-PgRoot` parameter (default the same path) and finds `psql.exe`/`pg_restore.exe` under
+it directly.
+
+**The one real run against `noof_ledger`, per the operator's decision (B5):** this must be run by the
+operator, or with the operator's explicit permission, since it reads the real ledger:
+```powershell
+pwsh -File ops/restore-check.ps1 -SourceDatabase noof_ledger
+```
+Record the result here once it has been run:
+
+> _Not yet run. When it is: date, dump file name, and OK/MISMATCH go here._
+
 ## Start the published app from its own directory
 
 ```powershell

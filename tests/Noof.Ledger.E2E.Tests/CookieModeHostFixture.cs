@@ -88,6 +88,7 @@ public sealed class CookieModeHostFixture : IAsyncLifetime
             {
                 ["Database__MigrateOnStartup"] = "false",
                 ["ConnectionStrings__Ledger"] = cloneConnectionString,
+                ["Backup__Enabled"] = "false",
             }, cancellationToken);
         }
         catch

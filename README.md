@@ -6,16 +6,21 @@ Capture spending through a Telegram bot — typed, spoken, or photographed — l
 each line item, and see where the money went on a local Blazor dashboard that understands multiple
 wallets and currencies.
 
-> **Status: the capture path works end to end.** A message typed to the Telegram bot becomes a
-> categorised expense on the dashboard. Say it the way you would say it — *"купил вчера штуку
-> евро"* is recorded as 1000 EUR dated yesterday, echoed back in the chat, and can be cancelled
-> with one tap or corrected by a reply. Voice notes work the same way: say it, and the bot records
-> what it heard.
-> 677 tests, all green — browser tests included.
+> **Status: capture, balances and a checked backup all work end to end.** A message typed to the
+> Telegram bot becomes a categorised expense, income, or balance statement on the dashboard — say it
+> the way you would say it, and the model reads the amount, the date, the kind and which wallet from
+> how you speak it. Every wallet's balance — opening balance, minus spending, plus income, corrected
+> by your own balance statements — is exact in all five supported currencies (EUR, RSD, USD, RUB,
+> KZT), proven under both `ru-RU` and `sr-Latn-RS`. Wallets are created and managed on a `/wallets`
+> page; income and balance statements are ordinary messages to the bot, typed or spoken. The app
+> backs its own database up daily, and `ops/restore-check.ps1` restores a dump into a scratch
+> database and compares every wallet's balance and row count against the source — proven so far
+> against a template clone; the one restore check against the live ledger itself is the operator's
+> to run (see `ops/RUNBOOK.md`).
+> 852 tests, all green — browser tests included.
 >
-> Still missing before it can carry a year of real spending: **balances** (there is no arithmetic
-> over wallets yet), **receipt photos**, **currency exchange**, and — the one that matters most —
-> **a backup that has actually been restored at least once**. An untested backup is a hypothesis.
+> Still missing: **receipt photos** and **currency exchange** (a spend in a currency other than its
+> wallet's own is recorded as-is, in its own currency, not converted).
 
 ## Why it looks the way it does
 

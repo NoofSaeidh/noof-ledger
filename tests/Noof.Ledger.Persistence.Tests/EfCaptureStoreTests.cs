@@ -11,40 +11,23 @@ namespace Noof.Ledger.Persistence.Tests;
 [Collection("postgres")]
 public class EfCaptureStoreTests(PostgresFixture fixture)
 {
-    static Wallet DefaultWallet() => new()
-    {
-        Id = Guid.NewGuid(),
-        Name = "Cash",
-        Currency = CurrencyCode.Eur,
-        IsDefault = true,
-    };
-
     static CapturedMessage NewMessage(long chatId = 1, int messageId = 100, DateTimeOffset? sentAt = null) =>
         new(chatId, messageId, "coffee 3.50", sentAt ?? DateTimeOffset.UnixEpoch);
 
-    // The AddCaptureModel migration seeds exactly one default wallet (SeedDataTests proves it),
-    // enforced by the ix_wallets_single_default partial unique index. These tests want full
-    // control over which wallet is "the" default, so the seeded row is removed first - otherwise
-    // adding a second IsDefault = true wallet is a unique-constraint violation, not a fixture bug.
-    static async Task RemoveSeededDefaultWalletAsync(LedgerDbContext db, CancellationToken cancellationToken)
-    {
-        var seeded = await db.Wallets.SingleAsync(cancellationToken);
-        db.Wallets.Remove(seeded);
-        await db.SaveChangesAsync(cancellationToken);
-    }
-
     [Fact]
-    public async Task Throws_when_no_wallet_is_marked_default()
+    public async Task Captures_even_when_no_wallet_is_marked_default()
     {
         await using var db = await fixture.CreateContextAsync();
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
-        await RemoveSeededDefaultWalletAsync(db, TestContext.Current.CancellationToken);
+        var seeded = await db.Wallets.SingleAsync(TestContext.Current.CancellationToken);
+        seeded.IsDefaultForCurrency = false;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         var store = new EfCaptureStore(db, new FakeTimeProvider());
 
-        var act = async () =>
-            await store.CaptureAsync(NewMessage(), "Europe/Belgrade", TestContext.Current.CancellationToken);
+        var transactionId = await store.CaptureAsync(NewMessage(), "Europe/Belgrade", TestContext.Current.CancellationToken);
 
-        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*default*");
+        (await db.Transactions.SingleAsync(TestContext.Current.CancellationToken)).Id.Should().Be(transactionId,
+            "the wallet is chosen when the record is read, so a capture never waits for one");
     }
 
     [Fact]
@@ -52,10 +35,6 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
     {
         await using var db = await fixture.CreateContextAsync();
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
-        await RemoveSeededDefaultWalletAsync(db, TestContext.Current.CancellationToken);
-        var wallet = DefaultWallet();
-        db.Wallets.Add(wallet);
-        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var now = new DateTimeOffset(2026, 9, 21, 8, 0, 0, TimeSpan.Zero);
         var store = new EfCaptureStore(db, new FakeTimeProvider(now));
@@ -65,7 +44,9 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
 
         var transaction = await db.Transactions.SingleAsync(TestContext.Current.CancellationToken);
         transaction.Id.Should().Be(transactionId);
-        transaction.WalletId.Should().Be(wallet.Id);
+        transaction.WalletId.Should().BeNull("the model names the wallet when it reads the message, or the currency's default is used then");
+        transaction.Kind.Should().Be(TransactionKind.Expense);
+        transaction.CaptureKind.Should().Be(CaptureKind.Text);
         transaction.RawText.Should().Be("coffee 3.50");
         transaction.Status.Should().Be(TransactionStatus.Captured);
         transaction.TimeZoneId.Should().Be("Europe/Belgrade");
@@ -88,9 +69,6 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
     {
         await using var db = await fixture.CreateContextAsync();
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
-        await RemoveSeededDefaultWalletAsync(db, TestContext.Current.CancellationToken);
-        db.Wallets.Add(DefaultWallet());
-        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var sentAt = new DateTimeOffset(2026, 9, 21, 8, 0, 0, TimeSpan.Zero);
         var processedAt = sentAt.AddHours(3);
@@ -109,9 +87,6 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
     {
         await using var db = await fixture.CreateContextAsync();
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
-        await RemoveSeededDefaultWalletAsync(db, TestContext.Current.CancellationToken);
-        db.Wallets.Add(DefaultWallet());
-        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         var store = new EfCaptureStore(db, new FakeTimeProvider());
         var message = NewMessage();
 
@@ -124,27 +99,6 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
     }
 
     [Fact]
-    public async Task A_replay_succeeds_even_if_no_wallet_is_marked_default_any_more()
-    {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
-        await RemoveSeededDefaultWalletAsync(db, TestContext.Current.CancellationToken);
-        var wallet = DefaultWallet();
-        db.Wallets.Add(wallet);
-        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-        var store = new EfCaptureStore(db, new FakeTimeProvider());
-        var message = NewMessage();
-        var first = await store.CaptureAsync(message, "Europe/Belgrade", TestContext.Current.CancellationToken);
-
-        wallet.IsDefault = false;
-        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-        var second = await store.CaptureAsync(message, "Europe/Belgrade", TestContext.Current.CancellationToken);
-
-        second.Should().Be(first, "a replay must not fail just because the wallet lookup would now throw");
-    }
-
-    [Fact]
     public async Task A_failure_before_commit_leaves_neither_row_behind()
     {
         var connectionString = await fixture.CreateEmptyDatabaseConnectionStringAsync();
@@ -153,9 +107,6 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
             new DbContextOptionsBuilder<LedgerDbContext>().UseNpgsql(connectionString).Options))
         {
             await seed.Database.MigrateAsync(TestContext.Current.CancellationToken);
-            await RemoveSeededDefaultWalletAsync(seed, TestContext.Current.CancellationToken);
-            seed.Wallets.Add(DefaultWallet());
-            await seed.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
         await using var breaking = new LedgerDbContext(
@@ -188,9 +139,6 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
     {
         await using var dbA = await fixture.CreateContextAsync();
         await dbA.Database.MigrateAsync(TestContext.Current.CancellationToken);
-        await RemoveSeededDefaultWalletAsync(dbA, TestContext.Current.CancellationToken);
-        dbA.Wallets.Add(DefaultWallet());
-        await dbA.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var optionsB = new DbContextOptionsBuilder<LedgerDbContext>()
             .UseNpgsql(dbA.Database.GetConnectionString()!)
@@ -244,9 +192,6 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
     {
         await using var db = await fixture.CreateContextAsync();
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
-        await RemoveSeededDefaultWalletAsync(db, TestContext.Current.CancellationToken);
-        db.Wallets.Add(DefaultWallet());
-        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         var store = new EfCaptureStore(db, new FakeTimeProvider());
         var transactionId =
             await store.CaptureAsync(NewMessage(), "Europe/Belgrade", TestContext.Current.CancellationToken);
@@ -271,6 +216,7 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
         var transaction = await db.Transactions.SingleAsync(TestContext.Current.CancellationToken);
         transaction.Id.Should().Be(transactionId);
         transaction.CaptureKind.Should().Be(CaptureKind.Voice);
+        transaction.WalletId.Should().BeNull();
         transaction.RawText.Should().BeNull();
         transaction.VoiceFileId.Should().Be("voice-file-1");
         transaction.VoiceDurationSeconds.Should().Be(4);

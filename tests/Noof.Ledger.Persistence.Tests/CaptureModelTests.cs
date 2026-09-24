@@ -112,5 +112,9 @@ public class CaptureModelTests
             .GetColumnType().Should().Be("integer");
         db.Model.FindEntityType(typeof(CategorizationJob))!.GetProperty(nameof(CategorizationJob.Status))
             .GetColumnType().Should().Be("integer");
+        db.Model.FindEntityType(typeof(Transaction))!.GetProperty(nameof(Transaction.Kind))
+            .GetColumnType().Should().Be("integer");
+        db.Model.FindEntityType(typeof(Entry))!.GetProperty(nameof(Entry.Role))
+            .GetColumnType().Should().Be("integer");
     }
 }

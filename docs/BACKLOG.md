@@ -499,8 +499,7 @@ cannot**. The blockers are architectural rather than sloppy: `EfJobQueue.ClaimAs
 table with `FOR UPDATE SKIP LOCKED` and depends on being the only writer; `EfSpendingReadModel`
 aggregates across every row by design; `EfSecretStoreTests`, `EfUserStoreTests` and
 `MerchantAliasWriteOnceTests` reuse fixed natural keys (`SecretKeys.AnthropicApiKey`, `"noof"`,
-`"TEST MERCHANT"`) that would collide; `EfCaptureStoreTests` deletes the seeded default wallet that
-`WalletDefaultTests` depends on; and `SeedDataTests` renames the seeded coffee category its own
+`"TEST MERCHANT"`) that would collide; and `SeedDataTests` renames the seeded coffee category its own
 sibling asserts on. So sharing buys a ~55% cut in database creations, not the ~95% the idea
 suggests — worth perhaps 18 of those 32 seconds, against a real risk of turning deterministic
 failures into timing-dependent ones.
@@ -651,7 +650,7 @@ update burns three poison attempts for no reason. Consider
 **Wanted.** A sixth currency code, or at least a clean failure when one is meant, instead of the
 silent RSD default.
 
-**Why it is not scheduled.** `record_spending`'s response schema constrains `currency` to a
+**Why it is not scheduled.** `record_spending`'s (renamed to `record_transaction` in Phase 4) response schema constrains `currency` to a
 compile-time enum of the five supported codes, so the model has no way to answer with a sixth even
 when a message names one — it lands on `CategorizationWorkerOptions.DefaultCurrency` (RSD) instead,
 visible only in the echo if the operator happens to notice the wrong code. Widening it safely is
@@ -745,3 +744,72 @@ as — exactly the ambiguity V5 was built to remove, just not for this path. A f
 🎤 "<instruction>" when the latest revision is a spoken correction; deferred because it needs a small
 spec decision from the operator (which revision's transcript to show, and how it composes with the
 original 🎤 line already shown above the body).
+
+---
+
+## Deferred from Phase 4 (money model and backup)
+
+**Cross-currency conversion.** A spend in a currency other than its wallet's own (M10) is recorded as
+a separate currency line on that wallet's balance, not converted. Building this needs a rate source
+decision (Q4 in the original design's open questions) the operator has not made, and a rate is a
+moving target that would need its own history to stay honest in a re-read old transaction. Not
+scheduled until a rate source is chosen.
+
+**Transfers between wallets (Phase 7).** `TransactionKind.Transfer = 3` and `EntryRole.Fee` are
+reserved values, not declared members of the enum (`MoneyModelEnumTests` pins the current member
+counts) — a transfer becomes two entries (one per wallet) with no schema change needed when that
+phase arrives. Moving cash between wallets today is two separate manual transactions (an expense
+from one, an income to the other), which loses the "this was the same money" relationship a real
+transfer would keep.
+
+**Loans are recorded as other-income until Phase 7 models transfers/liabilities.** A loan received
+("заняла у Маши 5000 рсд") is recorded as kind `income` under the `other-income` category
+(`CategorizationPrompt`'s I-3 fix, Phase 4 final review) so the wallet matches the bank — but a loan
+is a liability, not earned income, and there is no `Transfer`/liability kind yet to record it more
+precisely. Until Phase 7, this means the dashboard's income totals include money that was borrowed,
+not earned. Revisit once transfers (above) are built.
+
+**The Recent list shows income and opening balances indistinguishable from spending.**
+`RecentTransaction` (`src/Noof.Ledger.Application/Reporting/ISpendingReadModel.cs`) carries no
+`Kind`, so a 2000 EUR salary and a wallet's "Opening balance" checkpoint appear in the dashboard's
+"Recent" list exactly like an expense — money is not wrong ("This month" is filtered by kind), but a
+reader cannot tell +2000 from −2000 at a glance (M-6, Phase 4 final review). Fix by carrying `Kind`
+into `RecentTransaction` and giving the list a marker (a chip, a sign) per row.
+
+**A correction to a record whose wallet was archived moves it to the currency default.**
+`CategorizationWorker.KeepingTheRecordsWallet` (`src/Noof.Ledger.Host/Workers/CategorizationWorker.cs`)
+keeps a record's existing wallet only while it is still active; correcting a record whose wallet has
+since been archived silently falls back to the default wallet for that currency, so "hidden from
+capture, history kept" is no longer quite true for a corrected record (M-7, Phase 4 final review).
+Pinned as intended by `A_correction_whose_wallet_was_archived_falls_back_to_the_default`. Acceptable
+for a single operator; revisit if a second wallet per currency becomes common.
+
+**The same-day checkpoint ordering edge.** A purchase dated to the same local day as a balance
+statement, but sent to the bot after the statement, is ordered after it (M6's `(occurred_on,
+occurred_at)` rule) — so the *next* statement absorbs it instead of the one it was dated alongside.
+This is a known, accepted approximation (recorded in the spec's "Known limits"), not a bug: the
+alternative (ordering by `occurred_on` alone, ties broken arbitrarily) would make a statement's
+"adjustment" figure depend on transcription order rather than anything the operator said.
+
+**Encrypted backups.** `BackupWorker`'s dumps sit unencrypted under `%LOCALAPPDATA%\NoofLedger\backups`,
+protected only by the user profile's own permissions — the same trust boundary the credential file
+already relies on. OneDrive sync (Q8 in the original design) is Phase 10 and would want this decided
+first, since syncing an unencrypted financial dump to the cloud is a different risk than a dump that
+never leaves the machine.
+
+**A separate PostgreSQL instance for tests** (own port, `fsync` off, no real data on it). Phase 4's
+subagents spent most of their time in database test runs and in waiting on the shared suite lock:
+every worktree's `DROP DATABASE` waits on the one server's checkpoints, and under parallel load the
+fixtures' cleanup timed out and failed tests that were not broken. A test-only cluster pointed at
+through the existing `NOOF_TEST_PG` variable would make clones cheap, retire the lock, and keep test
+clones off the server that holds `noof_ledger`. Costs a second cluster to start after a reboot and a
+small ops script. The operator has seen the trade-offs (2026-09-24) and not decided; the Phase 4
+rule of running database and E2E tests filtered, and in full once per phase, removed most of the
+contention in the meantime.
+
+**A cancelled dump can be recorded as a failed run.** `PgDumpDatabaseDumper` kills `pg_dump` on
+cancellation with `if (!process.HasExited) process.Kill(entireProcessTree: true)`; if `pg_dump` exits
+between the check and the kill, `Kill` throws `InvalidOperationException`, which replaces the pending
+cancellation, and `BackupWorker` records an ordinary failed run. A microsecond window at host
+shutdown, no data lost — wrap the `Kill` in a `catch (InvalidOperationException)` when next in the
+file (Phase 4 fix-wave re-review).

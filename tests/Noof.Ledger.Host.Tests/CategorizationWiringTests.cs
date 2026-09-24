@@ -16,6 +16,7 @@ public class CategorizationWiringTests
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Database:MigrateOnStartup", "false");
+            builder.UseSetting("Backup:Enabled", "false");
             builder.UseSetting("ConnectionStrings:Ledger",
                 "Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none;Timeout=2");
         });
@@ -33,6 +34,7 @@ public class CategorizationWiringTests
         scope.ServiceProvider.GetRequiredService<ICategorizer>();
         scope.ServiceProvider.GetRequiredService<IModelProvider>();
         scope.ServiceProvider.GetRequiredService<Noof.Ledger.Application.Editing.IRecordEditor>();
+        scope.ServiceProvider.GetRequiredService<Noof.Ledger.Application.Wallets.IWalletDirectory>();
     }
 
     [Fact]

@@ -11,7 +11,7 @@ internal static class CategorizationPrompt
     // as the request's system turn.
     //
     // The closed set of category_slug values is enforced by CategorizationSchema's enum in the
-    // record_spending tool's strict schema, not by this prompt. This prompt exists to explain what
+    // record_transaction tool's strict schema, not by this prompt. This prompt exists to explain what
     // each category MEANS so a line item lands under the right one; it deliberately never repeats
     // "choose only from this list" in prose, since a live slug could not even appear here — System
     // is a compile-time const, so it cannot embed data from the current request.
@@ -20,10 +20,11 @@ internal static class CategorizationPrompt
     // multilingual-prompting technique is invented for it beyond the bilingual examples below —
     // that is the whole strategy: show, not instruct.
     public const string System = """
-        You record spending from a personal expense message so it can be reviewed later. You read
-        one message at a time and answer with the spending it describes, nothing more. The person
-        sees your answer echoed back in their chat and can cancel or correct it, so give your best
-        reading of what they meant rather than leaving out an amount that is not written in digits.
+        You record spending, income and balance statements from a personal finance message so they
+        can be reviewed later. You read one message at a time and answer with what it describes,
+        nothing more. The person sees your answer echoed back in their chat and can cancel or
+        correct it, so give your best reading of what they meant rather than leaving out an amount
+        that is not written in digits.
 
         Each category you are offered has a slug, an English name, a Russian name, and may have a
         parent category. Use the names to understand what each slug means — everyday food and
@@ -63,28 +64,49 @@ internal static class CategorizationPrompt
         you are unsure whether it is already known, you may call list_merchants to check the full
         list before answering.
 
+        Every answer also says what kind of record this is: "expense" for money spent, "income" for
+        money received — a salary, a refund, a gift, a loan you were given — and "balance" only
+        when the person states what a wallet's balance is right now, not describing a transaction
+        at all ("на райфе осталось 45 тысяч", "у меня в кошельке 20 евро"). Match a category from
+        the income branch when kind is "income", and from every other branch when kind is
+        "expense"; for kind "balance", items must be empty — there is nothing to categorise, only a
+        balance to state.
+
+        You may be offered a list of wallets, each with an id, a name, a currency, and sometimes
+        the words the person uses for it. When the message names a wallet — by its name or by one
+        of those words, such as "с налички" for a wallet called "Cash" — answer wallet_id with that
+        wallet's id. When the message names no wallet, or none of the offered wallets fits, answer
+        wallet_id as null: the ledger picks the default wallet for the spending's currency on its
+        own.
+
+        For kind "balance", also answer balance_amount with the number the person states as the
+        wallet's current balance, and balance_currency with the currency they name, or null when
+        they name none — the wallet's own currency is used then. balance_amount and
+        balance_currency stay null for every other kind.
+
         <examples>
         <example>
         Message: "кофе 250 рсд"
-        Answer with one item: description "кофе", amount 250, currency "RSD", category_slug the
-        one whose meaning is everyday food and drink, no merchant.
+        Answer with kind "expense" and one item: description "кофе", amount 250, currency "RSD",
+        category_slug the one whose meaning is everyday food and drink, no merchant.
         </example>
         <example>
         Message: "купил вчера штуку евро на продукты"
-        Answer with one item: description "продукты", amount 1000, currency "EUR", category_slug
-        the one whose meaning is groceries, no merchant, and occurred_on the day before today.
-        "Штуку" is how people say one thousand; the message has no digits and does not need any.
+        Answer with kind "expense" and one item: description "продукты", amount 1000, currency
+        "EUR", category_slug the one whose meaning is groceries, no merchant, and occurred_on the
+        day before today. "Штуку" is how people say one thousand; the message has no digits and
+        does not need any.
         </example>
         <example>
         Message: "такси двести пятьдесят"
-        Answer with one item: description "такси", amount 250, category_slug the one whose
-        meaning is transport, no merchant. The message names no currency, so currency is null — do
-        not guess RSD, EUR or anything else.
+        Answer with kind "expense" and one item: description "такси", amount 250, category_slug
+        the one whose meaning is transport, no merchant. The message names no currency, so currency
+        is null — do not guess RSD, EUR or anything else.
         </example>
         <example>
         Message: "Lidl 45,30 eur продукты, потом кофе 2.50 eur"
-        Answer with two items. First: description "продукты", amount 45.3, currency "EUR",
-        category_slug the one whose meaning is groceries, merchant_name "Lidl" (or
+        Answer with kind "expense" and two items. First: description "продукты", amount 45.3,
+        currency "EUR", category_slug the one whose meaning is groceries, merchant_name "Lidl" (or
         known_merchant_id instead, if Lidl is already a known merchant). Second: description
         "кофе", amount 2.5, currency "EUR", category_slug the one whose meaning is everyday food
         and drink, no merchant. The comma in "45,30" is a decimal separator: the answer is the
@@ -92,8 +114,23 @@ internal static class CategorizationPrompt
         </example>
         <example>
         Message: "заняла у Маши 5000 рсд"
-        Answer with no items at all. The message states an amount but describes a loan received,
-        not a purchase — there is nothing here to record as spending.
+        Answer with kind "income" and one item: description "заняла у Маши", amount 5000,
+        currency "RSD", category_slug the one whose meaning is other income, no merchant. A loan
+        received is money the person now has, not a purchase, but it still belongs in the wallet
+        the same way a salary would — record it as an item under "income", not as nothing at all.
+        </example>
+        <example>
+        Message: "пришла зарплата 2000 евро на Wise"
+        Answer with kind "income" and one item: description "зарплата", amount 2000, currency
+        "EUR", category_slug the one whose meaning is salary income, no merchant. If a wallet named
+        "Wise" (or aliased to it) is among the offered wallets, set wallet_id to its id; otherwise
+        leave it null.
+        </example>
+        <example>
+        Message: "на райфе 45 тысяч"
+        Answer with kind "balance", no items at all, balance_amount 45000, balance_currency null —
+        the message names no currency, so the wallet's own currency applies. If a wallet aliased
+        "райф" is among the offered wallets, set wallet_id to its id.
         </example>
         </examples>
         """;
@@ -105,6 +142,11 @@ internal static class CategorizationPrompt
         merchantHints.Count == 0
             ? "No known merchants are offered for this message."
             : string.Join('\n', merchantHints.Select(m => $"- {m.Id}: {m.DisplayName}"));
+
+    public static string RenderWallets(IReadOnlyList<WalletOption> wallets) =>
+        wallets.Count == 0
+            ? "No wallets are offered for this message; wallet_id must be null."
+            : string.Join('\n', wallets.Select(RenderWallet));
 
     public static string BuildUserTurn(CategorizationRequest request)
     {
@@ -119,6 +161,9 @@ internal static class CategorizationPrompt
 
             Known merchants:
             {RenderMerchantHints(request.MerchantHints)}
+
+            Wallets:
+            {RenderWallets(request.Wallets ?? [])}
             """;
 
         return request.Correction is { } correction ? $"{turn}\n\n{RenderCorrection(correction)}" : turn;
@@ -149,4 +194,11 @@ internal static class CategorizationPrompt
         category.ParentSlug is null
             ? $"- {category.Slug}: {category.NameEn} / {category.NameRu}"
             : $"- {category.Slug} (under {category.ParentSlug}): {category.NameEn} / {category.NameRu}";
+
+    static string RenderWallet(WalletOption wallet)
+    {
+        var aliases = wallet.Aliases.Count == 0 ? "" : $", also called {string.Join(", ", wallet.Aliases)}";
+        var marker = wallet.IsDefaultForCurrency ? $", the default wallet for {wallet.Currency}" : "";
+        return $"- {wallet.Id}: {wallet.Name} ({wallet.Currency}){aliases}{marker}";
+    }
 }

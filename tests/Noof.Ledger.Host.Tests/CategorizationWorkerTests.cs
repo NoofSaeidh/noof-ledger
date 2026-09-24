@@ -7,6 +7,7 @@ using NSubstitute.ExceptionExtensions;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Jobs;
+using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Host.Workers;
 
@@ -21,11 +22,17 @@ public class CategorizationWorkerTests
     static readonly IProposalMapper Mapper = new ProposalMapper();
     static readonly IMerchantScan Scan = new MerchantScan();
     static readonly IRecordEcho Echo = new RecordEcho();
+    static readonly WalletOption MainWallet = new(
+        Guid.Parse("00000000-0000-0000-0000-000000000001"), "Main Wallet", CurrencyCode.Rsd, [], IsDefaultForCurrency: true);
+    static readonly WalletOption CashRsd = new(
+        Guid.Parse("33333333-3333-3333-3333-333333333333"), "Cash", CurrencyCode.Rsd, ["налик", "наличка"], IsDefaultForCurrency: false);
+    static readonly WalletOption WiseEur = new(
+        Guid.Parse("22222222-2222-2222-2222-222222222222"), "Wise EUR", CurrencyCode.Eur, ["wise", "вайз"], IsDefaultForCurrency: true);
 
     static IServiceScopeFactory ScopeFactoryFor(
         IJobQueue jobQueue, IModelProvider modelProvider, ICategorizationStore? store = null,
         ICategoryCatalog? categoryCatalog = null, IMerchantDirectory? merchantDirectory = null,
-        ICategorizer? categorizer = null, IChatNotifier? notifier = null)
+        ICategorizer? categorizer = null, IChatNotifier? notifier = null, IWalletDirectory? walletDirectory = null)
     {
         // The fallback substitutes are resolved into locals BEFORE any .Returns() call below.
         // Calling Substitute.For<T>() (or a helper that itself configures a substitute, like
@@ -39,6 +46,7 @@ public class CategorizationWorkerTests
         var resolvedMerchantDirectory = merchantDirectory ?? DefaultMerchantDirectory();
         var resolvedCategorizer = categorizer ?? Substitute.For<ICategorizer>();
         var resolvedNotifier = notifier ?? Substitute.For<IChatNotifier>();
+        var resolvedWalletDirectory = walletDirectory ?? WalletDirectoryOf(MainWallet, CashRsd, WiseEur);
 
         var provider = Substitute.For<IServiceProvider>();
         provider.GetService(typeof(IJobQueue)).Returns(jobQueue);
@@ -48,6 +56,7 @@ public class CategorizationWorkerTests
         provider.GetService(typeof(IMerchantDirectory)).Returns(resolvedMerchantDirectory);
         provider.GetService(typeof(ICategorizer)).Returns(resolvedCategorizer);
         provider.GetService(typeof(IChatNotifier)).Returns(resolvedNotifier);
+        provider.GetService(typeof(IWalletDirectory)).Returns(resolvedWalletDirectory);
 
         var scope = Substitute.For<IServiceScope>();
         scope.ServiceProvider.Returns(provider);
@@ -68,6 +77,14 @@ public class CategorizationWorkerTests
     {
         var directory = Substitute.For<IMerchantDirectory>();
         directory.AliasesAsync(Arg.Any<CancellationToken>()).Returns(new List<MerchantAliasEntry>());
+        return directory;
+    }
+
+    static IWalletDirectory WalletDirectoryOf(params WalletOption[] wallets)
+    {
+        var directory = Substitute.For<IWalletDirectory>();
+        IReadOnlyList<WalletOption> active = wallets;
+        directory.ActiveAsync(Arg.Any<CancellationToken>()).Returns(active);
         return directory;
     }
 
@@ -101,8 +118,8 @@ public class CategorizationWorkerTests
 
     static CategorizationSubject Subject(
         int? botMessageId = 42, string rawText = "Bread 250 RSD", DateOnly? occurredOn = null,
-        TransactionStatus status = TransactionStatus.Captured, IReadOnlyList<RecordedLine>? lines = null) =>
-        new(TransactionId, rawText, 111L, botMessageId, "Cash", status, SentOn, occurredOn ?? SentOn, lines ?? []);
+        TransactionStatus status = TransactionStatus.Captured, IReadOnlyList<RecordedLine>? lines = null, Guid? walletId = null) =>
+        new(TransactionId, rawText, 111L, botMessageId, "Cash", status, SentOn, occurredOn ?? SentOn, lines ?? [], WalletId: walletId);
 
     static CategorizationProposal OneGroceryLine(decimal amount = 250m, string currency = "RSD") =>
         new([new ProposedLineItem("Bread", amount, currency, "groceries", null, null)]);
@@ -306,6 +323,211 @@ public class CategorizationWorkerTests
             Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task The_model_is_offered_the_active_wallets()
+    {
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine());
+        var worker = CreateWorker(ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await categorizer.Received(1).ProposeAsync(
+            Arg.Is<CategorizationRequest>(request =>
+                request.Wallets != null && request.Wallets.SequenceEqual(new[] { MainWallet, CashRsd, WiseEur })),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_spending_that_names_no_wallet_goes_to_the_default_wallet_of_its_currency()
+    {
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine(3.50m, "EUR"));
+        var worker = CreateWorker(ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await store.Received(1).ApplyAsync(TransactionId,
+            Arg.Is<CategorizationOutcome>(outcome =>
+                outcome.TransactionKind == TransactionKind.Expense
+                && outcome.WalletId == WiseEur.Id
+                && outcome.StatedBalance == null
+                && outcome.Items.Single().Amount == new Money(3.50m, CurrencyCode.Eur)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task An_income_is_recorded_as_income_in_the_wallet_the_model_named()
+    {
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject(rawText: "пришла зарплата 2000 евро на Wise"));
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(OneGroceryLine(2000m, "EUR") with { Kind = ProposedKind.Income, WalletId = WiseEur.Id });
+        var worker = CreateWorker(ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await store.Received(1).ApplyAsync(TransactionId,
+            Arg.Is<CategorizationOutcome>(outcome =>
+                outcome.TransactionKind == TransactionKind.Income && outcome.WalletId == WiseEur.Id && outcome.Items.Count == 1),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_balance_statement_reaches_the_store_with_its_stated_balance_and_no_lines()
+    {
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject(rawText: "на главном 45 тысяч"));
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new CategorizationProposal([], Kind: ProposedKind.Balance, BalanceAmount: 45000m));
+        var worker = CreateWorker(ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await store.Received(1).ApplyAsync(TransactionId,
+            Arg.Is<CategorizationOutcome>(outcome =>
+                outcome.TransactionKind == TransactionKind.BalanceCheck
+                && outcome.WalletId == MainWallet.Id
+                && outcome.StatedBalance == new Money(45000m, CurrencyCode.Rsd)
+                && outcome.Items.Count == 0
+                && outcome.Kind == JobKind.Categorize),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_wallet_the_model_was_not_offered_fails_the_job_terminally()
+    {
+        var stranger = Guid.Parse("99999999-9999-9999-9999-999999999999");
+        var jobQueue = QueueWith(Job());
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(OneGroceryLine() with { WalletId = stranger });
+        var worker = CreateWorker(ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await jobQueue.Received(1).FailAsync(JobId, WorkerId, $"wallet {stranger} was not offered", Arg.Any<CancellationToken>());
+        await store.DidNotReceive().ApplyAsync(Arg.Any<Guid>(), Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_correction_that_names_no_wallet_keeps_the_record_in_its_wallet()
+    {
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(status: TransactionStatus.Completed, lines: [StoredBread], walletId: CashRsd.Id));
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine(1500m));
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job(kind: JobKind.Correct, instruction: "нет, 1500")), KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await store.Received(1).ApplyAsync(TransactionId,
+            Arg.Is<CategorizationOutcome>(outcome => outcome.WalletId == CashRsd.Id),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_correction_that_names_a_wallet_moves_the_record_there()
+    {
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(status: TransactionStatus.Completed, lines: [StoredBread], walletId: MainWallet.Id));
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(OneGroceryLine() with { WalletId = CashRsd.Id });
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job(kind: JobKind.Correct, instruction: "это было с налички")), KeyPresent(), store,
+                categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await store.Received(1).ApplyAsync(TransactionId,
+            Arg.Is<CategorizationOutcome>(outcome => outcome.WalletId == CashRsd.Id && outcome.Kind == JobKind.Correct),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_correction_whose_wallet_was_archived_falls_back_to_the_default()
+    {
+        var archived = Guid.Parse("55555555-5555-5555-5555-555555555555");
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(status: TransactionStatus.Completed, lines: [StoredBread], walletId: archived));
+        CategorizationOutcome? applied = null;
+        store.ApplyAsync(TransactionId, Arg.Do<CategorizationOutcome>(outcome => applied = outcome), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine(1500m, "RSD"));
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job(kind: JobKind.Correct, instruction: "нет, 1500")), KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        (applied?.WalletId).Should().Be(MainWallet.Id,
+            "the line is stated in RSD and Main Wallet is the RSD default; the archived wallet is not offered, so the correction cannot keep it");
+    }
+
+    [Fact]
+    public async Task A_message_with_no_default_wallet_fails_terminally_naming_the_cause()
+    {
+        var jobQueue = QueueWith(Job());
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject(rawText: "кофе 250"));
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine(250m, "RSD"));
+        var notifier = Substitute.For<IChatNotifier>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer, notifier: notifier,
+                walletDirectory: WalletDirectoryOf(CashRsd)),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await jobQueue.Received(1).FailAsync(JobId, WorkerId, "no wallet to record into", Arg.Any<CancellationToken>());
+        await jobQueue.DidNotReceive().RetryAsync(
+            Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await store.DidNotReceive().ApplyAsync(Arg.Any<Guid>(), Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
+        await store.Received(1).MarkFailedAsync(TransactionId, Arg.Any<CancellationToken>());
+        await notifier.Received(1).EditAsync(111L, 42, Arg.Any<EchoMessage>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_reinterpretation_that_names_no_wallet_resolves_the_wallet_afresh()
+    {
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(status: TransactionStatus.Completed, lines: [StoredBread], walletId: CashRsd.Id));
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine());
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job(kind: JobKind.Reinterpret)), KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await store.Received(1).ApplyAsync(TransactionId,
+            Arg.Is<CategorizationOutcome>(outcome => outcome.WalletId == MainWallet.Id),
+            Arg.Any<CancellationToken>());
+    }
+
     // Behaves like the real store for the one property the echo depends on: after ApplyAsync, reading the
     // record back returns what was applied.
     static ICategorizationStore StoreThatRemembersWhatItApplies(CategorizationSubject before)
@@ -443,10 +665,11 @@ public class CategorizationWorkerTests
     [Fact]
     public async Task A_proposal_with_no_items_completes_the_job_honestly_instead_of_recording_a_loan_as_spending()
     {
-        // The defect this guards against: "заняла у Маши 5000 рсд" is a loan received, not a
-        // purchase. A model that (correctly, per the prompt) answers with zero items must succeed
-        // the job with zero line items, not be forced to invent one and not be treated as a
-        // failure either - both would misrepresent what actually happened.
+        // A message can still come back with zero items (the prompt no longer asks for this on a
+        // loan specifically - see CategorizationPromptTests - but a purely conversational message
+        // with a figure and nothing to record against it can). A model that answers with zero
+        // items must succeed the job with zero line items, not be forced to invent one and not be
+        // treated as a failure either - both would misrepresent what actually happened.
         var jobQueue = Substitute.For<IJobQueue>();
         jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
         jobQueue.SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>()).Returns(JobCompletionOutcome.Applied);
