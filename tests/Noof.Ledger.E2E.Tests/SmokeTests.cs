@@ -46,4 +46,15 @@ public sealed class SmokeTests(UnreachableDatabaseHostFixture fixture) : PageTes
 
         failed.Should().BeEmpty("every static asset and API call the redirected login page makes must resolve");
     }
+
+    [Fact]
+    public async Task The_sign_in_page_shows_the_database_waiting_banner_while_the_database_is_unreachable()
+    {
+        await Page.GotoAsync(fixture.BaseUrl + "/");
+        await Page.WaitForURLAsync("**/account/login*");
+
+        await Expect(Page.Locator("#database-waiting")).ToBeVisibleAsync();
+        await Expect(Page.Locator("#database-waiting")).ToContainTextAsync("Waiting for the database");
+        await Expect(Page.Locator("input[name='username']")).Not.ToBeVisibleAsync();
+    }
 }
