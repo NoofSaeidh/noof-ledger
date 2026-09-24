@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Domain;
+using Noof.Ledger.Persistence.Balances;
 using Noof.Ledger.Persistence.Revisions;
 
 namespace Noof.Ledger.Persistence.Categorization;
@@ -99,8 +100,11 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
         // brings it back.
         transaction.Status = statusBefore == TransactionStatus.Cancelled ? TransactionStatus.Cancelled : TransactionStatus.Completed;
         transaction.OccurredOn = outcome.OccurredOn;
+        transaction.Kind = outcome.TransactionKind;
+        transaction.WalletId = outcome.WalletId ?? transaction.WalletId;
 
         await db.SaveChangesAsync(cancellationToken);
+        await LedgerPostings.RewriteAsync(db, transaction, outcome.StatedBalance, cancellationToken);
         await RevisionLog.AppendAsync(db, transaction, RevisionKindFor(outcome.Kind), outcome.Instruction,
             statusBefore, timeProvider.GetUtcNow(), cancellationToken);
         await tx.CommitAsync(cancellationToken);

@@ -46,6 +46,11 @@ internal static class RevisionLog
             select new { li.Description, li.Amount, CategorySlug = c == null ? null : c.Slug, li.MerchantId, li.CategorizedBy })
             .ToListAsync(cancellationToken);
 
+        var checkpoint = await db.BalanceChecks.AsNoTracking()
+            .Where(check => check.TransactionId == transaction.Id)
+            .Select(check => new { check.Stated.Amount, check.Stated.Currency })
+            .SingleOrDefaultAsync(cancellationToken);
+
         // Amounts are written as decimal strings, never JSON numbers, so no reader of this history can take
         // them as floating point.
         return JsonSerializer.Serialize(new Snapshot(
@@ -59,7 +64,10 @@ internal static class RevisionLog
                 line.MerchantId,
                 (int)line.CategorizedBy))],
             transaction.Kind.ToString(),
-            transaction.WalletId));
+            transaction.WalletId,
+            checkpoint is null
+                ? null
+                : new SnapshotBalance(checkpoint.Amount.ToString(CultureInfo.InvariantCulture), checkpoint.Currency.Value)));
     }
 
     sealed record Snapshot(
@@ -67,7 +75,8 @@ internal static class RevisionLog
         [property: JsonPropertyName("occurred_on")] string OccurredOn,
         [property: JsonPropertyName("items")] IReadOnlyList<SnapshotLine> Items,
         [property: JsonPropertyName("kind")] string Kind,
-        [property: JsonPropertyName("wallet_id")] Guid? WalletId);
+        [property: JsonPropertyName("wallet_id")] Guid? WalletId,
+        [property: JsonPropertyName("stated_balance")] SnapshotBalance? StatedBalance);
 
     sealed record SnapshotLine(
         [property: JsonPropertyName("description")] string Description,
@@ -76,4 +85,8 @@ internal static class RevisionLog
         [property: JsonPropertyName("category_slug")] string? CategorySlug,
         [property: JsonPropertyName("merchant_id")] Guid? MerchantId,
         [property: JsonPropertyName("categorized_by")] int CategorizedBy);
+
+    sealed record SnapshotBalance(
+        [property: JsonPropertyName("amount")] string Amount,
+        [property: JsonPropertyName("currency")] string Currency);
 }
