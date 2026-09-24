@@ -14,6 +14,7 @@ public class LoginEndpointTests
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Database:MigrateOnStartup", "false");
+            builder.UseSetting("Backup:Enabled", "false");
             builder.UseSetting("ConnectionStrings:Ledger",
                 "Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none;Timeout=2");
             builder.ConfigureServices(FakeUserStore.Register);
@@ -82,6 +83,7 @@ public class LoginEndpointTests
         using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Database:MigrateOnStartup", "false");
+            builder.UseSetting("Backup:Enabled", "false");
             builder.UseSetting("ConnectionStrings:Ledger",
                 "Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none;Timeout=2");
             builder.ConfigureServices(services =>
