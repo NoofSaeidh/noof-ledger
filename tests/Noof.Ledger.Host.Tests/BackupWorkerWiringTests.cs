@@ -15,6 +15,13 @@ public class BackupWorkerWiringTests
             builder.UseSetting("Database:MigrateOnStartup", "false");
             builder.UseSetting("ConnectionStrings:Ledger",
                 "Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none;Timeout=2");
+            // M-8 (Phase 4 final review): this factory leaves Backup:Enabled on, so its
+            // BackupWorker actually runs as a hosted service. Its safety must not depend solely on
+            // port 59999 always refusing the connection before RunBackupAsync ever touches a
+            // directory - a reachable database here must still never be able to make it write into
+            // the operator's real %LOCALAPPDATA%\NoofLedger\backups.
+            builder.UseSetting("Backup:BackupDirectory",
+                Path.Combine(Path.GetTempPath(), $"noof-backup-wiring-tests-{Guid.NewGuid():N}"));
         });
 
     [Fact]
@@ -26,7 +33,13 @@ public class BackupWorkerWiringTests
     }
 
     [Fact]
-    public void BackupWorkerOptions_is_a_singleton_with_its_documented_defaults()
+    public void BackupWorkerOptions_defaults_to_the_operators_folder_under_LocalApplicationData()
+    {
+        new BackupWorkerOptions().BackupDirectory.Should().EndWith(Path.Combine("NoofLedger", "backups"));
+    }
+
+    [Fact]
+    public void BackupWorkerOptions_is_a_singleton_bound_from_configuration()
     {
         using var factory = Factory();
 
@@ -36,7 +49,9 @@ public class BackupWorkerWiringTests
         options.Interval.Should().Be(TimeSpan.FromHours(24));
         options.RetryInterval.Should().Be(TimeSpan.FromHours(1));
         options.KeepCount.Should().Be(14);
-        options.BackupDirectory.Should().EndWith(Path.Combine("NoofLedger", "backups"));
+        options.BackupDirectory.Should().StartWith(Path.GetTempPath(),
+            "this factory overrides it away from the operator's real backup directory (M-8)");
+        factory.Services.GetRequiredService<BackupWorkerOptions>().Should().BeSameAs(options);
     }
 
     [Fact]
