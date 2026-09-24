@@ -7,9 +7,10 @@ namespace Noof.Ledger.Host.Workers;
 internal static class WorkerRegistration
 {
     public static IServiceCollection AddNoofWorkers(
-        this IServiceCollection services, CategorizationWorkerOptions options)
+        this IServiceCollection services, CategorizationWorkerOptions options, BackupWorkerOptions backupOptions)
     {
         services.AddSingleton(options);
+        services.AddSingleton(backupOptions);
         services.AddHostedService(sp => new CategorizationWorker(
             sp.GetRequiredService<IServiceScopeFactory>(),
             sp.GetRequiredService<TimeProvider>(),
@@ -27,6 +28,15 @@ internal static class WorkerRegistration
             CategorizationWorker.CreateWorkerId(),
             sp.GetRequiredService<IRecordEcho>(),
             sp.GetRequiredService<ILogger<TranscriptionWorker>>()));
+
+        if (backupOptions.Enabled)
+        {
+            services.AddHostedService(sp => new BackupWorker(
+                sp.GetRequiredService<IServiceScopeFactory>(),
+                sp.GetRequiredService<TimeProvider>(),
+                backupOptions,
+                sp.GetRequiredService<ILogger<BackupWorker>>()));
+        }
 
         return services;
     }
