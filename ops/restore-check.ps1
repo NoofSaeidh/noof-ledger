@@ -45,49 +45,64 @@ function Invoke-Psql([string]$Database, [string]$Sql) {
 
 function Get-Comparable([string]$Database) {
     $tables = Invoke-Psql $Database "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY table_name"
-    $counts = foreach ($table in $tables) { Invoke-Psql $Database "SELECT '$table', count(*) FROM `"$table`"" }
+    # I-1 (Phase 4 final review): backup_runs is written by BackupWorker AFTER the dump completes,
+    # so a dump the worker made always has one fewer backup_runs row than the live database it was
+    # taken from - by construction, not because anything is actually wrong. Excluded from the
+    # gating comparison; its counts are still printed, informationally, below.
+    $ledgerTables = $tables | Where-Object { $_ -ne 'backup_runs' }
+    $counts = foreach ($table in $ledgerTables) { Invoke-Psql $Database "SELECT '$table', count(*) FROM `"$table`"" }
     [PSCustomObject]@{
-        Balances = Invoke-Psql $Database "SELECT wallet_id, currency, balance, checked_on FROM wallet_balances ORDER BY wallet_id, currency"
-        Counts   = $counts
+        Balances        = Invoke-Psql $Database "SELECT wallet_id, currency, balance, checked_on FROM wallet_balances ORDER BY wallet_id, currency"
+        Counts          = $counts
+        BackupRunsCount = (Invoke-Psql $Database "SELECT count(*) FROM backup_runs")[0]
     }
-}
-
-Write-Host "Restoring '$DumpPath' into scratch database '$scratch'..."
-if ($PSCmdlet.ShouldProcess($scratch, 'CREATE DATABASE')) {
-    & $psql -h $p['Host'] -p $p['Port'] -U $p['Username'] -d postgres -c "CREATE DATABASE `"$scratch`"" | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "CREATE DATABASE failed with exit code $LASTEXITCODE" }
 }
 
 try {
-    if ($PSCmdlet.ShouldProcess($DumpPath, "pg_restore into $scratch")) {
-        & $pgRestore -h $p['Host'] -p $p['Port'] -U $p['Username'] -d $scratch --no-owner --no-privileges $DumpPath
-        if ($LASTEXITCODE -ne 0) { throw "pg_restore failed with exit code $LASTEXITCODE" }
+    Write-Host "Restoring '$DumpPath' into scratch database '$scratch'..."
+    if ($PSCmdlet.ShouldProcess($scratch, 'CREATE DATABASE')) {
+        & $psql -h $p['Host'] -p $p['Port'] -U $p['Username'] -d postgres -c "CREATE DATABASE `"$scratch`"" | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "CREATE DATABASE failed with exit code $LASTEXITCODE" }
     }
 
-    $source = Get-Comparable $SourceDatabase
-    $restored = Get-Comparable $scratch
+    try {
+        if ($PSCmdlet.ShouldProcess($DumpPath, "pg_restore into $scratch")) {
+            & $pgRestore -h $p['Host'] -p $p['Port'] -U $p['Username'] -d $scratch --no-owner --no-privileges $DumpPath
+            if ($LASTEXITCODE -ne 0) { throw "pg_restore failed with exit code $LASTEXITCODE" }
+        }
 
-    # Compare-Object throws "Cannot bind argument to parameter 'ReferenceObject' because it is
-    # null" when either side is empty (e.g. an empty wallet_balances in a freshly migrated
-    # template) - wrapping both sides in @() keeps it an empty array instead of $null.
-    $balanceDiff = Compare-Object @($source.Balances) @($restored.Balances)
-    $countDiff = Compare-Object @($source.Counts) @($restored.Counts)
+        $source = Get-Comparable $SourceDatabase
+        $restored = Get-Comparable $scratch
 
-    if ($balanceDiff -or $countDiff) {
-        Write-Host "MISMATCH between '$SourceDatabase' and the restored dump:"
-        if ($balanceDiff) { Write-Host "wallet_balances differs:"; $balanceDiff | Format-Table | Out-String | Write-Host }
-        if ($countDiff) { Write-Host "row counts differ:"; $countDiff | Format-Table | Out-String | Write-Host }
-        $script:failed = $true
+        Write-Host "backup_runs rows (informational, not compared - I-1): '$SourceDatabase' has $($source.BackupRunsCount), the restored dump has $($restored.BackupRunsCount)."
+
+        # Compare-Object throws "Cannot bind argument to parameter 'ReferenceObject' because it is
+        # null" when either side is empty (e.g. an empty wallet_balances in a freshly migrated
+        # template) - wrapping both sides in @() keeps it an empty array instead of $null.
+        $balanceDiff = Compare-Object @($source.Balances) @($restored.Balances)
+        $countDiff = Compare-Object @($source.Counts) @($restored.Counts)
+
+        if ($balanceDiff -or $countDiff) {
+            Write-Host "MISMATCH between '$SourceDatabase' and the restored dump:"
+            if ($balanceDiff) { Write-Host "wallet_balances differs:"; $balanceDiff | Format-Table | Out-String | Write-Host }
+            if ($countDiff) { Write-Host "row counts differ:"; $countDiff | Format-Table | Out-String | Write-Host }
+            $script:failed = $true
+        }
+        else {
+            Write-Host "restore-check OK: '$DumpPath' matches '$SourceDatabase' (wallet_balances and every ledger table's row count; backup_runs is informational only)."
+            $script:failed = $false
+        }
     }
-    else {
-        Write-Host "restore-check OK: '$DumpPath' matches '$SourceDatabase' (wallet_balances and every table's row count)."
-        $script:failed = $false
+    finally {
+        if ($PSCmdlet.ShouldProcess($scratch, 'DROP DATABASE')) {
+            & $psql -h $p['Host'] -p $p['Port'] -U $p['Username'] -d postgres -c "DROP DATABASE IF EXISTS `"$scratch`" WITH (FORCE)" | Out-Null
+        }
     }
 }
 finally {
-    if ($PSCmdlet.ShouldProcess($scratch, 'DROP DATABASE')) {
-        & $psql -h $p['Host'] -p $p['Port'] -U $p['Username'] -d postgres -c "DROP DATABASE IF EXISTS `"$scratch`" WITH (FORCE)" | Out-Null
-    }
+    # M-2 (Phase 4 final review): otherwise the ledger password stays in this shell's environment
+    # after the script exits, visible to every child process launched afterwards from it.
+    Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
 }
 
 if ($failed) { exit 1 }
