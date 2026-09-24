@@ -146,8 +146,10 @@ naming what it could not remove, pointing here.
 
 `BackupWorker` runs inside the host, not as a separate process. On start it checks
 `backup_runs` for the newest successful run; if there is none, or it is older than 24 hours, it
-backs up immediately. It then checks again 24 hours after each success, or 1 hour after a failed
-attempt rather than waiting a full day, for as long as the host keeps running.
+backs up immediately. Otherwise it wakes again when that success turns 24 hours old — not 24 hours
+from whenever it happened to start — so a host that is not always on still backs up roughly once a
+day rather than falling to every other day; a failed attempt is retried after 1 hour instead of
+waiting for the next scheduled day.
 
 **Where:** `%LOCALAPPDATA%\NoofLedger\backups\noof_ledger-yyyyMMdd-HHmmss.dump` (UTC timestamp in
 the file name). Written under a `.tmp` name first and renamed only on success, so a half-written

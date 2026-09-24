@@ -4,6 +4,8 @@ namespace Noof.Ledger.Host.Workers;
 
 internal enum BackupTickResult { BackedUp, Skipped, Failed }
 
+internal readonly record struct BackupTickOutcome(BackupTickResult Result, DateTimeOffset? LastSuccessAt);
+
 // TimeProvider-driven throughout (CLAUDE.md "seed timestamps from fixed literals"): the started/
 // finished stamps recorded in backup_runs and the file name both come from timeProvider, never
 // DateTimeOffset.UtcNow, so a test can assert an exact file name and an exact recorded interval.
@@ -14,20 +16,41 @@ internal sealed class BackupWorker(
     ILogger<BackupWorker> logger)
     : BackgroundService
 {
+    // A tick this close to due wakes at the floor instead of the few seconds Interval minus
+    // elapsed would otherwise compute to - never a tight loop re-checking a database connection
+    // every few seconds while a backup is not actually due yet.
+    static readonly TimeSpan MinimumSkipDelay = TimeSpan.FromMinutes(1);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            var result = await RunTickAsync(stoppingToken);
-            var delay = result == BackupTickResult.Failed ? options.RetryInterval : options.Interval;
-            await Task.Delay(delay, timeProvider, stoppingToken);
+            var outcome = await RunTickCoreAsync(stoppingToken);
+            await Task.Delay(DelayUntilNextTick(outcome), timeProvider, stoppingToken);
         }
     }
 
     // Never throws (B1/B2: "a failure is logged and recorded, never crashes the host") - every
     // failure path below, including one this method cannot foresee, is caught and turned into a
     // recorded run instead of an unhandled exception on the host's background-service thread.
-    public async Task<BackupTickResult> RunTickAsync(CancellationToken cancellationToken)
+    public async Task<BackupTickResult> RunTickAsync(CancellationToken cancellationToken) =>
+        (await RunTickCoreAsync(cancellationToken)).Result;
+
+    // I-2 (Phase 4 final review): a Skipped tick used to sleep a full Interval from *now*, so a
+    // host restarted well into the current window (e.g. 20 h after the last success) would not
+    // check again for another 24 h instead of the ~4 h actually remaining - the cadence degrades
+    // to every other day on a machine that is not always on.
+    TimeSpan DelayUntilNextTick(BackupTickOutcome outcome) => outcome.Result switch
+    {
+        BackupTickResult.Failed => options.RetryInterval,
+        BackupTickResult.Skipped when outcome.LastSuccessAt is { } lastSuccess =>
+            Max(options.Interval - (timeProvider.GetUtcNow() - lastSuccess), MinimumSkipDelay),
+        _ => options.Interval,
+    };
+
+    static TimeSpan Max(TimeSpan a, TimeSpan b) => a > b ? a : b;
+
+    async Task<BackupTickOutcome> RunTickCoreAsync(CancellationToken cancellationToken)
     {
         try
         {
@@ -37,15 +60,16 @@ internal sealed class BackupWorker(
             var status = await backupLog.StatusAsync(cancellationToken);
             var now = timeProvider.GetUtcNow();
             if (status.LastSuccessAt is { } lastSuccess && now - lastSuccess < options.Interval)
-                return BackupTickResult.Skipped;
+                return new BackupTickOutcome(BackupTickResult.Skipped, lastSuccess);
 
             var dumper = scope.ServiceProvider.GetRequiredService<IDatabaseDumper>();
-            return await RunBackupAsync(backupLog, dumper, now, cancellationToken);
+            var result = await RunBackupAsync(backupLog, dumper, now, cancellationToken);
+            return new BackupTickOutcome(result, status.LastSuccessAt);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Backup worker tick failed");
-            return BackupTickResult.Failed;
+            return new BackupTickOutcome(BackupTickResult.Failed, null);
         }
     }
 
