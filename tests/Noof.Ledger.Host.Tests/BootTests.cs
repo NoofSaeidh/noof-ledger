@@ -41,16 +41,18 @@ public class BootTests
     }
 
     [Fact]
-    public async Task Fails_fast_rather_than_hanging_when_migration_is_on_and_the_database_is_dead()
+    public async Task Stays_up_rather_than_failing_fast_when_migration_is_on_and_the_database_is_dead()
     {
+        // Before the database gate (Phase 5 Task 1), Program.cs migrated synchronously before
+        // app.Run(), so an unreachable database here threw before the host ever started serving.
+        // DatabaseStartupService now runs as a hosted service instead, so the host starts and an
+        // anonymous request still redirects to sign-in - the database being down is the gate's
+        // problem to report (via DatabaseGateBanner), not a reason for the process to never come up.
         using var factory = Factory(migrateOnStartup: true);
+        using var client = factory.CreateClient();
 
-        var act = async () =>
-        {
-            using var client = factory.CreateClient();
-            await client.GetAsync("/", TestContext.Current.CancellationToken);
-        };
+        var response = await client.GetAsync("/", TestContext.Current.CancellationToken);
 
-        await act.Should().ThrowAsync<Exception>();
+        response.IsSuccessStatusCode.Should().BeTrue();
     }
 }
