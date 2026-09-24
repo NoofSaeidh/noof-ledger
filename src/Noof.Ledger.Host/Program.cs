@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Hosting.Server.Features;
 using Noof.Ledger.Ai;
 using Noof.Ledger.Application;
 using Noof.Ledger.Application.Auth;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Host.Auth;
 using Noof.Ledger.Host.Cli;
 using Noof.Ledger.Host.Endpoints;
@@ -47,6 +48,11 @@ builder.Configuration.GetSection("Backup").Bind(backupOptions);
 
 builder.Services.AddNoofPersistence(builder.Configuration, categorizationOptions.MaxAttempts);
 
+builder.Services.AddSingleton<DatabaseGate>();
+builder.Services.AddSingleton<IDatabaseGate>(sp => sp.GetRequiredService<DatabaseGate>());
+builder.Services.AddSingleton<IDatabaseStartupProbe, DatabaseStartupProbe>();
+builder.Services.AddHostedService<DatabaseStartupService>();
+
 builder.Services.AddAuthentication(AuthSchemes.Cookie)
     .AddCookie(AuthSchemes.Cookie, options =>
     {
@@ -71,14 +77,6 @@ builder.Services.AddNoofAi(builder.Configuration);
 builder.Services.AddNoofWorkers(categorizationOptions, backupOptions);
 
 var app = builder.Build();
-
-if (builder.Configuration.GetValue("Database:MigrateOnStartup", true))
-    // ApplicationStopping, not CancellationToken.None: a Ctrl+C during startup migration should
-    // cancel the in-flight MigrateAsync rather than let it run unattended. EF applies each
-    // migration inside its own transaction, so a cancel here rolls back the migration in
-    // progress and leaves the schema at its last fully-applied version - never a half-applied
-    // one - which Migrate() can safely retry on the next start.
-    await app.Services.MigrateNoofDatabaseAsync(app.Lifetime.ApplicationStopping);
 
 app.UseAuthentication();
 app.UseAuthorization();
