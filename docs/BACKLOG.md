@@ -776,4 +776,6 @@ never leaves the machine.
 
 **A separate PostgreSQL instance for tests** (own port, fsync off, no real data on it) — faster
 database tests, no shared lock between worktrees, and test clones never on the server that holds
-`noof_ledger`; deferred by the operator on 2026-09-24 as a follow-up after Phase 4.
+`noof_ledger`. Proposed here, not yet an operator decision — no ruling to this effect appears in
+`progress.md`'s ruling log, the brief, the plan or the spec. Worth raising with the operator as a
+follow-up after Phase 4, but not recorded as settled until they say so.
