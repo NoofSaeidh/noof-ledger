@@ -10,6 +10,8 @@
 @inject IBalanceReadModel BalanceReadModel
 @inject IBackupLog BackupLog
 @inject TimeProvider TimeProvider
+@inject IDatabaseGate DatabaseGate
+@using Noof.Ledger.Application.Diagnostics
 
 <PageTitle>Ledger</PageTitle>
 
@@ -17,7 +19,11 @@
    the smoke test, but Typo.h1 is display-sized type that would dwarf everything under it. *@
 <MudText HtmlTag="h1" Typo="Typo.h4" Class="mb-1">Ledger</MudText>
 
-@if (databaseUnavailable)
+@if (DatabaseGate.State != DatabaseState.Ready)
+{
+    <DatabaseGateBanner />
+}
+else if (databaseUnavailable)
 {
     @* Distinct from "no spending yet" below: that means the database answered and there is nothing
        in it, this means the database never answered at all. PostgreSQL on this machine is
@@ -226,6 +232,9 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        if (DatabaseGate.State != DatabaseState.Ready)
+            return;
+
         try
         {
             recent = await ReadModel.RecentAsync(20, cancellation.Token);
