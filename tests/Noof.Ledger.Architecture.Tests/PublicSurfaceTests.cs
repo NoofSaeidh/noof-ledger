@@ -45,6 +45,7 @@ public class PublicSurfaceTests
             "ICaptureStore", "CategoryOption", "MerchantOption", "CategorizationRequest", "CorrectionRequest",
             "ProposedLineItem", "CategorizationProposal", "ResolvedLineItem", "CategorizedLineItem",
             "CategorizationSubject", "RecordedLine", "CategorizationOutcome", "CategoryEntry", "MerchantAliasEntry", "ICategorizationStore",
+            "BalanceStatement",
             "ICategorizer", "ICategoryCatalog", "IMerchantDirectory", "IMerchantScan",
             "ModelFailureKind", "ModelCallException", "ModelCallExceptionExtensions",
             "IModelProvider",

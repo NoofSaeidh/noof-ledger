@@ -18,8 +18,19 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
             from w in walletJoin.DefaultIfEmpty()
             select new
             {
-                t.Id, t.RawText, t.TelegramChatId, t.BotMessageId, WalletName = w == null ? string.Empty : w.Name,
-                t.Status, t.OccurredAt, t.TimeZoneId, t.OccurredOn, t.CaptureKind, t.WalletId,
+                t.Id,
+                t.RawText,
+                t.TelegramChatId,
+                t.BotMessageId,
+                WalletName = w == null ? string.Empty : w.Name,
+                WalletCurrency = w == null ? (CurrencyCode?)null : w.Currency,
+                t.Status,
+                t.OccurredAt,
+                t.TimeZoneId,
+                t.OccurredOn,
+                t.CaptureKind,
+                t.Kind,
+                t.WalletId,
             })
             .SingleOrDefaultAsync(cancellationToken);
 
@@ -43,13 +54,24 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
                 m == null ? null : m.DisplayName))
             .ToListAsync(cancellationToken);
 
+        var balances = header.WalletId is { } walletId
+            ? await new EfBalanceReadModel(db).BalanceOfAsync(walletId, cancellationToken)
+            : [];
+
+        var statement = header.Kind == TransactionKind.BalanceCheck
+            ? await db.BalanceChecks.AsNoTracking()
+                .Where(bc => bc.TransactionId == transactionId)
+                .Select(bc => new BalanceStatement(bc.Stated, bc.ComputedBefore))
+                .SingleOrDefaultAsync(cancellationToken)
+            : null;
+
         // A voice capture has no text until its transcript arrives, and none at all when nothing was heard;
         // the pipeline and the echo read that as empty, which is what it is. Only a Manual record has no chat,
         // and nothing categorises or echoes one, so 0 stands in for it.
         return new CategorizationSubject(
             header.Id, header.RawText ?? string.Empty, header.TelegramChatId ?? 0, header.BotMessageId, header.WalletName,
             header.Status, ZonedClock.LocalDate(header.OccurredAt, header.TimeZoneId), header.OccurredOn, lines,
-            header.CaptureKind, WalletId: header.WalletId);
+            header.CaptureKind, header.Kind, header.WalletCurrency, balances, statement, WalletId: header.WalletId);
     }
 
     public async Task ApplyAsync(Guid transactionId, CategorizationOutcome outcome, CancellationToken cancellationToken)
