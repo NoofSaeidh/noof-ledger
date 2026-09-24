@@ -3,6 +3,7 @@ using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Jobs;
 using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
+using Noof.Ledger.Host.Workers.CategorizationLogging;
 
 namespace Noof.Ledger.Host.Workers;
 
@@ -73,7 +74,7 @@ internal sealed class CategorizationWorker(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogError(ex, "Categorization worker tick failed");
+            logger.TickFailed(ex);
             return CategorizationTickResult.Failed;
         }
     }
@@ -172,9 +173,7 @@ internal sealed class CategorizationWorker(
                         // Past the cap the line keeps its amount and category and simply has no
                         // merchant. Failing the job instead would throw away a correctly extracted
                         // bill over a field that is decoration, and the alias table stays clean.
-                        logger.LogInformation(
-                            "Job {JobId} reached the canonicalization cap of {Cap}; '{MerchantText}' was left unlinked",
-                            job.Id, options.MaxCanonicalizationsPerJob, merchantText);
+                        logger.CanonicalizationCapReached(job.Id, options.MaxCanonicalizationsPerJob, merchantText);
                     }
                 }
 
@@ -205,13 +204,11 @@ internal sealed class CategorizationWorker(
             {
                 var succeedOutcome = await jobQueue.SucceedAsync(job.Id, workerId, cancellationToken);
                 if (succeedOutcome == JobCompletionOutcome.NotOwned)
-                    logger.LogWarning("Job {JobId} was already reclaimed by another worker; not retrying", job.Id);
+                    logger.JobAlreadyReclaimed(job.Id);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                logger.LogWarning(ex,
-                    "SucceedAsync failed for job {JobId} after its line items were already committed; the transaction is left as Completed",
-                    job.Id);
+                logger.SucceedAfterCommitFailed(ex, job.Id);
             }
         }
         catch (ModelCallException ex) when (ex.IsAccountLevel())
@@ -222,9 +219,7 @@ internal sealed class CategorizationWorker(
             // permanently fail the job it happened to land on, and claiming pauses for a cooldown
             // so the rest of the backlog is not burned through while the key stays bad.
             accountCooldownUntil = timeProvider.GetUtcNow() + options.AccountCooldown;
-            logger.LogWarning(
-                "Account-level model provider failure on job {JobId} ({Message}); pausing new claims for {Cooldown}",
-                job.Id, ex.Message, options.AccountCooldown);
+            logger.AccountLevelFailure(job.Id, ex.Message, options.AccountCooldown);
             await HandleModelFailureAsync(jobQueue, store, notifier, job, subject, ModelFailureKind.Transient, ex.Message, cancellationToken);
         }
         catch (ModelCallException ex)
@@ -281,8 +276,7 @@ internal sealed class CategorizationWorker(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogWarning(ex,
-                "Failed to echo job {JobId}'s result to Telegram; the categorization itself already succeeded", job.Id);
+            logger.EchoFailed(ex, job.Id);
         }
     }
 
@@ -337,9 +331,7 @@ internal sealed class CategorizationWorker(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogWarning(ex,
-                "Failed to edit Telegram message {MessageId} to report a failed job for transaction {TransactionId}",
-                messageId, job.TransactionId);
+            logger.FailureEditFailed(ex, messageId, job.TransactionId);
         }
     }
 

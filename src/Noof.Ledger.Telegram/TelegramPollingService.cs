@@ -107,8 +107,7 @@ internal sealed class TelegramPollingService(
                         }
                         poisonUpdateAttempts++;
 
-                        logger.LogError(ex, "Telegram update {UpdateId} failed on attempt {Attempt}/{MaxAttempts}",
-                            update.Id, poisonUpdateAttempts, MaxUpdateAttempts);
+                        logger.UpdateFailed(ex, update.Id, poisonUpdateAttempts, MaxUpdateAttempts);
 
                         if (poisonUpdateAttempts < MaxUpdateAttempts)
                         {
@@ -119,9 +118,7 @@ internal sealed class TelegramPollingService(
                             return TelegramPollResult.Failed;
                         }
 
-                        logger.LogError(
-                            "Telegram update {UpdateId} failed {MaxAttempts} times; skipping it so later updates aren't blocked behind it",
-                            update.Id, MaxUpdateAttempts);
+                        logger.UpdateAbandoned(update.Id, MaxUpdateAttempts);
                         await NotifyOperatorOfSkippedUpdateAsync(scope, update, cancellationToken);
                         poisonUpdateId = null;
                         poisonUpdateAttempts = 0;
@@ -143,7 +140,7 @@ internal sealed class TelegramPollingService(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             consecutiveFailures++;
-            logger.LogError(ex, "Telegram poll tick failed; backing off and retrying");
+            logger.PollTickFailed(ex);
             return TelegramPollResult.Failed;
         }
     }
@@ -160,7 +157,7 @@ internal sealed class TelegramPollingService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogError(ex, "Failed to notify the operator that Telegram update {UpdateId} was skipped", update.Id);
+            logger.SkippedUpdateNotificationFailed(ex, update.Id);
         }
     }
 }

@@ -60,6 +60,14 @@ dotnet_naming_style.pascal_case.capitalization = pascal_case
 # precedes it, so a repository-wide rule added below one of them silently becomes a rule about a
 # single directory - which reports nothing, and reads exactly like a rule with nothing to report.
 
+[src/**]
+# Task 2 (Phase 5 observability): every log call in src goes through a source-generated
+# [LoggerMessage] method - CA1848 catches a direct logger.LogXxx(...) call, CA2254 catches a
+# message template built from a runtime expression instead of a compile-time constant. Scoped to
+# src, not tests/**, per CLAUDE.md's own working agreement for this task.
+dotnet_diagnostic.CA1848.severity = error
+dotnet_diagnostic.CA2254.severity = error
+
 [src/Noof.Ledger.Domain/**]
 # Domain and Application exist to be referenced. Their public types are the contract every other
 # assembly is written against, so "could this be internal?" has a standing answer of no. The list
