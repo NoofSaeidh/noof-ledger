@@ -300,11 +300,14 @@ Playwright.
         Detail  = @'
 update-test-template
 
-Runs the exact command in ops\RUNBOOK.md's "After adding a migration" section: resolves the admin
+Runs the command in ops\RUNBOOK.md's "After adding a migration" section: resolves the admin
 connection string, rewrites its Database to noof_ledger_test_template, refuses to proceed if that
-rewrite did not actually happen, and runs `dotnet ef database update --connection <template>`.
-Never touches noof_ledger. Takes the shared suite lock, since the template is shared across
-worktrees. Run this right after any `dotnet ef migrations add`.
+rewrite did not actually happen, and runs `dotnet ef database update`. The template connection
+string (it carries the postgres password) is handed to `dotnet ef` through the
+NOOF_LEDGER_EF_CONNECTION environment variable, never as a --connection argument, so the password
+never appears on that process's command line. Never touches noof_ledger. Takes the shared suite
+lock, since the template is shared across worktrees. Run this right after any `dotnet ef migrations
+add`.
 
 Prerequisites: PostgreSQL reachable; NOOF_TEST_PG set or %LOCALAPPDATA%\NoofLedger\db.connection
 present (ops\reset-database-auth.ps1 creates it).
@@ -524,8 +527,16 @@ switch ($CommandName) {
                 throw 'Refusing: the connection string does not name the test template.'
             }
             $persistence = Join-Path $Root 'src\Noof.Ledger.Persistence'
-            Invoke-Checked {
-                dotnet ef database update --project $persistence --startup-project $persistence --connection $template
+            # The template connection string (it carries the postgres password) goes to the `dotnet ef`
+            # child process through this environment variable, which DesignTimeDbContextFactory reads -
+            # never through --connection, which would put the password on that process's command line.
+            $env:NOOF_LEDGER_EF_CONNECTION = $template
+            try {
+                Invoke-Checked {
+                    dotnet ef database update --project $persistence --startup-project $persistence
+                }
+            } finally {
+                Remove-Item Env:\NOOF_LEDGER_EF_CONNECTION -ErrorAction SilentlyContinue
             }
         } finally { Exit-SuiteLock $lock }
     }

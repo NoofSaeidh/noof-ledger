@@ -53,10 +53,19 @@ operator starts the host (`Database:MigrateOnStartup`), never by hand.
 $admin = if ($env:NOOF_TEST_PG) { $env:NOOF_TEST_PG } else { (Get-Content "$env:LOCALAPPDATA\NoofLedger\db.connection").Trim() }
 $template = $admin -replace 'Database=postgres', 'Database=noof_ledger_test_template'
 if ($template -notmatch 'Database=noof_ledger_test_template') { throw "Refusing: the connection string does not name the test template." }
-dotnet ef database update --project src/Noof.Ledger.Persistence --startup-project src/Noof.Ledger.Persistence --connection $template
+$env:NOOF_LEDGER_EF_CONNECTION = $template
+try {
+    dotnet ef database update --project src/Noof.Ledger.Persistence --startup-project src/Noof.Ledger.Persistence
+} finally {
+    Remove-Item Env:\NOOF_LEDGER_EF_CONNECTION -ErrorAction SilentlyContinue
+}
 ```
 
-The output's last line must name the new migration. Do **not** run it without `--connection`.
+The template connection string carries the postgres password, so it goes to `dotnet ef` through the
+`NOOF_LEDGER_EF_CONNECTION` environment variable - which `DesignTimeDbContextFactory` reads before
+falling back to the normal resolution - never through `--connection`, which would put the password on
+that process's command line. The output's last line must name the new migration. Do **not** run it
+without pointing `dotnet ef` at the template one way or the other.
 
 `.\run.ps1 update-test-template` runs exactly this (under the shared suite lock).
 

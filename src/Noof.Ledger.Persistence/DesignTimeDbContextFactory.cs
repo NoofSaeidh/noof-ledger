@@ -9,10 +9,21 @@ namespace Noof.Ledger.Persistence;
 // ReSharper disable once UnusedType.Global
 internal sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<LedgerDbContext>
 {
+    // run.ps1's update-test-template hands the (password-bearing) test-template connection string
+    // through this environment variable instead of `dotnet ef database update --connection`, so the
+    // password never appears as an argument on the `dotnet ef` child process's command line - the
+    // same rule CLAUDE.md's Database section holds pg_dump to. Never consulted for anything but this.
+    internal const string ConnectionOverrideVariable = "NOOF_LEDGER_EF_CONNECTION";
+
     public LedgerDbContext CreateDbContext(string[] args)
     {
+        var overrideConnection = Environment.GetEnvironmentVariable(ConnectionOverrideVariable);
+        var connectionString = string.IsNullOrWhiteSpace(overrideConnection)
+            ? LedgerConnectionString.Resolve(null)
+            : overrideConnection;
+
         var options = new DbContextOptionsBuilder<LedgerDbContext>()
-            .UseNpgsql(LedgerConnectionString.Resolve(null))
+            .UseNpgsql(connectionString)
             .Options;
 
         return new LedgerDbContext(options);
