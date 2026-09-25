@@ -2,7 +2,34 @@
 
 Personal finance tracker. Telegram bot captures spending (text, voice, receipt photos), an LLM categorises it per line item, a local Blazor dashboard shows it across multiple wallets and currencies. C# / .NET 10, EF Core, strict TDD, local hosting, **public repo**.
 
-> **Status:** spec approved (`docs/superpowers/specs/2026-09-24-money-model.md`); **Phases 0, 0b, 1A, 1B, 1C, 1D, 2, 3 and 4 complete** — solution, EF Core model and migrations, PostgreSQL money-storage gate, cookie authentication as the sole mode, the `user set-password` verb, the loopback interlock, a Blazor Server shell, Telegram capture with a durable queue, natural-language capture, voice notes transcribed by Groq's whisper-large-v3, and now the money model: every wallet's balance — opening balance, minus spending, plus income, re-anchored by the operator's own balance statements — is exact in all five currencies (EUR, RSD, USD, RUB, KZT) under `ru-RU` and `sr-Latn-RS`. Transactions carry a `Kind` (`Expense`/`Income`/`BalanceCheck`); expense and income transactions own signed double-entry-lite `entries`; a balance statement is a `balance_checks` checkpoint; a wallet's balance is computed by the `wallet_balances` SQL view and read back by `IBalanceReadModel`, never stored. The model's answer tool is `record_transaction` (was `record_spending`) and now names a wallet and, for a balance statement, the stated amount. `/wallets` manages wallets on the dashboard; income and balance statements are ordinary messages to the bot. The app also backs itself up daily — `pg_dump -Fc` into `%LOCALAPPDATA%\NoofLedger\backups`, the newest 14 kept, every run logged to `backup_runs` — and `ops/restore-check.ps1` proves a dump restores to the same balances, checked so far against a template clone; the one check against the live ledger itself is the operator's to run (`ops/RUNBOOK.md`). 852 solution tests, all green — the Playwright browser tests are in the solution now, so `dotnet test --solution` runs them too and needs Chromium present. Live suites stay skipped unless `NOOF_LEDGER_LIVE_ANTHROPIC_KEY` / `NOOF_LEDGER_LIVE_GROQ_KEY` + `NOOF_LEDGER_LIVE_VOICE_FILE` are set; `ops/publish.ps1` produces a runnable host. Cross-currency conversion, transfers and receipt photos remain future phases. Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
+> **Status:** spec approved (`docs/superpowers/specs/2026-09-24-money-model.md`,
+> `docs/superpowers/specs/2026-09-24-observability-design.md`); **Phases 0, 0b, 1A, 1B, 1C, 1D, 2, 3, 4
+> and 5 complete** — solution, EF Core model and migrations, PostgreSQL money-storage gate, cookie
+> authentication as the sole mode, the `user set-password` verb, the loopback interlock, a Blazor
+> Server shell, Telegram capture with a durable queue, natural-language capture, voice notes
+> transcribed by Groq's whisper-large-v3, the money model (every wallet's balance — opening balance,
+> minus spending, plus income, re-anchored by the operator's own balance statements — is exact in all
+> five currencies (EUR, RSD, USD, RUB, KZT) under `ru-RU` and `sr-Latn-RS`), and now observability: the
+> host waits indefinitely for PostgreSQL instead of exiting when it is down, every page shows a waiting
+> banner until the database gate is `Ready`, Serilog logs to a rolling file and to the `app_log` table
+> with secrets redacted before every sink, a transaction's whole path from message to echo (and its
+> revision history) is visible on one trace page, and system health is on a dashboard tile, on
+> `/diagnostics` and behind the bot's owner-only `/health` command. Transactions carry a `Kind`
+> (`Expense`/`Income`/`BalanceCheck`); expense and income transactions own signed double-entry-lite
+> `entries`; a balance statement is a `balance_checks` checkpoint; a wallet's balance is computed by the
+> `wallet_balances` SQL view and read back by `IBalanceReadModel`, never stored. The model's answer tool
+> is `record_transaction` (was `record_spending`) and now names a wallet and, for a balance statement,
+> the stated amount. `/wallets` manages wallets on the dashboard; income and balance statements are
+> ordinary messages to the bot. The app also backs itself up daily — `pg_dump -Fc` into
+> `%LOCALAPPDATA%\NoofLedger\backups`, the newest 14 kept, every run logged to `backup_runs` — and
+> `ops/restore-check.ps1` proves a dump restores to the same balances, checked so far against a
+> template clone; the one check against the live ledger itself is the operator's to run
+> (`ops/RUNBOOK.md`). **1054 solution tests — 1043 passing, 11 live-only tests skipped, none failing** —
+> the Playwright browser tests are in the solution now, so `dotnet test --solution` runs them too and
+> needs Chromium present. Live suites stay skipped unless `NOOF_LEDGER_LIVE_ANTHROPIC_KEY` /
+> `NOOF_LEDGER_LIVE_GROQ_KEY` + `NOOF_LEDGER_LIVE_VOICE_FILE` are set; `ops/publish.ps1` produces a
+> runnable host. Cross-currency conversion, transfers and receipt photos remain future phases. Rules
+> below marked *(settled)* are direct user decisions and are not up for re-litigation.
 >
 > Deferred **decisions** live in `docs/OPEN-QUESTIONS.md`; deferred **work** lives in `docs/BACKLOG.md`. Check both before proposing something as missing.
 >
@@ -99,6 +126,14 @@ register it into) — named because they are exceptions, not a licence to invent
   dialog and snackbar providers cannot work from there, and nothing may use a popover, dialog,
   snackbar, tooltip or menu. Feedback is an inline `MudAlert`. Ways out are costed in
   `docs/BACKLOG.md`; taking one is a decision, not a convenience.
+- **Nothing at startup may block on the database** *(settled 2026-09-25, Phase 5)*. The host starts —
+  Kestrel, the sign-in page, `/healthz`, file logging — with PostgreSQL down; `IDatabaseGate` tracks
+  `Waiting`/`Migrating`/`Ready`/`Failed` and every page shows a waiting banner until `Ready`. Every
+  `BackgroundService` loop awaits `IDatabaseGate.WaitUntilReadyAsync` before its first iteration and
+  catches every non-cancellation exception per tick — a loop that lets an exception escape faults the
+  host's `BackgroundService` and stops the whole process with exit code 0, silently. This cost a
+  critical review finding: `SecretSnapshotRefreshWorker` had no catch, so PostgreSQL going down *after*
+  `Ready` took the host down outright even though startup itself tolerated it fine.
 
 **Database**
 - **After `dotnet ef migrations add`, convert the migration `.cs` file to a file-scoped namespace.** `IDE0161` is an error here, so it **fails the build** until you do. Its `.Designer.cs` and `LedgerDbContextModelSnapshot.cs` carry `// <auto-generated />`, which exempts them from code-style analyzers — leave those exactly as EF emits them. Converting them is churn that EF overwrites on the next scaffold anyway. Only the migration file is hand-edited (it carries the raw SQL EF cannot express), and only it is checked.
@@ -129,8 +164,31 @@ register it into) — named because they are exceptions, not a licence to invent
   first and re-create it in the same migration, or the migration fails on the dependency.
   `schema.expected.sql` never shows views or triggers — `WalletBalancesViewTests` is their detector.
 
+**Logging** *(settled 2026-09-25, Phase 5)*
+- **Serilog is the `Microsoft.Extensions.Logging` provider only** — referenced by `Noof.Ledger.Host`
+  alone. Everywhere else logs through `ILogger<T>` with `[LoggerMessage]` source-generated methods;
+  `CA1848`/`CA2254` are errors in `src` and an architecture test additionally bans a direct
+  `.LogXxx(` call there.
+- **`[LoggerMessage]` methods live in a sibling top-level `static partial class`, never a nested `Log`
+  class** — a nested class does not compile here (`CS1109`/`CS0260`).
+- Every log event gets a stable, pinned `EventId`. A `[LoggerMessage]` with no id is a gap the next
+  person has to notice by hand.
+
 **Testing**
 - TDD: a failing test first, for all behaviour. Exempt: migrations, DTOs, `Program.cs` wiring.
+- **Test hosts never write into the operator's real log directory** *(settled 2026-09-25, Phase 5)*.
+  Every `WebApplicationFactory<Program>` and E2E host fixture must point `Logging:File:Directory` at a
+  per-fixture temp directory (the `TestHostLogging` helpers, guarded by `TestHostLogDirectoryTests`) —
+  before this, test runs wrote files straight into `%LOCALAPPDATA%\NoofLedger\logs` and could evict the
+  operator's own logs under the 14-file retention cap. `Host.Tests` runs with
+  `parallelizeTestCollections=false` because Serilog's logger is a shared static.
+- **A statically rendered page's state is read once, at render** — an E2E fixture waiting for
+  something to change (the database gate, a background job) must wait for the actual rendered marker
+  (the sign-in page rendering *without* `id="database-waiting"`), never for a bare HTTP 200; a page can
+  200 while still showing what it rendered before the change.
+- **No production configuration key exists solely so a test can flip a code path** *(settled
+  2026-09-25, Phase 5)*. A `Diagnostics:ForceLogSinkFailureForTests` hook was added, then removed in
+  review, in favour of driving the real failure (an unreachable sink) from the test itself.
 - **A look that fails silently needs a test that reads what the app serves, not the source.** The
   theme once emitted `font-family: 'system-ui, -apple-system, ...'` — one quoted name no machine
   has — and every page rendered in Times New Roman while all 482 tests passed. `ShellSourceTests`

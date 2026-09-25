@@ -374,6 +374,14 @@ it is an `OperationCanceledException`, the filter needs to distinguish our token
 `ex is OperationCanceledException && stoppingToken.IsCancellationRequested` rather than a bare type
 test.
 
+**Still open after Phase 5 (2026-09-25).** Phase 5 made every hosted loop catch non-cancellation
+exceptions per tick and await `IDatabaseGate` first (`CLAUDE.md` §4), but the filter itself is
+unchanged — still a bare `ex is not OperationCanceledException` — and
+`HostOptions.BackgroundServiceExceptionBehavior` is still the unoverridden .NET default `StopHost`
+(confirmed directly by Phase 5's C-1 finding, `docs/OPEN-QUESTIONS.md` P5-1). A dependency that raises
+`OperationCanceledException` for a reason other than the loop's own token would still stop the host.
+The verification step above is still not done.
+
 ## The read model's "current zone" is supplied by a registered singleton now — a test gap remains
 
 **Corrected 2026-09-22 by Phase 1C Task 2.** This entry originally said the zone is "never given a
@@ -813,3 +821,65 @@ between the check and the kill, `Kill` throws `InvalidOperationException`, which
 cancellation, and `BackupWorker` records an ordinary failed run. A microsecond window at host
 shutdown, no data lost — wrap the `Kill` in a `catch (InvalidOperationException)` when next in the
 file (Phase 4 fix-wave re-review).
+
+---
+
+## Loose ends from Phase 5 (observability)
+
+Recorded 2026-09-25 closing Phase 5. The critical and important findings from the Fable 5.1 closing
+review were fixed on-branch; these are the minors the operator chose to park rather than fix, plus
+two items the spec explicitly deferred.
+
+**Proactive Telegram alerts when a health check turns red.** Today the operator only learns of a
+failing check by opening the dashboard, `/diagnostics`, or asking the bot's `/health` — nothing pushes
+a message when a check's state changes. Named out of scope by the observability spec (§"Out of
+scope"); it would want a debounce (a flapping check should not spam) and a decision about which
+checks are worth a push at all.
+
+**M-1 — `SelfLog.Enable` attributes every Serilog self-log line to the database sink, process-wide.**
+`LoggingSetup.cs` records *any* Serilog internal error (a locked log file, a console write failure, not
+only a PostgreSQL batch failure) as a Log sink failure, so the check can say "logs are in the file
+only" for the wrong reason. `SelfLog` is also a process-global listener while `Configure` runs per
+host, so two in-process hosts (as in some tests) overwrite each other's listener. Fix: attach to the
+PostgreSQL sink's own failure listener if `Serilog.Sinks.Postgresql.Alternative` exposes one, otherwise
+filter `SelfLog` text by that sink's type name before recording a failure.
+
+**M-3 — three near-identical registration entry points for one folder.**
+`DiagnosticsRegistration.AddNoofDiagnostics`, `DiagnosticsHostRegistration.AddNoofDiagnosticsHost` and
+`HostDiagnosticsRegistration.AddNoofHostDiagnostics(connectionString)` are all called from `Program.cs`
+and all live under `Noof.Ledger.Host/Diagnostics`. Harmless today; collapsing them into one
+`AddNoofHostDiagnostics(connectionString)` is ordinary tidying whenever that folder is touched next.
+
+**M-10 — the Database health check reads the gate, not PostgreSQL, so it can say "Ready" while
+PostgreSQL is down.** `DatabaseHealthCheck` reports whatever `IDatabaseGate.State` was when it last
+changed; once `Ready`, it never re-probes, so an outage that starts *after* startup shows "Database —
+Ready" in green next to Migrations, Backup and Telegram failing with raw Npgsql text underneath.
+Spec-conformant (the design says gate `Ready` → Ok) but confusing to read. A live `SELECT 1` with a
+short timeout on every check would be better and is cheap; not built because the gate's own workers
+already recover on their own, so nothing operationally depends on this check being live.
+
+**M-11 — `/health`'s command registration is not retried, and `/health@otherbot` is also accepted.**
+`setMyCommands` (which registers `/health` in the owner's chat) runs only when the bot token changes;
+a transient network failure at that moment is logged and never retried until the next restart. Separately,
+the router accepts `/health@anyname`, not just `/health@<this bot's own username>` — harmless for a
+single-owner DM bot where nothing else is listening, so left as is rather than plumbing the bot's own
+username through for a check that changes nothing observable.
+
+**FX freshness check arrives with the FX phase.** The observability spec named this out of scope
+because there is no FX rate source yet (`docs/OPEN-QUESTIONS.md` Q4) — nothing to check the freshness
+of. Add it alongside whichever phase builds currency conversion.
+
+**Playwright cannot drive a native `datetime-local` widget in headless Chromium**, so
+`/diagnostics/logs`'s From/To filter is verified through the query layer and the page's markup, not
+through a browser interaction test. `FillAsync` sets the DOM value but fires no event Blazor Server's
+`@bind:event="oninput"` receives — confirmed with a debug span that stayed empty across `oninput`,
+`onchange`, a plain `@bind`, and an explicit bubbling `dispatchEvent`. Coverage instead: `EfLogQueryTests`
+proves the SQL/EF filtering (inclusive both ends), and `DiagnosticsPageSourceTests` proves the page
+renders `#logs-filter-from`/`#logs-filter-to` and wires them into the query. Revisit if a future
+Playwright or Chromium release fixes native datetime input dispatch.
+
+**An intermittent Host auth-flow test flake**, seen twice across roughly six `Host.Tests` runs during
+the phase's closing fix pass, never reproduced on an immediate retry, and not connected to any finding
+fixed in this phase (a clean 292/292 pass bracketed each sighting). The failing test's own name was not
+captured — the run's tail buffer held only request-log noise by the time it was checked. Worth
+instrumenting the next time it is seen live rather than chasing from this description.

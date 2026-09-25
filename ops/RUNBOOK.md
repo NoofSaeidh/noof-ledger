@@ -219,6 +219,60 @@ Record the result here once it has been run:
 
 > _Not yet run. When it is: date, dump file name, and OK/MISMATCH go here._
 
+## Logging and diagnostics
+
+**Where logs live.** `%LOCALAPPDATA%\NoofLedger\logs\noof-ledger-<date>.log` by default — daily
+rolling, 14 files kept, 50 MB cap each. To use a different folder, set `Logging:File:Directory` in
+`appsettings.json` (or the `Logging__File__Directory` environment variable) to the path you want; the
+app creates it if it does not exist. While PostgreSQL is reachable, the same events are also written
+to the `app_log` table — every known secret (everything in `app_secret`, plus the database password)
+is redacted to `***` before either sink sees a line. If the database is down, or the table sink itself
+starts failing, the file is the only copy; nothing is lost, only the second copy is missing until the
+sink recovers.
+
+**Reading `/diagnostics` and the trace page.** `/diagnostics` lists every health check — Database,
+Migrations, Telegram, AI keys, Backup, Disk, Log sink — each with a "Logs" link that opens
+`/diagnostics/logs` pre-filtered to that check's own log category. `/diagnostics/logs` is a paged,
+filterable grid (level, time range, free text, source, transaction id) over `app_log`; when the
+database or the log sink is unavailable it falls back automatically to tailing the newest log file
+instead, with a banner saying so. Every transaction has its own page at
+`/transactions/{id}/trace` — its path from received to replied with timings, and the
+`transaction_revisions` history below it; if the log rows have aged out under retention (Debug 7
+days, Information 90 days, Warning and above 730 days) the trace strip says so but the revision
+history still shows, since that table is never pruned.
+
+**Setting the PostgreSQL service to start automatically is the operator's decision, not the app's.**
+The host waits indefinitely for PostgreSQL and needs no help to recover once it is up — but if you
+want PostgreSQL itself to come back after a reboot without you starting it by hand, that is a Windows
+service setting, from an elevated shell:
+
+```powershell
+Set-Service postgresql-x64-18 -StartupType Automatic
+```
+
+### Manual acceptance — Phase 5 (observability), the database going down and coming back
+
+Ten minutes, no live model call, this costs nothing.
+
+1. **Stop PostgreSQL:**
+   ```powershell
+   Stop-Service postgresql-x64-18
+   ```
+2. **Start the host** (`Push-Location .\publish; .\Noof.Ledger.Host.exe`, per the section below). The
+   sign-in page — and every other page, if you are already signed in — shows a "Waiting for the
+   database…" banner instead of an error or a crash. The process keeps running.
+3. **Check the log file** under `%LOCALAPPDATA%\NoofLedger\logs`: it records each connection attempt
+   with the 2 s → 4 s → 8 s → 16 s → 30 s backoff (the first ten attempts each logged, then every
+   tenth).
+4. **Start PostgreSQL again:**
+   ```powershell
+   Start-Service postgresql-x64-18
+   ```
+   The host migrates and comes up on its own — no restart needed. Reload the sign-in page; the banner
+   is gone.
+5. **Ask the bot for its own health:** send `/health` from the owner's chat. Expect a plain-text
+   summary — `Health: all good` or a line per check that is not Ok.
+
 ## Start the published app from its own directory
 
 ```powershell
