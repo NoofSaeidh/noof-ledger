@@ -55,6 +55,17 @@ public class SecretsPageSourceTests
     }
 
     [Fact]
+    public void Shows_the_database_gate_banner_while_the_database_is_not_ready()
+    {
+        // Task 1 covered Login and Home only; Phase 5's spec (§1, §4) is that a signed-in user sees
+        // the waiting banner on EVERY page instead of its data - Secrets is one of those pages.
+        var source = SourceText();
+
+        source.Should().Contain("IDatabaseGate");
+        source.Should().Contain("DatabaseGateBanner");
+    }
+
+    [Fact]
     public void Disposes_a_component_owned_cancellation_source_so_navigating_away_cancels_in_flight_calls()
     {
         var source = SourceText();

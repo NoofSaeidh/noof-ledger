@@ -3,15 +3,13 @@
 @implements IDisposable
 @using System.Data.Common
 @using System.Globalization
-@using Noof.Ledger.Application.Backup
+@using Noof.Ledger.Application.Diagnostics
 @using Noof.Ledger.Application.Reporting
 @using Noof.Ledger.Domain
 @inject ISpendingReadModel ReadModel
 @inject IBalanceReadModel BalanceReadModel
-@inject IBackupLog BackupLog
-@inject TimeProvider TimeProvider
+@inject ISystemHealth SystemHealth
 @inject IDatabaseGate DatabaseGate
-@using Noof.Ledger.Application.Diagnostics
 
 <PageTitle>Ledger</PageTitle>
 
@@ -23,19 +21,42 @@
 {
     <DatabaseGateBanner />
 }
-else if (databaseUnavailable)
-{
-    @* Distinct from "no spending yet" below: that means the database answered and there is nothing
-       in it, this means the database never answered at all. PostgreSQL on this machine is
-       Manual-start and sometimes simply isn't running, so this is an expected front-page state, not
-       a crash - conflating the two would say "you have no spending" when the truth is "we don't
-       know". *@
-    <MudAlert id="database-unavailable" Severity="Severity.Error" Variant="Variant.Outlined" Class="mt-6">
-        Can't reach the database right now. Once PostgreSQL is running again, reload this page.
-    </MudAlert>
-}
 else
 {
+    <MudAlert id="health-tile" Severity="@HealthSeverity(health?.Overall)" Variant="Variant.Outlined" Class="mt-6 mb-6">
+        @if (health is null)
+        {
+            <MudText Typo="Typo.body2">Checking system health…</MudText>
+        }
+        else if (health.Items.All(item => item.Level == HealthLevel.Ok))
+        {
+            <MudText Typo="Typo.body2">All systems normal.</MudText>
+        }
+        else
+        {
+            @foreach (var item in health.Items.Where(item => item.Level != HealthLevel.Ok))
+            {
+                <MudText Typo="Typo.body2">@item.Name — @item.Summary</MudText>
+            }
+        }
+        <MudLink Href="/diagnostics" Class="mt-1" Style="display:inline-block;">Diagnostics</MudLink>
+    </MudAlert>
+
+    @if (databaseUnavailable)
+    {
+        @* Distinct from "no spending yet" below: that means the database answered and there is
+           nothing in it, this means the database never answered at all. PostgreSQL on this machine
+           is Manual-start and sometimes simply isn't running, so this is an expected front-page
+           state, not a crash - conflating the two would say "you have no spending" when the truth
+           is "we don't know". The health tile above still reflects its own check, which reads the
+           database independently of this page's own read-model queries. *@
+        <MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">
+            The health tile above still reflects the database's own check - the sections below are
+            unavailable because a request made while loading this page failed.
+        </MudText>
+    }
+    else
+    {
     <MudPaper id="balances" Outlined="true" Elevation="0" Class="pa-5 mb-8">
         <MudText HtmlTag="h2" Typo="Typo.h6" Class="mb-3">Balances</MudText>
 
@@ -73,11 +94,6 @@ else
             }
         }
     </MudPaper>
-
-    <MudText id="backup-status" Typo="Typo.caption" Class="mb-8"
-             Color="@(BackupIsStale() ? Color.Warning : Color.Default)">
-        @DescribeBackup()
-    </MudText>
 
     <MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">
         This month, from @summaryFirstDay.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
@@ -205,6 +221,7 @@ else
             </MudPaper>
         }
     }
+    }
 }
 
 @code {
@@ -212,7 +229,7 @@ else
     IReadOnlyList<CurrencyGroup> currencyGroups = [];
     IReadOnlyList<WalletBalance> activeBalances = [];
     IReadOnlyList<CurrencyTotal> currencyTotals = [];
-    BackupStatus? backupStatus;
+    SystemHealthReport? health;
     DateOnly summaryFirstDay;
     bool databaseUnavailable;
 
@@ -270,7 +287,7 @@ else
                     .Select(group => new CurrencyTotal(group.Key, group.Sum(money => money.Amount))),
             ];
 
-            backupStatus = await BackupLog.StatusAsync(cancellation.Token);
+            health = await SystemHealth.GetAsync(fresh: false, cancellation.Token);
         }
         // Navigating away before the query returns cancels it via our own token, not a database
         // failure - it must not land in the databaseUnavailable branch below, or leaving the page
@@ -311,30 +328,13 @@ else
     static string FormatBalances(IReadOnlyList<Money> balances) =>
         balances.Count == 0 ? "—" : string.Join(", ", balances.Select(FormatMoney));
 
-    // M-5 (Phase 4 final review): "Last backup: failed" alone hid whether an earlier backup still
-    // exists - the failed-with-a-prior-success arm must come before the bare failed arm, or it
-    // never matches.
-    string DescribeBackup() => backupStatus switch
+    static Severity HealthSeverity(HealthLevel? level) => level switch
     {
-        null => "Last backup: unavailable",
-        { LastRunFailed: true, LastSuccessAt: { } at } => $"Last backup: failed · last success {FormatAgo(TimeProvider.GetUtcNow() - at)} ago",
-        { LastRunFailed: true } => "Last backup: failed",
-        { LastSuccessAt: null } => "Last backup: never",
-        { LastSuccessAt: { } at } => $"Last backup: {FormatAgo(TimeProvider.GetUtcNow() - at)} ago",
+        HealthLevel.Ok => Severity.Success,
+        HealthLevel.Warning => Severity.Warning,
+        HealthLevel.Failing => Severity.Error,
+        _ => Severity.Normal,
     };
-
-    static string FormatAgo(TimeSpan elapsed) => elapsed switch
-    {
-        { TotalMinutes: < 1 } => "just now",
-        { TotalHours: < 1 } => $"{(int)elapsed.TotalMinutes} min",
-        { TotalDays: < 1 } => $"{(int)elapsed.TotalHours} h",
-        _ => $"{(int)elapsed.TotalDays} d",
-    };
-
-    // B3's own staleness threshold: amber past 36 hours since the last success, or on any failed run,
-    // or when nothing has ever succeeded.
-    bool BackupIsStale() => backupStatus is null or { LastRunFailed: true } or { LastSuccessAt: null }
-        || backupStatus.LastSuccessAt is { } at && TimeProvider.GetUtcNow() - at > TimeSpan.FromHours(36);
 
     static string FormatOccurred(RecentTransaction transaction)
     {

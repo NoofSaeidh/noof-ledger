@@ -1,0 +1,205 @@
+@page "/diagnostics/logs"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using Microsoft.AspNetCore.Components.QuickGrid
+@using Noof.Ledger.Application.Diagnostics
+@inject ILogQuery LogQuery
+@inject ILogFileTail LogFileTail
+@inject ISystemHealth SystemHealth
+@inject IDatabaseGate Gate
+
+<PageTitle>Logs</PageTitle>
+
+<MudText HtmlTag="h1" Typo="Typo.h4" Class="mb-4">Logs</MudText>
+
+@if (fileTailMode)
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mb-4">
+        Database log unavailable — showing the log file.
+    </MudAlert>
+
+    <MudTextField T="string" Value="textFilter" Immediate="true" ValueChanged="OnFileTailFilterChangedAsync"
+                  Variant="Variant.Outlined" Margin="Margin.Dense" Label="Text" Class="mb-4" />
+
+    <div id="logs-file-tail">
+        @foreach (var line in visibleFileLines)
+        {
+            <MudText Typo="Typo.body2" Class="noof-log-line">@line</MudText>
+        }
+    </div>
+}
+else
+{
+    @if (Gate.State != DatabaseState.Ready)
+    {
+        <DatabaseGateBanner />
+    }
+    else
+    {
+        <MudGrid Spacing="2" Class="mb-4">
+            <MudItem xs="12" md="2">
+                <select id="logs-filter-level" @bind="filter.MinLevel" @bind:after="ReloadAsync" class="noof-native-select">
+                    @foreach (var level in Enum.GetValues<LogSeverity>())
+                    {
+                        <option value="@level">@level</option>
+                    }
+                </select>
+            </MudItem>
+            @* Plain native inputs, not MudTextField: a QuickGrid refresh needs to fire on every
+               keystroke, and a native input's @bind:event="oninput" does that directly, without
+               depending on MudTextField's own (JS-interop-driven) Immediate/debounce plumbing. *@
+            <MudItem xs="12" md="2">
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Text</MudText>
+                <input id="logs-filter-text" class="noof-input" @bind="filter.Text" @bind:event="oninput" @bind:after="ReloadAsync" />
+            </MudItem>
+            <MudItem xs="12" md="2">
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Source</MudText>
+                <input id="logs-filter-source" class="noof-input" @bind="filter.Source" @bind:event="oninput" @bind:after="ReloadAsync" />
+            </MudItem>
+            <MudItem xs="12" md="2">
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">From</MudText>
+                @* @bind against a DateTime? field, not a string: Razor's @bind directive infers a
+                   DateTime target type from a "datetime-local" input regardless of the bound
+                   property's own declared type, and generates Blazor's own built-in date/time
+                   round-trip conversion - the native binding path, rather than a hand-rolled
+                   value/@onchange pair reading a string. *@
+                <input type="datetime-local" id="logs-filter-from" class="noof-input" @bind="filter.From" @bind:event="oninput" @bind:after="ReloadAsync" />
+            </MudItem>
+            <MudItem xs="12" md="2">
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">To</MudText>
+                <input type="datetime-local" id="logs-filter-to" class="noof-input" @bind="filter.To" @bind:event="oninput" @bind:after="ReloadAsync" />
+            </MudItem>
+            <MudItem xs="12" md="2">
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Transaction id</MudText>
+                <input id="logs-filter-transaction-id" class="noof-input" @bind="transactionIdText" @bind:event="oninput" @bind:after="ReloadAsync" />
+            </MudItem>
+        </MudGrid>
+
+        <QuickGrid @key="reloadGeneration" TGridItem="LogRow" id="logs-grid" ItemsProvider="ProvideRowsAsync" Pagination="pagination" Class="mb-2">
+            <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="LogRow" TProp="DateTimeOffset" Property="@(row => row.LoggedAt)" Title="Logged at" />
+            <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="LogRow" TProp="LogSeverity" Property="@(row => row.Level)" Title="Level" />
+            <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="LogRow" TProp="string" Property="@(row => row.Source)" Title="Source" />
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="LogRow" Title="Message" Context="row">
+                <ChildContent>
+                    <div>
+                        @row.Message
+                        <MudLink OnClick="@(() => ToggleExpanded(row.Id))" Class="ml-2">
+                            @(expandedRowId == row.Id ? "Hide" : "Details")
+                        </MudLink>
+                        @if (expandedRowId == row.Id)
+                        {
+                            <div class="noof-log-details">
+                                @if (row.Exception is not null)
+                                {
+                                    <pre>@row.Exception</pre>
+                                }
+                                @if (row.PropertiesJson is not null)
+                                {
+                                    <pre>@row.PropertiesJson</pre>
+                                }
+                                @if (row.TransactionId is { } id)
+                                {
+                                    <MudLink Href="@($"/transactions/{id}/trace")">View trace</MudLink>
+                                }
+                            </div>
+                        }
+                    </div>
+                </ChildContent>
+            </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
+        </QuickGrid>
+        <Paginator State="pagination" />
+    }
+}
+
+@code {
+    // The `?source=` query parameter (set by /diagnostics's per-check Logs link) seeds the filter
+    // before this page's first ItemsProvider call, so following that link lands already narrowed
+    // to the check's rows instead of an unfiltered grid.
+    [SupplyParameterFromQuery]
+    public string? Source { get; set; }
+
+    sealed class LogFilterEdit
+    {
+        public LogSeverity MinLevel { get; set; } = LogSeverity.Information;
+        public string? Text { get; set; }
+        public string? Source { get; set; }
+        public DateTime? From { get; set; }
+        public DateTime? To { get; set; }
+        public Guid? TransactionId { get; set; }
+    }
+
+    readonly LogFilterEdit filter = new();
+    readonly PaginationState pagination = new() { ItemsPerPage = 100 };
+    int reloadGeneration;
+    string? textFilter;
+    string? transactionIdText;
+    bool fileTailMode;
+    long expandedRowId = -1;
+    IReadOnlyList<string> fileLines = [];
+    IReadOnlyList<string> visibleFileLines = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(Source))
+            filter.Source = Source;
+
+        var health = Gate.State == DatabaseState.Ready
+            ? await SystemHealth.GetAsync(fresh: false, CancellationToken.None)
+            : null;
+        var logSinkOk = health?.Items.SingleOrDefault(item => item.Name == HealthCheckNames.LogSink)?.Level == HealthLevel.Ok;
+        fileTailMode = Gate.State != DatabaseState.Ready || !logSinkOk;
+
+        if (fileTailMode)
+        {
+            fileLines = await LogFileTail.ReadLastLinesAsync(500, CancellationToken.None);
+            visibleFileLines = fileLines;
+        }
+    }
+
+    async ValueTask<GridItemsProviderResult<LogRow>> ProvideRowsAsync(GridItemsProviderRequest<LogRow> request)
+    {
+        var page = await LogQuery.QueryAsync(ToFilter(), request.StartIndex / pagination.ItemsPerPage, pagination.ItemsPerPage, request.CancellationToken);
+        return GridItemsProviderResult.From<LogRow>([.. page.Rows], page.TotalCount);
+    }
+
+    LogFilter ToFilter() => new(
+        filter.MinLevel,
+        From: ToOffset(filter.From),
+        To: ToOffset(filter.To),
+        Text: filter.Text,
+        Source: filter.Source,
+        TransactionId: filter.TransactionId);
+
+    // The datetime-local input's bound value is a local wall-clock DateTime with no offset of its
+    // own; pairing it with this machine's current UTC offset for that instant is what turns it into
+    // the DateTimeOffset the filter (and the timestamptz column it compares against) needs.
+    static DateTimeOffset? ToOffset(DateTime? localTime) =>
+        localTime is { } value
+            ? new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Unspecified), TimeZoneInfo.Local.GetUtcOffset(value))
+            : null;
+
+    Task ReloadAsync()
+    {
+        filter.TransactionId = Guid.TryParse(transactionIdText, out var parsed) ? parsed : null;
+
+        // Incrementing @key forces Blazor to tear down the old QuickGrid instance and mount a brand
+        // new one, rather than asking the existing instance to refresh in place. A filter change and
+        // the grid's own still in-flight initial load would otherwise be two concurrent
+        // ItemsProvider calls whose results can arrive out of order and leave a stale (unfiltered)
+        // page visible - discarding the whole component sidesteps that race instead of coordinating
+        // around it.
+        reloadGeneration++;
+        return pagination.SetCurrentPageIndexAsync(0);
+    }
+
+    Task OnFileTailFilterChangedAsync(string? value)
+    {
+        textFilter = value;
+        visibleFileLines = string.IsNullOrWhiteSpace(textFilter)
+            ? fileLines
+            : [.. fileLines.Where(line => line.Contains(textFilter, StringComparison.OrdinalIgnoreCase))];
+        return Task.CompletedTask;
+    }
+
+    void ToggleExpanded(long id) => expandedRowId = expandedRowId == id ? -1 : id;
+}
