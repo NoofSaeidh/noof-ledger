@@ -142,6 +142,37 @@ public class RunScriptTests
         output.Should().Contain("-Filter");
     }
 
+    // PR #1 review item 1: $exe was built from the raw, possibly-relative -Path, then Push-Location
+    // changed the current directory to that same -Path before `& $exe` ran - a relative -Path
+    // resolved twice (e.g. publish\publish\Noof.Ledger.Host.exe) and the launch failed. Stands in for
+    // the real host with a copy of hostname.exe under the same filename, so this runs for real without
+    // starting anything - the fake "host" just prints a hostname and exits 0.
+    [Fact]
+    public void Start_published_with_a_relative_Path_still_finds_the_exe()
+    {
+        var repoRoot = RepoRoot.Find().FullName;
+        var relativeDir = "runscripttest-start-published-" + Guid.NewGuid().ToString("N")[..8];
+        var absoluteDir = Path.Combine(repoRoot, relativeDir);
+        Directory.CreateDirectory(absoluteDir);
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(absoluteDir, "appsettings.json"),
+                """{ "Urls": "http://127.0.0.1:5263" }""");
+            File.Copy(
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "hostname.exe"),
+                Path.Combine(absoluteDir, "Noof.Ledger.Host.exe"));
+
+            var (exitCode, output) = RunPwsh("start-published", "-Path", relativeDir);
+
+            exitCode.Should().Be(0, $"a relative -Path must still resolve to the fake host exe; output was: {output}");
+        }
+        finally
+        {
+            Directory.Delete(absoluteDir, recursive: true);
+        }
+    }
+
     public static TheoryData<string> CommandNameTheoryData()
     {
         var data = new TheoryData<string>();

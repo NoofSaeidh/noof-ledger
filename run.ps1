@@ -497,6 +497,12 @@ switch ($CommandName) {
         $path = Get-ArgValue $Rest '-Path' (Join-Path $Root 'publish')
         $exe = Join-Path $path 'Noof.Ledger.Host.exe'
         if (-not (Test-Path $exe)) { throw "Not found: $exe. Run '.\run.ps1 publish' first, or pass -Path." }
+        # A relative -Path (e.g. "publish") stayed relative through Push-Location below, so `& $exe`
+        # then resolved it a second time against the already-changed directory (publish\publish\...).
+        # Resolving to an absolute path here, once existence is confirmed, makes $exe correct no
+        # matter what directory Push-Location switches into.
+        $path = (Resolve-Path $path).ProviderPath
+        $exe = Join-Path $path 'Noof.Ledger.Host.exe'
         # M-8: reads this published folder's own appsettings.json, so an operator who edited its
         # Urls sees the address the exe is actually about to bind to, not the source tree's.
         Write-Host "Listening on $(Get-HostUrl -Path $path)"
