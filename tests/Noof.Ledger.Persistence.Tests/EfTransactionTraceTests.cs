@@ -46,6 +46,20 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
         PropertiesJson = $$"""{"Stage":"{{stage}}","EventId":{"Id":{{eventId}},"Name":"{{stage}}"},"TransactionId":"{{transactionId}}"}""",
     };
 
+    static AppLogEntry StageFailedEvent(long id, DateTimeOffset at, string failedStage, Guid transactionId) => new()
+    {
+        Id = id,
+        LoggedAt = at,
+        Level = LogSeverity.Error,
+        Source = "Noof.Ledger.Host.Workers.CategorizationWorker",
+        Message = $"{TransactionStages.StageFailed} at stage {failedStage}",
+        Template = "{Stage} at stage {FailedStage}",
+        TransactionId = transactionId,
+        PropertiesJson = $$"""
+            {"Stage":"{{TransactionStages.StageFailed}}","FailedStage":"{{failedStage}}","EventId":{"Id":{{TransactionStages.StageFailedEventId}},"Name":"{{TransactionStages.StageFailed}}"},"TransactionId":"{{transactionId}}"}
+            """,
+    };
+
     static AppLogEntry NonStageEvent(long id, DateTimeOffset at, Guid transactionId) => new()
     {
         Id = id,
@@ -150,6 +164,38 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
 
         trace.History.Select(h => h.Details).Should().Equal("Captured → Completed", "нет, 1500");
         trace.History.Select(h => h.ChangeKind).Should().Equal(nameof(RevisionKind.Initial), nameof(RevisionKind.Correction));
+    }
+
+    [Fact]
+    public async Task A_StageFailed_event_carries_the_failed_stage_parsed_from_properties()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await SeedTransactionAsync(db);
+        var t0 = DateTimeOffset.Parse("2026-09-25T10:00:00Z");
+        db.AppLogs.Add(StageFailedEvent(1, t0, TransactionStages.Categorized, TransactionId));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+
+        var stageFailed = trace.Events.Should().ContainSingle().Subject;
+        stageFailed.Stage.Should().Be(TransactionStages.StageFailed);
+        stageFailed.FailedStage.Should().Be(TransactionStages.Categorized);
+    }
+
+    [Fact]
+    public async Task A_non_failed_event_carries_no_failed_stage()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await SeedTransactionAsync(db);
+        var t0 = DateTimeOffset.Parse("2026-09-25T10:00:00Z");
+        db.AppLogs.Add(StageEvent(1, t0, TransactionStages.Received, TransactionStages.ReceivedEventId, TransactionId));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+
+        trace.Events.Should().ContainSingle().Which.FailedStage.Should().BeNull();
     }
 
     [Fact]

@@ -27,8 +27,7 @@ else
         @foreach (var stage in TransactionStages.Ordered)
         {
             var stageEvent = trace.Events.FirstOrDefault(e => e.Stage == stage);
-            var failed = trace.Events.Any(e => e.Stage == TransactionStages.StageFailed
-                && e.PropertiesJson is not null && e.PropertiesJson.Contains($"\"FailedStage\":\"{stage}\"", StringComparison.Ordinal));
+            var failed = trace.Events.Any(e => e.Stage == TransactionStages.StageFailed && e.FailedStage == stage);
             <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
                      Color="@(failed ? Color.Error : stageEvent is not null ? Color.Success : Color.Default)"
                      Class="mr-2">

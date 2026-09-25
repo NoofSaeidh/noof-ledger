@@ -49,6 +49,10 @@ internal sealed class EfTransactionTrace(LedgerDbContext db) : ITransactionTrace
                 ? idElement.GetInt32()
                 : 0;
 
-        return new TraceEvent(entry.LoggedAt, stage, eventId, entry.Level, entry.Message, entry.Exception, entry.PropertiesJson);
+        var failedStage = properties.RootElement.TryGetProperty("FailedStage", out var failedStageElement)
+            ? failedStageElement.GetString()
+            : null;
+
+        return new TraceEvent(entry.LoggedAt, stage, eventId, entry.Level, entry.Message, entry.Exception, entry.PropertiesJson, failedStage);
     }
 }

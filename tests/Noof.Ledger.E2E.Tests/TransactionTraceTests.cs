@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Playwright;
 using Microsoft.Playwright.Xunit.v3;
@@ -75,6 +76,48 @@ public sealed class TransactionTraceTests(CookieModeHostFixture fixture) : PageT
 
         var history = Page.Locator("#trace-history");
         await Expect(history).ToContainTextAsync("Initial");
+    }
+
+    [Fact]
+    public async Task A_StageFailed_event_renders_its_failed_stage_chip_red()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var transactionId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var walletId = await SeedWalletAsync();
+
+        await using (var db = OpenDb())
+        {
+            db.Transactions.Add(new Transaction
+            {
+                Id = transactionId,
+                WalletId = walletId,
+                RawText = "seeded failed trace transaction",
+                CaptureKind = CaptureKind.Manual,
+                Kind = TransactionKind.Expense,
+                Status = TransactionStatus.Failed,
+                TimeZoneId = "Europe/Belgrade",
+                OccurredAt = now,
+                OccurredOn = ZonedClock.LocalDate(now, "Europe/Belgrade"),
+                TelegramChatId = null,
+                TelegramMessageId = null,
+                CreatedAt = now,
+            });
+
+            db.AppLogs.Add(NewStageRow(transactionId, now, TransactionStages.Received, TransactionStages.ReceivedEventId));
+            db.AppLogs.Add(NewStageFailedRow(transactionId, now.AddSeconds(1), TransactionStages.Categorized));
+
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync($"{fixture.BaseUrl}/transactions/{transactionId}/trace");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var failedChip = Page.Locator("#trace-stages .mud-chip", new PageLocatorOptions { HasText = TransactionStages.Categorized });
+        await Expect(failedChip).ToHaveClassAsync(new Regex("mud-chip-color-error"));
     }
 
     [Fact]
@@ -156,6 +199,21 @@ public sealed class TransactionTraceTests(CookieModeHostFixture fixture) : PageT
         Exception = null,
         TransactionId = transactionId,
         PropertiesJson = $$"""{"Stage":"{{stage}}","EventId":{"Id":{{eventId}},"Name":"{{stage}}"},"TransactionId":"{{transactionId}}"}""",
+    };
+
+    static AppLogEntry NewStageFailedRow(Guid transactionId, DateTimeOffset at, string failedStage) => new()
+    {
+        Id = 0,
+        LoggedAt = at,
+        Level = LogSeverity.Error,
+        Source = "TransactionTraceTests",
+        Message = $"{TransactionStages.StageFailed} at stage {failedStage}",
+        Template = "{Stage} at stage {FailedStage}",
+        Exception = null,
+        TransactionId = transactionId,
+        PropertiesJson = $$"""
+            {"Stage":"{{TransactionStages.StageFailed}}","FailedStage":"{{failedStage}}","EventId":{"Id":{{TransactionStages.StageFailedEventId}},"Name":"{{TransactionStages.StageFailed}}"},"TransactionId":"{{transactionId}}"}
+            """,
     };
 
     LedgerDbContext OpenDb() =>

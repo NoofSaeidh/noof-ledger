@@ -7,7 +7,8 @@ public sealed record TraceEvent(
     LogSeverity Level,
     string Message,
     string? Exception,
-    string? PropertiesJson);
+    string? PropertiesJson,
+    string? FailedStage);
 
 public sealed record RevisionView(DateTimeOffset At, string ChangeKind, string Details);
 
