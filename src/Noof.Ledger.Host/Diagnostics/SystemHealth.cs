@@ -42,10 +42,9 @@ internal sealed class SystemHealth(HealthCheckService healthCheckService, TimePr
             ? new HealthItem(name, Map(entry.Status), entry.Description ?? string.Empty, now)
             : new HealthItem(name, HealthLevel.Failing, "Check not registered", now))];
 
-        // Overall reflects only the checks the report actually ran, not the ones this call
-        // synthesizes a "Check not registered" item for - a unit test that stubs a partial
-        // HealthReport (fewer than all seven checks) still gets an Overall driven by what it stubbed.
-        var overall = raw.Entries.Count == 0 ? HealthLevel.Ok : raw.Entries.Values.Max(entry => Map(entry.Status));
+        // Overall is the worst of the items exactly as displayed, so a check missing from
+        // registration - shown as Failing, "Check not registered" - counts toward it the same way.
+        var overall = items.Length == 0 ? HealthLevel.Ok : items.Max(item => item.Level);
 
         return new SystemHealthReport(overall, items);
     }

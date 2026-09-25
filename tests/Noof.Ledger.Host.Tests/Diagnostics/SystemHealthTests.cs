@@ -65,12 +65,29 @@ public class SystemHealthTests
     {
         var report = ReportOf(
             (HealthCheckNames.Database, HealthStatus.Healthy, "ready"),
-            (HealthCheckNames.Backup, HealthStatus.Degraded, "stale"));
+            (HealthCheckNames.Migrations, HealthStatus.Healthy, "up to date"),
+            (HealthCheckNames.Telegram, HealthStatus.Healthy, "connected"),
+            (HealthCheckNames.AiKeys, HealthStatus.Healthy, "configured"),
+            (HealthCheckNames.Backup, HealthStatus.Degraded, "stale"),
+            (HealthCheckNames.Disk, HealthStatus.Healthy, "10.0 GB free"),
+            (HealthCheckNames.LogSink, HealthStatus.Healthy, "ok"));
         var health = new SystemHealth(ServiceReturning(report), new FakeTimeProvider(T0));
 
         var result = await health.GetAsync(fresh: true, TestContext.Current.CancellationToken);
 
         result.Overall.Should().Be(HealthLevel.Warning);
+    }
+
+    [Fact]
+    public async Task A_check_missing_from_registration_counts_toward_Overall_exactly_as_displayed()
+    {
+        var report = ReportOf((HealthCheckNames.Database, HealthStatus.Healthy, "ready"));
+        var health = new SystemHealth(ServiceReturning(report), new FakeTimeProvider(T0));
+
+        var result = await health.GetAsync(fresh: true, TestContext.Current.CancellationToken);
+
+        result.Items.Should().Contain(item => item.Name == HealthCheckNames.Backup && item.Level == HealthLevel.Failing);
+        result.Overall.Should().Be(HealthLevel.Failing);
     }
 
     [Fact]
