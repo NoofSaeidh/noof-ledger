@@ -482,6 +482,15 @@ switch ($CommandName) {
         $suite = if ($Rest.Count -ge 1 -and -not $Rest[0].StartsWith('-')) { $Rest[0] } else { 'fast' }
         $filter = Get-ArgValue $Rest '-Filter'
 
+        # M-6 (Phase 5 final review): Get-ArgValue silently returns $null when -Filter is the last
+        # token, and every -Filter branch below then ran its project (or, for db/e2e/all, the whole
+        # suite) unfiltered - the one thing the operator's testing rule says a db/e2e run must not do
+        # outside the phase-end pass. Checked before Enter-SuiteLock, so this never touches
+        # PostgreSQL even for db/e2e/all.
+        if ((Test-ArgSwitch $Rest '-Filter') -and -not $filter) {
+            throw 'Usage: -Filter requires a value (a test class name).'
+        }
+
         $fastProjects = @(
             'tests\Noof.Ledger.Domain.Tests\Noof.Ledger.Domain.Tests.csproj',
             'tests\Noof.Ledger.Ai.Tests\Noof.Ledger.Ai.Tests.csproj',

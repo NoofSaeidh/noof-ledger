@@ -67,6 +67,24 @@ public class RunScriptTests
             output.Should().Contain(name);
     }
 
+    // M-6 (Phase 5 final review): Get-ArgValue returns $null when -Filter is the last token, and
+    // every -Filter caller used to treat that the same as "no -Filter given" and run the whole
+    // project unfiltered - the one thing the operator's testing rule says db/e2e must not do outside
+    // the phase-end pass. Safe to run for real: the fix throws before Enter-SuiteLock, so this never
+    // touches PostgreSQL even for `test db`.
+    [Theory]
+    [InlineData("fast")]
+    [InlineData("db")]
+    [InlineData("e2e")]
+    [InlineData("all")]
+    public void Filter_with_no_value_errors_instead_of_running_the_suite_unfiltered(string suite)
+    {
+        var (exitCode, output) = RunPwsh("test", suite, "-Filter");
+
+        exitCode.Should().NotBe(0, "a -Filter with no value must fail loudly, not run the suite unfiltered");
+        output.Should().Contain("-Filter");
+    }
+
     public static TheoryData<string> CommandNameTheoryData()
     {
         var data = new TheoryData<string>();
