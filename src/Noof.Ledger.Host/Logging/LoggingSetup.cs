@@ -50,13 +50,17 @@ internal static class LoggingSetup
 
     // The full reconfiguration UseSerilog runs once the host is built. `services` is threaded
     // through so Task 4's Postgres sink and secret-redaction wrap can resolve IDatabaseGate,
-    // ILogSinkStatus and SecretRedactor here. MinimumLevel and LogContext enrichment stay on the
-    // outer `configuration` - the one Log.Logger actually becomes - so a later BeginScope (Task 3's
-    // TransactionLogScope) is still ambient when an event is written. `destinations` is a separate
-    // inner LoggerConfiguration holding console+file+Postgres; RedactingSink wraps its built logger
-    // so every one of those three sinks only ever sees a redacted LogEvent, per spec. `connectionString`
-    // is resolved once by the caller (Program.cs) and passed in - resolving it again here duplicated
+    // ILogSinkStatus and SecretRedactor here. `destinations` is a separate inner LoggerConfiguration
+    // holding console+file+Postgres; RedactingSink wraps its built logger so every one of those
+    // three sinks only ever sees a redacted LogEvent, per spec. `connectionString` is resolved once
+    // by the caller (Program.cs) and passed in - resolving it again here duplicated
     // LedgerConnectionString.Resolve's work every time the host started.
+    //
+    // M-9 (Phase 5 final review): a later BeginScope (Task 3's TransactionLogScope) still reaches
+    // Serilog properties regardless - SerilogLoggerProvider enriches Microsoft.Extensions.Logging
+    // scopes itself, whether or not Enrich.FromLogContext() is present. FromLogContext() only feeds
+    // Serilog.Context.LogContext.PushProperty, which nothing in this codebase calls; kept for
+    // parity with a conventional Serilog setup, not because it is load-bearing here.
     public static void Configure(LoggerConfiguration configuration, string logDirectory, string connectionString, IServiceProvider services)
     {
         var gate = services.GetRequiredService<IDatabaseGate>();
