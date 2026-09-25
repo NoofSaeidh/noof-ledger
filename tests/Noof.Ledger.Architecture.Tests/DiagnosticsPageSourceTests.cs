@@ -18,6 +18,9 @@ public class DiagnosticsPageSourceTests
         source.Should().Contain("id=\"diagnostics-checks\"");
         source.Should().Contain("HealthCheckLogCategories",
             "the Logs link must open the check's owning logger category, not the check's display name (I-1)");
+        source.Should().Contain("id=\"diagnostics-view-all-logs\"");
+        source.Should().NotContain("diagnostics-transaction-id",
+            "the confusing transaction-id lookup form was removed - the trace is reachable from Transactions and log rows instead");
         source.Should().NotContain("MudSelect");
         source.Should().NotContain("MudDatePicker");
         source.Should().NotContain("MudAutocomplete");
@@ -46,6 +49,10 @@ public class DiagnosticsPageSourceTests
             "Task 9: quick date ranges (Last hour/Today/7 days/All) alongside the custom From/To fields");
         source.Should().Contain("id=\"logs-sort-order\"",
             "Task 9: a sort toggle between newest-first and oldest-first");
+        source.Should().Contain("""Typo="Typo.caption" Class="mud-text-secondary">Level""",
+            "the Level select must carry the same caption-above-the-control label every other filter field does");
+        source.Should().Contain("placeholder=\"e.g. 3a70ddca-2352-",
+            "a transaction id is a GUID from the trace page - the field must show what one looks like");
         source.Should().Contain("[SupplyParameterFromQuery]",
             "/diagnostics's per-check Logs link navigates to /diagnostics/logs?source=<name> - this page must read that query parameter to seed the filter");
         source.Should().NotContain("Virtualize",
@@ -67,6 +74,7 @@ public class DiagnosticsPageSourceTests
         source.Should().Contain("@page \"/transactions/{Id:guid}/trace\"");
         source.Should().Contain("[Authorize]");
         source.Should().Contain("ITransactionTrace");
+        source.Should().Contain("id=\"trace-summary\"");
         source.Should().Contain("id=\"trace-stages\"");
         source.Should().Contain("id=\"trace-timeline\"");
         source.Should().Contain("id=\"trace-history\"");

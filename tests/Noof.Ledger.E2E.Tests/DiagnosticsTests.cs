@@ -46,21 +46,18 @@ public sealed class DiagnosticsTests(CookieModeHostFixture fixture) : PageTest, 
     }
 
     [Fact]
-    public async Task Entering_a_transaction_id_opens_its_trace_page()
+    public async Task A_view_all_logs_link_opens_the_logs_page()
     {
         if (fixture.DatabaseUnavailable)
             Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
-
-        var transactionId = Guid.NewGuid();
 
         await SignInAsync();
         await Page.GotoAsync(fixture.BaseUrl + "/diagnostics");
         await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
-        await Page.FillAsync("#diagnostics-transaction-id", transactionId.ToString());
-        await Page.ClickAsync("#diagnostics-open-trace");
+        await Page.ClickAsync("#diagnostics-view-all-logs");
 
-        await Page.WaitForURLAsync($"**/transactions/{transactionId}/trace");
+        await Page.WaitForURLAsync($"**/diagnostics/logs");
     }
 
     async Task SignInAsync()

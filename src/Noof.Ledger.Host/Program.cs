@@ -133,7 +133,6 @@ try
         .AddInteractiveServerRenderMode();
 
     app.MapAccountEndpoints();
-    app.MapDiagnosticsEndpoints();
 
     app.MapGet("/healthz", () => Results.Ok("ok")).AllowAnonymous();
 

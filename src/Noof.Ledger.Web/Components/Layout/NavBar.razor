@@ -39,12 +39,24 @@
         new("/transactions", "Transactions", Icons.Material.Outlined.ReceiptLong),
         new("/wallets", "Wallets", Icons.Material.Outlined.AccountBalanceWallet),
         new("/diagnostics", "Diagnostics", Icons.Material.Outlined.MonitorHeart),
+        new("/diagnostics/logs", "Logs", Icons.Material.Outlined.Article),
         new("/settings/secrets", "Secrets", Icons.Material.Outlined.Key),
     ];
 
-    bool IsCurrent(string href)
+    // A plain StartsWith would highlight both "Diagnostics" and "Logs" on /diagnostics/logs, since
+    // "/diagnostics" is a prefix of "/diagnostics/logs" - the current link is whichever Links entry
+    // is the longest (most specific) prefix match of the path, not every entry that happens to match.
+    bool IsCurrent(string href) => href == CurrentHref();
+
+    string? CurrentHref()
     {
         var path = "/" + Navigation.ToBaseRelativePath(Navigation.Uri).Split('?')[0].TrimEnd('/');
-        return href == "/" ? path == "/" : path.StartsWith(href, StringComparison.Ordinal);
+        return Links
+            .Where(link => link.Href == "/"
+                ? path == "/"
+                : path == link.Href || path.StartsWith(link.Href + "/", StringComparison.Ordinal))
+            .OrderByDescending(link => link.Href.Length)
+            .Select(link => link.Href)
+            .FirstOrDefault();
     }
 }

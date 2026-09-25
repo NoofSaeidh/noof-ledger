@@ -46,16 +46,7 @@ else
         </tbody>
     </MudSimpleTable>
 
-    <MudPaper Outlined="true" Elevation="0" Class="pa-5">
-        <MudText Typo="Typo.subtitle1" Class="mb-3">Open a transaction's trace</MudText>
-        <form method="get" action="/diagnostics/open-trace">
-            <MudTextField T="string" InputId="diagnostics-transaction-id" name="id"
-                          Variant="Variant.Outlined" Margin="Margin.Dense" Label="Transaction id" Class="mb-3" />
-            <MudButton id="diagnostics-open-trace" ButtonType="ButtonType.Submit" Variant="Variant.Outlined">
-                Open trace
-            </MudButton>
-        </form>
-    </MudPaper>
+    <MudLink id="diagnostics-view-all-logs" Href="/diagnostics/logs">View all logs &rarr;</MudLink>
 }
 
 @code {
