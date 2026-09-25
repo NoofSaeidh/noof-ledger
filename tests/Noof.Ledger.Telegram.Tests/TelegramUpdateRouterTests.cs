@@ -1,10 +1,13 @@
-﻿using NSubstitute;
+﻿using AwesomeAssertions;
+using NSubstitute;
 using Noof.Ledger.Application.Capture;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Editing;
 using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Domain;
+using Noof.Ledger.TestKit;
 using Telegram.Bot.Types;
 
 namespace Noof.Ledger.Telegram.Tests;
@@ -15,7 +18,7 @@ public class TelegramUpdateRouterTests
 
     sealed record Harness(
         TelegramUpdateRouter Router, ICaptureStore CaptureStore, IChatNotifier ChatNotifier,
-        IRecordEditor Editor, ICategorizationStore Store);
+        IRecordEditor Editor, ICategorizationStore Store, CapturingLogger<TelegramUpdateRouter> Logger);
 
     static Harness CreateRouter(long ownerChatId)
     {
@@ -26,10 +29,12 @@ public class TelegramUpdateRouterTests
         var chatNotifier = Substitute.For<IChatNotifier>();
         var editor = Substitute.For<IRecordEditor>();
         var store = Substitute.For<ICategorizationStore>();
+        var logger = new CapturingLogger<TelegramUpdateRouter>();
         var router = new TelegramUpdateRouter(captureStore, chatNotifier, new TelegramOwnerGate(secretStore),
-            new RecordActionHandler(editor, store, chatNotifier, Echo), new CorrectionHandler(editor, chatNotifier, Echo), Echo);
+            new RecordActionHandler(editor, store, chatNotifier, Echo), new CorrectionHandler(editor, chatNotifier, Echo), Echo,
+            logger);
 
-        return new Harness(router, captureStore, chatNotifier, editor, store);
+        return new Harness(router, captureStore, chatNotifier, editor, store, logger);
     }
 
     static Update TextMessage(long chatId, int messageId, string text, DateTime date) => new()
@@ -70,7 +75,7 @@ public class TelegramUpdateRouterTests
     [Fact]
     public async Task Captures_replies_and_attaches_the_reply_for_the_owner()
     {
-        var (router, captureStore, chatNotifier, _, _) = CreateRouter(ownerChatId: 111L);
+        var (router, captureStore, chatNotifier, _, _, _) = CreateRouter(ownerChatId: 111L);
         var sentAt = DateTimeOffset.Parse("2026-09-21T10:00:00Z");
         var transactionId = Guid.NewGuid();
         captureStore.CaptureAsync(Arg.Any<CapturedMessage>(), "Europe/Belgrade", Arg.Any<CancellationToken>())
@@ -91,13 +96,78 @@ public class TelegramUpdateRouterTests
     }
 
     [Fact]
+    public async Task Received_is_logged_for_a_text_capture_with_the_transaction_scope()
+    {
+        var (router, captureStore, chatNotifier, _, _, logger) = CreateRouter(ownerChatId: 111L);
+        var transactionId = Guid.NewGuid();
+        captureStore.CaptureAsync(Arg.Any<CapturedMessage>(), "Europe/Belgrade", Arg.Any<CancellationToken>())
+            .Returns(transactionId);
+        chatNotifier.SendAsync(111L, Echo.Acknowledgement, Arg.Any<CancellationToken>()).Returns(777);
+
+        await router.HandleAsync(
+            TextMessage(111L, 5, "coffee 3.20 EUR", DateTime.UtcNow), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        var entry = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.ReceivedEventId).Subject;
+        entry.Stage.Should().Be(TransactionStages.Received);
+        entry.Properties["CaptureKind"].Should().Be(CaptureKind.Text);
+        entry.Properties["ChatId"].Should().Be(111L);
+        entry.Scope.Should().NotBeNull();
+        entry.Scope![TransactionStages.TransactionIdProperty].Should().Be(transactionId);
+    }
+
+    [Fact]
+    public async Task Received_is_logged_for_a_voice_capture()
+    {
+        var (router, captureStore, chatNotifier, _, _, logger) = CreateRouter(ownerChatId: 111L);
+        var transactionId = Guid.NewGuid();
+        captureStore.CaptureVoiceAsync(Arg.Any<CapturedVoice>(), "Europe/Belgrade", Arg.Any<CancellationToken>())
+            .Returns(transactionId);
+        chatNotifier.SendAsync(111L, Echo.Transcribing, Arg.Any<CancellationToken>()).Returns(778);
+        var update = new Update
+        {
+            Id = 901,
+            Message = new Message
+            {
+                Id = 6, Chat = new Chat { Id = 111L }, Date = DateTime.UtcNow,
+                Voice = new Voice { FileId = "voice-1", Duration = 4 },
+            },
+        };
+
+        await router.HandleAsync(update, "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        var entry = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.ReceivedEventId).Subject;
+        entry.Properties["CaptureKind"].Should().Be(CaptureKind.Voice);
+        entry.Scope![TransactionStages.TransactionIdProperty].Should().Be(transactionId);
+    }
+
+    [Fact]
+    public async Task A_failed_acknowledgement_logs_StageFailed_for_Received_and_rethrows()
+    {
+        var (router, captureStore, chatNotifier, _, _, logger) = CreateRouter(ownerChatId: 111L);
+        var transactionId = Guid.NewGuid();
+        captureStore.CaptureAsync(Arg.Any<CapturedMessage>(), "Europe/Belgrade", Arg.Any<CancellationToken>())
+            .Returns(transactionId);
+        chatNotifier.SendAsync(111L, Echo.Acknowledgement, Arg.Any<CancellationToken>())
+            .Returns<int>(_ => throw new InvalidOperationException("bot token revoked"));
+
+        var act = () => router.HandleAsync(
+            TextMessage(111L, 5, "coffee 3.20 EUR", DateTime.UtcNow), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        var entry = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.StageFailedEventId).Subject;
+        entry.Properties["FailedStage"].Should().Be(TransactionStages.Received);
+        entry.Exception.Should().NotBeNull();
+        entry.Scope![TransactionStages.TransactionIdProperty].Should().Be(transactionId);
+    }
+
+    [Fact]
     public async Task Stores_the_time_Telegram_sent_the_message_not_the_time_it_was_processed()
     {
         // An outage can queue a message for hours; Telegram's own Message.Date is when the spend
         // happened, "now" at handling time is only when we got around to it. Collapsing every
         // queued message onto the reconnection moment buckets it into the wrong local day once
         // Phase 1B reads time_zone_id back to compute "today" / "this month".
-        var (router, captureStore, chatNotifier, _, _) = CreateRouter(ownerChatId: 111L);
+        var (router, captureStore, chatNotifier, _, _, _) = CreateRouter(ownerChatId: 111L);
         var sentAt = DateTimeOffset.Parse("2026-09-21T23:50:00Z");
         captureStore.CaptureAsync(Arg.Any<CapturedMessage>(), "Europe/Belgrade", Arg.Any<CancellationToken>())
             .Returns(Guid.NewGuid());
@@ -119,7 +189,7 @@ public class TelegramUpdateRouterTests
     [Fact]
     public async Task Rejects_a_stranger_before_capturing_or_replying()
     {
-        var (router, captureStore, chatNotifier, _, _) = CreateRouter(ownerChatId: 111L);
+        var (router, captureStore, chatNotifier, _, _, _) = CreateRouter(ownerChatId: 111L);
 
         await router.HandleAsync(
             TextMessage(999L, 5, "coffee 3.20 EUR", DateTime.UtcNow),
@@ -133,7 +203,7 @@ public class TelegramUpdateRouterTests
     [Fact]
     public async Task Ignores_an_update_with_no_message()
     {
-        var (router, captureStore, _, _, _) = CreateRouter(ownerChatId: 111L);
+        var (router, captureStore, _, _, _, _) = CreateRouter(ownerChatId: 111L);
 
         await router.HandleAsync(new Update { Id = 901 }, "Europe/Belgrade", TestContext.Current.CancellationToken);
 
@@ -143,7 +213,7 @@ public class TelegramUpdateRouterTests
     [Fact]
     public async Task Ignores_a_message_with_no_text()
     {
-        var (router, captureStore, _, _, _) = CreateRouter(ownerChatId: 111L);
+        var (router, captureStore, _, _, _, _) = CreateRouter(ownerChatId: 111L);
         var update = new Update { Id = 902, Message = new Message { Id = 6, Chat = new Chat { Id = 111L } } };
 
         await router.HandleAsync(update, "Europe/Belgrade", TestContext.Current.CancellationToken);
@@ -154,7 +224,7 @@ public class TelegramUpdateRouterTests
     [Fact]
     public async Task Cancel_cancels_the_record_and_turns_its_echo_into_the_cancelled_one()
     {
-        var (router, _, chatNotifier, editor, store) = CreateRouter(ownerChatId: 111L);
+        var (router, _, chatNotifier, editor, store, _) = CreateRouter(ownerChatId: 111L);
         var transactionId = Guid.NewGuid();
         editor.FindByBotMessageAsync(111L, 42, Arg.Any<CancellationToken>()).Returns(new EchoTarget(transactionId, 42));
         store.GetSubjectAsync(transactionId, Arg.Any<CancellationToken>()).Returns(RecordWith(TransactionStatus.Cancelled));
@@ -171,7 +241,7 @@ public class TelegramUpdateRouterTests
     [Fact]
     public async Task Restore_restores_the_record_and_its_buttons()
     {
-        var (router, _, chatNotifier, editor, store) = CreateRouter(ownerChatId: 111L);
+        var (router, _, chatNotifier, editor, store, _) = CreateRouter(ownerChatId: 111L);
         var transactionId = Guid.NewGuid();
         editor.FindByBotMessageAsync(111L, 42, Arg.Any<CancellationToken>()).Returns(new EchoTarget(transactionId, 42));
         store.GetSubjectAsync(transactionId, Arg.Any<CancellationToken>()).Returns(RecordWith(TransactionStatus.Completed));
@@ -187,7 +257,7 @@ public class TelegramUpdateRouterTests
     [Fact]
     public async Task A_strangers_button_press_is_ignored_entirely()
     {
-        var (router, _, chatNotifier, editor, _) = CreateRouter(ownerChatId: 111L);
+        var (router, _, chatNotifier, editor, _, _) = CreateRouter(ownerChatId: 111L);
 
         await router.HandleAsync(ButtonPress(999L, 42, "cancel"), "Europe/Belgrade", TestContext.Current.CancellationToken);
 
@@ -198,7 +268,7 @@ public class TelegramUpdateRouterTests
     [Fact]
     public async Task A_press_on_a_message_that_is_no_record_is_answered_and_nothing_else()
     {
-        var (router, _, chatNotifier, editor, _) = CreateRouter(ownerChatId: 111L);
+        var (router, _, chatNotifier, editor, _, _) = CreateRouter(ownerChatId: 111L);
         editor.FindByBotMessageAsync(111L, 42, Arg.Any<CancellationToken>()).Returns((EchoTarget?)null);
 
         await router.HandleAsync(ButtonPress(111L, 42, "cancel"), "Europe/Belgrade", TestContext.Current.CancellationToken);
@@ -211,7 +281,7 @@ public class TelegramUpdateRouterTests
     [Fact]
     public async Task A_reply_to_an_echo_queues_a_correction_instead_of_a_new_capture()
     {
-        var (router, captureStore, chatNotifier, editor, _) = CreateRouter(ownerChatId: 111L);
+        var (router, captureStore, chatNotifier, editor, _, _) = CreateRouter(ownerChatId: 111L);
         var transactionId = Guid.NewGuid();
         editor.FindByBotMessageAsync(111L, 42, Arg.Any<CancellationToken>()).Returns(new EchoTarget(transactionId, 42));
         editor.RequestCorrectionAsync(transactionId, "нет, 1500", 8, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(true);
@@ -227,7 +297,7 @@ public class TelegramUpdateRouterTests
     [Fact]
     public async Task A_redelivered_reply_edits_nothing_and_captures_nothing()
     {
-        var (router, captureStore, chatNotifier, editor, _) = CreateRouter(ownerChatId: 111L);
+        var (router, captureStore, chatNotifier, editor, _, _) = CreateRouter(ownerChatId: 111L);
         var transactionId = Guid.NewGuid();
         editor.FindByBotMessageAsync(111L, 42, Arg.Any<CancellationToken>()).Returns(new EchoTarget(transactionId, 42));
         editor.RequestCorrectionAsync(transactionId, "нет, 1500", 8, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(false);
@@ -241,7 +311,7 @@ public class TelegramUpdateRouterTests
     [Fact]
     public async Task A_reply_to_anything_but_an_echo_is_captured_as_a_new_message()
     {
-        var (router, captureStore, _, editor, _) = CreateRouter(ownerChatId: 111L);
+        var (router, captureStore, _, editor, _, _) = CreateRouter(ownerChatId: 111L);
         editor.FindByBotMessageAsync(111L, 3, Arg.Any<CancellationToken>()).Returns((EchoTarget?)null);
 
         await router.HandleAsync(ReplyTo(111L, 8, 3, "хлеб 100"), "Europe/Belgrade", TestContext.Current.CancellationToken);
@@ -252,7 +322,7 @@ public class TelegramUpdateRouterTests
     [Fact]
     public async Task Edit_asks_what_to_change_and_remembers_the_prompt()
     {
-        var (router, _, chatNotifier, editor, _) = CreateRouter(ownerChatId: 111L);
+        var (router, _, chatNotifier, editor, _, _) = CreateRouter(ownerChatId: 111L);
         var transactionId = Guid.NewGuid();
         editor.FindByBotMessageAsync(111L, 42, Arg.Any<CancellationToken>()).Returns(new EchoTarget(transactionId, 42));
         chatNotifier.AskAsync(111L, 42, Echo.EditPrompt, Arg.Any<CancellationToken>()).Returns(77);
@@ -265,7 +335,7 @@ public class TelegramUpdateRouterTests
     [Fact]
     public async Task Editing_the_original_message_re_reads_it()
     {
-        var (router, _, chatNotifier, editor, _) = CreateRouter(ownerChatId: 111L);
+        var (router, _, chatNotifier, editor, _, _) = CreateRouter(ownerChatId: 111L);
         var transactionId = Guid.NewGuid();
         editor.FindByUserMessageAsync(111L, 5, Arg.Any<CancellationToken>()).Returns(new EchoTarget(transactionId, 42));
         editor.ReplaceRawTextAsync(transactionId, "кофе 300", Arg.Any<CancellationToken>()).Returns(true);
@@ -280,7 +350,7 @@ public class TelegramUpdateRouterTests
     [Fact]
     public async Task A_strangers_edit_is_ignored()
     {
-        var (router, _, _, editor, _) = CreateRouter(ownerChatId: 111L);
+        var (router, _, _, editor, _, _) = CreateRouter(ownerChatId: 111L);
         var update = new Update { Id = 906, EditedMessage = new Message { Id = 5, Chat = new Chat { Id = 999L }, Text = "x" } };
 
         await router.HandleAsync(update, "Europe/Belgrade", TestContext.Current.CancellationToken);
@@ -304,7 +374,7 @@ public class TelegramUpdateRouterTests
     [Fact]
     public async Task Captures_a_voice_note_and_says_it_is_transcribing()
     {
-        var (router, captureStore, chatNotifier, _, _) = CreateRouter(ownerChatId: 111L);
+        var (router, captureStore, chatNotifier, _, _, _) = CreateRouter(ownerChatId: 111L);
         var sentAt = DateTimeOffset.Parse("2026-09-24T21:30:00Z");
         var transactionId = Guid.NewGuid();
         captureStore.CaptureVoiceAsync(Arg.Any<CapturedVoice>(), "Europe/Belgrade", Arg.Any<CancellationToken>()).Returns(transactionId);
@@ -324,7 +394,7 @@ public class TelegramUpdateRouterTests
     [Fact]
     public async Task Rejects_a_strangers_voice_note_before_reading_it()
     {
-        var (router, captureStore, chatNotifier, editor, _) = CreateRouter(ownerChatId: 111L);
+        var (router, captureStore, chatNotifier, editor, _, _) = CreateRouter(ownerChatId: 111L);
 
         await router.HandleAsync(VoiceNote(222L, 5, DateTime.UtcNow), "Europe/Belgrade", TestContext.Current.CancellationToken);
 
@@ -336,7 +406,7 @@ public class TelegramUpdateRouterTests
     [Fact]
     public async Task A_voice_reply_to_an_echo_queues_a_spoken_correction_instead_of_a_new_capture()
     {
-        var (router, captureStore, chatNotifier, editor, _) = CreateRouter(ownerChatId: 111L);
+        var (router, captureStore, chatNotifier, editor, _, _) = CreateRouter(ownerChatId: 111L);
         var transactionId = Guid.NewGuid();
         var sentAt = DateTimeOffset.Parse("2026-09-24T10:00:00Z");
         editor.FindByBotMessageAsync(111L, 42, Arg.Any<CancellationToken>()).Returns(new EchoTarget(transactionId, 42));
@@ -354,7 +424,7 @@ public class TelegramUpdateRouterTests
     [Fact]
     public async Task A_redelivered_voice_reply_edits_nothing_and_captures_nothing()
     {
-        var (router, captureStore, chatNotifier, editor, _) = CreateRouter(ownerChatId: 111L);
+        var (router, captureStore, chatNotifier, editor, _, _) = CreateRouter(ownerChatId: 111L);
         var transactionId = Guid.NewGuid();
         editor.FindByBotMessageAsync(111L, 42, Arg.Any<CancellationToken>()).Returns(new EchoTarget(transactionId, 42));
         editor.RequestVoiceCorrectionAsync(transactionId, "voice-file-1", 6, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
@@ -371,7 +441,7 @@ public class TelegramUpdateRouterTests
     [Fact]
     public async Task A_voice_reply_to_anything_but_an_echo_is_captured_as_a_new_voice_note()
     {
-        var (router, captureStore, _, editor, _) = CreateRouter(ownerChatId: 111L);
+        var (router, captureStore, _, editor, _, _) = CreateRouter(ownerChatId: 111L);
         editor.FindByBotMessageAsync(111L, 50, Arg.Any<CancellationToken>()).Returns((EchoTarget?)null);
 
         await router.HandleAsync(
@@ -385,7 +455,7 @@ public class TelegramUpdateRouterTests
     [Fact]
     public async Task An_edited_voice_note_is_ignored()
     {
-        var (router, _, _, editor, _) = CreateRouter(ownerChatId: 111L);
+        var (router, _, _, editor, _, _) = CreateRouter(ownerChatId: 111L);
         var edited = new Update
         {
             Id = 906,

@@ -79,6 +79,8 @@ internal sealed class TranscriptionWorker(
 
         CategorizationSubject? record = null;
 
+        using var logScope = TransactionLogScope.Begin(logger, job.TransactionId);
+
         try
         {
             record = await store.GetSubjectAsync(job.TransactionId, cancellationToken);
@@ -93,13 +95,19 @@ internal sealed class TranscriptionWorker(
 
             // A check constraint holds voice_file_id on every Transcribe job.
             await using var audio = await voiceFiles.DownloadAsync(job.VoiceFileId!, cancellationToken);
+            var transcriptionStartedAt = timeProvider.GetUtcNow();
             var transcript = await transcriber.TranscribeAsync(audio, cancellationToken);
+            var transcriptionDuration = timeProvider.GetUtcNow() - transcriptionStartedAt;
 
             if (transcript.Length == 0)
             {
+                logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Transcribed,
+                    new InvalidOperationException("nothing was heard in the voice note"));
                 await ReportNothingHeardAsync(jobQueue, store, notifier, job, record, cancellationToken);
                 return;
             }
+
+            logger.LogTranscribed(TransactionStages.Transcribed, transcriptionDuration.TotalSeconds, transcript.Length);
 
             var transcriptionStore = scope.ServiceProvider.GetRequiredService<ITranscriptionStore>();
             var handedOn = job.SourceMessageId is { } sourceMessageId
@@ -118,17 +126,20 @@ internal sealed class TranscriptionWorker(
         {
             // 401/402/403: the key, not this note, is what is broken. Retried, never failed, and claiming pauses so the
             // backlog is not burned through while the key stays bad.
+            logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Transcribed, ex);
             accountCooldownUntil = timeProvider.GetUtcNow() + options.AccountCooldown;
             logger.AccountLevelFailure(job.Id, ex.Message, options.AccountCooldown);
             await HandleFailureAsync(jobQueue, store, notifier, job, record, ModelFailureKind.Transient, ex.Message, cancellationToken);
         }
         catch (ModelCallException ex)
         {
+            logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Transcribed, ex);
             await HandleFailureAsync(jobQueue, store, notifier, job, record, ex.Kind, ex.Message, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // A failed download lands here and is worth another attempt (V9); the attempt cap bounds everything else.
+            logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Transcribed, ex);
             await HandleFailureAsync(jobQueue, store, notifier, job, record, ModelFailureKind.Transient, ex.Message, cancellationToken);
         }
     }

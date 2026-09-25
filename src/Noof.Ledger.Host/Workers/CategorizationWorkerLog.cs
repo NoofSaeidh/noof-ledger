@@ -1,3 +1,6 @@
+using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Domain;
+
 namespace Noof.Ledger.Host.Workers.CategorizationLogging;
 
 // A sibling top-level static class, not nested inside CategorizationWorker: a [LoggerMessage]
@@ -35,4 +38,20 @@ internal static partial class CategorizationWorkerLog
     [LoggerMessage(EventId = 1207, Level = LogLevel.Warning,
         Message = "Failed to edit Telegram message {MessageId} to report a failed job for transaction {TransactionId}")]
     public static partial void FailureEditFailed(this ILogger logger, Exception exception, int messageId, Guid transactionId);
+
+    [LoggerMessage(EventId = TransactionStages.CategorizedEventId, EventName = TransactionStages.Categorized, Level = LogLevel.Information,
+        Message = "{Stage} as {Kind} for wallet {WalletId}: {Summary}")]
+    public static partial void LogCategorized(this ILogger logger, string stage, TransactionKind kind, Guid? walletId, string summary);
+
+    [LoggerMessage(EventId = TransactionStages.PersistedEventId, EventName = TransactionStages.Persisted, Level = LogLevel.Information,
+        Message = "{Stage} as {Kind}")]
+    public static partial void LogPersisted(this ILogger logger, string stage, TransactionKind kind);
+
+    [LoggerMessage(EventId = TransactionStages.RepliedEventId, EventName = TransactionStages.Replied, Level = LogLevel.Information,
+        Message = "{Stage} to bot message {BotMessageId}")]
+    public static partial void LogReplied(this ILogger logger, string stage, int botMessageId);
+
+    [LoggerMessage(EventId = TransactionStages.StageFailedEventId, EventName = TransactionStages.StageFailed, Level = LogLevel.Error,
+        Message = "{Stage} at stage {FailedStage}")]
+    public static partial void LogStageFailed(this ILogger logger, string stage, string failedStage, Exception exception);
 }

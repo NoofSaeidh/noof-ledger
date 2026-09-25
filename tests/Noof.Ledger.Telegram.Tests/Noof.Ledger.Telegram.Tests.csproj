@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Noof.Ledger.Telegram\Noof.Ledger.Telegram.csproj" />
+    <ProjectReference Include="..\Noof.Ledger.TestKit\Noof.Ledger.TestKit.csproj" />
   </ItemGroup>
 
 </Project>
