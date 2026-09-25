@@ -2,6 +2,8 @@ using System.Globalization;
 using AwesomeAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence;
 using Noof.Ledger.TestKit;
@@ -87,6 +89,10 @@ public sealed class DashboardCultureTests
             });
 
             using var client = factory.CreateClient();
+
+            var gate = factory.Services.GetRequiredService<IDatabaseGate>();
+            await gate.WaitUntilReadyAsync(TestContext.Current.CancellationToken);
+
             await LoginHelper.PostWithTokenAsync(client, "noof", "correct");
             var html = await client.GetStringAsync("/", TestContext.Current.CancellationToken);
 
