@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.Hosting.Server.Features;
 using Noof.Ledger.Ai;
 using Noof.Ledger.Application;
 using Noof.Ledger.Application.Auth;
-using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Host.Auth;
 using Noof.Ledger.Host.Cli;
 using Noof.Ledger.Host.Diagnostics;
@@ -100,9 +99,6 @@ try
     builder.Services.AddNoofDiagnostics();
 
     var app = builder.Build();
-
-    if (builder.Configuration.GetValue("Diagnostics:ForceLogSinkFailureForTests", false))
-        app.Services.GetRequiredService<ILogSinkStatus>().RecordFailure(TimeProvider.System.GetUtcNow());
 
     app.UseAuthentication();
     app.UseAuthorization();

@@ -156,7 +156,9 @@ public sealed class CookieModeHostFixture : IAsyncLifetime
         await create.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    static async Task SeedUserAsync(string publishDirectory, string connectionString, CancellationToken cancellationToken)
+    // Internal, not private: DiagnosticsLogsTests reuses this to seed its own isolated clone
+    // (I-5, Phase 5 final review) rather than duplicating the `user set-password` CLI dance.
+    internal static async Task SeedUserAsync(string publishDirectory, string connectionString, CancellationToken cancellationToken)
     {
         var dll = Path.Combine(publishDirectory, "Noof.Ledger.Host.dll");
 

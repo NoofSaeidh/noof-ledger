@@ -5,6 +5,8 @@ using Microsoft.Playwright.Xunit.v3;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Persistence;
 using Noof.Ledger.Persistence.Diagnostics;
+using Noof.Ledger.TestKit;
+using Npgsql;
 
 namespace Noof.Ledger.E2E.Tests;
 
@@ -127,36 +129,110 @@ public sealed class DiagnosticsLogsTests(CookieModeHostFixture fixture) : PageTe
         if (fixture.DatabaseUnavailable)
             Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
 
-        // A separate host process, started with the force-failure hook set, rather than mutating
-        // the shared fixture's host (other tests in this class rely on the Log sink check reading
-        // Ok on that shared host).
-        var publishDirectory = await HostProcess.PublishHostAsync(TestContext.Current.CancellationToken);
-        await using var host = new HostProcess();
-        await host.StartAsync(publishDirectory, new Dictionary<string, string>
+        // I-5 (Phase 5 final review): drives the real failure path rather than a production
+        // Diagnostics:ForceLogSinkFailureForTests config key that let Program.cs reach into
+        // ILogSinkStatus directly. A separate host process, on its OWN isolated clone (never the
+        // shared fixture's - other tests in this class rely on that one's app_log table being
+        // writable) whose app_log table is renamed away before the host ever starts, so every
+        // batch the Postgres sink tries to flush fails with "relation \"app_log\" does not exist" -
+        // the same wiring SelfLogSinkFailureTests already proves reaches ILogSinkStatus through
+        // Serilog's SelfLog.
+        var cloneDatabaseName = $"noof_logsink_fail_{Guid.NewGuid():N}";
+        await CreateIsolatedCloneAsync(cloneDatabaseName, TestContext.Current.CancellationToken);
+
+        try
         {
-            ["Database__MigrateOnStartup"] = "false",
-            ["ConnectionStrings__Ledger"] = fixture.ConnectionString,
-            ["Backup__Enabled"] = "false",
-            ["Diagnostics__ForceLogSinkFailureForTests"] = "true",
-        }, TestContext.Current.CancellationToken);
+            var connectionString = DatabaseSettings.For(cloneDatabaseName);
+            await RenameAppLogTableAsync(connectionString, TestContext.Current.CancellationToken);
 
-        // HostProcess.StartAsync already waited for /account/login to come back without
-        // DatabaseGateBanner (id="database-waiting") before returning, so the database gate is Ready
-        // and the first navigation here lands on the sign-in form, not the banner - Login.razor is
-        // statically rendered and never re-renders itself once served.
-        await Page.GotoAsync(host.BaseUrl + "/");
-        await Page.WaitForURLAsync("**/account/login*");
-        await Page.FillAsync("input[name='username']", CookieModeHostFixture.Username);
-        await Page.FillAsync("input[name='password']", CookieModeHostFixture.Password);
-        await Page.ClickAsync("button[type='submit']");
-        await Page.WaitForURLAsync(host.BaseUrl + "/");
+            var publishDirectory = await HostProcess.PublishHostAsync(TestContext.Current.CancellationToken);
+            await CookieModeHostFixture.SeedUserAsync(publishDirectory, connectionString, TestContext.Current.CancellationToken);
 
-        await Page.GotoAsync(host.BaseUrl + "/diagnostics/logs");
-        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+            await using var host = new HostProcess();
+            await host.StartAsync(publishDirectory, new Dictionary<string, string>
+            {
+                ["Database__MigrateOnStartup"] = "false",
+                ["ConnectionStrings__Ledger"] = connectionString,
+                ["Backup__Enabled"] = "false",
+            }, TestContext.Current.CancellationToken);
 
-        await Expect(Page.Locator("text=Database log unavailable")).ToBeVisibleAsync();
-        await Expect(Page.Locator("#logs-file-tail")).ToBeVisibleAsync();
-        await Expect(Page.Locator("#logs-grid")).Not.ToBeVisibleAsync();
+            // HostProcess.StartAsync already waited for /account/login to come back without
+            // DatabaseGateBanner (id="database-waiting") before returning, so the database gate is
+            // Ready and the first navigation here lands on the sign-in form, not the banner -
+            // Login.razor is statically rendered and never re-renders itself once served.
+            await Page.GotoAsync(host.BaseUrl + "/");
+            await Page.WaitForURLAsync("**/account/login*");
+            await Page.FillAsync("input[name='username']", CookieModeHostFixture.Username);
+            await Page.FillAsync("input[name='password']", CookieModeHostFixture.Password);
+            await Page.ClickAsync("button[type='submit']");
+            await Page.WaitForURLAsync(host.BaseUrl + "/");
+
+            // ISystemHealth caches a check for 30s once computed, and DiagnosticsLogs.razor reads it
+            // with fresh: false, so a single visit can land inside a 30s window that was cached
+            // before the sink's first batch flush ever failed - the exact race that made this test
+            // flaky when it only waited once. Retry across several 30+s cache windows instead of
+            // guessing one fixed delay; each attempt's own page visit is what forces the next fresh
+            // computation once its predecessor's cache has expired.
+            await EventuallyShowsTheFileTailAsync(host, TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            await DropIsolatedCloneAsync(cloneDatabaseName);
+        }
+    }
+
+    async Task EventuallyShowsTheFileTailAsync(HostProcess host, CancellationToken cancellationToken)
+    {
+        const int maxAttempts = 5;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            await Page.GotoAsync(host.BaseUrl + "/diagnostics/logs");
+            await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+            if (await Page.Locator("#logs-file-tail").IsVisibleAsync())
+            {
+                await Expect(Page.Locator("text=Database log unavailable")).ToBeVisibleAsync();
+                await Expect(Page.Locator("#logs-grid")).Not.ToBeVisibleAsync();
+                return;
+            }
+
+            if (attempt == maxAttempts)
+            {
+                throw new InvalidOperationException(
+                    "The log sink check never went Degraded - the Postgres sink's own batch write "
+                    + "against the renamed app_log table never surfaced through ILogSinkStatus. Host output:\n"
+                    + string.Join('\n', host.CapturedOutputLines));
+            }
+
+            // Past the health check's own 30s cache window, so the next visit forces a fresh read.
+            await Task.Delay(TimeSpan.FromSeconds(32), cancellationToken);
+        }
+    }
+
+    static async Task RenameAppLogTableAsync(string connectionString, CancellationToken cancellationToken)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var rename = new NpgsqlCommand("ALTER TABLE app_log RENAME TO app_log_disabled_for_test", connection);
+        await rename.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    static async Task CreateIsolatedCloneAsync(string name, CancellationToken cancellationToken)
+    {
+        await using var admin = new NpgsqlConnection(DatabaseSettings.AdminConnectionString);
+        await admin.OpenAsync(cancellationToken);
+        await using var create = new NpgsqlCommand($"CREATE DATABASE \"{name}\" TEMPLATE {DatabaseSettings.TemplateDatabase}", admin);
+        await create.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    static async Task DropIsolatedCloneAsync(string name)
+    {
+        NpgsqlConnection.ClearAllPools();
+        await using var admin = new NpgsqlConnection(DatabaseSettings.AdminConnectionString);
+        await admin.OpenAsync(CancellationToken.None);
+        await using var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)", admin) { CommandTimeout = 120 };
+        await drop.ExecuteNonQueryAsync(CancellationToken.None);
     }
 
     static AppLogEntry NewRow(string message, DateTimeOffset? loggedAt = null, string source = "DiagnosticsLogsTests") => new()
