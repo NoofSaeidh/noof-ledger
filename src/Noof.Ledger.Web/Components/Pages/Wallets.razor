@@ -2,9 +2,11 @@
 @attribute [Authorize]
 @implements IDisposable
 @using System.Globalization
+@using Noof.Ledger.Application.Diagnostics
 @using Noof.Ledger.Application.Wallets
 @using Noof.Ledger.Domain
 @inject IWalletAdmin WalletAdmin
+@inject IDatabaseGate Gate
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 
 <PageTitle>Wallets</PageTitle>
@@ -13,6 +15,13 @@
 <MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">
     Create, rename and archive wallets here. Income and balance statements are told to the bot.
 </MudText>
+
+@if (Gate.State != DatabaseState.Ready)
+{
+    <DatabaseGateBanner />
+}
+else
+{
 
 @if (error is not null)
 {
@@ -114,6 +123,7 @@
         Create wallet
     </MudButton>
 </MudPaper>
+}
 
 @code {
     sealed class Row
@@ -140,7 +150,11 @@
 
     readonly CancellationTokenSource cancellation = new();
 
-    protected override async Task OnInitializedAsync() => await ReloadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        if (Gate.State == DatabaseState.Ready)
+            await ReloadAsync();
+    }
 
     async Task ReloadAsync()
     {

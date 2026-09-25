@@ -45,6 +45,17 @@ public class WalletsPageSourceTests
     }
 
     [Fact]
+    public void Shows_the_database_gate_banner_while_the_database_is_not_ready()
+    {
+        // Task 1 covered Login and Home only; Phase 5's spec (§1, §4) is that a signed-in user sees
+        // the waiting banner on EVERY page instead of its data - Wallets is one of those pages.
+        var source = SourceText();
+
+        source.Should().Contain("IDatabaseGate");
+        source.Should().Contain("DatabaseGateBanner");
+    }
+
+    [Fact]
     public void Parses_numbers_and_dates_against_invariant_culture()
     {
         // MudNumericField and a MudTextField typed DateOnly? parse user input against the server's
