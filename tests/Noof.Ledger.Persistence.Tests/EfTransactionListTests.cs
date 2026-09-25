@@ -327,6 +327,66 @@ public class EfTransactionListTests(PostgresFixture fixture)
         page.Rows.Single().Amounts.Should().ContainSingle().Which.Should().Be(new Money(1000m, CurrencyCode.Eur));
     }
 
+    static Receipt NewReceipt(Guid transactionId, string? sellerName) => new()
+    {
+        Id = Guid.NewGuid(),
+        TransactionId = transactionId,
+        Source = ReceiptSource.Vision,
+        SellerName = sellerName,
+        Total = new Money(300m, CurrencyCode.Rsd),
+        Kind = ReceiptKind.Sale,
+        CreatedAt = new DateTimeOffset(2026, 9, 25, 9, 0, 0, TimeSpan.Zero),
+    };
+
+    [Fact]
+    public async Task A_row_with_a_receipt_reports_HasReceipt_and_the_shop_name()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var wallet = NewWallet("Cash", CurrencyCode.Rsd);
+        db.Wallets.Add(wallet);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var now = new DateTimeOffset(2026, 9, 10, 12, 0, 0, TimeSpan.Zero);
+        var withReceipt = NewTransaction(wallet.Id, now, TransactionKind.Expense, TransactionStatus.Completed, rawText: "receipt row");
+        var withoutReceipt = NewTransaction(wallet.Id, now, TransactionKind.Expense, TransactionStatus.Completed, rawText: "plain row");
+        db.Transactions.AddRange(withReceipt, withoutReceipt);
+        db.Receipts.Add(NewReceipt(withReceipt.Id, "Maxi"));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var list = new EfTransactionList(db);
+        var page = await list.QueryAsync(new TransactionListFilter(), 0, 50, TestContext.Current.CancellationToken);
+
+        page.Rows.Single(r => r.Id == withReceipt.Id).HasReceipt.Should().BeTrue();
+        page.Rows.Single(r => r.Id == withReceipt.Id).ShopName.Should().Be("Maxi");
+        page.Rows.Single(r => r.Id == withoutReceipt.Id).HasReceipt.Should().BeFalse();
+        page.Rows.Single(r => r.Id == withoutReceipt.Id).ShopName.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ReceiptsOnly_filter_narrows_to_transactions_that_have_a_receipt()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var wallet = NewWallet("Cash", CurrencyCode.Rsd);
+        db.Wallets.Add(wallet);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var now = new DateTimeOffset(2026, 9, 10, 12, 0, 0, TimeSpan.Zero);
+        var withReceipt = NewTransaction(wallet.Id, now, TransactionKind.Expense, TransactionStatus.Completed);
+        var withoutReceipt = NewTransaction(wallet.Id, now, TransactionKind.Expense, TransactionStatus.Completed);
+        db.Transactions.AddRange(withReceipt, withoutReceipt);
+        db.Receipts.Add(NewReceipt(withReceipt.Id, "Maxi"));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var list = new EfTransactionList(db);
+        var page = await list.QueryAsync(new TransactionListFilter(ReceiptsOnly: true), 0, 50, TestContext.Current.CancellationToken);
+
+        page.Rows.Select(r => r.Id).Should().BeEquivalentTo([withReceipt.Id]);
+    }
+
     [Fact]
     public async Task A_transaction_with_no_wallet_yet_shows_an_empty_wallet_name()
     {

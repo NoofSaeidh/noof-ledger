@@ -1,6 +1,25 @@
 using Noof.Ledger.Domain;
+using PaymentMethod = Noof.Ledger.Application.Receipts.PaymentMethod;
+using ReceiptSource = Noof.Ledger.Application.Receipts.ReceiptSource;
 
 namespace Noof.Ledger.Application.Diagnostics;
+
+public sealed record ReceiptTraceLine(
+    int Ordinal, string Name, decimal Quantity, string? Unit, decimal UnitPrice, decimal Total, string? CategoryNameEn);
+
+public sealed record ReceiptTraceView(
+    ReceiptSource Source,
+    string? SellerName,
+    string? LocationName,
+    string? SellerAddress,
+    string? SellerTaxId,
+    string? FiscalNumber,
+    DateTimeOffset? IssuedAt,
+    PaymentMethod? PaymentMethod,
+    decimal Total,
+    CurrencyCode Currency,
+    decimal? QrTotal,
+    IReadOnlyList<ReceiptTraceLine> Lines);
 
 public sealed record TraceEvent(
     DateTimeOffset At,
@@ -32,7 +51,8 @@ public sealed record TransactionTrace(
     bool Exists,
     TransactionSummary? Summary,
     IReadOnlyList<TraceEvent> Events,
-    IReadOnlyList<RevisionView> History);
+    IReadOnlyList<RevisionView> History,
+    ReceiptTraceView? Receipt = null);
 
 public interface ITransactionTrace
 {

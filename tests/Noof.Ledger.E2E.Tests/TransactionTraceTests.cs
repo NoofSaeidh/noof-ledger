@@ -384,6 +384,78 @@ public sealed class TransactionTraceTests(CookieModeHostFixture fixture) : PageT
     }
 
     [Fact]
+    public async Task A_receipt_transaction_shows_the_receipt_section_with_a_vision_warning()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var transactionId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var walletId = await SeedWalletAsync();
+
+        await using (var db = OpenDb())
+        {
+            db.Transactions.Add(new Transaction
+            {
+                Id = transactionId,
+                WalletId = walletId,
+                RawText = "seeded receipt transaction",
+                CaptureKind = CaptureKind.Manual,
+                Kind = TransactionKind.Expense,
+                Status = TransactionStatus.Completed,
+                TimeZoneId = "Europe/Belgrade",
+                OccurredAt = now,
+                OccurredOn = ZonedClock.LocalDate(now, "Europe/Belgrade"),
+                TelegramChatId = null,
+                TelegramMessageId = null,
+                CreatedAt = now,
+            });
+
+            var receiptId = Guid.NewGuid();
+            db.Receipts.Add(new Receipt
+            {
+                Id = receiptId,
+                TransactionId = transactionId,
+                Source = ReceiptSource.Vision,
+                SellerName = "Maxi Petlovo Brdo",
+                SellerAddress = "Bulevar 1",
+                SellerTaxId = "123456789",
+                FiscalNumber = "FN-9",
+                IssuedAt = now,
+                Total = new Money(300m, CurrencyCode.Rsd),
+                Kind = ReceiptKind.Sale,
+                PaymentMethod = PaymentMethod.Card,
+                QrTotal = 305m,
+                CreatedAt = now,
+            });
+            db.ReceiptLines.Add(new ReceiptLine
+            {
+                Id = Guid.NewGuid(),
+                ReceiptId = receiptId,
+                Ordinal = 1,
+                Name = "Bread",
+                Quantity = 1m,
+                UnitPrice = 300m,
+                Total = 300m,
+            });
+
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync($"{fixture.BaseUrl}/transactions/{transactionId}/trace");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var receiptSection = Page.Locator("#trace-receipt");
+        await Expect(receiptSection).ToContainTextAsync("Maxi Petlovo Brdo");
+        await Expect(receiptSection).ToContainTextAsync("123456789");
+        await Expect(receiptSection).ToContainTextAsync("FN-9");
+        await Expect(receiptSection).ToContainTextAsync("Read from the photo");
+        await Expect(receiptSection).ToContainTextAsync("Bread");
+        await Expect(receiptSection).ToContainTextAsync("The Tax Administration was unavailable; these lines were read from the photo.");
+    }
+
+    [Fact]
     public async Task With_the_database_level_at_Information_the_notice_is_not_shown()
     {
         if (fixture.DatabaseUnavailable)

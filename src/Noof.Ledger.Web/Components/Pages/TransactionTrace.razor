@@ -2,6 +2,7 @@
 @using System.Globalization
 @using Noof.Ledger.Application.Diagnostics
 @using Noof.Ledger.Domain
+@using ReceiptSource = Noof.Ledger.Application.Receipts.ReceiptSource
 @attribute [Authorize]
 @inject ITransactionTrace TransactionTraceReader
 @inject IDatabaseGate Gate
@@ -151,6 +152,53 @@ else
         </MudSimpleTable>
     }
 
+    @if (trace.Receipt is { } receipt)
+    {
+        <div id="trace-receipt" class="mb-6">
+            <MudText HtmlTag="h2" Typo="Typo.h6" Class="mb-3">Receipt</MudText>
+
+            @if (receipt.Source == ReceiptSource.Vision && receipt.QrTotal is not null)
+            {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mb-3">
+                    The Tax Administration was unavailable; these lines were read from the photo.
+                </MudAlert>
+            }
+
+            <MudSimpleTable Dense="true" Elevation="0" Class="mb-3">
+                <tbody>
+                    <tr><td>Shop</td><td>@FormatShop(receipt)</td></tr>
+                    <tr><td>Address</td><td>@(receipt.SellerAddress ?? "—")</td></tr>
+                    <tr><td>PIB</td><td>@(receipt.SellerTaxId ?? "—")</td></tr>
+                    <tr><td>Fiscal number</td><td>@(receipt.FiscalNumber ?? "—")</td></tr>
+                    <tr><td>Issued at</td><td>@FormatIssuedAt(receipt.IssuedAt)</td></tr>
+                    <tr><td>Source</td><td>@(receipt.Source == ReceiptSource.FiscalQr ? "Tax Administration" : "Read from the photo")</td></tr>
+                    <tr><td>Payment method</td><td>@(receipt.PaymentMethod?.ToString() ?? "—")</td></tr>
+                    <tr><td>Total</td><td>@FormatMoney(receipt.Total, receipt.Currency)</td></tr>
+                    <tr><td>QR total</td><td>@(receipt.QrTotal is { } qrTotal ? FormatMoney(qrTotal, receipt.Currency) : "—")</td></tr>
+                </tbody>
+            </MudSimpleTable>
+
+            <MudSimpleTable Dense="true" Elevation="0">
+                <thead>
+                    <tr><th>#</th><th>Name</th><th>Quantity</th><th>Unit price</th><th>Total</th><th>Category</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var line in receipt.Lines)
+                    {
+                        <tr>
+                            <td>@line.Ordinal</td>
+                            <td>@line.Name</td>
+                            <td>@line.Quantity.ToString("0.####", CultureInfo.InvariantCulture)@(line.Unit is { } unit ? $" {unit}" : "")</td>
+                            <td>@FormatMoney(line.UnitPrice, receipt.Currency)</td>
+                            <td>@FormatMoney(line.Total, receipt.Currency)</td>
+                            <td>@(line.CategoryNameEn ?? "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </div>
+    }
+
     <MudText HtmlTag="h2" Typo="Typo.h6" Class="mb-3">History</MudText>
     @if (trace.History.Count == 0)
     {
@@ -200,6 +248,19 @@ else
         TransactionStatus.Captured => Color.Warning,
         _ => Color.Default,
     };
+
+    static string FormatShop(ReceiptTraceView receipt) => receipt switch
+    {
+        { SellerName: { } name, LocationName: { } location } => $"{name} ({location})",
+        { SellerName: { } name } => name,
+        _ => "—",
+    };
+
+    static string FormatIssuedAt(DateTimeOffset? issuedAt) =>
+        issuedAt is { } at ? at.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture) : "—";
+
+    static string FormatMoney(decimal amount, CurrencyCode currency) =>
+        $"{amount.ToString("N2", CultureInfo.InvariantCulture)} {currency}";
 
     static string FormatOffset(TimeSpan offset) => offset switch
     {

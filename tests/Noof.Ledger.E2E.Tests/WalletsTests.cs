@@ -104,6 +104,61 @@ public sealed class WalletsTests(CookieModeHostFixture fixture) : PageTest, ICla
     }
 
     [Fact]
+    public async Task Setting_a_card_default_on_one_wallet_then_another_moves_it()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var firstName = $"Card A {Guid.NewGuid():N}";
+        var secondName = $"Card B {Guid.NewGuid():N}";
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/wallets");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        await Page.FillAsync("#new-wallet-name", firstName);
+        await Page.SelectOptionAsync("#new-wallet-currency", "RSD");
+        await Page.FillAsync("#new-wallet-opening", "0");
+        await Page.FillAsync("#new-wallet-date", "2026-09-01");
+        await Page.ClickAsync("#create-wallet");
+        await Expect(Page.Locator("#wallets-saved")).ToContainTextAsync("Created");
+
+        await Page.FillAsync("#new-wallet-name", secondName);
+        await Page.SelectOptionAsync("#new-wallet-currency", "RSD");
+        await Page.FillAsync("#new-wallet-opening", "0");
+        await Page.FillAsync("#new-wallet-date", "2026-09-01");
+        await Page.ClickAsync("#create-wallet");
+        await Expect(Page.Locator("#wallets-saved")).ToContainTextAsync("Created");
+
+        Guid firstId, secondId;
+        await using (var db = OpenDb())
+        {
+            firstId = (await db.Wallets.SingleAsync(w => w.Name == firstName, TestContext.Current.CancellationToken)).Id;
+            secondId = (await db.Wallets.SingleAsync(w => w.Name == secondName, TestContext.Current.CancellationToken)).Id;
+        }
+
+        await Page.SelectOptionAsync($"#wallet-payment-default-{firstId}", "Card");
+        await Expect(Page.Locator("#wallets-saved")).ToContainTextAsync("Payment default saved");
+
+        await using (var db = OpenDb())
+        {
+            (await db.Wallets.AsNoTracking().SingleAsync(w => w.Id == firstId, TestContext.Current.CancellationToken))
+                .DefaultForPayment.Should().Be(WalletPaymentDefault.Card);
+        }
+
+        await Page.SelectOptionAsync($"#wallet-payment-default-{secondId}", "Card");
+        await Expect(Page.Locator("#wallets-saved")).ToContainTextAsync("Payment default saved");
+
+        await using (var verify = OpenDb())
+        {
+            (await verify.Wallets.AsNoTracking().SingleAsync(w => w.Id == secondId, TestContext.Current.CancellationToken))
+                .DefaultForPayment.Should().Be(WalletPaymentDefault.Card);
+            (await verify.Wallets.AsNoTracking().SingleAsync(w => w.Id == firstId, TestContext.Current.CancellationToken))
+                .DefaultForPayment.Should().BeNull("only the second wallet must show the card default now");
+        }
+    }
+
+    [Fact]
     public async Task An_empty_wallet_name_is_refused_inline()
     {
         if (fixture.DatabaseUnavailable)

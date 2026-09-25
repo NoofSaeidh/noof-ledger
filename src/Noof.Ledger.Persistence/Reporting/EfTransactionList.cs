@@ -29,6 +29,8 @@ internal sealed class EfTransactionList(LedgerDbContext db) : ITransactionList
             var pattern = $"%{EscapeLike(text)}%";
             query = query.Where(t => t.RawText != null && EF.Functions.ILike(t.RawText, pattern, @"\"));
         }
+        if (filter.ReceiptsOnly)
+            query = query.Where(t => db.Receipts.Any(r => r.TransactionId == t.Id));
 
         var totalCount = await query.CountAsync(cancellationToken);
 
@@ -75,6 +77,10 @@ internal sealed class EfTransactionList(LedgerDbContext db) : ITransactionList
             .Where(bc => transactionIds.Contains(bc.TransactionId))
             .ToDictionaryAsync(bc => bc.TransactionId, bc => bc.Stated, cancellationToken);
 
+        var shopNameByTransaction = await db.Receipts.AsNoTracking()
+            .Where(r => transactionIds.Contains(r.TransactionId))
+            .ToDictionaryAsync(r => r.TransactionId, r => r.SellerName, cancellationToken);
+
         IReadOnlyList<Money> AmountsFor(Guid transactionId, TransactionKind kind) => kind switch
         {
             TransactionKind.Expense =>
@@ -113,7 +119,9 @@ internal sealed class EfTransactionList(LedgerDbContext db) : ITransactionList
                 h.Status,
                 h.RawText,
                 AmountsFor(h.Id, h.Kind),
-                CategoriesFor(h.Id)))
+                CategoriesFor(h.Id),
+                shopNameByTransaction.ContainsKey(h.Id),
+                shopNameByTransaction.GetValueOrDefault(h.Id)))
             .ToList();
 
         return new TransactionListPage(rows, totalCount);

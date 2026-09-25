@@ -76,7 +76,7 @@ public class PublicSurfaceTests
             "ReceiptPhoto", "IReceiptPhotoSource",
             "LogSeverity", "LogRow", "LogFilter", "LogPage", "LogSortOrder", "ILogQuery", "ILogRetention",
             "TransactionStages", "TransactionLogScope", "TraceEvent", "RevisionView", "TraceLineItem", "TransactionSummary",
-            "TransactionTrace", "ITransactionTrace",
+            "TransactionTrace", "ITransactionTrace", "ReceiptTraceLine", "ReceiptTraceView",
             "ILogSinkStatus",
             "IDatabaseLogLevel",
             "HealthLevel", "HealthItem", "SystemHealthReport", "ISystemHealth",

@@ -14,6 +14,7 @@ internal static class DiagnosticsRegistration
         services.AddScoped<ISystemHealthCheck, BackupHealthCheck>();
         services.AddScoped<ISystemHealthCheck, DiskHealthCheck>();
         services.AddScoped<ISystemHealthCheck, LogSinkHealthCheck>();
+        services.AddScoped<ISystemHealthCheck, ReceiptsHealthCheck>();
 
         return services;
     }

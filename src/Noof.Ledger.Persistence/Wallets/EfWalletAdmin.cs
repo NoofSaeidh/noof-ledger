@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Revisions;
+using AppReceipts = Noof.Ledger.Application.Receipts;
 
 namespace Noof.Ledger.Persistence.Wallets;
 
@@ -23,7 +24,8 @@ internal sealed class EfWalletAdmin(LedgerDbContext db, TimeProvider timeProvide
                 .ThenBy(wallet => wallet.Name, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(wallet => wallet.Id)
                 .Select(wallet => new WalletDetails(
-                    wallet.Id, wallet.Name, wallet.Currency, wallet.Aliases, wallet.IsDefaultForCurrency, wallet.Archived)),
+                    wallet.Id, wallet.Name, wallet.Currency, wallet.Aliases, wallet.IsDefaultForCurrency, wallet.Archived,
+                    ToContract(wallet.DefaultForPayment))),
         ];
     }
 
@@ -116,6 +118,32 @@ internal sealed class EfWalletAdmin(LedgerDbContext db, TimeProvider timeProvide
         await tx.CommitAsync(cancellationToken);
     }
 
+    public async Task SetPaymentDefaultAsync(Guid walletId, AppReceipts.PaymentMethod? method, CancellationToken cancellationToken)
+    {
+        var domainMethod = ToDomain(method);
+
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        var exists = await WalletById(walletId).AnyAsync(cancellationToken);
+        if (!exists)
+            throw Unknown(walletId);
+
+        if (domainMethod is not null)
+        {
+            // Clear, then set - the same reasoning as MakeDefaultForCurrencyAsync: the unique index
+            // is checked row by row, so writing the new default before the old one is cleared would
+            // violate it.
+            await db.Wallets
+                .Where(w => w.DefaultForPayment == domainMethod && w.Id != walletId)
+                .ExecuteUpdateAsync(set => set.SetProperty(w => w.DefaultForPayment, (WalletPaymentDefault?)null), cancellationToken);
+        }
+
+        await WalletById(walletId)
+            .ExecuteUpdateAsync(set => set.SetProperty(w => w.DefaultForPayment, domainMethod), cancellationToken);
+
+        await tx.CommitAsync(cancellationToken);
+    }
+
     public async Task ArchiveAsync(Guid walletId, CancellationToken cancellationToken)
     {
         // An archived wallet is hidden from capture, so it cannot stay the default capture resolves to.
@@ -142,6 +170,23 @@ internal sealed class EfWalletAdmin(LedgerDbContext db, TimeProvider timeProvide
 
     static string RequireName(string name) =>
         name.Trim() is { Length: > 0 } trimmed ? trimmed : throw new ArgumentException("A wallet needs a name.", nameof(name));
+
+    static WalletPaymentDefault? ToDomain(AppReceipts.PaymentMethod? method) => method switch
+    {
+        null => null,
+        AppReceipts.PaymentMethod.Card => WalletPaymentDefault.Card,
+        AppReceipts.PaymentMethod.Cash => WalletPaymentDefault.Cash,
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(method), method, "Only Card, Cash or null can be a wallet's payment default."),
+    };
+
+    static AppReceipts.PaymentMethod? ToContract(WalletPaymentDefault? method) => method switch
+    {
+        null => null,
+        WalletPaymentDefault.Card => AppReceipts.PaymentMethod.Card,
+        WalletPaymentDefault.Cash => AppReceipts.PaymentMethod.Cash,
+        _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unknown wallet payment default."),
+    };
 
     static string[] Normalise(IEnumerable<string> aliases) =>
         [.. aliases.Select(alias => alias.Trim()).Where(alias => alias.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase)];

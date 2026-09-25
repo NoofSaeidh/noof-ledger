@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Diagnostics;
+using AppReceipts = Noof.Ledger.Application.Receipts;
 
 namespace Noof.Ledger.Persistence.Diagnostics;
 
@@ -33,7 +34,9 @@ internal sealed class EfTransactionTrace(LedgerDbContext db) : ITransactionTrace
                 r.Instruction ?? $"{r.StatusBefore} → {r.StatusAfter}"))
             .ToList();
 
-        return new TransactionTrace(transactionId, summary is not null, summary, events, historyViews);
+        var receipt = await ReceiptTraceAsync(transactionId, cancellationToken);
+
+        return new TransactionTrace(transactionId, summary is not null, summary, events, historyViews, receipt);
     }
 
     async Task<TransactionSummary?> LoadSummaryAsync(Guid transactionId, CancellationToken cancellationToken)
@@ -76,6 +79,48 @@ internal sealed class EfTransactionTrace(LedgerDbContext db) : ITransactionTrace
             header.WalletName,
             header.OccurredOn,
             lineItems);
+    }
+
+    async Task<ReceiptTraceView?> ReceiptTraceAsync(Guid transactionId, CancellationToken cancellationToken)
+    {
+        var receipt = await db.Receipts.AsNoTracking()
+            .SingleOrDefaultAsync(r => r.TransactionId == transactionId, cancellationToken);
+
+        if (receipt is null)
+            return null;
+
+        var categoryByReceiptLineId = await (
+            from lineItem in db.LineItems.AsNoTracking()
+            where lineItem.TransactionId == transactionId && lineItem.ReceiptLineId != null
+            join category in db.Categories.AsNoTracking() on lineItem.CategoryId equals category.Id into categoryJoin
+            from category in categoryJoin.DefaultIfEmpty()
+            select new { lineItem.ReceiptLineId, CategoryNameEn = category == null ? null : category.NameEn })
+            .ToDictionaryAsync(row => row.ReceiptLineId!.Value, row => row.CategoryNameEn, cancellationToken);
+
+        var receiptLines = await db.ReceiptLines.AsNoTracking()
+            .Where(line => line.ReceiptId == receipt.Id)
+            .OrderBy(line => line.Ordinal)
+            .ToListAsync(cancellationToken);
+
+        var lines = receiptLines
+            .Select(line => new ReceiptTraceLine(
+                line.Ordinal, line.Name, line.Quantity, line.Unit, line.UnitPrice, line.Total,
+                categoryByReceiptLineId.TryGetValue(line.Id, out var categoryNameEn) ? categoryNameEn : null))
+            .ToList();
+
+        return new ReceiptTraceView(
+            (AppReceipts.ReceiptSource)receipt.Source,
+            receipt.SellerName,
+            receipt.LocationName,
+            receipt.SellerAddress,
+            receipt.SellerTaxId,
+            receipt.FiscalNumber,
+            receipt.IssuedAt,
+            (AppReceipts.PaymentMethod?)receipt.PaymentMethod,
+            receipt.Total.Amount,
+            receipt.Total.Currency,
+            receipt.QrTotal,
+            lines);
     }
 
     static TraceEvent? ToTraceEvent(AppLogEntry entry)

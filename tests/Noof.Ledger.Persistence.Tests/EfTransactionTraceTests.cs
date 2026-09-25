@@ -4,6 +4,7 @@ using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Diagnostics;
 using Noof.Ledger.Persistence.Revisions;
+using AppReceipts = Noof.Ledger.Application.Receipts;
 
 namespace Noof.Ledger.Persistence.Tests;
 
@@ -197,6 +198,96 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
         var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
 
         trace.Events.Should().ContainSingle().Which.FailedStage.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_transaction_with_no_receipt_reports_a_null_Receipt()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await SeedTransactionAsync(db);
+
+        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+
+        trace.Receipt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_transaction_with_a_receipt_exposes_shop_lines_and_their_categories()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await SeedTransactionAsync(db);
+
+        var category = new Category { Id = Guid.NewGuid(), Slug = "trace-groceries", NameEn = "Groceries", NameRu = "Продукты", IsActive = true };
+        db.Categories.Add(category);
+
+        var receiptId = Guid.NewGuid();
+        db.Receipts.Add(new Receipt
+        {
+            Id = receiptId,
+            TransactionId = TransactionId,
+            Source = ReceiptSource.Vision,
+            SellerName = "Maxi",
+            LocationName = "Maxi Vračar",
+            SellerAddress = "Bulevar 1",
+            SellerTaxId = "123456789",
+            FiscalNumber = "FN-1",
+            IssuedAt = new DateTimeOffset(2026, 9, 25, 9, 0, 0, TimeSpan.Zero),
+            Total = new Money(300m, CurrencyCode.Rsd),
+            Kind = ReceiptKind.Sale,
+            PaymentMethod = PaymentMethod.Card,
+            QrTotal = 305m,
+            CreatedAt = new DateTimeOffset(2026, 9, 25, 9, 0, 5, TimeSpan.Zero),
+        });
+        var lineId = Guid.NewGuid();
+        db.ReceiptLines.Add(new ReceiptLine
+        {
+            Id = lineId,
+            ReceiptId = receiptId,
+            Ordinal = 1,
+            Name = "Bread",
+            Quantity = 1m,
+            Unit = "kom",
+            UnitPrice = 300m,
+            Total = 300m,
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        db.LineItems.Add(new LineItem
+        {
+            Id = Guid.NewGuid(),
+            TransactionId = TransactionId,
+            Description = "Bread",
+            Amount = new Money(300m, CurrencyCode.Rsd),
+            CategoryId = category.Id,
+            CategorizedBy = CategorizationAuthority.Model,
+            Ordinal = 1,
+            ReceiptLineId = lineId,
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+
+        trace.Receipt.Should().NotBeNull();
+        trace.Receipt!.Source.Should().Be(AppReceipts.ReceiptSource.Vision);
+        trace.Receipt.SellerName.Should().Be("Maxi");
+        trace.Receipt.LocationName.Should().Be("Maxi Vračar");
+        trace.Receipt.SellerAddress.Should().Be("Bulevar 1");
+        trace.Receipt.SellerTaxId.Should().Be("123456789");
+        trace.Receipt.FiscalNumber.Should().Be("FN-1");
+        trace.Receipt.PaymentMethod.Should().Be(AppReceipts.PaymentMethod.Card);
+        trace.Receipt.Total.Should().Be(300m);
+        trace.Receipt.Currency.Should().Be(CurrencyCode.Rsd);
+        trace.Receipt.QrTotal.Should().Be(305m);
+        var line = trace.Receipt.Lines.Should().ContainSingle().Subject;
+        line.Ordinal.Should().Be(1);
+        line.Name.Should().Be("Bread");
+        line.Quantity.Should().Be(1m);
+        line.Unit.Should().Be("kom");
+        line.UnitPrice.Should().Be(300m);
+        line.Total.Should().Be(300m);
+        line.CategoryNameEn.Should().Be("Groceries");
     }
 
     [Fact]
