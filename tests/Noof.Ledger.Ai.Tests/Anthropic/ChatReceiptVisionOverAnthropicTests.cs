@@ -3,7 +3,6 @@ using System.Text.Json;
 using AwesomeAssertions;
 using Noof.Ledger.Ai.Anthropic;
 using Noof.Ledger.Application.Categorization;
-using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Domain;
 
@@ -60,14 +59,14 @@ public class ChatReceiptVisionOverAnthropicTests
 
         var receipt = await vision.ReadAsync(TinyImage, "image/jpeg", qrTotal: 845.50m, TestContext.Current.CancellationToken);
 
-        receipt.Source.Should().Be(ReceiptSource.Vision);
+        receipt.Source.Should().Be(Application.Receipts.ReceiptSource.Vision);
         receipt.SellerName.Should().Be("Maxi");
         receipt.SellerTaxId.Should().Be("123456789");
         receipt.Currency.Should().Be(CurrencyCode.Rsd);
         receipt.Total.Should().Be(845.50m);
         receipt.QrTotal.Should().Be(845.50m);
-        receipt.Kind.Should().Be(ReceiptKind.Sale);
-        receipt.PaymentMethod.Should().Be(PaymentMethod.Card);
+        receipt.Kind.Should().Be(Application.Receipts.ReceiptKind.Sale);
+        receipt.PaymentMethod.Should().Be(Application.Receipts.PaymentMethod.Card);
         receipt.IssuedAt.Should().NotBeNull();
         receipt.IssuedAt!.Value.Offset.Should().Be(TimeSpan.FromHours(2), "20 September is still Belgrade summer time (UTC+2)");
 
