@@ -61,7 +61,9 @@ internal static class LoggingSetup
     // scopes itself, whether or not Enrich.FromLogContext() is present. FromLogContext() only feeds
     // Serilog.Context.LogContext.PushProperty, which nothing in this codebase calls; kept for
     // parity with a conventional Serilog setup, not because it is load-bearing here.
-    public static void Configure(LoggerConfiguration configuration, string logDirectory, string connectionString, IServiceProvider services)
+    public static void Configure(
+        LoggerConfiguration configuration, IConfiguration hostConfiguration, string logDirectory,
+        string connectionString, IServiceProvider services)
     {
         var gate = services.GetRequiredService<IDatabaseGate>();
         var sinkStatus = services.GetRequiredService<ILogSinkStatus>();
@@ -82,22 +84,24 @@ internal static class LoggingSetup
             ["properties"] = new PropertiesColumnWriter(NpgsqlDbType.Jsonb),
         };
 
+        var postgresLogger = new LoggerConfiguration()
+            .WriteTo.PostgreSQL(connectionString, "app_log", columnOptions, needAutoCreateTable: false)
+            .CreateLogger();
+
         var destinations = new LoggerConfiguration()
-            .WriteTo.Console()
+            .WriteTo.Console(restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Information)
             .WriteTo.File(
                 Path.Combine(logDirectory, "noof-ledger-.log"),
                 rollingInterval: RollingInterval.Day,
                 retainedFileCountLimit: RetainedFileCountLimit,
                 fileSizeLimitBytes: FileSizeLimitBytes,
                 rollOnFileSizeLimit: true)
-            .WriteTo.Logger(pg => pg
-                .Filter.ByIncludingOnly(_ => gate.State == DatabaseState.Ready)
-                .WriteTo.PostgreSQL(connectionString, "app_log", columnOptions, needAutoCreateTable: false));
+            .WriteTo.Sink(new ReadyGatedBufferSink(postgresLogger, gate));
 
         var builtDestinations = destinations.CreateLogger();
 
         configuration
-            .MinimumLevel.Information()
+            .ReadFrom.Configuration(hostConfiguration)
             .Enrich.FromLogContext()
             .WriteTo.Sink(new RedactingSink(builtDestinations, redactor));
     }
