@@ -1,6 +1,7 @@
 @page "/transactions"
 @attribute [Authorize]
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
+@implements IDisposable
 @using System.Globalization
 @using Microsoft.AspNetCore.Components.QuickGrid
 @using Noof.Ledger.Application.Categorization
@@ -111,7 +112,8 @@ else
     }
 
     readonly TransactionFilterEdit filter = new();
-    readonly PaginationState pagination = new() { ItemsPerPage = 50 };
+    readonly SemaphoreSlim queryGate = new(1, 1);
+    PaginationState pagination = new() { ItemsPerPage = 50 };
     int reloadGeneration;
     IReadOnlyList<WalletOption> wallets = [];
     bool walletsLoaded;
@@ -131,11 +133,24 @@ else
         walletsLoaded = true;
     }
 
+    // I-2 (Phase 5 final review): serialised the same way DiagnosticsLogs.razor's ProvideRowsAsync
+    // is - see that method's comment for the full race. Left unserialised, a filter change fired
+    // while the previous ProvideRowsAsync call is still in flight races a second query against this
+    // circuit's one scoped LedgerDbContext, which EF Core forbids ("a second operation was started
+    // on this context instance").
     async ValueTask<GridItemsProviderResult<TransactionListRow>> ProvideRowsAsync(GridItemsProviderRequest<TransactionListRow> request)
     {
-        var page = await TransactionList.QueryAsync(
-            ToFilter(), request.StartIndex / pagination.ItemsPerPage, pagination.ItemsPerPage, request.CancellationToken);
-        return GridItemsProviderResult.From([.. page.Rows], page.TotalCount);
+        await queryGate.WaitAsync(request.CancellationToken);
+        try
+        {
+            var page = await TransactionList.QueryAsync(
+                ToFilter(), request.StartIndex / pagination.ItemsPerPage, pagination.ItemsPerPage, request.CancellationToken);
+            return GridItemsProviderResult.From([.. page.Rows], page.TotalCount);
+        }
+        finally
+        {
+            queryGate.Release();
+        }
     }
 
     TransactionListFilter ToFilter() => new(filter.From, filter.To, filter.WalletId, filter.Kind, filter.Status, filter.Text);
@@ -155,11 +170,16 @@ else
 
     Task ReloadAsync()
     {
-        // Same reasoning as DiagnosticsLogs.razor: incrementing @key tears down the old QuickGrid
-        // instance instead of asking it to refresh in place, so a filter change never races the
-        // grid's own still in-flight load.
+        // Same reasoning as DiagnosticsLogs.razor.ReloadAsync: incrementing @key tears down the old
+        // QuickGrid instance and mounts a new one, but a fresh PaginationState - not
+        // SetCurrentPageIndexAsync(0) on the old one - is what makes that safe. Notifying the old
+        // PaginationState races the new @key-remounted grid's own first fetch, both against the same
+        // scoped DbContext, and crashes the circuit with EF's "a second operation was started on this
+        // context instance". A new PaginationState already starts at page 0 and has no old
+        // subscriber to notify.
         reloadGeneration++;
-        return pagination.SetCurrentPageIndexAsync(0);
+        pagination = new PaginationState { ItemsPerPage = pagination.ItemsPerPage };
+        return Task.CompletedTask;
     }
 
     static string FormatOccurred(TransactionListRow row)
@@ -172,4 +192,6 @@ else
         amounts.Count == 0 ? "—" : string.Join(", ", amounts.Select(FormatMoney));
 
     static string FormatMoney(Money money) => $"{money.Amount.ToString("N2", CultureInfo.InvariantCulture)} {money.Currency}";
+
+    public void Dispose() => queryGate.Dispose();
 }

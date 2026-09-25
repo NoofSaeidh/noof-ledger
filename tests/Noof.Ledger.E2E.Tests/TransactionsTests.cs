@@ -1,3 +1,4 @@
+using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Playwright;
 using Microsoft.Playwright.Xunit.v3;
@@ -94,6 +95,54 @@ public sealed class TransactionsTests(CookieModeHostFixture fixture) : PageTest,
         await Page.FillAsync("#transactions-filter-text", marker);
         await Expect(grid).ToContainTextAsync($"filter match {marker}");
         await Expect(grid).Not.ToContainTextAsync("unrelated row that must not match");
+    }
+
+    [Fact]
+    public async Task Changing_two_filters_in_quick_succession_still_narrows_the_grid_without_crashing_the_circuit()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var marker = Guid.NewGuid().ToString("N")[..8];
+        var walletA = await SeedWalletAsync($"Race wallet A {marker}");
+        var walletB = await SeedWalletAsync($"Race wallet B {marker}");
+        var now = DateTimeOffset.UtcNow;
+
+        await using (var db = OpenDb())
+        {
+            db.Transactions.Add(NewTransaction(Guid.NewGuid(), walletA, TransactionKind.Expense, TransactionStatus.Completed,
+                $"race a expense {marker}", now));
+            db.Transactions.Add(NewTransaction(Guid.NewGuid(), walletA, TransactionKind.Income, TransactionStatus.Completed,
+                $"race a income {marker}", now));
+            db.Transactions.Add(NewTransaction(Guid.NewGuid(), walletB, TransactionKind.Expense, TransactionStatus.Completed,
+                $"race b expense {marker}", now));
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/transactions");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var grid = Page.Locator("#transactions-grid");
+        await Expect(grid).ToBeVisibleAsync();
+        await Expect(grid).ToContainTextAsync($"race a expense {marker}");
+        await Expect(grid).ToContainTextAsync($"race a income {marker}");
+        await Expect(grid).ToContainTextAsync($"race b expense {marker}");
+
+        // Two filter changes fired back to back, deliberately not waiting for the first round-trip
+        // to land - the sequence the Task 9 fix round found most likely to race a QuickGrid rebuild
+        // against a still in-flight ItemsProvider call on the circuit's one scoped DbContext.
+        await Page.SelectOptionAsync("#transactions-filter-wallet", walletA.ToString());
+        await Page.SelectOptionAsync("#transactions-filter-kind", nameof(TransactionKind.Expense));
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        await Expect(grid).ToContainTextAsync($"race a expense {marker}", new() { Timeout = 10_000 });
+        await Expect(grid).Not.ToContainTextAsync($"race a income {marker}");
+        await Expect(grid).Not.ToContainTextAsync($"race b expense {marker}");
+
+        fixture.CapturedOutputLines.Should().NotContain(
+            line => line.Contains("second operation was started on this context", StringComparison.OrdinalIgnoreCase),
+            "a rapid filter change must never race two queries against the circuit's one DbContext");
     }
 
     [Fact]
