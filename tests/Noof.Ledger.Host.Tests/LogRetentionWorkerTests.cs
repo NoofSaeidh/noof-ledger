@@ -34,7 +34,7 @@ public class LogRetentionWorkerTests
     public async Task The_worker_waits_for_the_gate_before_its_first_prune()
     {
         var retention = Substitute.For<ILogRetention>();
-        retention.PruneAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(0);
+        retention.PruneAsync(Arg.Any<CancellationToken>()).Returns(0);
         var gate = Substitute.For<IDatabaseGate>();
         var gateReady = new TaskCompletionSource();
         gate.WaitUntilReadyAsync(Arg.Any<CancellationToken>()).Returns(gateReady.Task);
@@ -45,12 +45,12 @@ public class LogRetentionWorkerTests
         try
         {
             await Task.Delay(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
-            await retention.DidNotReceive().PruneAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+            await retention.DidNotReceive().PruneAsync(Arg.Any<CancellationToken>());
 
             gateReady.SetResult();
             time.Advance(TimeSpan.FromSeconds(60));
             await Task.Delay(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
-            await retention.Received(1).PruneAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+            await retention.Received(1).PruneAsync(Arg.Any<CancellationToken>());
         }
         finally
         {
@@ -62,7 +62,7 @@ public class LogRetentionWorkerTests
     public async Task The_first_prune_runs_sixty_seconds_after_ready_not_immediately()
     {
         var retention = Substitute.For<ILogRetention>();
-        retention.PruneAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(0);
+        retention.PruneAsync(Arg.Any<CancellationToken>()).Returns(0);
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 25, 0, 0, 0, TimeSpan.Zero));
         var worker = new LogRetentionWorker(ScopeFactoryFor(retention), ReadyGate(), time, NullLogger<LogRetentionWorker>.Instance);
 
@@ -70,15 +70,15 @@ public class LogRetentionWorkerTests
         try
         {
             await Task.Delay(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
-            await retention.DidNotReceive().PruneAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+            await retention.DidNotReceive().PruneAsync(Arg.Any<CancellationToken>());
 
             time.Advance(TimeSpan.FromSeconds(59));
             await Task.Delay(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
-            await retention.DidNotReceive().PruneAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+            await retention.DidNotReceive().PruneAsync(Arg.Any<CancellationToken>());
 
             time.Advance(TimeSpan.FromSeconds(1));
             await Task.Delay(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
-            await retention.Received(1).PruneAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+            await retention.Received(1).PruneAsync(Arg.Any<CancellationToken>());
         }
         finally
         {
@@ -90,7 +90,7 @@ public class LogRetentionWorkerTests
     public async Task Subsequent_prunes_run_every_six_hours()
     {
         var retention = Substitute.For<ILogRetention>();
-        retention.PruneAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(0);
+        retention.PruneAsync(Arg.Any<CancellationToken>()).Returns(0);
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 25, 0, 0, 0, TimeSpan.Zero));
         var worker = new LogRetentionWorker(ScopeFactoryFor(retention), ReadyGate(), time, NullLogger<LogRetentionWorker>.Instance);
 
@@ -100,15 +100,15 @@ public class LogRetentionWorkerTests
             await Task.Delay(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
             time.Advance(TimeSpan.FromSeconds(60));
             await Task.Delay(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
-            await retention.Received(1).PruneAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+            await retention.Received(1).PruneAsync(Arg.Any<CancellationToken>());
 
             time.Advance(TimeSpan.FromHours(6) - TimeSpan.FromSeconds(1));
             await Task.Delay(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
-            await retention.Received(1).PruneAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+            await retention.Received(1).PruneAsync(Arg.Any<CancellationToken>());
 
             time.Advance(TimeSpan.FromSeconds(1));
             await Task.Delay(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
-            await retention.Received(2).PruneAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+            await retention.Received(2).PruneAsync(Arg.Any<CancellationToken>());
         }
         finally
         {
@@ -120,7 +120,7 @@ public class LogRetentionWorkerTests
     public async Task Log_messages_carry_stable_EventIds()
     {
         var retention = Substitute.For<ILogRetention>();
-        retention.PruneAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+        retention.PruneAsync(Arg.Any<CancellationToken>())
             .Returns(_ => 0, _ => throw new InvalidOperationException("database unreachable"));
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 25, 0, 0, 0, TimeSpan.Zero));
         var logger = new CapturingLogger<LogRetentionWorker>();
@@ -152,7 +152,7 @@ public class LogRetentionWorkerTests
     public async Task A_prune_that_throws_is_logged_and_never_crashes_the_worker()
     {
         var retention = Substitute.For<ILogRetention>();
-        retention.PruneAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+        retention.PruneAsync(Arg.Any<CancellationToken>())
             .ThrowsAsync(new InvalidOperationException("database unreachable"));
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 25, 0, 0, 0, TimeSpan.Zero));
         var worker = new LogRetentionWorker(ScopeFactoryFor(retention), ReadyGate(), time, NullLogger<LogRetentionWorker>.Instance);
@@ -163,12 +163,12 @@ public class LogRetentionWorkerTests
             await Task.Delay(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
             time.Advance(TimeSpan.FromSeconds(60));
             await Task.Delay(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
-            await retention.Received(1).PruneAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+            await retention.Received(1).PruneAsync(Arg.Any<CancellationToken>());
 
             // Still alive: the failed tick did not stop the loop, so the next scheduled tick still fires.
             time.Advance(TimeSpan.FromHours(6));
             await Task.Delay(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
-            await retention.Received(2).PruneAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+            await retention.Received(2).PruneAsync(Arg.Any<CancellationToken>());
         }
         finally
         {

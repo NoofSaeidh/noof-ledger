@@ -27,7 +27,7 @@ internal sealed partial class LogRetentionWorker(
         {
             using var scope = scopeFactory.CreateScope();
             var retention = scope.ServiceProvider.GetRequiredService<ILogRetention>();
-            var pruned = await retention.PruneAsync(timeProvider.GetUtcNow(), cancellationToken);
+            var pruned = await retention.PruneAsync(cancellationToken);
             LogPruned(pruned);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

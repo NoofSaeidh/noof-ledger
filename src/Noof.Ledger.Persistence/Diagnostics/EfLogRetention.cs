@@ -3,21 +3,20 @@ using Noof.Ledger.Application.Diagnostics;
 
 namespace Noof.Ledger.Persistence.Diagnostics;
 
-internal sealed class EfLogRetention(LedgerDbContext db) : ILogRetention
+internal sealed class EfLogRetention(LedgerDbContext db, TimeProvider timeProvider, LogRetentionOptions options) : ILogRetention
 {
-    public async Task<int> PruneAsync(DateTimeOffset now, CancellationToken cancellationToken)
+    public async Task<int> PruneAsync(CancellationToken cancellationToken)
     {
-        var deleted = await db.AppLogs
-            .Where(e => e.Level <= LogSeverity.Debug && e.LoggedAt < now.AddDays(-7))
-            .ExecuteDeleteAsync(cancellationToken);
+        var now = timeProvider.GetUtcNow();
+        var deleted = 0;
 
-        deleted += await db.AppLogs
-            .Where(e => e.Level == LogSeverity.Information && e.LoggedAt < now.AddDays(-90))
-            .ExecuteDeleteAsync(cancellationToken);
-
-        deleted += await db.AppLogs
-            .Where(e => e.Level >= LogSeverity.Warning && e.LoggedAt < now.AddDays(-730))
-            .ExecuteDeleteAsync(cancellationToken);
+        foreach (var level in Enum.GetValues<LogSeverity>())
+        {
+            var cutoff = now.AddDays(-options.Days.For(level));
+            deleted += await db.AppLogs
+                .Where(e => e.Level == level && e.LoggedAt < cutoff)
+                .ExecuteDeleteAsync(cancellationToken);
+        }
 
         return deleted;
     }

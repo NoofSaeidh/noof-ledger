@@ -1,5 +1,6 @@
 using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Time.Testing;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Persistence.Diagnostics;
 
@@ -23,72 +24,81 @@ public class EfLogRetentionTests(PostgresFixture fixture)
     static async Task<List<long>> RemainingIdsAsync(LedgerDbContext db) =>
         await db.AppLogs.AsNoTracking().OrderBy(e => e.Id).Select(e => e.Id).ToListAsync(TestContext.Current.CancellationToken);
 
+    static EfLogRetention RetentionFor(LedgerDbContext db, LogRetentionOptions? options = null) =>
+        new(db, new FakeTimeProvider(Now), options ?? new LogRetentionOptions());
+
     [Theory]
     [InlineData(LogSeverity.Verbose)]
     [InlineData(LogSeverity.Debug)]
-    public async Task Verbose_and_debug_older_than_seven_days_are_pruned_but_not_seven_days_exactly(LogSeverity level)
+    public async Task Verbose_and_debug_older_than_the_default_one_day_window_are_pruned_but_not_exactly_at_the_boundary(LogSeverity level)
     {
         await using var db = await fixture.CreateContextAsync();
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
         db.AppLogs.AddRange(
-            Row(1, level, Now.AddDays(-7).AddSeconds(1)), // just inside 7 days: kept
-            Row(2, level, Now.AddDays(-7).AddSeconds(-1))); // just past 7 days: pruned
+            Row(1, level, Now.AddDays(-1).AddSeconds(1)), // just inside 1 day: kept
+            Row(2, level, Now.AddDays(-1).AddSeconds(-1))); // just past 1 day: pruned
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var deleted = await new EfLogRetention(db).PruneAsync(Now, TestContext.Current.CancellationToken);
+        var deleted = await RetentionFor(db).PruneAsync(TestContext.Current.CancellationToken);
 
         deleted.Should().Be(1);
         (await RemainingIdsAsync(db)).Should().Equal(1);
-    }
-
-    [Fact]
-    public async Task Information_older_than_ninety_days_is_pruned_but_not_ninety_days_exactly()
-    {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
-        db.AppLogs.AddRange(
-            Row(1, LogSeverity.Information, Now.AddDays(-90).AddSeconds(1)),
-            Row(2, LogSeverity.Information, Now.AddDays(-90).AddSeconds(-1)),
-            Row(3, LogSeverity.Information, Now.AddDays(-8))); // inside 7 days boundary irrelevant to Information
-
-        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-        var deleted = await new EfLogRetention(db).PruneAsync(Now, TestContext.Current.CancellationToken);
-
-        deleted.Should().Be(1);
-        (await RemainingIdsAsync(db)).Should().Equal(1, 3);
     }
 
     [Theory]
+    [InlineData(LogSeverity.Information)]
     [InlineData(LogSeverity.Warning)]
     [InlineData(LogSeverity.Error)]
     [InlineData(LogSeverity.Fatal)]
-    public async Task Warning_and_above_older_than_730_days_are_pruned_but_not_730_days_exactly(LogSeverity level)
+    public async Task Information_and_above_older_than_the_default_ninety_day_window_are_pruned_but_not_exactly_at_the_boundary(LogSeverity level)
     {
         await using var db = await fixture.CreateContextAsync();
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
         db.AppLogs.AddRange(
-            Row(1, level, Now.AddDays(-730).AddSeconds(1)),
-            Row(2, level, Now.AddDays(-730).AddSeconds(-1)));
+            Row(1, level, Now.AddDays(-90).AddSeconds(1)),
+            Row(2, level, Now.AddDays(-90).AddSeconds(-1)));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var deleted = await new EfLogRetention(db).PruneAsync(Now, TestContext.Current.CancellationToken);
+        var deleted = await RetentionFor(db).PruneAsync(TestContext.Current.CancellationToken);
 
         deleted.Should().Be(1);
         (await RemainingIdsAsync(db)).Should().Equal(1);
     }
 
     [Fact]
-    public async Task An_information_row_seven_days_old_is_not_pruned_by_the_verbose_debug_band()
+    public async Task Each_level_is_pruned_by_its_own_window_not_a_shared_one()
     {
         await using var db = await fixture.CreateContextAsync();
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
-        db.AppLogs.Add(Row(1, LogSeverity.Information, Now.AddDays(-8)));
+        // Two days old: past Debug's default one-day window, well inside Information's default
+        // ninety-day window - proves each level's cutoff is computed and applied independently, not
+        // one shared cutoff for the whole table.
+        db.AppLogs.AddRange(
+            Row(1, LogSeverity.Debug, Now.AddDays(-2)),
+            Row(2, LogSeverity.Information, Now.AddDays(-2)));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var deleted = await new EfLogRetention(db).PruneAsync(Now, TestContext.Current.CancellationToken);
+        var deleted = await RetentionFor(db).PruneAsync(TestContext.Current.CancellationToken);
 
-        deleted.Should().Be(0);
-        (await RemainingIdsAsync(db)).Should().Equal(1);
+        deleted.Should().Be(1);
+        (await RemainingIdsAsync(db)).Should().Equal(2);
+    }
+
+    [Fact]
+    public async Task A_configured_window_overrides_the_default_for_that_level_only()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        db.AppLogs.AddRange(
+            Row(1, LogSeverity.Warning, Now.AddDays(-10)),
+            Row(2, LogSeverity.Error, Now.AddDays(-10)));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var options = new LogRetentionOptions { Days = new() { Warning = 5 } };
+
+        var deleted = await RetentionFor(db, options).PruneAsync(TestContext.Current.CancellationToken);
+
+        deleted.Should().Be(1);
+        (await RemainingIdsAsync(db)).Should().Equal(2);
     }
 }

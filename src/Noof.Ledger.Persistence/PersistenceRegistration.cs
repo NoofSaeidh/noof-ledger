@@ -67,6 +67,10 @@ public static class PersistenceRegistration
         services.AddScoped<IBackupLog, EfBackupLog>();
         services.AddScoped<IDatabaseDumper>(_ => new PgDumpDatabaseDumper(
             connectionString, configuration["Backup:PgDumpPath"] ?? PgDumpDatabaseDumper.DefaultPath));
+        var retentionOptions = new LogRetentionOptions();
+        configuration.GetSection("Logging:Retention").Bind(retentionOptions);
+        services.AddSingleton(retentionOptions);
+
         services.AddScoped<ILogQuery, EfLogQuery>();
         services.AddScoped<ILogRetention, EfLogRetention>();
         services.AddScoped<ITransactionTrace, EfTransactionTrace>();
