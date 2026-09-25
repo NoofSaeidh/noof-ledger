@@ -37,6 +37,11 @@ public class DiagnosticsPageSourceTests
         source.Should().Contain("ILogFileTail");
         source.Should().Contain("id=\"logs-grid\"");
         source.Should().Contain("id=\"logs-file-tail\"");
+        source.Should().Contain("id=\"logs-filter-from\"",
+            "LogFilter carries From/To (binding spec §4) - the UI must expose both, not just MinLevel/Text/Source/TransactionId");
+        source.Should().Contain("id=\"logs-filter-to\"");
+        source.Should().Contain("[SupplyParameterFromQuery]",
+            "/diagnostics's per-check Logs link navigates to /diagnostics/logs?source=<name> - this page must read that query parameter to seed the filter");
         source.Should().NotContain("Virtualize",
             "the spec is explicit: paged QuickGrid, no Virtualize (§4)");
         source.Should().NotContain("MudSelect");

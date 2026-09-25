@@ -48,15 +48,28 @@ else
             @* Plain native inputs, not MudTextField: a QuickGrid refresh needs to fire on every
                keystroke, and a native input's @bind:event="oninput" does that directly, without
                depending on MudTextField's own (JS-interop-driven) Immediate/debounce plumbing. *@
-            <MudItem xs="12" md="3">
+            <MudItem xs="12" md="2">
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">Text</MudText>
                 <input id="logs-filter-text" class="noof-input" @bind="filter.Text" @bind:event="oninput" @bind:after="ReloadAsync" />
             </MudItem>
-            <MudItem xs="12" md="3">
+            <MudItem xs="12" md="2">
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">Source</MudText>
                 <input id="logs-filter-source" class="noof-input" @bind="filter.Source" @bind:event="oninput" @bind:after="ReloadAsync" />
             </MudItem>
-            <MudItem xs="12" md="4">
+            <MudItem xs="12" md="2">
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">From</MudText>
+                @* @bind against a DateTime? field, not a string: Razor's @bind directive infers a
+                   DateTime target type from a "datetime-local" input regardless of the bound
+                   property's own declared type, and generates Blazor's own built-in date/time
+                   round-trip conversion - the native binding path, rather than a hand-rolled
+                   value/@onchange pair reading a string. *@
+                <input type="datetime-local" id="logs-filter-from" class="noof-input" @bind="filter.From" @bind:event="oninput" @bind:after="ReloadAsync" />
+            </MudItem>
+            <MudItem xs="12" md="2">
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">To</MudText>
+                <input type="datetime-local" id="logs-filter-to" class="noof-input" @bind="filter.To" @bind:event="oninput" @bind:after="ReloadAsync" />
+            </MudItem>
+            <MudItem xs="12" md="2">
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">Transaction id</MudText>
                 <input id="logs-filter-transaction-id" class="noof-input" @bind="transactionIdText" @bind:event="oninput" @bind:after="ReloadAsync" />
             </MudItem>
@@ -99,11 +112,19 @@ else
 }
 
 @code {
+    // The `?source=` query parameter (set by /diagnostics's per-check Logs link) seeds the filter
+    // before this page's first ItemsProvider call, so following that link lands already narrowed
+    // to the check's rows instead of an unfiltered grid.
+    [SupplyParameterFromQuery]
+    public string? Source { get; set; }
+
     sealed class LogFilterEdit
     {
         public LogSeverity MinLevel { get; set; } = LogSeverity.Information;
         public string? Text { get; set; }
         public string? Source { get; set; }
+        public DateTime? From { get; set; }
+        public DateTime? To { get; set; }
         public Guid? TransactionId { get; set; }
     }
 
@@ -119,6 +140,9 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        if (!string.IsNullOrWhiteSpace(Source))
+            filter.Source = Source;
+
         var health = Gate.State == DatabaseState.Ready
             ? await SystemHealth.GetAsync(fresh: false, CancellationToken.None)
             : null;
@@ -138,7 +162,21 @@ else
         return GridItemsProviderResult.From<LogRow>([.. page.Rows], page.TotalCount);
     }
 
-    LogFilter ToFilter() => new(filter.MinLevel, Text: filter.Text, Source: filter.Source, TransactionId: filter.TransactionId);
+    LogFilter ToFilter() => new(
+        filter.MinLevel,
+        From: ToOffset(filter.From),
+        To: ToOffset(filter.To),
+        Text: filter.Text,
+        Source: filter.Source,
+        TransactionId: filter.TransactionId);
+
+    // The datetime-local input's bound value is a local wall-clock DateTime with no offset of its
+    // own; pairing it with this machine's current UTC offset for that instant is what turns it into
+    // the DateTimeOffset the filter (and the timestamptz column it compares against) needs.
+    static DateTimeOffset? ToOffset(DateTime? localTime) =>
+        localTime is { } value
+            ? new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Unspecified), TimeZoneInfo.Local.GetUtcOffset(value))
+            : null;
 
     Task ReloadAsync()
     {
