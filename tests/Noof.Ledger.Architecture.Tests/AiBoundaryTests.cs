@@ -87,6 +87,11 @@ public class AiBoundaryTests
     {
         var root = RepoRoot.Find().FullName;
         var mapper = Path.Combine(root, "src", "Noof.Ledger.Application", "Categorization", "ProposalMapper.cs");
+
+        // The receipt worker's own permitted site (Phase 6, R-2/R-6): a fiscal-QR receipt's amounts
+        // come from receipt_lines, never a model answer, so its Money is built from the opposite kind
+        // of source ProposalMapper guards - deliberately a second door, not an exception to the first.
+        var receiptWorker = Path.Combine(root, "src", "Noof.Ledger.Host", "Workers", "ReceiptCategorizationWorker.cs");
         string[] scannedRoots =
         [
             Path.Combine(root, "src", "Noof.Ledger.Ai"),
@@ -97,6 +102,7 @@ public class AiBoundaryTests
         var offenders = scannedRoots
             .SelectMany(dir => Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories))
             .Where(file => !string.Equals(file, mapper, StringComparison.OrdinalIgnoreCase))
+            .Where(file => !string.Equals(file, receiptWorker, StringComparison.OrdinalIgnoreCase))
             .Where(file => File.ReadAllText(file).Contains("new Money(", StringComparison.Ordinal))
             .Select(file => Path.GetRelativePath(root, file))
             .ToArray();
@@ -107,6 +113,8 @@ public class AiBoundaryTests
         offenders.Should().BeEmpty("a Money built from a model answer must come from ProposalMapper");
         File.ReadAllText(mapper).Should().Contain("new Money(",
             "the one permitted site must exist, or an empty offender list proves nothing");
+        File.ReadAllText(receiptWorker).Should().Contain("new Money(",
+            "the receipt worker's own permitted site must exist, or the exclusion proves nothing");
     }
 
     static IEnumerable<string> SourceFiles(string pattern) =>

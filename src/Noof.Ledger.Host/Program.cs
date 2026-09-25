@@ -80,8 +80,8 @@ try
     builder.Services.AddNoofApplication(slowOperations);
 
     builder.Services.AddSingleton(TimeProvider.System);
-    builder.Services.AddSingleton(CaptureTimeZoneGuard.Resolve(
-        builder.Configuration["Capture:TimeZone"] ?? "Europe/Belgrade"));
+    var captureTimeZone = CaptureTimeZoneGuard.Resolve(builder.Configuration["Capture:TimeZone"] ?? "Europe/Belgrade");
+    builder.Services.AddSingleton(captureTimeZone);
 
     var dataProtectionKeyRingDirectory = DataProtectionSetup.ResolveKeyRingDirectory(builder.Configuration);
     DataProtectionSetup.Configure(builder.Services, dataProtectionKeyRingDirectory);
@@ -126,7 +126,7 @@ try
 
     builder.Services.AddNoofReceipts();
 
-    builder.Services.AddNoofWorkers(categorizationOptions, backupOptions);
+    builder.Services.AddNoofWorkers(categorizationOptions, backupOptions, captureTimeZone);
 
     builder.Services.AddNoofDiagnostics();
 

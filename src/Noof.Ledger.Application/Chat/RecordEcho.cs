@@ -1,5 +1,6 @@
 using System.Globalization;
 using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Application.Chat;
@@ -74,6 +75,65 @@ internal sealed class RecordEcho : IRecordEcho
             : $"{FormatAmount(total)} {currency}";
 
         return new($"Already recorded — this receipt was sent before ({reference}).", []);
+    }
+
+    // Telegram's own hard limit (R-2, R-7). Kept well clear of it rather than measured live: 40
+    // detailed lines plus a grouped tail is short enough for any real receipt to stay under 4096
+    // characters without a second, length-dependent pass over the same text.
+    const int MaxDetailedReceiptLines = 40;
+
+    public EchoMessage ComposeReceipt(CategorizationSubject record, ReceiptView receipt) =>
+        new(
+            $"Recorded — {ShopHeader(receipt)} · {record.WalletName} · balance {Balances(record)}\n{ReceiptBody(record, receipt)}",
+            [RecordAction.Cancel, RecordAction.Edit]);
+
+    public EchoMessage ComposeReceiptNotRecorded(Receipts.ReceiptKind kind) =>
+        new($"This receipt is a {kind.ToString().ToLowerInvariant()} — not recorded", [RecordAction.Edit]);
+
+    static string ShopHeader(ReceiptView receipt)
+    {
+        var name = receipt.SellerName is { Length: > 0 } sellerName ? sellerName : "Receipt";
+        return receipt.LocationName is { Length: > 0 } location ? $"{name} — {location}" : name;
+    }
+
+    static string ReceiptBody(CategorizationSubject record, ReceiptView receipt)
+    {
+        List<string> lines = [$"Date: {record.OccurredOn.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)}"];
+        lines.AddRange(ReceiptLineSection(record.Lines));
+        lines.Add(string.Empty);
+        lines.Add($"Total: {Totals(record.Lines)}");
+        lines.AddRange(ReceiptWarnings(record.Lines, receipt));
+        return string.Join('\n', lines);
+    }
+
+    static IEnumerable<string> ReceiptLineSection(IReadOnlyList<RecordedLine> lines)
+    {
+        if (lines.Count <= MaxDetailedReceiptLines)
+            return lines.Select(FormatLine);
+
+        var detailed = lines.Take(MaxDetailedReceiptLines).Select(FormatLine);
+        var remainder = lines.Skip(MaxDetailedReceiptLines).ToList();
+        var grouped = remainder
+            .GroupBy(line => line.CategoryName ?? "uncategorised")
+            .OrderBy(group => group.Key, StringComparer.Ordinal)
+            .Select(group => $"{group.Key}: {FormatAmount(group.Sum(line => line.Amount.Amount))} {group.First().Amount.Currency}");
+
+        return [.. detailed, $"… {remainder.Count} more lines", .. grouped];
+    }
+
+    static IEnumerable<string> ReceiptWarnings(IReadOnlyList<RecordedLine> lines, ReceiptView receipt)
+    {
+        if (receipt is { Source: Receipts.ReceiptSource.Vision, QrTotal: not null })
+            yield return "⚠️ Tax Administration unavailable — lines read from the photo";
+        else if (receipt is { Source: Receipts.ReceiptSource.Vision, QrTotal: null })
+            yield return "⚠️ Read from the photo (no fiscal QR)";
+
+        var sum = lines.Sum(line => line.Amount.Amount);
+        if (Math.Abs(sum - receipt.Total) > 0.01m)
+        {
+            yield return
+                $"⚠️ Lines add up to {FormatAmount(sum)} {receipt.Currency}, the receipt says {FormatAmount(receipt.Total)} {receipt.Currency}";
+        }
     }
 
     string Waiting(CategorizationSubject record) =>

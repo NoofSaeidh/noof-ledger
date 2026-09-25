@@ -109,6 +109,9 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
             .MaxAsync(cancellationToken) ?? 0);
         foreach (var item in outcome.Items)
         {
+            // A receipt line names its own Ordinal - the receipt's own order (R-2) - and never the
+            // auto-numbering below, which exists only for a text/voice capture's model-authored lines.
+            var itemOrdinal = item.Ordinal ?? ordinal;
             db.LineItems.Add(new LineItem
             {
                 Id = Guid.NewGuid(),
@@ -118,8 +121,12 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
                 CategoryId = item.CategoryId,
                 CategorizedBy = CategorizationAuthority.Model,
                 MerchantId = item.MerchantId,
-                Ordinal = ordinal++,
+                Ordinal = itemOrdinal,
+                ReceiptLineId = item.ReceiptLineId,
             });
+
+            if (item.Ordinal is null)
+                ordinal++;
         }
 
         var transaction = await db.Transactions.SingleAsync(t => t.Id == transactionId, cancellationToken);
@@ -141,6 +148,7 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
     static RevisionKind RevisionKindFor(JobKind kind) => kind switch
     {
         JobKind.Categorize => RevisionKind.Initial,
+        JobKind.CategorizeReceipt => RevisionKind.Initial,
         JobKind.Correct => RevisionKind.Correction,
         JobKind.Reinterpret => RevisionKind.Edit,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "No revision kind for this job kind."),

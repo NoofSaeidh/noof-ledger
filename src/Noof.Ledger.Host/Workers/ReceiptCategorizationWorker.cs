@@ -1,0 +1,368 @@
+using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Application.Chat;
+using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Jobs;
+using Noof.Ledger.Application.Receipts;
+using Noof.Ledger.Application.Wallets;
+using Noof.Ledger.Domain;
+using Noof.Ledger.Host.Workers.ReceiptCategorizationLogging;
+using AppReceiptKind = Noof.Ledger.Application.Receipts.ReceiptKind;
+using AppPaymentMethod = Noof.Ledger.Application.Receipts.PaymentMethod;
+
+namespace Noof.Ledger.Host.Workers;
+
+// Claims only CategorizeReceipt jobs (R-2, R-3, R-6): a receipt's amounts always come from its own
+// receipt_lines, never the model, so this worker never builds a CategorizationRequest or calls
+// ICategorizer - it is a sibling of CategorizationWorker rather than a branch inside it because
+// every one of its steps (the merchant lookup order, the wallet rule, the non-money receipt kinds)
+// is receipt-specific, and folding them into CategorizationWorker's single ProcessClaimedJobAsync
+// would make that method branch on "is this a receipt?" at nearly every line.
+internal sealed class ReceiptCategorizationWorker(
+    IServiceScopeFactory scopeFactory,
+    TimeProvider timeProvider,
+    CategorizationWorkerOptions options,
+    string workerId,
+    IRecordEcho recordEcho,
+    TimeZoneInfo captureTimeZone,
+    IDatabaseGate gate,
+    ILogger<ReceiptCategorizationWorker> logger)
+    : BackgroundService
+{
+    const string FallbackCategorySlug = "other";
+
+    // For CategorizationWorker's own reason: an account-level model failure fails every queued job
+    // identically, so claiming pauses here too rather than burning through the backlog.
+    DateTimeOffset accountCooldownUntil = DateTimeOffset.MinValue;
+
+    static readonly JobKind[] ClaimableKinds = [JobKind.CategorizeReceipt];
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        await gate.WaitUntilReadyAsync(stoppingToken);
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            var result = await RunTickAsync(stoppingToken);
+
+            var delay = result == CategorizationTickResult.Processed ? TimeSpan.Zero : options.PollInterval;
+            if (delay > TimeSpan.Zero)
+                await Task.Delay(delay, timeProvider, stoppingToken);
+        }
+    }
+
+    public async Task<CategorizationTickResult> RunTickAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var scope = scopeFactory.CreateScope();
+            var jobQueue = scope.ServiceProvider.GetRequiredService<IJobQueue>();
+            var modelProvider = scope.ServiceProvider.GetRequiredService<IModelProvider>();
+
+            var now = timeProvider.GetUtcNow();
+            await jobQueue.ReleaseExpiredLeasesAsync(now, cancellationToken);
+
+            // Checked before claiming, for CategorizationWorker's own reason: a claim spends an
+            // attempt and nothing gives it back.
+            if (!await modelProvider.IsConfiguredAsync(cancellationToken))
+                return CategorizationTickResult.Idle;
+
+            if (now < accountCooldownUntil)
+                return CategorizationTickResult.Idle;
+
+            var job = await jobQueue.ClaimAsync(workerId, ClaimableKinds, options.Lease, cancellationToken);
+            if (job is null)
+                return CategorizationTickResult.Idle;
+
+            await ProcessClaimedJobAsync(scope, jobQueue, job, cancellationToken);
+            return CategorizationTickResult.Processed;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.TickFailed(ex);
+            return CategorizationTickResult.Failed;
+        }
+    }
+
+    async Task ProcessClaimedJobAsync(
+        IServiceScope scope, IJobQueue jobQueue, CategorizationJob job, CancellationToken cancellationToken)
+    {
+        var store = scope.ServiceProvider.GetRequiredService<ICategorizationStore>();
+        var receiptStore = scope.ServiceProvider.GetRequiredService<IReceiptStore>();
+        var categoryCatalog = scope.ServiceProvider.GetRequiredService<ICategoryCatalog>();
+        var merchantDirectory = scope.ServiceProvider.GetRequiredService<IMerchantDirectory>();
+        var walletDirectory = scope.ServiceProvider.GetRequiredService<IWalletDirectory>();
+        var receiptCategorizer = scope.ServiceProvider.GetRequiredService<IReceiptCategorizer>();
+        var notifier = scope.ServiceProvider.GetRequiredService<IChatNotifier>();
+
+        CategorizationSubject? subject = null;
+        var currentStage = TransactionStages.Categorized;
+
+        using var logScope = TransactionLogScope.Begin(logger, job.TransactionId);
+
+        try
+        {
+            subject = await store.GetSubjectAsync(job.TransactionId, cancellationToken);
+            if (subject is not { } sub)
+            {
+                await FailTerminallyAsync(
+                    jobQueue, store, notifier, job, null, "the transaction this job points at no longer exists", currentStage, cancellationToken);
+                return;
+            }
+
+            var receipt = await receiptStore.GetByTransactionAsync(job.TransactionId, cancellationToken);
+            if (receipt is null)
+            {
+                await FailTerminallyAsync(
+                    jobQueue, store, notifier, job, subject, "no receipt is recorded for this transaction", currentStage, cancellationToken);
+                return;
+            }
+
+            if (IsNonMoneyKind(receipt.Kind))
+            {
+                await ReportNotRecordedAsync(store, notifier, job, sub, receipt.Kind, cancellationToken);
+                await SucceedQuietlyAsync(jobQueue, job, cancellationToken);
+                return;
+            }
+
+            var aliases = await merchantDirectory.AliasesAsync(cancellationToken);
+            var aliasByFolded = aliases.ToDictionary(alias => alias.Folded, alias => alias);
+
+            var merchantId = await KnownMerchantIdAsync(merchantDirectory, aliasByFolded, receipt, cancellationToken);
+            var merchantKnown = merchantId is not null;
+
+            var categories = await categoryCatalog.ActiveAsync(cancellationToken);
+            var wallets = await walletDirectory.ActiveAsync(cancellationToken);
+
+            var request = new ReceiptCategorizationRequest(
+                [.. receipt.Lines.Select(line => new ReceiptLineToCategorize(line.Ordinal, line.Name, line.Quantity, line.Total))],
+                receipt.SellerName, receipt.SellerTaxId, merchantKnown, sub.RawText);
+
+            var categorization = await receiptCategorizer.CategorizeAsync(request, cancellationToken);
+
+            merchantId ??= await ResolveNewMerchantAsync(merchantDirectory, receipt, categorization, cancellationToken);
+
+            if (merchantId is { } knownMerchantId && receipt.SellerTaxId is { Length: > 0 } taxId)
+                await merchantDirectory.LinkTaxIdAsync(knownMerchantId, taxId, cancellationToken);
+
+            var walletId = await ResolveWalletAsync(walletDirectory, categorization, receipt, wallets, cancellationToken);
+            if (walletId is null)
+            {
+                await FailTerminallyAsync(jobQueue, store, notifier, job, subject, "no wallet to record into", currentStage, cancellationToken);
+                return;
+            }
+
+            var slugByOrdinal = categorization.Lines.ToDictionary(line => line.Ordinal, line => line.CategorySlug);
+            var items = new List<CategorizedLineItem>(receipt.Lines.Count);
+            foreach (var line in receipt.Lines.OrderBy(line => line.Ordinal))
+            {
+                if (!slugByOrdinal.TryGetValue(line.Ordinal, out var slug))
+                {
+                    logger.MissingOrdinal(line.Ordinal, FallbackCategorySlug);
+                    slug = FallbackCategorySlug;
+                }
+
+                var categoryId = categories.First(category => category.Slug == slug).Id;
+                items.Add(new CategorizedLineItem(
+                    line.Name, new Money(line.Total, receipt.Currency), categoryId, merchantId, line.Ordinal, line.Id));
+            }
+
+            var transactionKind = receipt.Kind == AppReceiptKind.Refund ? TransactionKind.Income : TransactionKind.Expense;
+            var occurredOn = receipt.IssuedAt is { } issuedAt
+                ? DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(issuedAt, captureTimeZone).DateTime)
+                : sub.OccurredOn;
+
+            logger.LogCategorized(TransactionStages.Categorized, transactionKind, walletId,
+                $"{items.Count} receipt line(s), total {receipt.Total} {receipt.Currency}");
+
+            var outcome = new CategorizationOutcome(items, occurredOn, JobKind.CategorizeReceipt, null, transactionKind, walletId);
+            currentStage = TransactionStages.Persisted;
+            await store.ApplyAsync(job.TransactionId, outcome, cancellationToken);
+            logger.LogPersisted(TransactionStages.Persisted, transactionKind);
+
+            // From here on, as in CategorizationWorker: the line items and status are already
+            // committed, so nothing past this line may be treated as a job failure.
+            await EchoAsync(store, receiptStore, notifier, job, cancellationToken);
+
+            try
+            {
+                var succeedOutcome = await jobQueue.SucceedAsync(job.Id, workerId, cancellationToken);
+                if (succeedOutcome == JobCompletionOutcome.NotOwned)
+                    logger.JobAlreadyReclaimed(job.Id);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.SucceedAfterCommitFailed(ex, job.Id);
+            }
+        }
+        catch (ModelCallException ex) when (ex.IsAccountLevel())
+        {
+            accountCooldownUntil = timeProvider.GetUtcNow() + options.AccountCooldown;
+            logger.AccountLevelFailure(job.Id, ex.Message, options.AccountCooldown);
+            await HandleModelFailureAsync(jobQueue, store, notifier, job, subject, ModelFailureKind.Transient, ex.Message, currentStage, cancellationToken, ex);
+        }
+        catch (ModelCallException ex)
+        {
+            await HandleModelFailureAsync(jobQueue, store, notifier, job, subject, ex.Kind, ex.Message, currentStage, cancellationToken, ex);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await HandleModelFailureAsync(jobQueue, store, notifier, job, subject, ModelFailureKind.Transient, ex.Message, currentStage, cancellationToken, ex);
+        }
+    }
+
+    static bool IsNonMoneyKind(AppReceiptKind kind) =>
+        kind is AppReceiptKind.Copy or AppReceiptKind.Training or AppReceiptKind.Proforma or AppReceiptKind.Advance;
+
+    static async Task<Guid?> KnownMerchantIdAsync(
+        IMerchantDirectory merchantDirectory, Dictionary<string, MerchantAliasEntry> aliasByFolded, ReceiptView receipt,
+        CancellationToken cancellationToken)
+    {
+        if (receipt.SellerTaxId is { Length: > 0 } taxId
+            && await merchantDirectory.FindByTaxIdAsync(taxId, cancellationToken) is { } byTaxId)
+            return byTaxId;
+
+        if (receipt.SellerName is { Length: > 0 } sellerName
+            && aliasByFolded.TryGetValue(MerchantName.Fold(sellerName), out var alias))
+            return alias.MerchantId;
+
+        return null;
+    }
+
+    static async Task<Guid?> ResolveNewMerchantAsync(
+        IMerchantDirectory merchantDirectory, ReceiptView receipt, ReceiptCategorization categorization, CancellationToken cancellationToken)
+    {
+        var canonicalName = categorization.MerchantCanonicalName ?? receipt.SellerName;
+        if (canonicalName is not { Length: > 0 })
+            return null;
+
+        var folded = MerchantName.Fold(receipt.SellerName is { Length: > 0 } sellerName ? sellerName : canonicalName);
+        return await merchantDirectory.LinkAliasAsync(folded, canonicalName, cancellationToken);
+    }
+
+    static async Task<Guid?> ResolveWalletAsync(
+        IWalletDirectory walletDirectory, ReceiptCategorization categorization, ReceiptView receipt, IReadOnlyList<WalletOption> wallets,
+        CancellationToken cancellationToken)
+    {
+        if (categorization.WalletId is { } named && wallets.Any(wallet => wallet.Id == named))
+            return named;
+
+        if (receipt.PaymentMethod is AppPaymentMethod.Card or AppPaymentMethod.Cash
+            && await walletDirectory.DefaultForPaymentAsync(receipt.PaymentMethod.Value, cancellationToken) is { } forPayment)
+            return forPayment;
+
+        return DefaultWalletFor(receipt.Currency.Value, wallets);
+    }
+
+    static Guid? DefaultWalletFor(string currency, IReadOnlyList<WalletOption> wallets) =>
+        wallets.FirstOrDefault(wallet =>
+            wallet.IsDefaultForCurrency && string.Equals(wallet.Currency.Value, currency, StringComparison.OrdinalIgnoreCase))?.Id;
+
+    async Task ReportNotRecordedAsync(
+        ICategorizationStore store, IChatNotifier notifier, CategorizationJob job, CategorizationSubject subject,
+        AppReceiptKind kind, CancellationToken cancellationToken)
+    {
+        logger.ReceiptNotRecorded(kind.ToString(), job.TransactionId);
+        await store.MarkFailedAsync(job.TransactionId, cancellationToken);
+
+        if (subject.BotMessageId is not { } messageId)
+            return;
+
+        try
+        {
+            await notifier.EditAsync(subject.TelegramChatId, messageId, recordEcho.ComposeReceiptNotRecorded(kind), cancellationToken);
+            logger.LogReplied(TransactionStages.Replied, messageId);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Replied, ex);
+            logger.EchoFailed(ex, job.Id);
+        }
+    }
+
+    async Task EchoAsync(
+        ICategorizationStore store, IReceiptStore receiptStore, IChatNotifier notifier, CategorizationJob job,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Read back, not composed from the proposal (D4): the echo shows what the database now holds.
+            if (await store.GetSubjectAsync(job.TransactionId, cancellationToken) is not { BotMessageId: { } messageId } record)
+                return;
+
+            if (await receiptStore.GetByTransactionAsync(job.TransactionId, cancellationToken) is not { } receipt)
+                return;
+
+            await notifier.EditAsync(record.TelegramChatId, messageId, recordEcho.ComposeReceipt(record, receipt), cancellationToken);
+            logger.LogReplied(TransactionStages.Replied, messageId);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Replied, ex);
+            logger.EchoFailed(ex, job.Id);
+        }
+    }
+
+    async Task HandleModelFailureAsync(
+        IJobQueue jobQueue, ICategorizationStore store, IChatNotifier notifier,
+        CategorizationJob job, CategorizationSubject? subject, ModelFailureKind kind, string error, string failedStage,
+        CancellationToken cancellationToken, Exception? exception = null)
+    {
+        if (kind == ModelFailureKind.Terminal)
+        {
+            await FailTerminallyAsync(jobQueue, store, notifier, job, subject, error, failedStage, cancellationToken, exception);
+            return;
+        }
+
+        logger.LogStageFailed(TransactionStages.StageFailed, failedStage, exception ?? new InvalidOperationException(error));
+
+        var isLastAttempt = job.AttemptCount >= options.MaxAttempts;
+        var runAfter = timeProvider.GetUtcNow() + options.ComputeBackoff(job.AttemptCount);
+        var outcome = await jobQueue.RetryAsync(job.Id, workerId, runAfter, error, cancellationToken);
+
+        if (outcome == JobCompletionOutcome.Applied && isLastAttempt)
+            await NotifyFailureAsync(store, notifier, subject, cancellationToken);
+    }
+
+    async Task FailTerminallyAsync(
+        IJobQueue jobQueue, ICategorizationStore store, IChatNotifier notifier,
+        CategorizationJob job, CategorizationSubject? subject, string error, string failedStage, CancellationToken cancellationToken,
+        Exception? exception = null)
+    {
+        logger.LogStageFailed(TransactionStages.StageFailed, failedStage, exception ?? new InvalidOperationException(error));
+
+        var outcome = await jobQueue.FailAsync(job.Id, workerId, error, cancellationToken);
+        if (outcome == JobCompletionOutcome.Applied)
+            await NotifyFailureAsync(store, notifier, subject, cancellationToken);
+    }
+
+    async Task SucceedQuietlyAsync(IJobQueue jobQueue, CategorizationJob job, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (await jobQueue.SucceedAsync(job.Id, workerId, cancellationToken) == JobCompletionOutcome.NotOwned)
+                logger.JobAlreadyReclaimed(job.Id);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.SucceedAfterCommitFailed(ex, job.Id);
+        }
+    }
+
+    async Task NotifyFailureAsync(
+        ICategorizationStore store, IChatNotifier notifier, CategorizationSubject? subject, CancellationToken cancellationToken)
+    {
+        if (subject is not { BotMessageId: { } messageId } sub)
+            return;
+
+        await store.MarkFailedAsync(sub.TransactionId, cancellationToken);
+
+        try
+        {
+            await notifier.EditAsync(sub.TelegramChatId, messageId, recordEcho.Failure, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.FailureEditFailed(ex, messageId, sub.TransactionId);
+        }
+    }
+}
