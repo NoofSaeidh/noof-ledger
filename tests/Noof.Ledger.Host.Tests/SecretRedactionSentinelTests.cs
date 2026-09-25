@@ -11,6 +11,7 @@ using Npgsql;
 namespace Noof.Ledger.Host.Tests;
 
 [Collection("app-log-sink")]
+[Trait("Category", "Database")]
 public sealed class SecretRedactionSentinelTests
 {
     const string FakeSecretValue = "sk-sentinel-fake-secret-0123456789";

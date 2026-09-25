@@ -296,8 +296,9 @@ detail — prerequisites included. `Get-Help .\run.ps1 -Full` works too. One lin
   failed or empty test run.
 - `start-published [-Path <dir>]` — run a published `Noof.Ledger.Host.exe`, from anywhere.
 - `set-password <username>` — create or reset a login; the only way a user is ever created.
-- `test [fast|db|e2e|all] [-Filter <class>]` — fast needs no database; db/e2e/all take the shared
-  suite lock.
+- `test [fast|db|e2e|all] [-Filter <class>]` — fast needs no database (it excludes the Host.Tests
+  classes tagged `[Trait("Category", "Database")]`); db/e2e/all take the shared suite lock, and db
+  runs those tagged classes too.
 - `update-test-template` — apply the newest migration to `noof_ledger_test_template` (see below).
 - `clean-test-dbs [-WhatIf]` — drop leftover `noof_test_*`/`noof_e2e_*` databases.
 - `restore-check [args passthrough]` — forwards to `ops/restore-check.ps1`.

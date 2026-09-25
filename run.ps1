@@ -280,16 +280,21 @@ Prerequisites: PostgreSQL reachable.
 test [fast|db|e2e|all] [-Filter <class>]
 
 fast (the default) runs every project that needs neither PostgreSQL nor a browser: Domain, Ai,
-Architecture, Telegram and Host.Tests.
+Architecture, Telegram and Host.Tests - except the handful of Host.Tests classes tagged
+[Trait("Category", "Database")] (AppLogSinkTests, DashboardCultureTests, ReadyGatedBufferSinkDbTests,
+SecretRedactionSentinelTests), which clone noof_ledger_test_template whenever PostgreSQL is reachable
+and so belong under the lock, not in fast.
 
-db runs Noof.Ledger.Persistence.Tests, e2e runs Noof.Ledger.E2E.Tests, all runs the whole solution
-suite (`dotnet test --solution`). Each of these three acquires the shared suite lock
-($env:TEMP\noof-suite.lock - PostgreSQL and Playwright browsers are shared across worktrees) before
-running and always releases it afterwards, even on failure.
+db runs Noof.Ledger.Persistence.Tests plus those Database-tagged Host.Tests classes, e2e runs
+Noof.Ledger.E2E.Tests, all runs the whole solution suite (`dotnet test --solution`). Each of these
+three acquires the shared suite lock ($env:TEMP\noof-suite.lock - PostgreSQL and Playwright browsers
+are shared across worktrees) before running and always releases it afterwards, even on failure.
 
--Filter passes a test class name straight to `dotnet test --filter`. Per the project's own testing
-rule, db and e2e should almost always be run filtered to the class you are actually changing - `all`
-is the one unfiltered run, done once at the end of a phase.
+-Filter passes a test class name straight to `dotnet test --filter` (an empty -Filter is an error, not
+a silent unfiltered run). Per the project's own testing rule, db and e2e should almost always be run
+filtered to the class you are actually changing - `all` is the one unfiltered run, done once at the
+end of a phase; the Database-tagged Host.Tests classes always run in full under `db`, regardless of
+-Filter, since that set is small and fixed.
 
 Prerequisites: for db/e2e/all, PostgreSQL reachable and (for e2e/all) a Chromium install for
 Playwright.
@@ -485,11 +490,28 @@ switch ($CommandName) {
             'tests\Noof.Ledger.Host.Tests\Noof.Ledger.Host.Tests.csproj'
         )
 
+        # I-3 (Phase 5 final review): four Host.Tests classes clone noof_ledger_test_template
+        # whenever PostgreSQL is reachable (AppLogSinkTests, DashboardCultureTests,
+        # ReadyGatedBufferSinkDbTests, SecretRedactionSentinelTests - each carries
+        # [Trait("Category", "Database")], enforced by HostDatabaseTestTraitTests). `fast` must
+        # never touch the shared server outside the lock, so this excludes them by trait rather
+        # than by class name, which stays correct as classes are added or renamed.
+        $hostTestsDatabaseExclusion = 'Category!=Database'
+
+        function Combine-Filter {
+            param([string]$Base, [string]$UserFilter)
+            if ($Base -and $UserFilter) { return "$UserFilter&$Base" }
+            if ($Base) { return $Base }
+            return $UserFilter
+        }
+
         switch ($suite) {
             'fast' {
                 foreach ($project in $fastProjects) {
                     $full = Join-Path $Root $project
-                    if ($filter) { Invoke-Checked { dotnet test --project $full --filter $filter } }
+                    $baseFilter = if ($project -like '*Noof.Ledger.Host.Tests*') { $hostTestsDatabaseExclusion } else { $null }
+                    $effective = Combine-Filter -Base $baseFilter -UserFilter $filter
+                    if ($effective) { Invoke-Checked { dotnet test --project $full --filter $effective } }
                     else { Invoke-Checked { dotnet test --project $full } }
                 }
             }
@@ -499,6 +521,11 @@ switch ($CommandName) {
                     $full = Join-Path $Root 'tests\Noof.Ledger.Persistence.Tests\Noof.Ledger.Persistence.Tests.csproj'
                     if ($filter) { Invoke-Checked { dotnet test --project $full --filter $filter } }
                     else { Invoke-Checked { dotnet test --project $full } }
+
+                    # The Host.Tests classes excluded from `fast` above need PostgreSQL too - run
+                    # them here, under the same lock, every time `db` runs.
+                    $hostTests = Join-Path $Root 'tests\Noof.Ledger.Host.Tests\Noof.Ledger.Host.Tests.csproj'
+                    Invoke-Checked { dotnet test --project $hostTests --filter 'Category=Database' }
                 } finally { Exit-SuiteLock $lock }
             }
             'e2e' {

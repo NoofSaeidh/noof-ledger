@@ -9,6 +9,7 @@ using Npgsql;
 namespace Noof.Ledger.Host.Tests;
 
 [Collection("app-log-sink")]
+[Trait("Category", "Database")]
 public sealed class AppLogSinkTests
 {
     [Fact]

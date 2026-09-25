@@ -12,6 +12,7 @@ using Npgsql;
 namespace Noof.Ledger.Host.Tests;
 
 [Collection("culture")]
+[Trait("Category", "Database")]
 public sealed class DashboardCultureTests
 {
     static readonly Guid EurWalletId = Guid.NewGuid();
