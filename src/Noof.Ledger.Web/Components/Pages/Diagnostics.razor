@@ -1,0 +1,69 @@
+@page "/diagnostics"
+@attribute [Authorize]
+@using Noof.Ledger.Application.Diagnostics
+@inject ISystemHealth SystemHealth
+@inject IDatabaseGate Gate
+
+<PageTitle>Diagnostics</PageTitle>
+
+<MudText HtmlTag="h1" Typo="Typo.h4" Class="mb-4">Diagnostics</MudText>
+
+@if (Gate.State != DatabaseState.Ready)
+{
+    <DatabaseGateBanner />
+}
+else
+{
+    <MudSimpleTable id="diagnostics-checks" Dense="true" Hover="true" Elevation="0" Class="mb-8">
+        <thead>
+            <tr>
+                <th>Check</th>
+                <th>Level</th>
+                <th>Summary</th>
+                <th>Checked at</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (report is not null)
+            {
+                @foreach (var item in report.Items)
+                {
+                    <tr>
+                        <td>@item.Name</td>
+                        <td>@item.Level</td>
+                        <td>@item.Summary</td>
+                        <td>@item.CheckedAt.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", System.Globalization.CultureInfo.InvariantCulture)</td>
+                        <td>
+                            @if (item.Level != HealthLevel.Ok)
+                            {
+                                <MudLink Href="@($"/diagnostics/logs?source={Uri.EscapeDataString(item.Name)}")">Logs</MudLink>
+                            }
+                        </td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </MudSimpleTable>
+
+    <MudPaper Outlined="true" Elevation="0" Class="pa-5">
+        <MudText Typo="Typo.subtitle1" Class="mb-3">Open a transaction's trace</MudText>
+        <form method="get" action="/diagnostics/open-trace">
+            <MudTextField T="string" InputId="diagnostics-transaction-id" name="id"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Label="Transaction id" Class="mb-3" />
+            <MudButton id="diagnostics-open-trace" ButtonType="ButtonType.Submit" Variant="Variant.Outlined">
+                Open trace
+            </MudButton>
+        </form>
+    </MudPaper>
+}
+
+@code {
+    SystemHealthReport? report;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Gate.State == DatabaseState.Ready)
+            report = await SystemHealth.GetAsync(fresh: true, CancellationToken.None);
+    }
+}
