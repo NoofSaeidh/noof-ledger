@@ -67,7 +67,7 @@ public class PublicSurfaceTests
             "TransactionStages", "TransactionLogScope", "TraceEvent", "RevisionView", "TransactionTrace", "ITransactionTrace",
             "ILogSinkStatus",
             "HealthLevel", "HealthItem", "SystemHealthReport", "ISystemHealth",
-            "PollFailure", "IPollingHeartbeat", "HealthCheckNames",
+            "PollFailure", "IPollingHeartbeat", "HealthCheckNames", "HealthCheckLogCategories",
         ],
         ["Noof.Ledger.Persistence"] = ["LedgerConnectionString", "PersistenceRegistration"],
         ["Noof.Ledger.Ai"] = ["AiRegistration"],

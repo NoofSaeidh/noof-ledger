@@ -14,7 +14,10 @@ internal sealed class EfLogQuery(LedgerDbContext db) : ILogQuery
         if (filter.To is { } to)
             query = query.Where(e => e.LoggedAt <= to);
         if (filter.Source is { } source)
-            query = query.Where(e => e.Source == source);
+        {
+            var sourcePattern = $"{EscapeLike(source)}%";
+            query = query.Where(e => e.Source != null && EF.Functions.ILike(e.Source, sourcePattern, @"\"));
+        }
         if (filter.TransactionId is { } transactionId)
             query = query.Where(e => e.TransactionId == transactionId);
         if (filter.Text is { } text)

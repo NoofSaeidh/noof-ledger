@@ -16,6 +16,8 @@ public class DiagnosticsPageSourceTests
         source.Should().Contain("[Authorize]");
         source.Should().Contain("ISystemHealth");
         source.Should().Contain("id=\"diagnostics-checks\"");
+        source.Should().Contain("HealthCheckLogCategories",
+            "the Logs link must open the check's owning logger category, not the check's display name (I-1)");
         source.Should().NotContain("MudSelect");
         source.Should().NotContain("MudDatePicker");
         source.Should().NotContain("MudAutocomplete");

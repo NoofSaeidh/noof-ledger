@@ -35,9 +35,9 @@ else
                         <td>@item.Summary</td>
                         <td>@item.CheckedAt.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", System.Globalization.CultureInfo.InvariantCulture)</td>
                         <td>
-                            @if (item.Level != HealthLevel.Ok)
+                            @if (item.Level != HealthLevel.Ok && HealthCheckLogCategories.ByCheckName.TryGetValue(item.Name, out var category))
                             {
-                                <MudLink Href="@($"/diagnostics/logs?source={Uri.EscapeDataString(item.Name)}")">Logs</MudLink>
+                                <MudLink Href="@($"/diagnostics/logs?source={Uri.EscapeDataString(category)}")">Logs</MudLink>
                             }
                         </td>
                     </tr>

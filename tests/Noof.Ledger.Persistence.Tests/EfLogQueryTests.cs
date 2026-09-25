@@ -81,16 +81,32 @@ public class EfLogQueryTests(PostgresFixture fixture)
     }
 
     [Fact]
-    public async Task Source_filters_exactly()
+    public async Task Source_filters_by_prefix_so_a_namespace_narrows_to_every_logger_under_it()
     {
         await using var db = await fixture.CreateContextAsync();
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
         await SeedAsync(db,
-            Row(1, LogSeverity.Information, DateTimeOffset.Parse("2026-09-25T10:00:00Z"), "a", source: "Noof.Ledger.Host.Workers.BackupWorker"),
-            Row(2, LogSeverity.Information, DateTimeOffset.Parse("2026-09-25T10:01:00Z"), "b", source: "Noof.Ledger.Telegram.TelegramPollingService"));
+            Row(1, LogSeverity.Information, DateTimeOffset.Parse("2026-09-25T10:00:00Z"), "a", source: "Noof.Ledger.Ai.Anthropic.AnthropicChatClient"),
+            Row(2, LogSeverity.Information, DateTimeOffset.Parse("2026-09-25T10:01:00Z"), "b", source: "Noof.Ledger.Ai.Groq.GroqTranscriber"),
+            Row(3, LogSeverity.Information, DateTimeOffset.Parse("2026-09-25T10:02:00Z"), "c", source: "Noof.Ledger.Telegram.TelegramPollingService"));
 
         var page = await new EfLogQuery(db).QueryAsync(
-            new LogFilter(Source: "Noof.Ledger.Host.Workers.BackupWorker"), pageIndex: 0, pageSize: 50, TestContext.Current.CancellationToken);
+            new LogFilter(Source: "Noof.Ledger.Ai"), pageIndex: 0, pageSize: 50, TestContext.Current.CancellationToken);
+
+        page.Rows.Select(r => r.Message).Should().BeEquivalentTo(["a", "b"]);
+    }
+
+    [Fact]
+    public async Task Source_filtering_escapes_ILIKE_wildcards_in_the_prefix_literally()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await SeedAsync(db,
+            Row(1, LogSeverity.Information, DateTimeOffset.Parse("2026-09-25T10:00:00Z"), "a", source: "Noof%Ledger.Weird"),
+            Row(2, LogSeverity.Information, DateTimeOffset.Parse("2026-09-25T10:01:00Z"), "b", source: "NoofXLedger.Weird"));
+
+        var page = await new EfLogQuery(db).QueryAsync(
+            new LogFilter(Source: "Noof%Ledger"), pageIndex: 0, pageSize: 50, TestContext.Current.CancellationToken);
 
         page.Rows.Should().ContainSingle().Which.Message.Should().Be("a");
     }
