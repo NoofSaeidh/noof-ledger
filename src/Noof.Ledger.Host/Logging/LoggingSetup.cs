@@ -42,10 +42,12 @@ internal static class LoggingSetup
                 rollOnFileSizeLimit: true)
             .CreateBootstrapLogger();
 
-    // The full reconfiguration UseSerilog runs once the host is built. No PostgreSQL sink here -
-    // that is Task 4's job; this stage only widens the bootstrap logger with LogContext
-    // enrichment so a later BeginScope (Task 3's TransactionLogScope) actually reaches the file.
-    public static void Configure(LoggerConfiguration configuration, string logDirectory) =>
+    // The full reconfiguration UseSerilog runs once the host is built. `services` is threaded
+    // through so Task 4's Postgres sink and secret-redaction wrap can resolve IDatabaseGate,
+    // ILogSinkStatus and SecretRedactor here - this stage only widens the bootstrap logger with
+    // LogContext enrichment so a later BeginScope (Task 3's TransactionLogScope) actually reaches
+    // the file.
+    public static void Configure(LoggerConfiguration configuration, string logDirectory, IServiceProvider services) =>
         configuration
             .MinimumLevel.Information()
             .Enrich.FromLogContext()

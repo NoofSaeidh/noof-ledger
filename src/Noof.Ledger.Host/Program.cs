@@ -37,8 +37,8 @@ try
 
     var builder = WebApplication.CreateBuilder(args);
 
-    builder.Host.UseSerilog((_, _, loggerConfiguration) =>
-        LoggingSetup.Configure(loggerConfiguration, logDirectory));
+    builder.Host.UseSerilog((_, services, loggerConfiguration) =>
+        LoggingSetup.Configure(loggerConfiguration, logDirectory, services));
 
     builder.Services.AddRazorComponents()
         .AddInteractiveServerComponents();
