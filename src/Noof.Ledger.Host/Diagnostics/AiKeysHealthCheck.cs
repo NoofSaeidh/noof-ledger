@@ -5,9 +5,9 @@ using Noof.Ledger.Application.Transcription;
 
 namespace Noof.Ledger.Host.Diagnostics;
 
-// Reads IModelProvider/ISpeechProvider - never Noof.Ledger.Ai or a raw ISecretStore key - so this
-// check needs no knowledge of which provider answers, matching HealthCheckBoundaryTests below and
-// the pre-existing AiBoundaryTests rule that only Noof.Ledger.Ai may name the provider.
+// Reads IModelProvider/ISpeechProvider - never the AI assembly or a raw ISecretStore key - so this
+// check needs no knowledge of which provider answers, matching HealthCheckBoundaryTests and the
+// pre-existing AiBoundaryTests rule that only that assembly may name the provider.
 internal sealed class AiKeysHealthCheck(IDatabaseGate gate, IModelProvider modelProvider, ISpeechProvider speechProvider) : IHealthCheck
 {
     public async Task<HealthCheckResult> CheckHealthAsync(
