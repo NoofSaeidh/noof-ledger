@@ -68,9 +68,12 @@ try
 
     builder.Services.AddNoofPersistence(builder.Configuration, categorizationOptions.MaxAttempts);
 
-    builder.Services.AddNoofHostDiagnostics(ledgerConnectionString);
-
+    // M-2 (Phase 5 final review): DatabaseStartupService (registered here) must be the first
+    // hosted service - every other worker awaits its gate, and AddNoofHostDiagnostics registers one
+    // (SecretSnapshotRefreshWorker).
     builder.Services.AddNoofDatabaseGate();
+
+    builder.Services.AddNoofHostDiagnostics(ledgerConnectionString);
 
     builder.Services.AddAuthentication(AuthSchemes.Cookie)
         .AddCookie(AuthSchemes.Cookie, options =>
