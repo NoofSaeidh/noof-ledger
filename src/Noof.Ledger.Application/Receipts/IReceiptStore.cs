@@ -39,4 +39,8 @@ public interface IReceiptStore
     // The capture's own Telegram file id (set by CaptureReceiptAsync), for ExtractReceiptWorker to
     // download the photo again - the photo itself is never stored (R-4).
     Task<string?> GetTelegramFileIdAsync(Guid transactionId, CancellationToken cancellationToken);
+
+    // The capture's own fiscal QR link, set by CaptureReceiptAsync for a text-link capture (never set
+    // together with a Telegram file id - CapturedReceipt carries exactly one of the two).
+    Task<string?> GetVerificationUrlAsync(Guid transactionId, CancellationToken cancellationToken);
 }

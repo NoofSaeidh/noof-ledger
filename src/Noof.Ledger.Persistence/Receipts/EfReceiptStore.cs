@@ -54,6 +54,22 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
             });
         }
 
+        // Enqueued in the same SaveChangesAsync as the receipt and its lines: a duplicate violation
+        // rolls this job back with everything else, so a duplicate transaction never gets a
+        // CategorizeReceipt job of its own.
+        var now = timeProvider.GetUtcNow();
+        db.CategorizationJobs.Add(new CategorizationJob
+        {
+            Id = Guid.NewGuid(),
+            TransactionId = transactionId,
+            Kind = JobKind.CategorizeReceipt,
+            Status = JobStatus.Pending,
+            AttemptCount = 0,
+            RunAfter = now,
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+
         try
         {
             await db.SaveChangesAsync(cancellationToken);
@@ -110,6 +126,12 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
         db.Transactions.AsNoTracking()
             .Where(t => t.Id == transactionId)
             .Select(t => t.TelegramFileId)
+            .SingleOrDefaultAsync(cancellationToken);
+
+    public Task<string?> GetVerificationUrlAsync(Guid transactionId, CancellationToken cancellationToken) =>
+        db.Transactions.AsNoTracking()
+            .Where(t => t.Id == transactionId)
+            .Select(t => t.VerificationUrl)
             .SingleOrDefaultAsync(cancellationToken);
 
     static bool IsDuplicateReceiptViolation(DbUpdateException ex) =>

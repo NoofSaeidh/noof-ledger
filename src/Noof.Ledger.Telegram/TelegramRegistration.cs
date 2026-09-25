@@ -2,6 +2,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Application.Transcription;
 using Noof.Ledger.Telegram.Diagnostics;
 
@@ -26,6 +27,7 @@ public static class TelegramRegistration
         services.AddSingleton<ITelegramBotClientFactory, TelegramBotClientFactory>();
         services.AddSingleton<IChatNotifier, TelegramChatNotifier>();
         services.AddSingleton<IVoiceFileSource, TelegramVoiceFileSource>();
+        services.AddSingleton<IReceiptPhotoSource, TelegramReceiptPhotoSource>();
         services.AddScoped<TelegramOwnerGate>();
         services.AddScoped<TelegramUpdateOffsetStore>();
         services.AddScoped<RecordActionHandler>();

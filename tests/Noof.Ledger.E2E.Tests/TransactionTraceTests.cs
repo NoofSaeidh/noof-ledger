@@ -259,6 +259,94 @@ public sealed class TransactionTraceTests(CookieModeHostFixture fixture) : PageT
     }
 
     [Fact]
+    public async Task A_text_captures_stage_strip_shows_a_dash_for_Transcribed_and_Extracted()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var transactionId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var walletId = await SeedWalletAsync();
+
+        await using (var db = OpenDb())
+        {
+            db.Transactions.Add(new Transaction
+            {
+                Id = transactionId,
+                WalletId = walletId,
+                RawText = "seeded text capture",
+                CaptureKind = CaptureKind.Manual,
+                Kind = TransactionKind.Expense,
+                Status = TransactionStatus.Completed,
+                TimeZoneId = "Europe/Belgrade",
+                OccurredAt = now,
+                OccurredOn = ZonedClock.LocalDate(now, "Europe/Belgrade"),
+                TelegramChatId = null,
+                TelegramMessageId = null,
+                CreatedAt = now,
+            });
+
+            db.AppLogs.Add(NewStageRow(transactionId, now, TransactionStages.Received, TransactionStages.ReceivedEventId));
+            db.AppLogs.Add(NewStageRow(transactionId, now.AddSeconds(1), TransactionStages.Categorized, TransactionStages.CategorizedEventId));
+
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync($"{fixture.BaseUrl}/transactions/{transactionId}/trace");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var stages = Page.Locator("#trace-stages");
+        await Expect(stages).ToContainTextAsync("Transcribed —");
+        await Expect(stages).ToContainTextAsync("Extracted —");
+    }
+
+    [Fact]
+    public async Task A_receipt_fetch_failed_event_shows_a_warning_row_on_the_timeline()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var transactionId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var walletId = await SeedWalletAsync();
+
+        await using (var db = OpenDb())
+        {
+            db.Transactions.Add(new Transaction
+            {
+                Id = transactionId,
+                WalletId = walletId,
+                RawText = null,
+                CaptureKind = CaptureKind.Photo,
+                TelegramFileId = "photo-file-trace-test",
+                Kind = TransactionKind.Expense,
+                Status = TransactionStatus.Completed,
+                TimeZoneId = "Europe/Belgrade",
+                OccurredAt = now,
+                OccurredOn = ZonedClock.LocalDate(now, "Europe/Belgrade"),
+                TelegramChatId = 333,
+                TelegramMessageId = 1,
+                CreatedAt = now,
+            });
+
+            db.AppLogs.Add(NewStageRow(transactionId, now, TransactionStages.Received, TransactionStages.ReceivedEventId));
+            db.AppLogs.Add(NewReceiptFetchFailedRow(transactionId, now.AddSeconds(1)));
+            db.AppLogs.Add(NewStageRow(transactionId, now.AddSeconds(2), TransactionStages.Extracted, TransactionStages.ExtractedEventId));
+
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync($"{fixture.BaseUrl}/transactions/{transactionId}/trace");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var warningRow = Page.Locator("#trace-timeline tr.trace-row-warning");
+        await Expect(warningRow).ToBeVisibleAsync();
+        await Expect(warningRow).ToContainTextAsync(TransactionStages.ReceiptFetchFailed);
+    }
+
+    [Fact]
     public async Task A_transaction_id_with_no_log_rows_but_a_real_transaction_shows_trace_expired()
     {
         if (fixture.DatabaseUnavailable)
@@ -506,6 +594,21 @@ public sealed class TransactionTraceTests(CookieModeHostFixture fixture) : PageT
         TransactionId = transactionId,
         PropertiesJson = $$"""
             {"Stage":"{{TransactionStages.StageFailed}}","FailedStage":"{{failedStage}}","EventId":{"Id":{{TransactionStages.StageFailedEventId}},"Name":"{{TransactionStages.StageFailed}}"},"TransactionId":"{{transactionId}}"}
+            """,
+    };
+
+    static AppLogEntry NewReceiptFetchFailedRow(Guid transactionId, DateTimeOffset at) => new()
+    {
+        Id = 0,
+        LoggedAt = at,
+        Level = LogSeverity.Warning,
+        Source = "TransactionTraceTests",
+        Message = $"{TransactionStages.ReceiptFetchFailed}: 504 gateway timeout (status 504)",
+        Template = "{Stage}: {Reason} (status {StatusCode})",
+        Exception = null,
+        TransactionId = transactionId,
+        PropertiesJson = $$"""
+            {"Stage":"{{TransactionStages.ReceiptFetchFailed}}","Reason":"504 gateway timeout","StatusCode":504,"EventId":{"Id":{{TransactionStages.ReceiptFetchFailedEventId}},"Name":"{{TransactionStages.ReceiptFetchFailed}}"},"TransactionId":"{{transactionId}}"}
             """,
     };
 

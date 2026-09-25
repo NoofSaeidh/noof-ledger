@@ -73,6 +73,7 @@ public class PublicSurfaceTests
             "ReceiptCategorizationRequest", "ReceiptLineCategory", "ReceiptCategorization", "IReceiptCategorizer",
             "IReceiptFetchStatus",
             "CapturedReceipt", "IReceiptStore", "ReceiptSaveResult", "ReceiptView", "ReceiptLineView",
+            "ReceiptPhoto", "IReceiptPhotoSource",
             "LogSeverity", "LogRow", "LogFilter", "LogPage", "LogSortOrder", "ILogQuery", "ILogRetention",
             "TransactionStages", "TransactionLogScope", "TraceEvent", "RevisionView", "TraceLineItem", "TransactionSummary",
             "TransactionTrace", "ITransactionTrace",

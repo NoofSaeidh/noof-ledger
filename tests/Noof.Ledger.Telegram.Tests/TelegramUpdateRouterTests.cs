@@ -538,6 +538,118 @@ public class TelegramUpdateRouterTests
         await secretStore.DidNotReceive().TrySetIfMissingAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
+    static Update PhotoMessage(long chatId, int messageId, string fileId, string? caption = null) => new()
+    {
+        Id = 910,
+        Message = new Message
+        {
+            Id = messageId,
+            Chat = new Chat { Id = chatId },
+            Date = DateTime.UtcNow,
+            Caption = caption,
+            Photo = [new PhotoSize { FileId = "small-" + fileId, Width = 90, Height = 90 }, new PhotoSize { FileId = fileId, Width = 1280, Height = 1280 }],
+        },
+    };
+
+    static Update DocumentMessage(long chatId, int messageId, string fileId, string? mimeType) => new()
+    {
+        Id = 911,
+        Message = new Message
+        {
+            Id = messageId,
+            Chat = new Chat { Id = chatId },
+            Date = DateTime.UtcNow,
+            Document = new Document { FileId = fileId, MimeType = mimeType },
+        },
+    };
+
+    [Fact]
+    public async Task A_photo_is_captured_as_a_receipt_with_its_largest_size_and_acknowledged()
+    {
+        var (router, captureStore, chatNotifier, _, _, logger) = CreateRouter(ownerChatId: 111L);
+        var transactionId = Guid.NewGuid();
+        captureStore.CaptureReceiptAsync(Arg.Any<CapturedReceipt>(), "Europe/Belgrade", Arg.Any<CancellationToken>()).Returns(transactionId);
+        chatNotifier.SendAsync(111L, Echo.ReadingReceipt, Arg.Any<CancellationToken>()).Returns(777);
+
+        await router.HandleAsync(PhotoMessage(111L, 5, "photo-1", "lunch"), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await captureStore.Received(1).CaptureReceiptAsync(
+            Arg.Is<CapturedReceipt>(r => r.ChatId == 111L && r.MessageId == 5 && r.Caption == "lunch"
+                && r.TelegramFileId == "photo-1" && r.VerificationUrl == null),
+            "Europe/Belgrade", Arg.Any<CancellationToken>());
+        await captureStore.Received(1).AttachBotMessageAsync(transactionId, 777, Arg.Any<CancellationToken>());
+        var entry = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.ReceivedEventId).Subject;
+        entry.Properties["CaptureKind"].Should().Be(CaptureKind.Photo);
+        entry.Scope![TransactionStages.TransactionIdProperty].Should().Be(transactionId);
+    }
+
+    [Fact]
+    public async Task An_image_document_is_captured_as_a_receipt()
+    {
+        var (router, captureStore, chatNotifier, _, _, _) = CreateRouter(ownerChatId: 111L);
+        var transactionId = Guid.NewGuid();
+        captureStore.CaptureReceiptAsync(Arg.Any<CapturedReceipt>(), "Europe/Belgrade", Arg.Any<CancellationToken>()).Returns(transactionId);
+        chatNotifier.SendAsync(111L, Echo.ReadingReceipt, Arg.Any<CancellationToken>()).Returns(778);
+
+        await router.HandleAsync(DocumentMessage(111L, 6, "doc-1", "image/png"), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await captureStore.Received(1).CaptureReceiptAsync(
+            Arg.Is<CapturedReceipt>(r => r.TelegramFileId == "doc-1"), "Europe/Belgrade", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_non_image_document_is_rejected_and_nothing_is_captured()
+    {
+        var (router, captureStore, chatNotifier, _, _, _) = CreateRouter(ownerChatId: 111L);
+
+        await router.HandleAsync(DocumentMessage(111L, 6, "doc-1", "application/pdf"), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await captureStore.DidNotReceiveWithAnyArgs().CaptureReceiptAsync(default!, default!, Arg.Any<CancellationToken>());
+        await chatNotifier.Received(1).SendAsync(111L, Echo.OnlyPhotosSupported, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Text_containing_a_fiscal_qr_link_anywhere_is_captured_as_a_receipt_not_text()
+    {
+        var (router, captureStore, chatNotifier, _, _, _) = CreateRouter(ownerChatId: 111L);
+        var transactionId = Guid.NewGuid();
+        captureStore.CaptureReceiptAsync(Arg.Any<CapturedReceipt>(), "Europe/Belgrade", Arg.Any<CancellationToken>()).Returns(transactionId);
+        chatNotifier.SendAsync(111L, Echo.ReadingReceipt, Arg.Any<CancellationToken>()).Returns(779);
+        const string text = "lunch https://suf.purs.gov.rs/v/?vl=AbCdEf123 thanks";
+
+        await router.HandleAsync(TextMessage(111L, 7, text, DateTime.UtcNow), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await captureStore.Received(1).CaptureReceiptAsync(
+            Arg.Is<CapturedReceipt>(r => r.VerificationUrl == "https://suf.purs.gov.rs/v/?vl=AbCdEf123" && r.TelegramFileId == null
+                && r.Caption == text),
+            "Europe/Belgrade", Arg.Any<CancellationToken>());
+        await captureStore.DidNotReceive().CaptureAsync(Arg.Any<CapturedMessage>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Plain_text_with_no_link_is_still_captured_as_text()
+    {
+        var (router, captureStore, chatNotifier, _, _, _) = CreateRouter(ownerChatId: 111L);
+        captureStore.CaptureAsync(Arg.Any<CapturedMessage>(), "Europe/Belgrade", Arg.Any<CancellationToken>()).Returns(Guid.NewGuid());
+        chatNotifier.SendAsync(111L, Echo.Acknowledgement, Arg.Any<CancellationToken>()).Returns(780);
+
+        await router.HandleAsync(TextMessage(111L, 8, "coffee 250", DateTime.UtcNow), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await captureStore.Received(1).CaptureAsync(Arg.Any<CapturedMessage>(), "Europe/Belgrade", Arg.Any<CancellationToken>());
+        await captureStore.DidNotReceiveWithAnyArgs().CaptureReceiptAsync(default!, default!, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_strangers_photo_is_ignored_before_capturing_anything()
+    {
+        var (router, captureStore, chatNotifier, _, _, _) = CreateRouter(ownerChatId: 111L);
+
+        await router.HandleAsync(PhotoMessage(999L, 5, "photo-1"), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await captureStore.DidNotReceiveWithAnyArgs().CaptureReceiptAsync(default!, default!, Arg.Any<CancellationToken>());
+        await chatNotifier.DidNotReceiveWithAnyArgs().SendAsync(default, default!, Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task Text_that_merely_starts_with_health_but_is_not_the_exact_command_is_still_captured()
     {

@@ -107,7 +107,7 @@ else
             var failed = trace.Events.Any(e => e.Stage == TransactionStages.StageFailed && e.FailedStage == stage);
             <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
                      Color="@(failed ? Color.Error : stageEvent is not null ? Color.Success : Color.Default)">
-                @(stage == TransactionStages.Transcribed && stageEvent is null && !failed ? $"{stage} —" : stage)
+                @(stage is TransactionStages.Transcribed or TransactionStages.Extracted && stageEvent is null && !failed ? $"{stage} —" : stage)
             </MudChip>
         }
     </div>
@@ -131,7 +131,7 @@ else
             <tbody>
                 @foreach (var e in trace.Events)
                 {
-                    <tr>
+                    <tr class="@(e.Level == LogSeverity.Warning ? "trace-row-warning" : null)">
                         <td>@FormatOffset(e.At - trace.Events[0].At)</td>
                         <td>@e.Stage</td>
                         <td>

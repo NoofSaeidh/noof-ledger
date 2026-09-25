@@ -933,3 +933,10 @@ summary:focus-visible,
 .noof-trace-details[open] summary {
     margin-bottom: 0.5rem;
 }
+
+/* A degraded-but-recovered step (the Tax Administration site was unreachable) on the trace
+   timeline: distinct from the Error rows MudBlazor's own chip colors already cover. */
+.trace-row-warning {
+    background-color: #fff3cd;
+    color: #7a4a00;
+}

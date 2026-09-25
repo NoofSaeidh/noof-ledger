@@ -30,6 +30,23 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
         CreatedAt = Now,
     };
 
+    static Transaction NewLinkTransaction() => new()
+    {
+        Id = Guid.NewGuid(),
+        WalletId = DefaultWalletId,
+        RawText = null,
+        CaptureKind = CaptureKind.Photo,
+        TelegramFileId = null,
+        VerificationUrl = "https://suf.purs.gov.rs/v/?vl=synthetic",
+        Status = TransactionStatus.Captured,
+        TimeZoneId = "Europe/Belgrade",
+        OccurredAt = Now,
+        OccurredOn = new DateOnly(2026, 9, 25),
+        TelegramChatId = 222,
+        TelegramMessageId = Interlocked.Increment(ref nextMessageId),
+        CreatedAt = Now,
+    };
+
     static AppReceipts.ExtractedReceipt NewExtractedReceipt(string? sellerTaxId = "SYN-100000001", string? fiscalNumber = "SYN-1") => new(
         AppReceipts.ReceiptSource.FiscalQr,
         VerificationUrl: "https://suf.purs.gov.rs/v/?vl=synthetic",
@@ -136,5 +153,59 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
         var fileId = await store.GetTelegramFileIdAsync(transaction.Id, TestContext.Current.CancellationToken);
 
         fileId.Should().Be("photo-file-1");
+    }
+
+    [Fact]
+    public async Task GetVerificationUrlAsync_returns_the_captures_own_link()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = NewLinkTransaction();
+        db.Transactions.Add(transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+
+        var url = await store.GetVerificationUrlAsync(transaction.Id, TestContext.Current.CancellationToken);
+
+        url.Should().Be("https://suf.purs.gov.rs/v/?vl=synthetic");
+    }
+
+    [Fact]
+    public async Task SaveExtractedAsync_enqueues_a_CategorizeReceipt_job_for_the_transaction()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = NewPhotoTransaction();
+        db.Transactions.Add(transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+
+        await store.SaveExtractedAsync(transaction.Id, NewExtractedReceipt(), "photo-file-1", TestContext.Current.CancellationToken);
+
+        var job = await db.CategorizationJobs.SingleAsync(j => j.TransactionId == transaction.Id, TestContext.Current.CancellationToken);
+        job.Kind.Should().Be(JobKind.CategorizeReceipt);
+        job.Status.Should().Be(JobStatus.Pending);
+    }
+
+    [Fact]
+    public async Task A_duplicate_receipt_enqueues_no_CategorizeReceipt_job_for_the_new_transaction()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var first = NewPhotoTransaction();
+        var second = NewPhotoTransaction();
+        db.Transactions.AddRange(first, second);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+        var receipt = NewExtractedReceipt(sellerTaxId: "SYN-300000003", fiscalNumber: "SYN-DUP-2");
+
+        await store.SaveExtractedAsync(first.Id, receipt, "photo-file-1", TestContext.Current.CancellationToken);
+        await store.SaveExtractedAsync(second.Id, receipt, "photo-file-2", TestContext.Current.CancellationToken);
+
+        (await db.CategorizationJobs.CountAsync(j => j.TransactionId == second.Id, TestContext.Current.CancellationToken))
+            .Should().Be(0, "a duplicate writes nothing, including no follow-up job for the transaction it never really extracted");
     }
 }

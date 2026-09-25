@@ -24,6 +24,16 @@ internal sealed class RecordEcho : IRecordEcho
         "Could not read that message. It's saved — reply to this message and tell me how to record it.",
         [RecordAction.Edit]);
 
+    public string ReadingReceipt => "Reading the receipt…";
+    public string OnlyPhotosSupported => "Only photos of receipts are supported.";
+
+    public EchoMessage NotAFiscalReceiptLink { get; } = new("This does not look like a fiscal receipt link.", []);
+
+    public EchoMessage ReceiptFetchUnreachableLinkOnly { get; } = new(
+        "The Tax Administration site is unreachable right now — send a photo of the receipt instead.", []);
+
+    public EchoMessage ReceiptReadFailure { get; } = new("Couldn't read that receipt.", []);
+
     public EchoMessage Compose(CategorizationSubject record) => WithWhatWasHeard(record, record switch
     {
         { Status: TransactionStatus.Cancelled } =>
@@ -52,6 +62,18 @@ internal sealed class RecordEcho : IRecordEcho
     {
         var current = Compose(record);
         return current with { Text = $"Could not apply that correction — the record is unchanged.\n\n{current.Text}" };
+    }
+
+    public string ComposeCategorisingReceipt(int lineCount) =>
+        $"Categorising {lineCount} line{(lineCount == 1 ? "" : "s")}…";
+
+    public EchoMessage ComposeReceiptDuplicate(DateOnly? occurredOn, decimal total, CurrencyCode currency)
+    {
+        var reference = occurredOn is { } date
+            ? $"{date.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)}, {FormatAmount(total)} {currency}"
+            : $"{FormatAmount(total)} {currency}";
+
+        return new($"Already recorded — this receipt was sent before ({reference}).", []);
     }
 
     string Waiting(CategorizationSubject record) =>

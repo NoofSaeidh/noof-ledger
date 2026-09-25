@@ -54,6 +54,18 @@ internal sealed class TelegramUpdateRouter(
         if (!await ownerGate.IsAllowedAsync(message.Chat.Id, cancellationToken))
             return;
 
+        if (message.Photo is { Length: > 0 } photos)
+        {
+            await HandleReceiptPhotoAsync(message, photos[^1].FileId, timeZoneId, cancellationToken);
+            return;
+        }
+
+        if (message.Document is { } document)
+        {
+            await HandleReceiptDocumentAsync(message, document, timeZoneId, cancellationToken);
+            return;
+        }
+
         if (message.Voice is { } voice)
         {
             await HandleVoiceAsync(message, voice, timeZoneId, cancellationToken);
@@ -66,6 +78,12 @@ internal sealed class TelegramUpdateRouter(
         if (message.ReplyToMessage is { } repliedTo
             && await correctionHandler.TryHandleReplyAsync(message, repliedTo, text, cancellationToken))
             return;
+
+        if (ReceiptLinkDetector.TryFind(text, out var verificationUrl))
+        {
+            await HandleReceiptLinkAsync(message, text, verificationUrl, timeZoneId, cancellationToken);
+            return;
+        }
 
         // message.Date is when Telegram received it from the sender, not when we got around to
         // processing it -- an outage can queue a message for hours, and every queued message must
@@ -96,6 +114,41 @@ internal sealed class TelegramUpdateRouter(
         logger.LogReceived(TransactionStages.Received, CaptureKind.Voice, message.Chat.Id);
 
         await SendAcknowledgementAsync(message.Chat.Id, transactionId, recordEcho.Transcribing, cancellationToken);
+    }
+
+    async Task HandleReceiptPhotoAsync(Message message, string fileId, string timeZoneId, CancellationToken cancellationToken)
+    {
+        var captured = new CapturedReceipt(
+            message.Chat.Id, message.Id, new DateTimeOffset(message.Date), message.Caption, fileId, VerificationUrl: null);
+        var transactionId = await captureStore.CaptureReceiptAsync(captured, timeZoneId, cancellationToken);
+
+        using var scope = TransactionLogScope.Begin(logger, transactionId);
+        logger.LogReceived(TransactionStages.Received, CaptureKind.Photo, message.Chat.Id);
+
+        await SendAcknowledgementAsync(message.Chat.Id, transactionId, recordEcho.ReadingReceipt, cancellationToken);
+    }
+
+    async Task HandleReceiptDocumentAsync(Message message, Document document, string timeZoneId, CancellationToken cancellationToken)
+    {
+        if (document.MimeType is not { } mimeType || !mimeType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+        {
+            await chatNotifier.SendAsync(message.Chat.Id, recordEcho.OnlyPhotosSupported, cancellationToken);
+            return;
+        }
+
+        await HandleReceiptPhotoAsync(message, document.FileId, timeZoneId, cancellationToken);
+    }
+
+    async Task HandleReceiptLinkAsync(Message message, string text, string verificationUrl, string timeZoneId, CancellationToken cancellationToken)
+    {
+        var captured = new CapturedReceipt(
+            message.Chat.Id, message.Id, new DateTimeOffset(message.Date), text, TelegramFileId: null, verificationUrl);
+        var transactionId = await captureStore.CaptureReceiptAsync(captured, timeZoneId, cancellationToken);
+
+        using var scope = TransactionLogScope.Begin(logger, transactionId);
+        logger.LogReceived(TransactionStages.Received, CaptureKind.Photo, message.Chat.Id);
+
+        await SendAcknowledgementAsync(message.Chat.Id, transactionId, recordEcho.ReadingReceipt, cancellationToken);
     }
 
     async Task SendAcknowledgementAsync(long chatId, Guid transactionId, string text, CancellationToken cancellationToken)
