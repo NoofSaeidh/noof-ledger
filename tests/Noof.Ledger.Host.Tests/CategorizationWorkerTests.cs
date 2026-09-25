@@ -533,6 +533,8 @@ public class CategorizationWorkerTests
         var entry = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.StageFailedEventId).Subject;
         entry.Properties["FailedStage"].Should().Be(TransactionStages.Categorized);
         entry.Exception!.Message.Should().Be("no credit left on this key");
+        entry.Exception.Should().BeOfType<ModelCallException>(
+            "M-6 (Phase 5 final review): the real exception the model call raised, not a synthetic InvalidOperationException");
         entry.Scope![TransactionStages.TransactionIdProperty].Should().Be(TransactionId);
     }
 
@@ -557,6 +559,8 @@ public class CategorizationWorkerTests
 
         var entry = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.StageFailedEventId).Subject;
         entry.Properties["FailedStage"].Should().Be(TransactionStages.Categorized);
+        entry.Exception.Should().BeOfType<ModelCallException>(
+            "M-6 (Phase 5 final review): the real exception the model call raised, not a synthetic InvalidOperationException");
     }
 
     [Fact]

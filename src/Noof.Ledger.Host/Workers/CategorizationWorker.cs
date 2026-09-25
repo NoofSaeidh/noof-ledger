@@ -229,18 +229,18 @@ internal sealed class CategorizationWorker(
             // so the rest of the backlog is not burned through while the key stays bad.
             accountCooldownUntil = timeProvider.GetUtcNow() + options.AccountCooldown;
             logger.AccountLevelFailure(job.Id, ex.Message, options.AccountCooldown);
-            await HandleModelFailureAsync(jobQueue, store, notifier, job, subject, ModelFailureKind.Transient, ex.Message, currentStage, cancellationToken);
+            await HandleModelFailureAsync(jobQueue, store, notifier, job, subject, ModelFailureKind.Transient, ex.Message, currentStage, cancellationToken, ex);
         }
         catch (ModelCallException ex)
         {
-            await HandleModelFailureAsync(jobQueue, store, notifier, job, subject, ex.Kind, ex.Message, currentStage, cancellationToken);
+            await HandleModelFailureAsync(jobQueue, store, notifier, job, subject, ex.Kind, ex.Message, currentStage, cancellationToken, ex);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Anything unmodeled here - a bug, an unexpected EF failure - is treated as Transient. The
             // attempt cap already bounds the damage: a persistent failure converges to Failed after
             // MaxAttempts instead of leaving the job Claimed for a full lease duration for no reason.
-            await HandleModelFailureAsync(jobQueue, store, notifier, job, subject, ModelFailureKind.Transient, ex.Message, currentStage, cancellationToken);
+            await HandleModelFailureAsync(jobQueue, store, notifier, job, subject, ModelFailureKind.Transient, ex.Message, currentStage, cancellationToken, ex);
         }
     }
 
@@ -301,15 +301,18 @@ internal sealed class CategorizationWorker(
     async Task HandleModelFailureAsync(
         IJobQueue jobQueue, ICategorizationStore store, IChatNotifier notifier,
         CategorizationJob job, CategorizationSubject? subject, ModelFailureKind kind, string error, string failedStage,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, Exception? exception = null)
     {
         if (kind == ModelFailureKind.Terminal)
         {
-            await FailTerminallyAsync(jobQueue, store, notifier, job, subject, error, failedStage, cancellationToken);
+            await FailTerminallyAsync(jobQueue, store, notifier, job, subject, error, failedStage, cancellationToken, exception);
             return;
         }
 
-        logger.LogStageFailed(TransactionStages.StageFailed, failedStage, new InvalidOperationException(error));
+        // M-6 (Phase 5 final review): the real exception when the catch block that called here had
+        // one (a bug, an unexpected EF failure) - only a mapping/lookup failure with no exception of
+        // its own falls back to a synthetic one, so the trace page still shows something.
+        logger.LogStageFailed(TransactionStages.StageFailed, failedStage, exception ?? new InvalidOperationException(error));
 
         // The same predicate EfJobQueue.RetryAsync evaluates server-side - see decision 10. This only
         // stays correct because Program.cs feeds EfJobQueue the same CategorizationWorkerOptions.MaxAttempts.
@@ -323,9 +326,10 @@ internal sealed class CategorizationWorker(
 
     async Task FailTerminallyAsync(
         IJobQueue jobQueue, ICategorizationStore store, IChatNotifier notifier,
-        CategorizationJob job, CategorizationSubject? subject, string error, string failedStage, CancellationToken cancellationToken)
+        CategorizationJob job, CategorizationSubject? subject, string error, string failedStage, CancellationToken cancellationToken,
+        Exception? exception = null)
     {
-        logger.LogStageFailed(TransactionStages.StageFailed, failedStage, new InvalidOperationException(error));
+        logger.LogStageFailed(TransactionStages.StageFailed, failedStage, exception ?? new InvalidOperationException(error));
 
         var outcome = await jobQueue.FailAsync(job.Id, workerId, error, cancellationToken);
         if (outcome == JobCompletionOutcome.Applied)
