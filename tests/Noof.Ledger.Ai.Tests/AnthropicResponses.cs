@@ -45,6 +45,18 @@ public static class AnthropicResponses
          "usage":{"input_tokens":50,"output_tokens":0}}
         """;
 
+    public const string ReadReceiptJsonAnswer = """
+        {"id":"msg_08","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
+         "content":[{"type":"tool_use","id":"toolu_08","name":"read_receipt","input":{"seller_name":"Maxi","seller_tax_id":"123456789","issued_at":"2026-09-20T14:05:00","currency":"RSD","total":845.50,"payment_method":"card","kind":"sale","lines":[{"name":"Mleko","quantity":1,"unit_price":120,"total":120},{"name":"Hleb","quantity":2,"unit_price":90.25,"total":180.50}]}}],
+         "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":200,"output_tokens":40}}
+        """;
+
+    public const string CategorizeReceiptJsonAnswer = """
+        {"id":"msg_09","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
+         "content":[{"type":"tool_use","id":"toolu_09","name":"categorize_receipt","input":{"lines":[{"ordinal":1,"category_slug":"groceries"},{"ordinal":2,"category_slug":"groceries"}],"merchant_name":"Maxi","wallet_id":null}}],
+         "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":150,"output_tokens":20}}
+        """;
+
     public const string AuthenticationError = """
         {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}
         """;

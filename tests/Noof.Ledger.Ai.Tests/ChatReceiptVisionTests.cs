@@ -1,0 +1,59 @@
+using AwesomeAssertions;
+using Microsoft.Extensions.AI;
+using Noof.Ledger.Application.Categorization;
+
+namespace Noof.Ledger.Ai.Tests;
+
+// ChatReceiptVision with no provider underneath it at all. What reaches the wire is pinned by
+// ChatReceiptVisionOverAnthropicTests; this pins what the provider-neutral layer itself says.
+public class ChatReceiptVisionTests
+{
+    static readonly byte[] TinyImage = [1, 2, 3, 4];
+
+    static FunctionCallContent Answer() => new(
+        "call_1", "read_receipt",
+        new Dictionary<string, object?>
+        {
+            ["seller_name"] = "Maxi",
+            ["seller_tax_id"] = "123456789",
+            ["issued_at"] = null,
+            ["currency"] = "RSD",
+            ["total"] = 100,
+            ["payment_method"] = null,
+            ["kind"] = "sale",
+            ["lines"] = Array.Empty<object>(),
+        });
+
+    [Fact]
+    public async Task The_tool_it_offers_is_strict_in_provider_neutral_terms()
+    {
+        var provider = new ScriptedChatClient().Answer(Answer());
+        var vision = new ChatReceiptVision(new FixedChatClientFactory(provider));
+
+        await vision.ReadAsync(TinyImage, "image/jpeg", null, TestContext.Current.CancellationToken);
+
+        var offered = provider.Requests.SelectMany(request => request.Options!.Tools!).ToList();
+        offered.Should().ContainSingle().Which.Name.Should().Be("read_receipt");
+        offered.Should().OnlyContain(tool => tool.IsStrict());
+        offered.Should().OnlyContain(tool => !tool.AdditionalProperties.ContainsKey("Strict"),
+            "\"Strict\" is what one provider's adapter reads; saying it here would tie this layer to that provider");
+    }
+
+    [Fact]
+    public async Task An_oversized_image_never_reaches_the_provider()
+    {
+        var provider = new ScriptedChatClient();
+        var vision = new ChatReceiptVision(new FixedChatClientFactory(provider));
+        var oversized = new byte[(5 * 1024 * 1024) + 1];
+
+        var act = () => vision.ReadAsync(oversized, "image/jpeg", null, TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<ModelCallException>()).Which.Kind.Should().Be(ModelFailureKind.Terminal);
+        provider.Requests.Should().BeEmpty();
+    }
+
+    sealed class FixedChatClientFactory(IChatClient client) : IChatClientFactory
+    {
+        public Task<IChatClient> CreateAsync(CancellationToken cancellationToken) => Task.FromResult(client);
+    }
+}
