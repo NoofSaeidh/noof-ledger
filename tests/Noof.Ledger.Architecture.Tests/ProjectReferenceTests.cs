@@ -34,7 +34,7 @@ public class ProjectReferenceTests
         // IServiceCollection - that type lives in this one package. Widening this list further is
         // an edit somebody has to justify, same as every other project's allowed set below.
         Packages("Noof.Ledger.Application").Should().BeEquivalentTo(
-            "Microsoft.Extensions.DependencyInjection.Abstractions");
+            "Microsoft.Extensions.DependencyInjection.Abstractions", "Microsoft.Extensions.Logging.Abstractions");
     }
 
     [Fact]
