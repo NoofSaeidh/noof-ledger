@@ -67,6 +67,32 @@ public class RunScriptTests
             output.Should().Contain(name);
     }
 
+    // M-8 (Phase 5 final review): `status` always read src\Noof.Ledger.Host\appsettings.json, even
+    // when an operator wants the status of a published deployment whose own appsettings.json
+    // overrides Urls - it would then report /healthz against the wrong address. Safe to run for
+    // real: a throwaway folder with just an appsettings.json, /healthz against a not-in-use port
+    // times out (3s) rather than reaching anything.
+    [Fact]
+    public void Status_with_a_Path_reads_that_folders_appsettings_json()
+    {
+        var publishedFolder = Directory.CreateTempSubdirectory("noof-status-path-test-").FullName;
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(publishedFolder, "appsettings.json"),
+                """{ "Urls": "http://127.0.0.1:19999" }""");
+
+            var (exitCode, output) = RunPwsh("status", "-Path", publishedFolder);
+
+            exitCode.Should().Be(0);
+            output.Should().Contain("http://127.0.0.1:19999/healthz");
+        }
+        finally
+        {
+            Directory.Delete(publishedFolder, recursive: true);
+        }
+    }
+
     // M-5 (Phase 5 final review): ops/publish.ps1 runs `dotnet test --solution` (Persistence, E2E and
     // all), the identical run `test all` takes the suite lock for - but `publish` itself did not, so
     // a parallel worktree's filtered run could collide with it. Source-text, not a real invocation:

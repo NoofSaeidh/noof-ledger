@@ -161,13 +161,20 @@ function Get-Elevated-Or-Explain {
 # Reads the same two keys LoggingSetup.cs and Program.cs's "Urls" own - never re-hardcodes their
 # defaults, so a future change to either only needs to change one file plus this one, not three
 # (that drift is exactly what LogDirectoryDefaultTests guards inside the solution itself).
+#
+# M-8 (Phase 5 final review): -Path lets a caller targeting a published deployment (whose own
+# appsettings.json may override Urls) read THAT file instead of always reading the source tree's -
+# `status -Path <publishDir>` and `start-published` (which knows its own -Path already) both need
+# this to report the address the published host will actually bind to.
 function Get-AppSettings {
-    $path = Join-Path $Root 'src\Noof.Ledger.Host\appsettings.json'
-    return Get-Content $path -Raw | ConvertFrom-Json
+    param([string]$Path)
+    $settingsPath = if ($Path) { Join-Path $Path 'appsettings.json' } else { Join-Path $Root 'src\Noof.Ledger.Host\appsettings.json' }
+    return Get-Content $settingsPath -Raw | ConvertFrom-Json
 }
 
 function Get-HostUrl {
-    $settings = Get-AppSettings
+    param([string]$Path)
+    $settings = Get-AppSettings -Path $Path
     if ($settings.Urls) { return $settings.Urls }
     return 'http://127.0.0.1:5263'
 }
@@ -271,7 +278,8 @@ start-published [-Path <dir>]
 
 Runs Noof.Ledger.Host.exe from -Path (default: .\publish under the repo root). Program.cs resolves
 its content root from its own install directory (AppContext.BaseDirectory), not from the shell's
-current directory, so this now works no matter where you run it from.
+current directory, so this now works no matter where you run it from. Prints the URL it read from
+that folder's own appsettings.json before starting, so an edited Urls there is reflected immediately.
 
 Prerequisites: the directory must already hold a publish (run `.\run.ps1 publish` first).
 '@
@@ -384,11 +392,15 @@ Prerequisites: start/stop need an elevated (Run as Administrator) PowerShell.
     'status' = @{
         Summary = 'One-screen summary: PostgreSQL service, /healthz, the newest log file'
         Detail  = @'
-status
+status [-Path <dir>]
 
 Prints three things: the postgresql-x64-18 service state, whether the host answers /healthz at the
 configured URL (a few seconds' timeout - "not running" is a normal answer, not an error), and the
 newest file under the configured log directory with its last-write time.
+
+With no -Path, the URL comes from src\Noof.Ledger.Host\appsettings.json (matching `start`/`dotnet
+run`). -Path <dir> reads <dir>\appsettings.json instead - pass your published folder (e.g. `.\publish`)
+to check the status of a published deployment whose own appsettings.json overrides Urls.
 
 Prerequisites: none - every check degrades to "not reachable" / "not found" rather than throwing.
 '@
@@ -485,6 +497,9 @@ switch ($CommandName) {
         $path = Get-ArgValue $Rest '-Path' (Join-Path $Root 'publish')
         $exe = Join-Path $path 'Noof.Ledger.Host.exe'
         if (-not (Test-Path $exe)) { throw "Not found: $exe. Run '.\run.ps1 publish' first, or pass -Path." }
+        # M-8: reads this published folder's own appsettings.json, so an operator who edited its
+        # Urls sees the address the exe is actually about to bind to, not the source tree's.
+        Write-Host "Listening on $(Get-HostUrl -Path $path)"
         Push-Location $path
         try { Invoke-Checked { & $exe } }
         finally { Pop-Location }
@@ -636,7 +651,10 @@ switch ($CommandName) {
         if ($service) { Write-Host "PostgreSQL ($ServiceName): $($service.Status)" }
         else { Write-Host "PostgreSQL ($ServiceName): not installed" }
 
-        $url = Get-HostUrl
+        # M-8: -Path targets a published deployment's own appsettings.json (it may override Urls);
+        # with no -Path, this still reads the source tree's, matching `start`/`dotnet run`.
+        $statusPath = Get-ArgValue $Rest '-Path'
+        $url = Get-HostUrl -Path $statusPath
         try {
             $response = Invoke-WebRequest -Uri "$url/healthz" -TimeoutSec 3 -UseBasicParsing
             Write-Host "Host ($url/healthz): $($response.StatusCode)"
