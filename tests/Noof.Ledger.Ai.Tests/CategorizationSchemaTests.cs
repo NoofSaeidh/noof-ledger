@@ -50,7 +50,7 @@ public class CategorizationSchemaTests
                 "properties": {
                   "description": { "type": "string", "description": "What was bought, as short plain text in the language of the message." },
                   "amount": { "type": "number", "description": "The amount the person meant, as a number - for example 1000 or 45.3. Interpret words, slang and speech: \"штуку\" is 1000, \"полтос\" is 50, \"двести пятьдесят\" is 250." },
-                  "currency": { "type": ["string", "null"], "enum": ["EUR", "RSD", "USD", "RUB", "KZT", null], "description": "The currency the message states, or null when it states none." },
+                  "currency": { "anyOf": [{ "type": "string", "enum": ["EUR", "RSD", "USD", "RUB", "KZT"] }, { "type": "null" }], "description": "The currency the message states, or null when it states none." },
                   "category_slug": { "type": "string", "enum": ["groceries", "food-drink"] },
                   "merchant_name": { "type": ["string", "null"], "description": "The merchant's name as the person wrote it, or null when no merchant is named or it is one of the known merchants." }
                 }
@@ -58,9 +58,9 @@ public class CategorizationSchemaTests
             },
             "occurred_on": { "type": ["string", "null"], "description": "The day the purchase happened, as an ISO date (YYYY-MM-DD), worked out from today's date given with the message, or null when the message names no day." },
             "kind": { "type": "string", "enum": ["expense", "income", "balance"], "description": "What kind of record this is: \"expense\" for money spent, \"income\" for money received, or \"balance\" when the person states what a wallet's balance is right now rather than a purchase or a deposit - items must be empty for kind \"balance\"." },
-            "wallet_id": { "type": ["string", "null"], "enum": [null], "description": "The id of the wallet the person means, chosen from the wallets you were offered, or null when no wallet is named or none of the offered wallets fits - the ledger then uses the default wallet for the spending's currency." },
+            "wallet_id": { "type": "null", "description": "The id of the wallet the person means, chosen from the wallets you were offered, or null when no wallet is named or none of the offered wallets fits - the ledger then uses the default wallet for the spending's currency." },
             "balance_amount": { "type": ["number", "null"], "description": "The balance the person stated, as a number, when kind is \"balance\"; null for every other kind." },
-            "balance_currency": { "type": ["string", "null"], "enum": ["EUR", "RSD", "USD", "RUB", "KZT", null], "description": "The currency of the stated balance, when kind is \"balance\" and the person named one; null for every other kind, or when they named none - the wallet's own currency is used then." }
+            "balance_currency": { "anyOf": [{ "type": "string", "enum": ["EUR", "RSD", "USD", "RUB", "KZT"] }, { "type": "null" }], "description": "The currency of the stated balance, when kind is \"balance\" and the person named one; null for every other kind, or when they named none - the wallet's own currency is used then." }
           }
         }
         """;
@@ -104,10 +104,7 @@ public class CategorizationSchemaTests
 
         var knownMerchantId = LineItemProperties(schema).GetProperty("known_merchant_id");
 
-        knownMerchantId.GetProperty("type").EnumerateArray().Select(e => e.GetString())
-            .Should().BeEquivalentTo(["string", "null"]);
-        knownMerchantId.GetProperty("enum").EnumerateArray().Select(e => e.GetString())
-            .Should().BeEquivalentTo(["11111111-1111-1111-1111-111111111111", null]);
+        NullableStringEnumValues(knownMerchantId).Should().BeEquivalentTo(["11111111-1111-1111-1111-111111111111"]);
         knownMerchantId.GetProperty("description").GetString().Should().Be(
             "One of the listed known merchants' ids, or null when the merchant is not one of them.");
     }
@@ -128,10 +125,8 @@ public class CategorizationSchemaTests
     {
         var schema = CategorizationSchema.BuildRecordTransaction(Categories, NoHints, NoWallets);
 
-        var currencies = LineItemProperties(schema).GetProperty("currency").GetProperty("enum")
-            .EnumerateArray().Select(e => e.GetString());
-
-        currencies.Should().BeEquivalentTo(["EUR", "RSD", "USD", "RUB", "KZT", null]);
+        NullableStringEnumValues(LineItemProperties(schema).GetProperty("currency"))
+            .Should().BeEquivalentTo(["EUR", "RSD", "USD", "RUB", "KZT"]);
     }
 
     [Fact]
@@ -143,8 +138,7 @@ public class CategorizationSchemaTests
         var required = lineItem.GetProperty("required").EnumerateArray().Select(e => e.GetString());
 
         required.Should().Contain("currency");
-        LineItemProperties(schema).GetProperty("currency").GetProperty("type").EnumerateArray()
-            .Select(e => e.GetString()).Should().BeEquivalentTo(["string", "null"]);
+        NullableStringEnumValues(LineItemProperties(schema).GetProperty("currency")).Should().NotBeEmpty();
     }
 
     [Fact]
@@ -163,27 +157,24 @@ public class CategorizationSchemaTests
         var schema = CategorizationSchema.BuildRecordTransaction(Categories, NoHints, OneWallet);
 
         var walletId = schema.GetProperty("properties").GetProperty("wallet_id");
-        walletId.GetProperty("type").EnumerateArray().Select(e => e.GetString()).Should().BeEquivalentTo(["string", "null"]);
-        walletId.GetProperty("enum").EnumerateArray().Select(e => e.GetString())
-            .Should().BeEquivalentTo(["22222222-2222-2222-2222-222222222222", null]);
+        NullableStringEnumValues(walletId).Should().BeEquivalentTo(["22222222-2222-2222-2222-222222222222"]);
     }
 
     [Fact]
-    public void Wallet_id_enum_is_only_null_when_no_wallets_are_offered()
+    public void Wallet_id_can_only_be_null_when_no_wallets_are_offered()
     {
         var schema = CategorizationSchema.BuildRecordTransaction(Categories, NoHints, NoWallets);
 
-        schema.GetProperty("properties").GetProperty("wallet_id").GetProperty("enum")
-            .EnumerateArray().Select(e => e.GetString()).Should().BeEquivalentTo([(string?)null]);
+        schema.GetProperty("properties").GetProperty("wallet_id").GetProperty("type").GetString().Should().Be("null");
     }
 
     [Fact]
-    public void Balance_currency_enum_is_the_five_CurrencyCode_statics_plus_null()
+    public void Balance_currency_enum_is_the_five_CurrencyCode_statics_or_null()
     {
         var schema = CategorizationSchema.BuildRecordTransaction(Categories, NoHints, NoWallets);
 
-        schema.GetProperty("properties").GetProperty("balance_currency").GetProperty("enum")
-            .EnumerateArray().Select(e => e.GetString()).Should().BeEquivalentTo(["EUR", "RSD", "USD", "RUB", "KZT", null]);
+        NullableStringEnumValues(schema.GetProperty("properties").GetProperty("balance_currency"))
+            .Should().BeEquivalentTo(["EUR", "RSD", "USD", "RUB", "KZT"]);
     }
 
     [Fact]
@@ -243,6 +234,18 @@ public class CategorizationSchemaTests
         listMerchants.Should().NotContain(forbidden);
     }
 
+    // The API rejects an enum next to a type array - "Enum value 'EUR' does not match declared type
+    // '['string', 'null']'" (live 400, 2026-09-25) - so every nullable enum is an anyOf instead.
+    [Fact]
+    public void No_node_declares_an_enum_alongside_a_type_array()
+    {
+        var schema = Reserialize(CategorizationSchema.BuildRecordTransaction(Categories, OneHint, OneWallet));
+
+        Descendants(schema).OfType<JsonObject>()
+            .Where(node => node["enum"] is not null && node["type"] is JsonArray)
+            .Should().BeEmpty();
+    }
+
     [Fact]
     public void Every_minItems_value_is_zero_or_one()
     {
@@ -272,6 +275,22 @@ public class CategorizationSchemaTests
 
     static JsonElement LineItemProperties(JsonElement schema) =>
         schema.GetProperty("properties").GetProperty("items").GetProperty("items").GetProperty("properties");
+
+    static IEnumerable<string?> NullableStringEnumValues(JsonElement property)
+    {
+        var branches = property.GetProperty("anyOf").EnumerateArray().ToList();
+        branches.Should().HaveCount(2);
+        branches[0].GetProperty("type").GetString().Should().Be("string");
+        branches[1].GetProperty("type").GetString().Should().Be("null");
+        return branches[0].GetProperty("enum").EnumerateArray().Select(e => e.GetString());
+    }
+
+    static IEnumerable<JsonNode> Descendants(JsonNode node) => node switch
+    {
+        JsonObject obj => [obj, .. obj.Where(p => p.Value is not null).SelectMany(p => Descendants(p.Value!))],
+        JsonArray array => [array, .. array.Where(item => item is not null).SelectMany(item => Descendants(item!))],
+        _ => [node],
+    };
 
     static JsonNode Reserialize(JsonElement schema) => JsonNode.Parse(schema.GetRawText())!;
 

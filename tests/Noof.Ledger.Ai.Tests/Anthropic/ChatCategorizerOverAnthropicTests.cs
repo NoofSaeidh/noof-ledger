@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AwesomeAssertions;
 using Noof.Ledger.Ai.Anthropic;
 using Noof.Ledger.Application.Categorization;
@@ -70,10 +71,14 @@ public class ChatCategorizerOverAnthropicTests
             tool.GetProperty("strict").GetBoolean().Should().BeTrue($"{tool.GetProperty("name").GetString()} must be strict");
 
         var recordTransaction = tools.EnumerateArray().Single(t => t.GetProperty("name").GetString() == "record_transaction");
-        var currencyEnum = recordTransaction.GetProperty("input_schema")
+        var currency = recordTransaction.GetProperty("input_schema")
             .GetProperty("properties").GetProperty("items").GetProperty("items").GetProperty("properties")
-            .GetProperty("currency").GetProperty("enum").EnumerateArray().Select(e => e.GetString());
-        currencyEnum.Should().BeEquivalentTo(["EUR", "RSD", "USD", "RUB", "KZT", null]);
+            .GetProperty("currency");
+        JsonNode.DeepEquals(
+                JsonNode.Parse(currency.GetProperty("anyOf").GetRawText()),
+                JsonNode.Parse("""[{ "type": "string", "enum": ["EUR", "RSD", "USD", "RUB", "KZT"] }, { "type": "null" }]"""))
+            .Should().BeTrue("the nullable enum must reach the wire as an anyOf, never an enum beside a type array");
+        currency.TryGetProperty("type", out _).Should().BeFalse();
 
         sent.GetProperty("tool_choice").GetProperty("type").GetString().Should().Be("any");
 
