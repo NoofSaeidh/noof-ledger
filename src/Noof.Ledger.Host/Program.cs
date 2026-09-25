@@ -13,6 +13,7 @@ using Noof.Ledger.Host.Logging;
 using Noof.Ledger.Host.Startup;
 using Noof.Ledger.Host.Workers;
 using Noof.Ledger.Persistence;
+using Noof.Ledger.Receipts;
 using Noof.Ledger.Telegram;
 using Noof.Ledger.Web;
 using Noof.Ledger.Web.Components;
@@ -122,6 +123,8 @@ try
     builder.Services.AddNoofTelegram();
 
     builder.Services.AddNoofAi(builder.Configuration);
+
+    builder.Services.AddNoofReceipts();
 
     builder.Services.AddNoofWorkers(categorizationOptions, backupOptions);
 

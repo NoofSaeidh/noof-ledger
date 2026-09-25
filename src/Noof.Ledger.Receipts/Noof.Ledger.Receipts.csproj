@@ -1,8 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="ZXing.Net" />
+    <PackageReference Include="ZXing.Net.Bindings.SkiaSharp" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Noof.Ledger.Application\Noof.Ledger.Application.csproj" />
     <ProjectReference Include="..\Noof.Ledger.Domain\Noof.Ledger.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Noof.Ledger.Receipts.Tests" />
   </ItemGroup>
 
 </Project>
