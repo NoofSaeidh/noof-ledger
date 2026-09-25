@@ -28,7 +28,9 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
 > the Playwright browser tests are in the solution now, so `dotnet test --solution` runs them too and
 > needs Chromium present. Live suites stay skipped unless `NOOF_LEDGER_LIVE_ANTHROPIC_KEY` /
 > `NOOF_LEDGER_LIVE_GROQ_KEY` + `NOOF_LEDGER_LIVE_VOICE_FILE` are set; `ops/publish.ps1` produces a
-> runnable host. Cross-currency conversion, transfers and receipt photos remain future phases. Rules
+> runnable host. **`run.ps1` in the repo root is the one entry point for launching and operating the
+> app** (`.\run.ps1 help`) — `dotnet run` and the published exe now behave the same. Cross-currency
+> conversion, transfers and receipt photos remain future phases. Rules
 > below marked *(settled)* are direct user decisions and are not up for re-litigation.
 >
 > Deferred **decisions** live in `docs/OPEN-QUESTIONS.md`; deferred **work** lives in `docs/BACKLOG.md`. Check both before proposing something as missing.
