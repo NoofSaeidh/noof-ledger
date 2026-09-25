@@ -20,13 +20,23 @@ public sealed class TransactionsTests(CookieModeHostFixture fixture) : PageTest,
 
         var expenseId = Guid.NewGuid();
         var incomeId = Guid.NewGuid();
+        var statementId = Guid.NewGuid();
 
         await using (var db = OpenDb())
         {
             db.Transactions.Add(NewTransaction(expenseId, walletId, TransactionKind.Expense, TransactionStatus.Completed,
-                $"grid expense {marker}", now.AddMinutes(-1)));
+                $"grid expense {marker}", now.AddMinutes(-2)));
             db.Transactions.Add(NewTransaction(incomeId, walletId, TransactionKind.Income, TransactionStatus.Completed,
-                $"grid income {marker}", now));
+                $"grid income {marker}", now.AddMinutes(-1)));
+            db.Transactions.Add(NewTransaction(statementId, walletId, TransactionKind.BalanceCheck, TransactionStatus.Completed,
+                $"grid statement {marker}", now));
+            db.BalanceChecks.Add(new BalanceCheck
+            {
+                TransactionId = statementId,
+                WalletId = walletId,
+                Stated = new Money(1000m, CurrencyCode.Eur),
+                ComputedBefore = 950m,
+            });
             await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
@@ -38,13 +48,17 @@ public sealed class TransactionsTests(CookieModeHostFixture fixture) : PageTest,
         await Expect(grid).ToBeVisibleAsync();
         await Expect(grid).ToContainTextAsync($"grid expense {marker}");
         await Expect(grid).ToContainTextAsync($"grid income {marker}");
+        await Expect(grid).ToContainTextAsync($"grid statement {marker}");
+        await Expect(grid).ToContainTextAsync("1,000.00 EUR");
 
         var rows = grid.Locator("tbody tr");
         var rowTexts = (await rows.AllTextContentsAsync()).ToList();
+        var statementIndex = rowTexts.FindIndex(t => t.Contains($"grid statement {marker}", StringComparison.Ordinal));
         var incomeIndex = rowTexts.FindIndex(t => t.Contains($"grid income {marker}", StringComparison.Ordinal));
         var expenseIndex = rowTexts.FindIndex(t => t.Contains($"grid expense {marker}", StringComparison.Ordinal));
-        Assert.True(incomeIndex >= 0 && expenseIndex >= 0 && incomeIndex < expenseIndex,
-            "the more recently occurred income row must render above the older expense row");
+        Assert.True(statementIndex >= 0 && incomeIndex >= 0 && expenseIndex >= 0
+            && statementIndex < incomeIndex && incomeIndex < expenseIndex,
+            "rows must render newest-occurred first: statement, then income, then expense");
 
         var incomeRow = grid.Locator("tr", new LocatorLocatorOptions { HasText = $"grid income {marker}" });
         await incomeRow.Locator("a").First.ClickAsync();
