@@ -20,6 +20,10 @@
 {
     <DatabaseGateBanner />
 }
+else if (!walletsLoaded)
+{
+    <MudText Typo="Typo.body1">Loading…</MudText>
+}
 else
 {
     <MudGrid id="transactions-filters" Spacing="2" Class="mb-4">
@@ -110,11 +114,21 @@ else
     readonly PaginationState pagination = new() { ItemsPerPage = 50 };
     int reloadGeneration;
     IReadOnlyList<WalletOption> wallets = [];
+    bool walletsLoaded;
 
+    // Blazor Server renders once, synchronously, before this method's own await completes - so a
+    // QuickGrid with no guard around it would already be mounted and calling its ItemsProvider
+    // (a second, concurrent read against the same circuit-scoped DbContext) while this call is
+    // still in flight. walletsLoaded keeps the grid out of the tree until this finishes, the same
+    // way the "loading" state elsewhere in this app keeps a component from touching the database
+    // before its own first read returns.
     protected override async Task OnInitializedAsync()
     {
-        if (Gate.State == DatabaseState.Ready)
-            wallets = await WalletDirectory.ActiveAsync(CancellationToken.None);
+        if (Gate.State != DatabaseState.Ready)
+            return;
+
+        wallets = await WalletDirectory.ActiveAsync(CancellationToken.None);
+        walletsLoaded = true;
     }
 
     async ValueTask<GridItemsProviderResult<TransactionListRow>> ProvideRowsAsync(GridItemsProviderRequest<TransactionListRow> request)
