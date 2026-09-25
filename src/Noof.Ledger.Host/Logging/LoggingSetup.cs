@@ -1,4 +1,11 @@
+using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Host.Diagnostics;
+using Noof.Ledger.Persistence;
+using NpgsqlTypes;
 using Serilog;
+using Serilog.Debugging;
+using Serilog.Sinks.PostgreSQL;
+using Serilog.Sinks.PostgreSQL.ColumnWriters;
 
 namespace Noof.Ledger.Host.Logging;
 
@@ -42,18 +49,53 @@ internal static class LoggingSetup
                 rollOnFileSizeLimit: true)
             .CreateBootstrapLogger();
 
-    // The full reconfiguration UseSerilog runs once the host is built. No PostgreSQL sink here -
-    // that is Task 4's job; this stage only widens the bootstrap logger with LogContext
-    // enrichment so a later BeginScope (Task 3's TransactionLogScope) actually reaches the file.
-    public static void Configure(LoggerConfiguration configuration, string logDirectory) =>
-        configuration
-            .MinimumLevel.Information()
-            .Enrich.FromLogContext()
+    // The full reconfiguration UseSerilog runs once the host is built. `services` is threaded
+    // through so Task 4's Postgres sink and secret-redaction wrap can resolve IDatabaseGate,
+    // ILogSinkStatus and SecretRedactor here. MinimumLevel and LogContext enrichment stay on the
+    // outer `configuration` - the one Log.Logger actually becomes - so a later BeginScope (Task 3's
+    // TransactionLogScope) is still ambient when an event is written. `destinations` is a separate
+    // inner LoggerConfiguration holding console+file+Postgres; RedactingSink wraps its built logger
+    // so every one of those three sinks only ever sees a redacted LogEvent, per spec.
+    public static void Configure(LoggerConfiguration configuration, string logDirectory, IServiceProvider services)
+    {
+        var gate = services.GetRequiredService<IDatabaseGate>();
+        var sinkStatus = services.GetRequiredService<ILogSinkStatus>();
+        var timeProvider = services.GetRequiredService<TimeProvider>();
+        var redactor = services.GetRequiredService<SecretRedactor>();
+        var connectionString = LedgerConnectionString.Resolve(
+            services.GetRequiredService<IConfiguration>().GetConnectionString("Ledger"));
+
+        SelfLog.Enable(_ => sinkStatus.RecordFailure(timeProvider.GetUtcNow()));
+
+        var columnOptions = new Dictionary<string, ColumnWriterBase>
+        {
+            ["logged_at"] = new TimestampColumnWriter(NpgsqlDbType.TimestampTz),
+            ["level"] = new LevelColumnWriter(renderAsText: false, NpgsqlDbType.Smallint),
+            ["source"] = new SinglePropertyColumnWriter("SourceContext", PropertyWriteMethod.Raw, NpgsqlDbType.Text),
+            ["message"] = new RenderedMessageColumnWriter(NpgsqlDbType.Text),
+            ["template"] = new MessageTemplateColumnWriter(NpgsqlDbType.Text),
+            ["exception"] = new ExceptionColumnWriter(NpgsqlDbType.Text),
+            ["transaction_id"] = new SinglePropertyColumnWriter("TransactionId", PropertyWriteMethod.Raw, NpgsqlDbType.Uuid),
+            ["properties"] = new PropertiesColumnWriter(NpgsqlDbType.Jsonb),
+        };
+
+        var destinations = new LoggerConfiguration()
             .WriteTo.Console()
             .WriteTo.File(
                 Path.Combine(logDirectory, "noof-ledger-.log"),
                 rollingInterval: RollingInterval.Day,
                 retainedFileCountLimit: RetainedFileCountLimit,
                 fileSizeLimitBytes: FileSizeLimitBytes,
-                rollOnFileSizeLimit: true);
+                rollOnFileSizeLimit: true)
+            .WriteTo.Logger(pg => pg
+                .Filter.ByIncludingOnly(_ => gate.State == DatabaseState.Ready)
+                .WriteTo.PostgreSQL(connectionString, "app_log", columnOptions, needAutoCreateTable: false));
+
+        var builtDestinations = destinations.CreateLogger();
+
+        configuration
+            .MinimumLevel.Information()
+            .Enrich.FromLogContext()
+            .WriteTo.Sink(new RedactingSink(builtDestinations, redactor));
+    }
 }

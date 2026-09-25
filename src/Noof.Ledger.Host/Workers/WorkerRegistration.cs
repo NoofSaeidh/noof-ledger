@@ -42,6 +42,12 @@ internal static class WorkerRegistration
                 sp.GetRequiredService<ILogger<BackupWorker>>()));
         }
 
+        services.AddHostedService(sp => new LogRetentionWorker(
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            sp.GetRequiredService<IDatabaseGate>(),
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<ILogger<LogRetentionWorker>>()));
+
         return services;
     }
 }
