@@ -264,13 +264,6 @@ internal sealed class CategorizationWorker(
     // The model is shown a correction's lines, not its wallet, so a correction that names no wallet means "leave it
     // where it is", not "the default": otherwise "нет, 300" would quietly move a Raiffeisen purchase into the RSD
     // default and both balances would drift (M1). A re-read starts from scratch and resolves the wallet afresh (M3).
-    static string BuildSummary(MappedProposal mapped) =>
-        mapped.Items.Count > 0
-            ? string.Join("; ", mapped.Items.Select(item => $"{item.Amount} {item.CategorySlug}"))
-            : mapped.StatedBalance is { } stated
-                ? $"balance {stated}"
-                : "no line items";
-
     static CategorizationProposal KeepingTheRecordsWallet(
         CategorizationJob job, CategorizationSubject record, CategorizationProposal proposal, IReadOnlyList<WalletOption> wallets) =>
         job.Kind == JobKind.Correct
@@ -279,6 +272,13 @@ internal sealed class CategorizationWorker(
         && wallets.Any(wallet => wallet.Id == current)
             ? proposal with { WalletId = current }
             : proposal;
+
+    static string BuildSummary(MappedProposal mapped) =>
+        mapped.Items.Count > 0
+            ? string.Join("; ", mapped.Items.Select(item => $"{item.Amount} {item.CategorySlug}"))
+            : mapped.StatedBalance is { } stated
+                ? $"balance {stated}"
+                : "no line items";
 
     async Task EchoAsync(ICategorizationStore store, IChatNotifier notifier, CategorizationJob job, CancellationToken cancellationToken)
     {
