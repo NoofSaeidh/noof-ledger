@@ -82,6 +82,7 @@ public sealed class DashboardCultureTests
 
             await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
             {
+                builder.UseTempLogDirectory();
                 builder.UseSetting("ConnectionStrings:Ledger", cloneBuilder.ConnectionString);
                 builder.UseSetting("Database:MigrateOnStartup", "false");
                 builder.UseSetting("Backup:Enabled", "false");

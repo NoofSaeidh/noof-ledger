@@ -10,15 +10,24 @@ public class FatalStartupExitCodeTests
     [Fact]
     public async Task A_fatal_startup_exception_yields_a_non_zero_exit_code()
     {
-        using var host = StartHostWithBrokenTimeZone();
+        string? logDirectory = null;
+        try
+        {
+            using var host = StartHostWithBrokenTimeZone(out logDirectory);
 
-        var exited = await WaitForExitAsync(host, TimeSpan.FromSeconds(30));
+            var exited = await WaitForExitAsync(host, TimeSpan.FromSeconds(30));
 
-        exited.Should().BeTrue("a startup exception must not leave the process hanging");
-        host.ExitCode.Should().NotBe(0, "a fatal startup failure must be detectable by a service manager");
+            exited.Should().BeTrue("a startup exception must not leave the process hanging");
+            host.ExitCode.Should().NotBe(0, "a fatal startup failure must be detectable by a service manager");
+        }
+        finally
+        {
+            if (logDirectory is not null && Directory.Exists(logDirectory))
+                Directory.Delete(logDirectory, recursive: true);
+        }
     }
 
-    static Process StartHostWithBrokenTimeZone()
+    static Process StartHostWithBrokenTimeZone(out string logDirectory)
     {
         var start = new ProcessStartInfo("dotnet")
         {
@@ -30,6 +39,7 @@ public class FatalStartupExitCodeTests
 
         start.Environment["Database__MigrateOnStartup"] = "false";
         start.Environment["Capture__TimeZone"] = "Not/AZone";
+        logDirectory = start.UseTempLogDirectory();
 
         return Process.Start(start)!;
     }

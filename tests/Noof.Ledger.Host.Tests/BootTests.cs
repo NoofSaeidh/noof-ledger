@@ -8,6 +8,7 @@ public class BootTests
     static WebApplicationFactory<Program> Factory(bool migrateOnStartup) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.UseTempLogDirectory();
             builder.UseSetting("Database:MigrateOnStartup", migrateOnStartup.ToString());
             builder.UseSetting("Backup:Enabled", "false");
             builder.UseSetting("ConnectionStrings:Ledger",

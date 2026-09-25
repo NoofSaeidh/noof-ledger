@@ -25,6 +25,7 @@ public sealed class AppLogSinkTests
         {
             await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
             {
+                builder.UseTempLogDirectory();
                 builder.UseSetting("ConnectionStrings:Ledger", connectionString);
                 builder.UseSetting("Database:MigrateOnStartup", "true");
                 builder.UseSetting("Backup:Enabled", "false");

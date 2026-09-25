@@ -13,6 +13,7 @@ public class SelfLogSinkFailureTests
     {
         await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.UseTempLogDirectory();
             builder.UseSetting("Database:MigrateOnStartup", "false");
             builder.UseSetting("Backup:Enabled", "false");
             builder.UseSetting("ConnectionStrings:Ledger",

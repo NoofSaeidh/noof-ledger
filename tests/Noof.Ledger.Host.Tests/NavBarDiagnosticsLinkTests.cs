@@ -10,6 +10,7 @@ public sealed class NavBarDiagnosticsLinkTests
     {
         await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.UseTempLogDirectory();
             builder.UseSetting("Database:MigrateOnStartup", "false");
             builder.UseSetting("Backup:Enabled", "false");
             // A safe, definitely-unreachable host - never the operator's real db.connection file

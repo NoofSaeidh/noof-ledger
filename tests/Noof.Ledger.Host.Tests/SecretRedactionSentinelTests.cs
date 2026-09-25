@@ -24,16 +24,16 @@ public sealed class SecretRedactionSentinelTests
         var databaseName = $"noof_secret_sentinel_{Guid.NewGuid():N}";
         await CreateCloneAsync(databaseName, TestContext.Current.CancellationToken);
         var connectionString = new NpgsqlConnectionStringBuilder(DatabaseSettings.AdminConnectionString) { Database = databaseName }.ConnectionString;
-        var logDirectory = Path.Combine(Path.GetTempPath(), $"noof-sentinel-logs-{Guid.NewGuid():N}");
+        string? logDirectory = null;
 
         try
         {
             await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
             {
+                logDirectory = builder.UseTempLogDirectory();
                 builder.UseSetting("ConnectionStrings:Ledger", connectionString);
                 builder.UseSetting("Database:MigrateOnStartup", "true");
                 builder.UseSetting("Backup:Enabled", "false");
-                builder.UseSetting("Logging:File:Directory", logDirectory);
                 builder.ConfigureServices(FakeUserStore.Register);
             });
 
@@ -62,7 +62,7 @@ public sealed class SecretRedactionSentinelTests
                 logger.LogError(ex, "Sentinel probe {ProbeId} failed with a secret in the message", probeId);
             }
 
-            var fileText = await PollFileTextAsync(logDirectory, probeId.ToString(), TestContext.Current.CancellationToken);
+            var fileText = await PollFileTextAsync(logDirectory!, probeId.ToString(), TestContext.Current.CancellationToken);
             fileText.Should().Contain(probeId.ToString());
             fileText.Should().NotContain(FakeSecretValue);
             fileText.Should().Contain("***");
@@ -75,7 +75,7 @@ public sealed class SecretRedactionSentinelTests
         finally
         {
             await DropCloneAsync(databaseName);
-            if (Directory.Exists(logDirectory))
+            if (logDirectory is not null && Directory.Exists(logDirectory))
                 Directory.Delete(logDirectory, recursive: true);
         }
     }

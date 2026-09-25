@@ -11,6 +11,7 @@ sealed partial class HostProcess : IAsyncDisposable
 
     Process? process;
     string? publishDirectory;
+    string? logDirectory;
 
     public string BaseUrl { get; private set; } = string.Empty;
 
@@ -62,7 +63,9 @@ sealed partial class HostProcess : IAsyncDisposable
         bool waitForDatabaseReady = true)
     {
         this.publishDirectory = publishDirectory;
-        process = Launch(publishDirectory, environment);
+        var (mergedEnvironment, createdLogDirectory) = WithTempLogDirectory(environment);
+        logDirectory = createdLogDirectory;
+        process = Launch(publishDirectory, mergedEnvironment);
         process.OutputDataReceived += CaptureLine;
         process.ErrorDataReceived += CaptureLine;
 
@@ -83,6 +86,22 @@ sealed partial class HostProcess : IAsyncDisposable
     }
 
     public async ValueTask DisposeAsync() => await StopAsync();
+
+    // I-3 (Phase 5 final review): a spawned host that never overrides Logging:File:Directory falls
+    // back to LoggingSetup's real default - %LOCALAPPDATA%\NoofLedger\logs, the operator's own log
+    // directory - and pollutes it with test noise. Every host this fixture launches gets a private
+    // temp directory instead, unless the caller already named one (none do today). A pure static
+    // method, separate from the instance that owns cleanup, so the merge itself is a fast test
+    // (HostProcessTests) with no process to spawn.
+    internal static (IReadOnlyDictionary<string, string> Environment, string? CreatedLogDirectory) WithTempLogDirectory(
+        IReadOnlyDictionary<string, string> environment)
+    {
+        if (environment.ContainsKey("Logging__File__Directory"))
+            return (environment, null);
+
+        var directory = Directory.CreateTempSubdirectory("noof-e2e-host-logs-").FullName;
+        return (new Dictionary<string, string>(environment) { ["Logging__File__Directory"] = directory }, directory);
+    }
 
     async Task StopAsync()
     {
@@ -110,29 +129,37 @@ sealed partial class HostProcess : IAsyncDisposable
         // WaitForExitAsync only guarantees the process object has reported exit - Windows can hold
         // the file/directory locks a launched process's working directory carries (every DLL it
         // loaded, and the directory itself as its CWD) for a short while after that. Best effort,
-        // with a few retries for that gap: a stray publish directory in the OS temp folder is
+        // with a few retries for that gap: a stray publish or log directory in the OS temp folder is
         // disk-space hygiene, not a correctness or security concern like the process or the database.
-        var toDelete = publishDirectory;
+        var publishToDelete = publishDirectory;
         publishDirectory = null;
+        await DeleteBestEffortAsync(publishToDelete);
 
-        if (toDelete is not null && Directory.Exists(toDelete))
+        var logToDelete = logDirectory;
+        logDirectory = null;
+        await DeleteBestEffortAsync(logToDelete);
+    }
+
+    static async Task DeleteBestEffortAsync(string? path)
+    {
+        if (path is null || !Directory.Exists(path))
+            return;
+
+        const int maxAttempts = 5;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            const int maxAttempts = 5;
-
-            for (var attempt = 1; attempt <= maxAttempts; attempt++)
+            try
             {
-                try
-                {
-                    Directory.Delete(toDelete, recursive: true);
-                    break;
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    if (attempt == maxAttempts)
-                        break;
+                Directory.Delete(path, recursive: true);
+                return;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                if (attempt == maxAttempts)
+                    return;
 
-                    await Task.Delay(TimeSpan.FromMilliseconds(200));
-                }
+                await Task.Delay(TimeSpan.FromMilliseconds(200));
             }
         }
     }
