@@ -31,6 +31,18 @@ public class TransactionsPageSourceTests
         source.Should().NotContain("MudSnackbar");
     }
 
+    // M-4 (Phase 5 final review): DateTime.Today is the server's own zone and bypasses TimeProvider -
+    // OccurredOn is a local date in the capture zone (Capture:TimeZone), not the server's.
+    [Fact]
+    public void Quick_ranges_use_TimeProvider_and_the_capture_time_zone_not_DateTime_Today()
+    {
+        var source = SourceText();
+
+        source.Should().NotContain("DateTime.Today");
+        source.Should().Contain("TimeProvider.GetUtcNow()");
+        source.Should().Contain("CaptureTimeZone");
+    }
+
     [Fact]
     public void Reads_transactions_through_the_list_read_model_only()
     {

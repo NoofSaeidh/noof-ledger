@@ -145,6 +145,47 @@ public sealed class TransactionsTests(CookieModeHostFixture fixture) : PageTest,
             "a rapid filter change must never race two queries against the circuit's one DbContext");
     }
 
+    // M-4 (Phase 5 final review): the Today/7 days/This month buttons used to compute "today" from
+    // DateTime.Today - the server's own zone, not the capture zone (OccurredOn is a local date in
+    // Capture:TimeZone) - and bypassed TimeProvider. No test exercised these buttons at all before
+    // this one; it cannot pin the zone difference without a fake clock reachable from a real browser
+    // circuit (the review's own limitation), but it is real regression coverage for a page control
+    // that previously had none.
+    [Fact]
+    public async Task The_Today_quick_range_narrows_to_todays_transaction()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var marker = Guid.NewGuid().ToString("N")[..8];
+        var walletId = await SeedWalletAsync($"Quick range wallet {marker}");
+        var now = DateTimeOffset.UtcNow;
+
+        await using (var db = OpenDb())
+        {
+            db.Transactions.Add(NewTransaction(Guid.NewGuid(), walletId, TransactionKind.Expense, TransactionStatus.Completed,
+                $"today row {marker}", now));
+            db.Transactions.Add(NewTransaction(Guid.NewGuid(), walletId, TransactionKind.Expense, TransactionStatus.Completed,
+                $"two days ago row {marker}", now.AddDays(-2)));
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/transactions");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var grid = Page.Locator("#transactions-grid");
+        await Expect(grid).ToBeVisibleAsync();
+        await Expect(grid).ToContainTextAsync($"today row {marker}");
+        await Expect(grid).ToContainTextAsync($"two days ago row {marker}");
+
+        await Page.GetByRole(AriaRole.Button, new() { Name = "Today", Exact = true }).ClickAsync();
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        await Expect(grid).ToContainTextAsync($"today row {marker}", new() { Timeout = 10_000 });
+        await Expect(grid).Not.ToContainTextAsync($"two days ago row {marker}");
+    }
+
     [Fact]
     public async Task A_dashboard_recent_row_links_to_the_trace_page()
     {

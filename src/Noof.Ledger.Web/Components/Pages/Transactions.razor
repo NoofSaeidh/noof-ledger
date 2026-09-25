@@ -12,6 +12,8 @@
 @inject ITransactionList TransactionList
 @inject IWalletDirectory WalletDirectory
 @inject IDatabaseGate Gate
+@inject TimeProvider TimeProvider
+@inject TimeZoneInfo CaptureTimeZone
 
 <PageTitle>Transactions</PageTitle>
 
@@ -155,9 +157,13 @@ else
 
     TransactionListFilter ToFilter() => new(filter.From, filter.To, filter.WalletId, filter.Kind, filter.Status, filter.Text);
 
+    // M-4 (Phase 5 final review): OccurredOn is a local date in the capture zone (Capture:TimeZone,
+    // default Europe/Belgrade), not the server's own zone - the server's current-day clock property
+    // used both the wrong zone and bypassed TimeProvider, which DiagnosticsLogs.razor's equivalent
+    // quick ranges already use.
     Task SetQuickRangeAsync(QuickRange range)
     {
-        var today = DateOnly.FromDateTime(DateTime.Today);
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(TimeProvider.GetUtcNow(), CaptureTimeZone).DateTime);
         (filter.From, filter.To) = range switch
         {
             QuickRange.Today => (today, today),
