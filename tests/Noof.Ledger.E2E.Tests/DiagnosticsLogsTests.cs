@@ -99,6 +99,29 @@ public sealed class DiagnosticsLogsTests(CookieModeHostFixture fixture) : PageTe
     }
 
     [Fact]
+    public async Task Logged_at_is_shown_in_local_time_as_an_iso_like_timestamp()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var source = $"diagnostics-time-{Guid.NewGuid():N}";
+        var loggedAt = new DateTimeOffset(2026, 9, 25, 21, 5, 45, TimeSpan.Zero);
+
+        await using (var db = OpenDb())
+        {
+            db.AppLogs.Add(NewRow("timestamp row", loggedAt: loggedAt, source: source));
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + $"/diagnostics/logs?source={source}");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var expected = loggedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+        await Expect(Page.Locator("#logs-grid")).ToContainTextAsync(expected);
+    }
+
+    [Fact]
     public async Task Opening_the_logs_link_from_a_diagnostics_check_seeds_the_source_filter()
     {
         if (fixture.DatabaseUnavailable)

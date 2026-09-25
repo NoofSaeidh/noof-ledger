@@ -98,8 +98,9 @@ else
         </div>
 
         <QuickGrid @key="reloadGeneration" TGridItem="LogRow" id="logs-grid" ItemsProvider="ProvideRowsAsync" Pagination="pagination" Class="noof-grid mb-2">
-            <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="LogRow" TProp="DateTimeOffset" Property="@(row => row.LoggedAt)" Title="Logged at" />
-            <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="LogRow" TProp="LogSeverity" Property="@(row => row.Level)" Title="Level" />
+            @* Local time, the same zone the From/To inputs above are read in. *@
+            <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="LogRow" TProp="DateTimeOffset" Property="@(row => row.LoggedAt.ToLocalTime())" Format="yyyy-MM-dd HH:mm:ss" Title="Logged at" Class="noof-col-nowrap" />
+            <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="LogRow" TProp="LogSeverity" Property="@(row => row.Level)" Title="Level" Class="noof-col-nowrap" />
             <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="LogRow" TProp="string" Property="@(row => row.Source)" Title="Source" />
             <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="LogRow" Title="Message" Context="row">
                 <ChildContent>

@@ -162,6 +162,7 @@
     gap: 0.3rem;
     flex: 1 1 11rem;
     min-width: 9rem;
+    max-width: 18rem;
 }
 
 /* QuickGrid renders a bare <table> with none of MudBlazor's own styling - every page that uses it
@@ -175,6 +176,7 @@
 .noof-grid td {
     padding: 0.65rem 0.9rem;
     text-align: left;
+    vertical-align: middle;
     border-bottom: 1px solid var(--mud-palette-divider);
 }
 
@@ -203,6 +205,9 @@
 .noof-grid .noof-col-amounts {
     white-space: nowrap;
     text-align: right;
+}
+
+.noof-grid td.noof-col-amounts {
     font-family: 'Cascadia Mono', Consolas, 'SF Mono', 'Liberation Mono', monospace;
     font-variant-numeric: tabular-nums;
 }
