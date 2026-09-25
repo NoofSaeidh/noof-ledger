@@ -14,6 +14,7 @@ public class SecretSnapshotRefreshWorkerTests
     {
         var provider = Substitute.For<IServiceProvider>();
         provider.GetService(typeof(ISecretStore)).Returns(store);
+        provider.GetService(typeof(IEnumerable<ISecretProbe>)).Returns(Array.Empty<ISecretProbe>());
         var scope = Substitute.For<IServiceScope>();
         scope.ServiceProvider.Returns(provider);
         var factory = Substitute.For<IServiceScopeFactory>();
@@ -34,7 +35,7 @@ public class SecretSnapshotRefreshWorkerTests
     [Fact]
     public void Values_shorter_than_eight_characters_are_ignored()
     {
-        var snapshot = new SecretSnapshot(ScopeFactoryFor(StoreWith(SecretKeys.TelegramBotToken, "short")), [], "db-password-long-enough");
+        var snapshot = new SecretSnapshot(ScopeFactoryFor(StoreWith(SecretKeys.TelegramBotToken, "short")), "db-password-long-enough");
 
         snapshot.CurrentValues.Should().NotContain("short").And.Contain("db-password-long-enough");
     }
@@ -43,7 +44,7 @@ public class SecretSnapshotRefreshWorkerTests
     public async Task RefreshAsync_picks_up_a_secret_present_at_refresh_time()
     {
         var store = StoreWith(SecretKeys.TelegramBotToken, "a-long-enough-bot-token");
-        var snapshot = new SecretSnapshot(ScopeFactoryFor(store), [], "db-password-long-enough");
+        var snapshot = new SecretSnapshot(ScopeFactoryFor(store), "db-password-long-enough");
 
         await snapshot.RefreshAsync(TestContext.Current.CancellationToken);
 
@@ -54,7 +55,7 @@ public class SecretSnapshotRefreshWorkerTests
     public async Task The_worker_refreshes_once_the_gate_is_ready_then_every_five_minutes()
     {
         var store = StoreWith(SecretKeys.TelegramBotToken, "a-long-enough-bot-token");
-        var snapshot = new SecretSnapshot(ScopeFactoryFor(store), [], "db-password-long-enough");
+        var snapshot = new SecretSnapshot(ScopeFactoryFor(store), "db-password-long-enough");
         var gate = Substitute.For<IDatabaseGate>();
         gate.WaitUntilReadyAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 25, 0, 0, 0, TimeSpan.Zero));

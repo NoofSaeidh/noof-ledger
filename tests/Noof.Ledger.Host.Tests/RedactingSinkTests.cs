@@ -24,10 +24,28 @@ public class RedactingSinkTests
         ((ScalarValue)recording.Received[0].Properties["Token"]).Value.Should().Be("***");
     }
 
-    sealed class RecordingSink : ILogEventSink
+    [Fact]
+    public void Disposing_the_sink_disposes_an_inner_sink_that_is_disposable()
+    {
+        // Serilog's own Logger only flushes and closes a sink it holds directly if that sink is
+        // IDisposable. RedactingSink sits between the outer pipeline and console+file+Postgres, so
+        // without this it silently swallows disposal and the file sink's handle - and the Postgres
+        // sink's batch - never close when the host shuts down. This is what LoggingBootstrapTests'
+        // file-cleanup race actually caught.
+        var recording = new RecordingSink();
+        var sink = new RedactingSink(recording, new SecretRedactor(new FixedSecrets()));
+
+        (sink as IDisposable)?.Dispose();
+
+        recording.Disposed.Should().BeTrue("the inner sink must be disposed when RedactingSink is");
+    }
+
+    sealed class RecordingSink : ILogEventSink, IDisposable
     {
         public List<LogEvent> Received { get; } = [];
+        public bool Disposed { get; private set; }
         public void Emit(LogEvent logEvent) => Received.Add(logEvent);
+        public void Dispose() => Disposed = true;
     }
 
     sealed class FixedSecrets(params string[] values) : ISecretValueSource

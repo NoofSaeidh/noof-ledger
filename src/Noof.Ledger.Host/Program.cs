@@ -6,6 +6,7 @@ using Noof.Ledger.Application;
 using Noof.Ledger.Application.Auth;
 using Noof.Ledger.Host.Auth;
 using Noof.Ledger.Host.Cli;
+using Noof.Ledger.Host.Diagnostics;
 using Noof.Ledger.Host.Endpoints;
 using Noof.Ledger.Host.Logging;
 using Noof.Ledger.Host.Startup;
@@ -64,6 +65,9 @@ try
     builder.Configuration.GetSection("Backup").Bind(backupOptions);
 
     builder.Services.AddNoofPersistence(builder.Configuration, categorizationOptions.MaxAttempts);
+
+    var ledgerConnectionString = LedgerConnectionString.Resolve(builder.Configuration.GetConnectionString("Ledger"));
+    builder.Services.AddNoofHostDiagnostics(ledgerConnectionString);
 
     builder.Services.AddNoofDatabaseGate();
 
