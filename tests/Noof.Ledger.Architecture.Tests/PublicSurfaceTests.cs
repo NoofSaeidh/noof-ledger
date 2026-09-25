@@ -71,6 +71,7 @@ public class PublicSurfaceTests
             "FiscalQrPayload", "FiscalQrDecodeResult", "FiscalFetchFailure", "FiscalFetchResult", "IQrReader",
             "IFiscalQrDecoder", "IFiscalReceiptClient", "IReceiptVision", "ReceiptLineToCategorize",
             "ReceiptCategorizationRequest", "ReceiptLineCategory", "ReceiptCategorization", "IReceiptCategorizer",
+            "IReceiptFetchStatus",
             "CapturedReceipt", "IReceiptStore", "ReceiptSaveResult", "ReceiptView", "ReceiptLineView",
             "LogSeverity", "LogRow", "LogFilter", "LogPage", "LogSortOrder", "ILogQuery", "ILogRetention",
             "TransactionStages", "TransactionLogScope", "TraceEvent", "RevisionView", "TraceLineItem", "TransactionSummary",

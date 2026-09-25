@@ -111,3 +111,12 @@ public interface IReceiptCategorizer
     Task<ReceiptCategorization> CategorizeAsync(
         ReceiptCategorizationRequest request, CancellationToken cancellationToken);
 }
+
+public interface IReceiptFetchStatus
+{
+    DateTimeOffset? LastFailureAt { get; }
+
+    string? LastFailureReason { get; }
+
+    void RecordFailure(DateTimeOffset at, string reason);
+}
