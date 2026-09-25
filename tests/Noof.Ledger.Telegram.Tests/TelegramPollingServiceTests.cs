@@ -2,12 +2,14 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Secrets;
 using Telegram.Bot;
+using Telegram.Bot.Exceptions;
 using Telegram.Bot.Requests;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
@@ -61,14 +63,17 @@ public class TelegramPollingServiceTests
         TelegramClientHandle handle,
         ITelegramUpdateRouter? router = null,
         IChatNotifier? chatNotifier = null,
-        IDatabaseGate? gate = null) =>
+        IDatabaseGate? gate = null,
+        IPollingHeartbeat? heartbeat = null,
+        TimeProvider? timeProvider = null) =>
         new(
             ScopeFactoryFor(secretStore, router, chatNotifier),
             clientFactory,
             handle,
             new ConfigurationBuilder().Build(),
-            TimeProvider.System,
+            timeProvider ?? TimeProvider.System,
             gate ?? ReadyGate(),
+            heartbeat ?? Substitute.For<IPollingHeartbeat>(),
             NullLogger<TelegramPollingService>.Instance);
 
     static IDatabaseGate ReadyGate()
@@ -296,6 +301,7 @@ public class TelegramPollingServiceTests
             new ConfigurationBuilder().Build(),
             TimeProvider.System,
             ReadyGate(),
+            Substitute.For<IPollingHeartbeat>(),
             NullLogger<TelegramPollingService>.Instance);
 
         var result = await service.RunTickAsync(TestContext.Current.CancellationToken);
@@ -360,5 +366,72 @@ public class TelegramPollingServiceTests
         // that the loop starts ticking at all - proven by not throwing/hanging past StopAsync.
 
         await service.StopAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task A_successful_poll_records_a_success_on_the_heartbeat()
+    {
+        var client = Substitute.For<ITelegramBotClient>();
+        client.SendRequest(Arg.Any<GetUpdatesRequest>(), Arg.Any<CancellationToken>()).Returns(Array.Empty<Update>());
+        var clientFactory = Substitute.For<ITelegramBotClientFactory>();
+        clientFactory.Create("tok1").Returns(client);
+        var heartbeat = Substitute.For<IPollingHeartbeat>();
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 25, 3, 0, 0, TimeSpan.Zero));
+
+        await CreateService(WithToken("tok1"), clientFactory, new TelegramClientHandle(), heartbeat: heartbeat, timeProvider: time)
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        heartbeat.Received(1).RecordSuccess(time.GetUtcNow());
+    }
+
+    [Fact]
+    public async Task A_network_failure_records_a_network_classified_heartbeat_failure()
+    {
+        var client = Substitute.For<ITelegramBotClient>();
+        client.SendRequest(Arg.Any<GetUpdatesRequest>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new HttpRequestException("connection refused"));
+        var clientFactory = Substitute.For<ITelegramBotClientFactory>();
+        clientFactory.Create("tok1").Returns(client);
+        var heartbeat = Substitute.For<IPollingHeartbeat>();
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 25, 3, 0, 0, TimeSpan.Zero));
+
+        await CreateService(WithToken("tok1"), clientFactory, new TelegramClientHandle(), heartbeat: heartbeat, timeProvider: time)
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        heartbeat.Received(1).RecordFailure(time.GetUtcNow(), PollFailure.Network);
+    }
+
+    [Fact]
+    public async Task A_401_from_Telegram_records_an_unauthorized_classified_heartbeat_failure()
+    {
+        var client = Substitute.For<ITelegramBotClient>();
+        client.SendRequest(Arg.Any<GetUpdatesRequest>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new ApiRequestException("Unauthorized", 401));
+        var clientFactory = Substitute.For<ITelegramBotClientFactory>();
+        clientFactory.Create("tok1").Returns(client);
+        var heartbeat = Substitute.For<IPollingHeartbeat>();
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 25, 3, 0, 0, TimeSpan.Zero));
+
+        await CreateService(WithToken("tok1"), clientFactory, new TelegramClientHandle(), heartbeat: heartbeat, timeProvider: time)
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        heartbeat.Received(1).RecordFailure(time.GetUtcNow(), PollFailure.Unauthorized);
+    }
+
+    [Fact]
+    public async Task An_unexpected_exception_records_an_other_classified_heartbeat_failure()
+    {
+        var client = Substitute.For<ITelegramBotClient>();
+        client.SendRequest(Arg.Any<GetUpdatesRequest>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("unexpected"));
+        var clientFactory = Substitute.For<ITelegramBotClientFactory>();
+        clientFactory.Create("tok1").Returns(client);
+        var heartbeat = Substitute.For<IPollingHeartbeat>();
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 25, 3, 0, 0, TimeSpan.Zero));
+
+        await CreateService(WithToken("tok1"), clientFactory, new TelegramClientHandle(), heartbeat: heartbeat, timeProvider: time)
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        heartbeat.Received(1).RecordFailure(time.GetUtcNow(), PollFailure.Other);
     }
 }

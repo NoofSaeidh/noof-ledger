@@ -94,6 +94,8 @@ try
 
     builder.Services.AddNoofWorkers(categorizationOptions, backupOptions);
 
+    builder.Services.AddNoofDiagnostics();
+
     var app = builder.Build();
 
     app.UseAuthentication();

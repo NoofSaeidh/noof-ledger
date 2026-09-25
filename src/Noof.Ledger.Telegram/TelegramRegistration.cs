@@ -1,7 +1,9 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.DependencyInjection;
 using Noof.Ledger.Application.Chat;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Transcription;
+using Noof.Ledger.Telegram.Diagnostics;
 
 namespace Noof.Ledger.Telegram;
 
@@ -30,6 +32,8 @@ public static class TelegramRegistration
         services.AddScoped<CorrectionHandler>();
         services.AddScoped<ITelegramUpdateRouter, TelegramUpdateRouter>();
         services.AddHostedService<TelegramPollingService>();
+
+        services.AddHealthChecks().AddCheck<TelegramHealthCheck>(HealthCheckNames.Telegram);
 
         return services;
     }

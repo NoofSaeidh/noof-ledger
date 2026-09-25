@@ -29,6 +29,7 @@ public class TelegramRegistrationTests
             gate.WaitUntilReadyAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
             return gate;
         });
+        services.AddSingleton(_ => Substitute.For<IPollingHeartbeat>());
         services.AddScoped(_ => Substitute.For<ISecretStore>());
         services.AddScoped(_ => Substitute.For<Application.Capture.ICaptureStore>());
         services.AddScoped(_ => Substitute.For<Application.Editing.IRecordEditor>());
@@ -42,7 +43,6 @@ public class TelegramRegistrationTests
         scope.ServiceProvider.GetRequiredService<IChatNotifier>().Should().BeOfType<TelegramChatNotifier>();
         scope.ServiceProvider.GetRequiredService<ITelegramUpdateRouter>().Should().BeOfType<TelegramUpdateRouter>();
         scope.ServiceProvider.GetRequiredService<IVoiceFileSource>().Should().BeOfType<TelegramVoiceFileSource>();
-        provider.GetServices<IHostedService>().Should().ContainSingle()
-            .Which.Should().BeOfType<TelegramPollingService>();
+        provider.GetServices<IHostedService>().OfType<TelegramPollingService>().Should().ContainSingle();
     }
 }
