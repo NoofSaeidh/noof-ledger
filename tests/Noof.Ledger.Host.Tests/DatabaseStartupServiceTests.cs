@@ -98,6 +98,28 @@ public class DatabaseStartupServiceTests
         gate.State.Should().Be(DatabaseState.Waiting);
     }
 
+    [Theory]
+    [InlineData("57P03", "the database system is starting up")]
+    [InlineData("57P01", "terminating connection due to administrator command")]
+    [InlineData("57P02", "the database system is shutting down")]
+    [InlineData("08006", "connection failure")]
+    [InlineData("08001", "unable to connect")]
+    [InlineData("53300", "too many connections")]
+    public async Task A_PostgresException_the_server_itself_raises_while_starting_stopping_or_overloaded_is_classified_as_Waiting(
+        string sqlState, string message)
+    {
+        var probe = Substitute.For<IDatabaseStartupProbe>();
+        probe.OpenConnectionAsync(Arg.Any<CancellationToken>())
+            .ThrowsAsync(new PostgresException(message, "FATAL", "FATAL", sqlState));
+        var gate = new DatabaseGate();
+
+        var result = await CreateService(probe, gate, new FakeTimeProvider())
+            .RunAttemptAsync(TestContext.Current.CancellationToken);
+
+        result.Should().Be(DatabaseStartupResult.WaitingRetry);
+        gate.State.Should().Be(DatabaseState.Waiting);
+    }
+
     [Fact]
     public async Task A_migration_failure_is_classified_as_Failed_not_Waiting()
     {

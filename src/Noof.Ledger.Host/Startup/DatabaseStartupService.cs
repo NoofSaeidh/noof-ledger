@@ -102,14 +102,26 @@ internal sealed partial class DatabaseStartupService(
     // PostgresException (the server answered and rejected something) always carries one. A bare
     // SocketException or TimeoutException can also surface unwrapped, depending on where in the
     // connect sequence Npgsql gives up.
+    //
+    // I-4 (Phase 5 final review): not every PostgresException means "the migration is wrong" -
+    // classes 57 (operator intervention: starting up, shutting down, admin-killed) and 08
+    // (connection exception) and 53300 (too many connections) are the server answering while it is
+    // not yet - or no longer - ready to serve, exactly the transient state this service exists to
+    // wait out. Only an error the server raises once it IS up and serving (a real migration
+    // conflict, a bad SQL statement) belongs in Failed.
     static bool IsConnectionFailure(Exception ex) => ex switch
     {
-        PostgresException => false,
+        PostgresException postgres => IsConnectionLevelSqlState(postgres.SqlState),
         NpgsqlException npgsqlException => npgsqlException.SqlState is null,
         System.Net.Sockets.SocketException => true,
         TimeoutException => true,
         _ => ex.InnerException is { } inner && IsConnectionFailure(inner),
     };
+
+    static bool IsConnectionLevelSqlState(string? sqlState) =>
+        sqlState is not null && (sqlState.StartsWith("57", StringComparison.Ordinal)
+            || sqlState.StartsWith("08", StringComparison.Ordinal)
+            || sqlState == "53300");
 
     [LoggerMessage(EventId = 5101, Level = LogLevel.Warning,
         Message = "Database connection attempt {Attempt} failed; retrying")]
