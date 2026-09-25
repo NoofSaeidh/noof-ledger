@@ -24,7 +24,7 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
 > `%LOCALAPPDATA%\NoofLedger\backups`, the newest 14 kept, every run logged to `backup_runs` — and
 > `ops/restore-check.ps1` proves a dump restores to the same balances, checked so far against a
 > template clone; the one check against the live ledger itself is the operator's to run
-> (`ops/RUNBOOK.md`). **1054 solution tests — 1043 passing, 11 live-only tests skipped, none failing** —
+> (`ops/RUNBOOK.md`). **1121 solution tests — 1110 passing, 11 live-only tests skipped, none failing** —
 > the Playwright browser tests are in the solution now, so `dotnet test --solution` runs them too and
 > needs Chromium present. Live suites stay skipped unless `NOOF_LEDGER_LIVE_ANTHROPIC_KEY` /
 > `NOOF_LEDGER_LIVE_GROQ_KEY` + `NOOF_LEDGER_LIVE_VOICE_FILE` are set; `ops/publish.ps1` produces a
@@ -147,9 +147,10 @@ register it into) — named because they are exceptions, not a licence to invent
   `merchant_aliases_no_truncate` trigger to an existing migration, and `noof_ledger` and the test
   template went on for a phase without the TRUNCATE guard the README promised, while every freshly
   created database had it.
-- **After adding a migration, update `noof_ledger_test_template`** with the command in
-  `ops/RUNBOOK.md` ("After adding a migration"). The E2E suite clones it and fails on a stale one;
-  never run `dotnet ef database update` without `--connection` — it resolves `noof_ledger`.
+- **After adding a migration, run `.\run.ps1 update-test-template`** (or the command it runs, in
+  `ops/RUNBOOK.md` under "After adding a migration"). The E2E suite clones the template and fails on
+  a stale one; never run `dotnet ef database update` bare or with `--connection` — both resolve
+  `noof_ledger` — point it at the template via `NOOF_LEDGER_EF_CONNECTION` instead.
 - **`transaction_revisions` is append-only** (a trigger refuses `UPDATE`/`DELETE`/`TRUNCATE`). Any
   code that changes a record writes a revision inside the same database transaction, through
   `RevisionLog.AppendAsync`.
