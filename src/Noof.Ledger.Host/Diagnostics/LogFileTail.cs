@@ -1,4 +1,5 @@
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Host.Logging;
 
 namespace Noof.Ledger.Host.Diagnostics;
 
@@ -41,11 +42,5 @@ internal sealed class LogFileTail(IConfiguration configuration) : ILogFileTail
             .FirstOrDefault();
     }
 
-    string ResolveDirectory()
-    {
-        var configured = configuration["Logging:File:Directory"];
-        var expanded = Environment.ExpandEnvironmentVariables(
-            configured ?? @"%LOCALAPPDATA%\NoofLedger\logs");
-        return expanded;
-    }
+    string ResolveDirectory() => LoggingSetup.ResolveLogDirectory(configuration);
 }

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Host.Logging;
 using Noof.Ledger.Host.Workers;
 
 namespace Noof.Ledger.Host.Diagnostics;
@@ -16,9 +17,7 @@ internal sealed class DiskHealthCheck(
         if (gate.State is not DatabaseState.Ready)
             return Task.FromResult(HealthCheckResult.Degraded("Waiting for the database"));
 
-        var logDirectory = Environment.ExpandEnvironmentVariables(
-            configuration["Logging:File:Directory"]
-            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NoofLedger", "logs"));
+        var logDirectory = LoggingSetup.ResolveLogDirectory(configuration);
 
         var logFree = SafeFreeBytes(logDirectory);
         var backupFree = SafeFreeBytes(backupOptions.BackupDirectory);
