@@ -3,8 +3,8 @@ using AwesomeAssertions;
 namespace Noof.Ledger.Architecture.Tests;
 
 // Global constraint (Phase 5 SDD): "Noof.Ledger.Web has no EF, no HttpClient, no System.IO file
-// access - it reads everything through Application interfaces." ILogFileTail (Application) is the
-// seam /diagnostics/logs uses for the file-tail fallback; nothing in Web may read a file itself.
+// access - it reads everything through Application interfaces." Nothing in Web may read a file
+// itself.
 public class WebFileSystemBoundaryTests
 {
     static IEnumerable<FileInfo> WebSourceFiles() =>
@@ -22,8 +22,8 @@ public class WebFileSystemBoundaryTests
             .ToList();
 
         offenders.Should().BeEmpty(
-            "Web reads logs through ILogFileTail (Application), never a file directly - a File.* or " +
-            "Directory.* call here would bypass the seam the file-tail fallback exists to define");
+            "Web reads through Application interfaces, never a file directly - a File.* or " +
+            "Directory.* call here would bypass that boundary");
     }
 
     [Fact]

@@ -39,9 +39,9 @@ public class DiagnosticsPageSourceTests
         source.Should().Contain("[Authorize]");
         source.Should().Contain("InteractiveServerRenderMode(prerender: false)");
         source.Should().Contain("ILogQuery");
-        source.Should().Contain("ILogFileTail");
+        source.Should().Contain("IDatabaseGate");
+        source.Should().Contain("DatabaseGateBanner");
         source.Should().Contain("id=\"logs-grid\"");
-        source.Should().Contain("id=\"logs-file-tail\"");
         source.Should().Contain("id=\"logs-filter-from\"",
             "LogFilter carries From/To (binding spec §4) - the UI must expose both, not just MinLevel/Text/Source/TransactionId");
         source.Should().Contain("id=\"logs-filter-to\"");

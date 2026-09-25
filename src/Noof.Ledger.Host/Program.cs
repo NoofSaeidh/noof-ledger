@@ -122,7 +122,6 @@ try
     builder.Services.AddNoofAi(builder.Configuration);
 
     builder.Services.AddNoofWorkers(categorizationOptions, backupOptions);
-    builder.Services.AddNoofDiagnosticsHost();
 
     builder.Services.AddNoofDiagnostics();
 

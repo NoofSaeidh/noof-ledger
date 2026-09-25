@@ -2,10 +2,10 @@ using AwesomeAssertions;
 
 namespace Noof.Ledger.Architecture.Tests;
 
-// M-4 (Phase 5 final review): the log directory default was spelled three times
-// (LoggingSetup.cs, LogFileTail.cs, DiskHealthCheck.cs - the last with a different Path.Combine
-// spelling), so a future rename of the key or default could drift silently. Only LoggingSetup may
-// spell the default; everything else resolves through LoggingSetup.ResolveLogDirectory.
+// M-4 (Phase 5 final review): the log directory default was spelled more than once
+// (LoggingSetup.cs, DiskHealthCheck.cs - the latter with a different Path.Combine spelling), so a
+// future rename of the key or default could drift silently. Only LoggingSetup may spell the
+// default; everything else resolves through LoggingSetup.ResolveLogDirectory.
 public class LogDirectoryDefaultTests
 {
     [Fact]
