@@ -58,14 +58,17 @@ sealed partial class HostProcess : IAsyncDisposable
     // SignInAsync could hit the banner instead of the form under load. UnreachableDatabaseHostFixture
     // is the one caller that passes false: its database never becomes reachable, so waiting for the
     // banner to disappear would just run out the clock.
+    // workingDirectory defaults to publishDirectory - a real deployment always launches from its
+    // own install directory. Task 11's ContentRootIndependenceTests is the one caller that passes
+    // something else, to prove the content root no longer depends on it.
     public async Task StartAsync(
         string publishDirectory, IReadOnlyDictionary<string, string> environment, CancellationToken cancellationToken,
-        bool waitForDatabaseReady = true)
+        bool waitForDatabaseReady = true, string? workingDirectory = null)
     {
         this.publishDirectory = publishDirectory;
         var (mergedEnvironment, createdLogDirectory) = WithTempLogDirectory(environment);
         logDirectory = createdLogDirectory;
-        process = Launch(publishDirectory, mergedEnvironment);
+        process = Launch(publishDirectory, mergedEnvironment, workingDirectory ?? publishDirectory);
         process.OutputDataReceived += CaptureLine;
         process.ErrorDataReceived += CaptureLine;
 
@@ -173,21 +176,18 @@ sealed partial class HostProcess : IAsyncDisposable
             capturedOutputLines.Add(e.Data);
     }
 
-    static Process Launch(string publishDirectory, IReadOnlyDictionary<string, string> environment)
+    static Process Launch(string publishDirectory, IReadOnlyDictionary<string, string> environment, string workingDirectory)
     {
         var dll = Path.Combine(publishDirectory, "Noof.Ledger.Host.dll");
 
         var start = new ProcessStartInfo("dotnet")
         {
             ArgumentList = { dll, "--urls", "http://127.0.0.1:0" },
-            // WebApplication.CreateBuilder derives ContentRootPath from the process's current
-            // directory, not from the DLL's location. Leaving this unset made every static asset
-            // resolve against the test runner's own working directory instead of the published
-            // output - MapStaticAssets then answered every GET with 200 and an empty body (HEAD
-            // stayed correct, since it only echoes the manifest's headers and never opens the file).
-            // A real deployment always launches with its working directory set to its install
-            // directory, so this also makes the fixture match production.
-            WorkingDirectory = publishDirectory,
+            // Program.cs now sets ContentRootPath from AppContext.BaseDirectory (Task 11), not the
+            // process's current directory, so this fixture's default (publishDirectory, matching a
+            // real deployment) and ContentRootIndependenceTests's deliberately different directory
+            // must both resolve static assets correctly.
+            WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
