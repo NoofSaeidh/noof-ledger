@@ -16,4 +16,7 @@ internal static partial class TelegramUpdateRouterLog
     [LoggerMessage(EventId = TransactionStages.StageFailedEventId, EventName = TransactionStages.StageFailed, Level = LogLevel.Error,
         Message = "{Stage} at stage {FailedStage}")]
     public static partial void LogStageFailed(this ILogger logger, string stage, string failedStage, Exception exception);
+
+    [LoggerMessage(EventId = 6001, Level = LogLevel.Debug, Message = "Rejected a /health command from a non-owner chat")]
+    public static partial void LogHealthCommandRejected(this ILogger logger);
 }
