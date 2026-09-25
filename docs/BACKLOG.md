@@ -883,3 +883,16 @@ the phase's closing fix pass, never reproduced on an immediate retry, and not co
 fixed in this phase (a clean 292/292 pass bracketed each sighting). The failing test's own name was not
 captured — the run's tail buffer held only request-log noise by the time it was checked. Worth
 instrumenting the next time it is seen live rather than chasing from this description.
+
+### Test-infrastructure flakes seen at the Phase 5 close
+
+- **E2E fixture teardown timed out once** — `CookieModeHostFixture.DropCloneAsync` hit an Npgsql read
+  timeout in `DisposeAsync` during a full-solution run (1 of ~4 full runs); the rerun of all E2E tests
+  was green. Likely `DROP DATABASE ... WITH (FORCE)` waiting on the shared server under load. A longer
+  command timeout on the admin connection is the cheap fix if it recurs.
+- **`SecretRedactionSentinelTests` hit an `IOException` once** on a rolling log file held by another
+  Host test host in the same run; passed alone. Each host has its own temp log directory, so the
+  collision is inside one directory — worth a look if it recurs.
+- **Configuration-added Serilog sinks did not reproduce through `WebApplicationFactory`** while they did
+  in an isolated logger (follow-up review I-1). `ReadFrom.Configuration` is gone, so the risk is closed,
+  but the reason the hosted repro stayed silent was never found.
