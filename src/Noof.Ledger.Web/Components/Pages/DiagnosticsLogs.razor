@@ -45,22 +45,24 @@ else
                     }
                 </select>
             </MudItem>
+            @* Plain native inputs, not MudTextField: a QuickGrid refresh needs to fire on every
+               keystroke, and a native input's @bind:event="oninput" does that directly, without
+               depending on MudTextField's own (JS-interop-driven) Immediate/debounce plumbing. *@
             <MudItem xs="12" md="3">
-                <MudTextField T="string" InputId="logs-filter-text" @bind-Value="filter.Text" @bind-Value:after="ReloadAsync"
-                              Variant="Variant.Outlined" Margin="Margin.Dense" Label="Text" />
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Text</MudText>
+                <input id="logs-filter-text" class="noof-input" @bind="filter.Text" @bind:event="oninput" @bind:after="ReloadAsync" />
             </MudItem>
             <MudItem xs="12" md="3">
-                <MudTextField T="string" InputId="logs-filter-source" @bind-Value="filter.Source" @bind-Value:after="ReloadAsync"
-                              Variant="Variant.Outlined" Margin="Margin.Dense" Label="Source" />
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Source</MudText>
+                <input id="logs-filter-source" class="noof-input" @bind="filter.Source" @bind:event="oninput" @bind:after="ReloadAsync" />
             </MudItem>
             <MudItem xs="12" md="4">
-                <MudTextField T="string" InputId="logs-filter-transaction-id" @bind-Value="transactionIdText"
-                              @bind-Value:after="ReloadAsync" Variant="Variant.Outlined" Margin="Margin.Dense"
-                              Label="Transaction id" />
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Transaction id</MudText>
+                <input id="logs-filter-transaction-id" class="noof-input" @bind="transactionIdText" @bind:event="oninput" @bind:after="ReloadAsync" />
             </MudItem>
         </MudGrid>
 
-        <QuickGrid TGridItem="LogRow" id="logs-grid" ItemsProvider="ProvideRowsAsync" Pagination="pagination" Class="mb-2">
+        <QuickGrid @key="reloadGeneration" TGridItem="LogRow" id="logs-grid" ItemsProvider="ProvideRowsAsync" Pagination="pagination" Class="mb-2">
             <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="LogRow" TProp="DateTimeOffset" Property="@(row => row.LoggedAt)" Title="Logged at" />
             <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="LogRow" TProp="LogSeverity" Property="@(row => row.Level)" Title="Level" />
             <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="LogRow" TProp="string" Property="@(row => row.Source)" Title="Source" />
@@ -107,6 +109,7 @@ else
 
     readonly LogFilterEdit filter = new();
     readonly PaginationState pagination = new() { ItemsPerPage = 100 };
+    int reloadGeneration;
     string? textFilter;
     string? transactionIdText;
     bool fileTailMode;
@@ -140,6 +143,14 @@ else
     Task ReloadAsync()
     {
         filter.TransactionId = Guid.TryParse(transactionIdText, out var parsed) ? parsed : null;
+
+        // Incrementing @key forces Blazor to tear down the old QuickGrid instance and mount a brand
+        // new one, rather than asking the existing instance to refresh in place. A filter change and
+        // the grid's own still in-flight initial load would otherwise be two concurrent
+        // ItemsProvider calls whose results can arrive out of order and leave a stale (unfiltered)
+        // page visible - discarding the whole component sidesteps that race instead of coordinating
+        // around it.
+        reloadGeneration++;
         return pagination.SetCurrentPageIndexAsync(0);
     }
 
