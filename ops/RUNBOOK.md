@@ -292,8 +292,8 @@ detail — prerequisites included. `Get-Help .\run.ps1 -Full` works too. One lin
 
 - `start [-Dev]` — the main way to run it: `dotnet run` in Production, same behaviour as the
   published exe; `-Dev` for the Development launch profile in an IDE.
-- `publish [-Output <dir>]` — build, test, publish (`ops/publish.ps1`); refuses to publish on a
-  failed or empty test run.
+- `publish [-Output <dir>]` — build, test, publish (`ops/publish.ps1`), under the shared suite lock;
+  refuses to publish on a failed or empty test run.
 - `start-published [-Path <dir>]` — run a published `Noof.Ledger.Host.exe`, from anywhere.
 - `set-password <username>` — create or reset a login; the only way a user is ever created.
 - `test [fast|db|e2e|all] [-Filter <class>]` — fast needs no database (it excludes the Host.Tests

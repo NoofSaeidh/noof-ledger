@@ -67,6 +67,25 @@ public class RunScriptTests
             output.Should().Contain(name);
     }
 
+    // M-5 (Phase 5 final review): ops/publish.ps1 runs `dotnet test --solution` (Persistence, E2E and
+    // all), the identical run `test all` takes the suite lock for - but `publish` itself did not, so
+    // a parallel worktree's filtered run could collide with it. Source-text, not a real invocation:
+    // running `.\run.ps1 publish` for real means a full solution test pass, and the operator's own
+    // rule is that only runs once, at the end of a phase - not once per finding under review here.
+    [Fact]
+    public void Publish_takes_the_suite_lock_around_its_test_run()
+    {
+        var source = File.ReadAllText(Path.Combine(RepoRoot.Find().FullName, "run.ps1"));
+        var start = source.IndexOf("'publish' {", StringComparison.Ordinal);
+        start.Should().BeGreaterThan(0, "run.ps1 must still declare a 'publish' command block");
+        var end = source.IndexOf("'start-published' {", StringComparison.Ordinal);
+        end.Should().BeGreaterThan(start, "'start-published' must still immediately follow 'publish' in the command table");
+        var block = source[start..end];
+
+        block.Should().Contain("Enter-SuiteLock");
+        block.Should().Contain("Exit-SuiteLock");
+    }
+
     // M-7 (Phase 5 final review): Invoke-Checked used to swallow the child's own exit code and
     // always exit run.ps1 with 1. A filter matching zero tests makes the MTP test host exit 8 (not
     // 1) - safe to run for real since Domain.Tests needs no database and this fails on the very

@@ -256,9 +256,9 @@ banner until it is); a .NET 10 SDK.
         Detail  = @'
 publish [-Output <dir>]
 
-Runs ops\publish.ps1: builds the solution in Release, runs the full test suite, and refuses to
-publish if a single test failed or if no test actually ran. Publishes to -Output (default: .\publish
-under the repo root).
+Runs ops\publish.ps1 under the shared suite lock ($env:TEMP\noof-suite.lock): builds the solution in
+Release, runs the full test suite, and refuses to publish if a single test failed or if no test
+actually ran. Publishes to -Output (default: .\publish under the repo root).
 
 Prerequisites: PostgreSQL reachable and the test template up to date - the suite this runs includes
 the database and E2E projects.
@@ -473,7 +473,12 @@ switch ($CommandName) {
 
     'publish' {
         $output = Get-ArgValue $Rest '-Output' (Join-Path $Root 'publish')
-        Invoke-Checked { & (Join-Path $Root 'ops\publish.ps1') -Output $output }
+        # M-5 (Phase 5 final review): ops/publish.ps1 runs the identical full-solution test pass
+        # `test all` takes the suite lock for - without it, a parallel worktree's filtered db/e2e
+        # run could collide with this one and publish would be refused for a spurious failure.
+        $lock = Enter-SuiteLock
+        try { Invoke-Checked { & (Join-Path $Root 'ops\publish.ps1') -Output $output } }
+        finally { Exit-SuiteLock $lock }
     }
 
     'start-published' {
