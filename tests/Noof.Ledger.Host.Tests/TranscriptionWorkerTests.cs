@@ -206,6 +206,21 @@ public class TranscriptionWorkerTests
     }
 
     [Fact]
+    public async Task A_missing_transaction_logs_StageFailed_for_Transcribed()
+    {
+        var harness = Setup(CaptureJob());
+        harness.Store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns((CategorizationSubject?)null);
+        var logger = new CapturingLogger<TranscriptionWorker>();
+        var worker = CreateWorker(harness.ScopeFactory(), logger: logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        var entry = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.StageFailedEventId).Subject;
+        entry.Properties["FailedStage"].Should().Be(TransactionStages.Transcribed);
+        entry.Scope![TransactionStages.TransactionIdProperty].Should().Be(TransactionId);
+    }
+
+    [Fact]
     public async Task A_spoken_correction_becomes_a_correction_with_the_transcript_as_its_instruction()
     {
         var harness = Setup(CorrectionJob(), transcript: "нет, полторы тысячи", record: RecordedCoffee());

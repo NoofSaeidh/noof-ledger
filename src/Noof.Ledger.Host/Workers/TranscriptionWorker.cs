@@ -86,6 +86,8 @@ internal sealed class TranscriptionWorker(
             record = await store.GetSubjectAsync(job.TransactionId, cancellationToken);
             if (record is null)
             {
+                logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Transcribed,
+                    new InvalidOperationException("the transaction this job points at no longer exists"));
                 await jobQueue.FailAsync(job.Id, workerId, "the transaction this job points at no longer exists", cancellationToken);
                 return;
             }
