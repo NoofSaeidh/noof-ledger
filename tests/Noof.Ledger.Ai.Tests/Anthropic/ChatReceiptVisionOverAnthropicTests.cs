@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AwesomeAssertions;
 using Noof.Ledger.Ai.Anthropic;
 using Noof.Ledger.Application.Categorization;
@@ -49,6 +50,27 @@ public class ChatReceiptVisionOverAnthropicTests
         var currencyEnum = tools[0].GetProperty("input_schema").GetProperty("properties")
             .GetProperty("currency").GetProperty("enum").EnumerateArray().Select(e => e.GetString());
         currencyEnum.Should().BeEquivalentTo(["EUR", "RSD", "USD", "RUB", "KZT"]);
+    }
+
+    [Fact]
+    public async Task Payment_method_reaches_the_wire_as_an_anyOf_never_an_enum_beside_a_type_array()
+    {
+        var (vision, handler) = Build();
+        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.ReadReceiptJsonAnswer);
+
+        await vision.ReadAsync(TinyImage, "image/jpeg", qrTotal: null, TestContext.Current.CancellationToken);
+
+        var sent = JsonDocument.Parse(handler.Requests[0].Body).RootElement;
+        var paymentMethod = sent.GetProperty("tools")[0].GetProperty("input_schema")
+            .GetProperty("properties").GetProperty("payment_method");
+
+        paymentMethod.TryGetProperty("type", out _).Should().BeFalse(
+            "the nullable enum must reach the wire as an anyOf, never an enum beside a type array");
+        JsonNode.DeepEquals(
+                JsonNode.Parse(paymentMethod.GetProperty("anyOf").GetRawText()),
+                JsonNode.Parse(
+                    """[{ "type": "string", "enum": ["card", "cash", "transfer", "voucher", "other", "mixed"] }, { "type": "null" }]"""))
+            .Should().BeTrue();
     }
 
     [Fact]

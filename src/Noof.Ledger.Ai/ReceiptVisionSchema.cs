@@ -57,12 +57,9 @@ internal static class ReceiptVisionSchema
                     ["description"] = "The receipt's currency. Assume RSD unless the receipt clearly states another.",
                 },
                 ["total"] = new JsonObject { ["type"] = "number", ["description"] = "The receipt's total, as printed." },
-                ["payment_method"] = new JsonObject
-                {
-                    ["type"] = new JsonArray("string", "null"),
-                    ["enum"] = new JsonArray("card", "cash", "transfer", "voucher", "other", "mixed", null),
-                    ["description"] = "How the receipt says it was paid, or null when not stated.",
-                },
+                ["payment_method"] = NullableEnum.String(
+                    ["card", "cash", "transfer", "voucher", "other", "mixed"],
+                    "How the receipt says it was paid, or null when not stated."),
                 ["kind"] = new JsonObject
                 {
                     ["type"] = "string",

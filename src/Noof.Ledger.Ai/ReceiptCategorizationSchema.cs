@@ -6,6 +6,8 @@ namespace Noof.Ledger.Ai;
 
 internal static class ReceiptCategorizationSchema
 {
+    const string WalletIdDescription = "The id of the wallet the caption names, or null when it names none.";
+
     public static JsonElement BuildCategorizeReceipt(IReadOnlyList<CategoryOption> categories, IReadOnlyList<WalletOption> wallets)
     {
         var line = new JsonObject
@@ -45,12 +47,9 @@ internal static class ReceiptCategorizationSchema
                         "The canonical shop name to store, when the merchant is not already known; "
                         + "null when it is already known.",
                 },
-                ["wallet_id"] = new JsonObject
-                {
-                    ["type"] = new JsonArray("string", "null"),
-                    ["enum"] = new JsonArray([.. wallets.Select(wallet => (JsonNode)wallet.Id.ToString()), null]),
-                    ["description"] = "The id of the wallet the caption names, or null when it names none.",
-                },
+                ["wallet_id"] = wallets.Count > 0
+                    ? NullableEnum.String(wallets.Select(wallet => wallet.Id.ToString()), WalletIdDescription)
+                    : new JsonObject { ["type"] = "null", ["description"] = WalletIdDescription },
             },
         };
 

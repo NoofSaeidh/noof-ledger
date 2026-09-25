@@ -53,7 +53,7 @@ internal static class CategorizationSchema
             }),
             // Strict mode puts every declared property in "required" (below), so optionality is a
             // nullable type instead of omission (operator, 2026-09-23).
-            new("currency", NullableStringEnum(
+            new("currency", NullableEnum.String(
                 CurrencyCode.Supported.Select(code => code.Value),
                 "The currency the message states, or null when it states none.")),
             new("category_slug", new JsonObject
@@ -65,7 +65,7 @@ internal static class CategorizationSchema
 
         if (merchantHints.Count > 0)
         {
-            properties.Add(new("known_merchant_id", NullableStringEnum(
+            properties.Add(new("known_merchant_id", NullableEnum.String(
                 merchantHints.Select(m => m.Id.ToString()),
                 "One of the listed known merchants' ids, or null when the merchant is not one of them.")));
         }
@@ -121,14 +121,14 @@ internal static class CategorizationSchema
                 // is on the no-hints path): wallet_id is a root property that always exists on this
                 // tool, so with nothing to choose from it narrows to a value that can only be null.
                 ["wallet_id"] = wallets.Count > 0
-                    ? NullableStringEnum(wallets.Select(w => w.Id.ToString()), WalletIdDescription)
+                    ? NullableEnum.String(wallets.Select(w => w.Id.ToString()), WalletIdDescription)
                     : new JsonObject { ["type"] = "null", ["description"] = WalletIdDescription },
                 ["balance_amount"] = new JsonObject
                 {
                     ["type"] = new JsonArray("number", "null"),
                     ["description"] = BalanceAmountDescription,
                 },
-                ["balance_currency"] = NullableStringEnum(
+                ["balance_currency"] = NullableEnum.String(
                     CurrencyCode.Supported.Select(code => code.Value), BalanceCurrencyDescription),
             },
         };
@@ -148,17 +148,6 @@ internal static class CategorizationSchema
 
         return ToElement(root);
     }
-
-    // An anyOf, not "type": ["string", "null"] beside the enum: the API checks every enum value
-    // against the type array as a whole and rejects the tool with a 400 ("Enum value 'EUR' does
-    // not match declared type '['string', 'null']'"), which failed every capture after Phase 4.
-    static JsonObject NullableStringEnum(IEnumerable<string> values, string description) => new()
-    {
-        ["anyOf"] = new JsonArray(
-            new JsonObject { ["type"] = "string", ["enum"] = new JsonArray([.. values.Select(value => (JsonNode)value)]) },
-            new JsonObject { ["type"] = "null" }),
-        ["description"] = description,
-    };
 
     static JsonElement ToElement(JsonObject root)
     {

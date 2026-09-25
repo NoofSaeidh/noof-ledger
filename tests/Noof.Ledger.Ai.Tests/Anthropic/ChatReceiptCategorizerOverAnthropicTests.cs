@@ -104,8 +104,13 @@ public class ChatReceiptCategorizerOverAnthropicTests
         result.WalletId.Should().Be(walletId);
 
         var sent = JsonDocument.Parse(handler.Requests[0].Body).RootElement;
-        var walletIdEnum = sent.GetProperty("tools")[0].GetProperty("input_schema").GetProperty("properties")
-            .GetProperty("wallet_id").GetProperty("enum").EnumerateArray().Select(e => e.GetString());
-        walletIdEnum.Should().BeEquivalentTo([walletId.ToString(), null]);
+        var walletIdSchema = sent.GetProperty("tools")[0].GetProperty("input_schema").GetProperty("properties")
+            .GetProperty("wallet_id");
+        walletIdSchema.TryGetProperty("type", out _).Should().BeFalse(
+            "a nullable enum must reach the wire as an anyOf, never an enum beside a type array");
+        var branches = walletIdSchema.GetProperty("anyOf").EnumerateArray().ToList();
+        branches[0].GetProperty("enum").EnumerateArray().Select(e => e.GetString())
+            .Should().BeEquivalentTo([walletId.ToString()]);
+        branches[1].GetProperty("type").GetString().Should().Be("null");
     }
 }
