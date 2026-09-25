@@ -3,6 +3,7 @@ using Noof.Ledger.Host.Diagnostics;
 using NpgsqlTypes;
 using Serilog;
 using Serilog.Debugging;
+using Serilog.Events;
 using Serilog.Sinks.PostgreSQL;
 using Serilog.Sinks.PostgreSQL.ColumnWriters;
 
@@ -103,9 +104,36 @@ internal static class LoggingSetup
 
         var builtDestinations = destinations.CreateLogger();
 
+        ApplyMinimumLevel(configuration, hostConfiguration);
+
         configuration
-            .ReadFrom.Configuration(hostConfiguration)
             .Enrich.FromLogContext()
             .WriteTo.Sink(new RedactingSink(builtDestinations, redactor));
     }
+
+    // I-1 (Phase 5 final review): ReadFrom.Configuration handed the whole "Serilog" section to
+    // Serilog.Settings.Configuration, which honours WriteTo/AuditTo/Enrich/Filter/Destructure too -
+    // not just MinimumLevel. A stray Serilog:WriteTo:* setting (an operator's leftover environment
+    // variable, or one supplied deliberately) then attached a sink directly to the outer
+    // LoggerConfiguration, as a sibling of WriteTo.Sink(RedactingSink) rather than a child of it, so
+    // it received every LogEvent unredacted. Reading exactly the two keys the brief names removes
+    // that whole class of sink injection - only MinimumLevel:Default and MinimumLevel:Override:* are
+    // ever read from configuration; every sink stays hard-coded in this file.
+    static void ApplyMinimumLevel(LoggerConfiguration configuration, IConfiguration hostConfiguration)
+    {
+        var levels = hostConfiguration.GetSection("Serilog:MinimumLevel");
+
+        var defaultLevel = levels["Default"] is { } defaultValue
+            ? ParseLevel(defaultValue, "Serilog:MinimumLevel:Default")
+            : LogEventLevel.Information;
+        configuration.MinimumLevel.Is(defaultLevel);
+
+        foreach (var over in levels.GetSection("Override").GetChildren())
+            configuration.MinimumLevel.Override(over.Key, ParseLevel(over.Value!, $"Serilog:MinimumLevel:Override:{over.Key}"));
+    }
+
+    static LogEventLevel ParseLevel(string value, string key) =>
+        Enum.TryParse<LogEventLevel>(value, ignoreCase: true, out var level)
+            ? level
+            : throw new InvalidOperationException($"{key} '{value}' is not a valid Serilog log level.");
 }

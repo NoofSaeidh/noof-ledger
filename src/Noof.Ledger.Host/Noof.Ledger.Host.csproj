@@ -15,7 +15,6 @@
     <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="Serilog.Sinks.File" />
     <PackageReference Include="Serilog.Sinks.Postgresql.Alternative" />
-    <PackageReference Include="Serilog.Settings.Configuration" />
   </ItemGroup>
 
   <PropertyGroup>

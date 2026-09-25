@@ -1,7 +1,10 @@
 using AwesomeAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Noof.Ledger.Host.Logging;
+using Serilog;
 
 namespace Noof.Ledger.Host.Tests;
 
@@ -45,6 +48,138 @@ public class LogLevelConfigurationTests
         {
             if (logDirectory is not null)
                 await DeleteWithRetryAsync(new DirectoryInfo(logDirectory));
+        }
+    }
+
+    // I-1 (Phase 5 final review): these two call LoggingSetup.Configure directly, not through a
+    // WebApplicationFactory host - Program.cs's top-level catch swallows a startup exception into
+    // Environment.ExitCode, which a WebApplicationFactory can only observe as "the entry point
+    // exited without ever building an IHost", losing the actual message these tests need to assert.
+    [Fact]
+    public void A_configured_WriteTo_sink_is_never_created_while_MinimumLevel_settings_still_apply()
+    {
+        var logDirectory = Directory.CreateTempSubdirectory("noof-logging-setup-test-").FullName;
+        var injectedSinkPath = Path.Combine(Path.GetTempPath(), $"noof-injected-sink-{Guid.NewGuid():N}.log");
+
+        try
+        {
+            var hostConfiguration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Serilog:WriteTo:0:Name"] = "File",
+                    ["Serilog:WriteTo:0:Args:path"] = injectedSinkPath,
+                    ["Serilog:MinimumLevel:Override:Noof.Ledger.Host.Tests"] = "Warning",
+                })
+                .Build();
+
+            var suppressedMarker = $"suppressed-{Guid.NewGuid():N}";
+            var passingMarker = $"passing-{Guid.NewGuid():N}";
+
+            var configuration = new LoggerConfiguration();
+            LoggingSetup.Configure(configuration, hostConfiguration, logDirectory, UnreachableConnectionString, BuildFakeServices());
+            using (var logger = configuration.CreateLogger())
+            {
+                var probe = logger.ForContext(Serilog.Core.Constants.SourceContextPropertyName, "Noof.Ledger.Host.Tests.Probe");
+                probe.Information("{Marker}", suppressedMarker);
+                probe.Warning("{Marker}", passingMarker);
+            }
+
+            File.Exists(injectedSinkPath).Should().BeFalse(
+                "Serilog:WriteTo entries in configuration must never add a sink - only MinimumLevel is read from configuration");
+
+            var text = ReadAllTextWithRetry(NewestLogFile(logDirectory));
+            text.Should().NotContain(suppressedMarker, "the configured Override still applies without ReadFrom.Configuration");
+            text.Should().Contain(passingMarker, "a Warning event still clears the overridden floor");
+        }
+        finally
+        {
+            DeleteWithRetry(new DirectoryInfo(logDirectory));
+            if (File.Exists(injectedSinkPath))
+                File.Delete(injectedSinkPath);
+        }
+    }
+
+    [Fact]
+    public void An_invalid_MinimumLevel_value_fails_with_a_clear_error()
+    {
+        var logDirectory = Directory.CreateTempSubdirectory("noof-logging-setup-test-").FullName;
+        try
+        {
+            var hostConfiguration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Serilog:MinimumLevel:Default"] = "NotALevel",
+                })
+                .Build();
+
+            var act = () => LoggingSetup.Configure(
+                new LoggerConfiguration(), hostConfiguration, logDirectory, UnreachableConnectionString, BuildFakeServices());
+
+            act.Should().Throw<InvalidOperationException>().WithMessage("*Serilog:MinimumLevel:Default*NotALevel*");
+        }
+        finally
+        {
+            DeleteWithRetry(new DirectoryInfo(logDirectory));
+        }
+    }
+
+    static IServiceProvider BuildFakeServices()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<Noof.Ledger.Application.Diagnostics.IDatabaseGate>(new AlwaysReadyGate());
+        services.AddSingleton<Noof.Ledger.Application.Diagnostics.ILogSinkStatus>(new NoopSinkStatus());
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<Noof.Ledger.Host.Diagnostics.ISecretValueSource>(new NoSecrets());
+        services.AddSingleton<Noof.Ledger.Host.Diagnostics.SecretRedactor>();
+        return services.BuildServiceProvider();
+    }
+
+    sealed class AlwaysReadyGate : Noof.Ledger.Application.Diagnostics.IDatabaseGate
+    {
+        public Noof.Ledger.Application.Diagnostics.DatabaseState State => Noof.Ledger.Application.Diagnostics.DatabaseState.Ready;
+        public string? Detail => null;
+        public Task WaitUntilReadyAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    sealed class NoopSinkStatus : Noof.Ledger.Application.Diagnostics.ILogSinkStatus
+    {
+        public DateTimeOffset? LastFailureAt { get; private set; }
+        public void RecordFailure(DateTimeOffset at) => LastFailureAt = at;
+    }
+
+    sealed class NoSecrets : Noof.Ledger.Host.Diagnostics.ISecretValueSource
+    {
+        public IReadOnlyCollection<string> CurrentValues => [];
+    }
+
+    static string ReadAllTextWithRetry(string path)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return File.ReadAllText(path);
+            }
+            catch (IOException) when (attempt < 10)
+            {
+                Thread.Sleep(50);
+            }
+        }
+    }
+
+    static void DeleteWithRetry(DirectoryInfo directory)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                directory.Delete(recursive: true);
+                return;
+            }
+            catch (IOException) when (attempt < 10)
+            {
+                Thread.Sleep(50);
+            }
         }
     }
 
