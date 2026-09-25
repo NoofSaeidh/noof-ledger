@@ -1,8 +1,10 @@
 @page "/transactions/{Id:guid}/trace"
+@using System.Globalization
 @using Noof.Ledger.Application.Diagnostics
 @attribute [Authorize]
 @inject ITransactionTrace TransactionTraceReader
 @inject IDatabaseGate Gate
+@inject TimeZoneInfo CaptureTimeZone
 
 <PageTitle>Transaction trace</PageTitle>
 
@@ -24,6 +26,54 @@ else if (!trace.Exists)
 }
 else
 {
+    @if (trace.Summary is { } summary)
+    {
+        <MudSimpleTable id="trace-summary" Dense="true" Elevation="0" Class="noof-trace-summary-table mb-6">
+            <tbody>
+                <tr>
+                    <td>Message</td>
+                    <td>@(string.IsNullOrWhiteSpace(summary.RawText) ? "—" : summary.RawText)</td>
+                </tr>
+                <tr>
+                    <td>Capture</td>
+                    <td>@summary.CaptureKind</td>
+                </tr>
+                <tr>
+                    <td>Received</td>
+                    <td>@FormatReceived(summary.ReceivedAt)</td>
+                </tr>
+                <tr>
+                    <td>Status</td>
+                    <td>@summary.Status</td>
+                </tr>
+                <tr>
+                    <td>Kind</td>
+                    <td>@summary.Kind</td>
+                </tr>
+                <tr>
+                    <td>Wallet</td>
+                    <td>@(string.IsNullOrEmpty(summary.WalletName) ? "—" : summary.WalletName)</td>
+                </tr>
+                <tr>
+                    <td>Occurred on</td>
+                    <td>@summary.OccurredOn.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)</td>
+                </tr>
+                @if (summary.LineItems.Count > 0)
+                {
+                    <tr>
+                        <td>Line items</td>
+                        <td>
+                            @foreach (var item in summary.LineItems)
+                            {
+                                <div>@item.Description — @item.Amount.Amount.ToString("N2", CultureInfo.InvariantCulture) @item.Amount.Currency @(item.CategoryName is not null ? $"({item.CategoryName})" : "")</div>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    }
+
     <div id="trace-stages" class="mb-6">
         @foreach (var stage in TransactionStages.Ordered)
         {
@@ -52,7 +102,17 @@ else
                     <tr>
                         <td>@FormatOffset(e.At - trace.Events[0].At)</td>
                         <td>@e.Stage</td>
-                        <td>@e.Message</td>
+                        <td>
+                            @e.Message
+                            @if (e.Exception is not null)
+                            {
+                                <div class="noof-trace-reason">@(e.Reason ?? "See details")</div>
+                                <details class="noof-trace-details">
+                                    <summary>Details</summary>
+                                    <pre>@e.Exception</pre>
+                                </details>
+                            }
+                        </td>
                     </tr>
                 }
             </tbody>
@@ -60,18 +120,25 @@ else
     }
 
     <MudText HtmlTag="h2" Typo="Typo.h6" Class="mb-3">History</MudText>
-    <MudSimpleTable id="trace-history" Dense="true" Elevation="0">
-        <tbody>
-            @foreach (var revision in trace.History)
-            {
-                <tr>
-                    <td>@revision.At.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", System.Globalization.CultureInfo.InvariantCulture)</td>
-                    <td>@revision.ChangeKind</td>
-                    <td>@revision.Details</td>
-                </tr>
-            }
-        </tbody>
-    </MudSimpleTable>
+    @if (trace.History.Count == 0)
+    {
+        <MudAlert id="trace-history" Severity="Severity.Info" Variant="Variant.Outlined">No edits yet</MudAlert>
+    }
+    else
+    {
+        <MudSimpleTable id="trace-history" Dense="true" Elevation="0">
+            <tbody>
+                @foreach (var revision in trace.History)
+                {
+                    <tr>
+                        <td>@revision.At.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", System.Globalization.CultureInfo.InvariantCulture)</td>
+                        <td>@revision.ChangeKind</td>
+                        <td>@revision.Details</td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    }
 }
 
 @code {
@@ -93,4 +160,7 @@ else
         { TotalSeconds: < 10 } => $"+{offset.TotalSeconds.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)} s",
         _ => $"+{(int)offset.TotalSeconds} s",
     };
+
+    string FormatReceived(DateTimeOffset receivedAt) =>
+        TimeZoneInfo.ConvertTime(receivedAt, CaptureTimeZone).ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
 }

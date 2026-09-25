@@ -78,6 +78,99 @@ public sealed class TransactionTraceTests(CookieModeHostFixture fixture) : PageT
         await Expect(history).ToContainTextAsync("Initial");
     }
 
+    // Line items in the summary card are covered by EfTransactionTraceTests (Persistence.Tests),
+    // which runs against a database freshly migrated from this branch's own migrations only - not
+    // this fixture's shared noof_ledger_test_template, whose schema can carry ahead-of-this-branch
+    // columns from concurrent work in another worktree against the same shared PostgreSQL server.
+    [Fact]
+    public async Task The_summary_card_shows_the_message_capture_kind_status_kind_and_wallet()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var transactionId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var walletId = await SeedWalletAsync();
+
+        await using (var db = OpenDb())
+        {
+            db.Transactions.Add(new Transaction
+            {
+                Id = transactionId,
+                WalletId = walletId,
+                RawText = "coffee 250 dinars",
+                CaptureKind = CaptureKind.Text,
+                Kind = TransactionKind.Expense,
+                Status = TransactionStatus.Completed,
+                TimeZoneId = "Europe/Belgrade",
+                OccurredAt = now,
+                OccurredOn = ZonedClock.LocalDate(now, "Europe/Belgrade"),
+                TelegramChatId = 1,
+                TelegramMessageId = 1,
+                CreatedAt = now,
+            });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync($"{fixture.BaseUrl}/transactions/{transactionId}/trace");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var summary = Page.Locator("#trace-summary");
+        await Expect(summary).ToContainTextAsync("coffee 250 dinars");
+        await Expect(summary).ToContainTextAsync("Text");
+        await Expect(summary).ToContainTextAsync("Completed");
+        await Expect(summary).ToContainTextAsync("Expense");
+    }
+
+    [Fact]
+    public async Task A_timeline_event_with_an_API_error_body_shows_its_message_as_a_reason_and_the_full_text_in_details()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var transactionId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var walletId = await SeedWalletAsync();
+        const string exceptionText = """
+            Noof.Ledger.Application.Categorization.ModelCallException: model call failed ---> Noof.Ledger.Ai.Anthropic.AnthropicBadRequestException: {"type":"error","error":{"type":"invalid_request_error","message":"tools.1.custom: Invalid schema: expected required to list every property"},"request_id":"req_1"}
+               at Noof.Ledger.Ai.Anthropic.AnthropicTranslatingChatClient.GetResponseAsync()
+            """;
+
+        await using (var db = OpenDb())
+        {
+            db.Transactions.Add(new Transaction
+            {
+                Id = transactionId,
+                WalletId = walletId,
+                RawText = "seeded failed trace transaction with a reason",
+                CaptureKind = CaptureKind.Manual,
+                Kind = TransactionKind.Expense,
+                Status = TransactionStatus.Failed,
+                TimeZoneId = "Europe/Belgrade",
+                OccurredAt = now,
+                OccurredOn = ZonedClock.LocalDate(now, "Europe/Belgrade"),
+                TelegramChatId = null,
+                TelegramMessageId = null,
+                CreatedAt = now,
+            });
+
+            db.AppLogs.Add(NewStageFailedRow(transactionId, now, TransactionStages.Categorized, exceptionText));
+
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync($"{fixture.BaseUrl}/transactions/{transactionId}/trace");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var timeline = Page.Locator("#trace-timeline");
+        await Expect(timeline).ToContainTextAsync("tools.1.custom: Invalid schema: expected required to list every property");
+
+        await Page.ClickAsync("#trace-timeline summary");
+        await Expect(timeline).ToContainTextAsync("AnthropicBadRequestException");
+    }
+
     [Fact]
     public async Task A_StageFailed_event_renders_its_failed_stage_chip_red()
     {
@@ -201,7 +294,7 @@ public sealed class TransactionTraceTests(CookieModeHostFixture fixture) : PageT
         PropertiesJson = $$"""{"Stage":"{{stage}}","EventId":{"Id":{{eventId}},"Name":"{{stage}}"},"TransactionId":"{{transactionId}}"}""",
     };
 
-    static AppLogEntry NewStageFailedRow(Guid transactionId, DateTimeOffset at, string failedStage) => new()
+    static AppLogEntry NewStageFailedRow(Guid transactionId, DateTimeOffset at, string failedStage, string? exception = null) => new()
     {
         Id = 0,
         LoggedAt = at,
@@ -209,7 +302,7 @@ public sealed class TransactionTraceTests(CookieModeHostFixture fixture) : PageT
         Source = "TransactionTraceTests",
         Message = $"{TransactionStages.StageFailed} at stage {failedStage}",
         Template = "{Stage} at stage {FailedStage}",
-        Exception = null,
+        Exception = exception,
         TransactionId = transactionId,
         PropertiesJson = $$"""
             {"Stage":"{{TransactionStages.StageFailed}}","FailedStage":"{{failedStage}}","EventId":{"Id":{{TransactionStages.StageFailedEventId}},"Name":"{{TransactionStages.StageFailed}}"},"TransactionId":"{{transactionId}}"}

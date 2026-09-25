@@ -8,8 +8,7 @@ internal sealed class EfTransactionTrace(LedgerDbContext db) : ITransactionTrace
 {
     public async Task<TransactionTrace> GetAsync(Guid transactionId, CancellationToken cancellationToken)
     {
-        var exists = await db.Transactions.AsNoTracking()
-            .AnyAsync(t => t.Id == transactionId, cancellationToken);
+        var summary = await LoadSummaryAsync(transactionId, cancellationToken);
 
         var rows = await db.AppLogs.AsNoTracking()
             .Where(e => e.TransactionId == transactionId && e.PropertiesJson != null)
@@ -34,7 +33,49 @@ internal sealed class EfTransactionTrace(LedgerDbContext db) : ITransactionTrace
                 r.Instruction ?? $"{r.StatusBefore} → {r.StatusAfter}"))
             .ToList();
 
-        return new TransactionTrace(transactionId, exists, events, historyViews);
+        return new TransactionTrace(transactionId, summary is not null, summary, events, historyViews);
+    }
+
+    async Task<TransactionSummary?> LoadSummaryAsync(Guid transactionId, CancellationToken cancellationToken)
+    {
+        var header = await (
+                from t in db.Transactions.AsNoTracking()
+                where t.Id == transactionId
+                join w in db.Wallets.AsNoTracking() on t.WalletId equals (Guid?)w.Id into walletJoin
+                from w in walletJoin.DefaultIfEmpty()
+                select new
+                {
+                    t.RawText,
+                    t.CaptureKind,
+                    t.CreatedAt,
+                    t.Status,
+                    t.Kind,
+                    t.OccurredOn,
+                    WalletName = w == null ? null : w.Name,
+                })
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (header is null)
+            return null;
+
+        var lineItems = await (
+                from li in db.LineItems.AsNoTracking()
+                where li.TransactionId == transactionId
+                join c in db.Categories.AsNoTracking() on li.CategoryId equals c.Id into categoryJoin
+                from c in categoryJoin.DefaultIfEmpty()
+                orderby li.Id
+                select new TraceLineItem(li.Description, li.Amount, c == null ? null : c.NameEn))
+            .ToListAsync(cancellationToken);
+
+        return new TransactionSummary(
+            header.RawText,
+            header.CaptureKind,
+            header.CreatedAt,
+            header.Status,
+            header.Kind,
+            header.WalletName,
+            header.OccurredOn,
+            lineItems);
     }
 
     static TraceEvent? ToTraceEvent(AppLogEntry entry)
@@ -53,6 +94,8 @@ internal sealed class EfTransactionTrace(LedgerDbContext db) : ITransactionTrace
             ? failedStageElement.GetString()
             : null;
 
-        return new TraceEvent(entry.LoggedAt, stage, eventId, entry.Level, entry.Message, entry.Exception, entry.PropertiesJson, failedStage);
+        var reason = ExceptionReason.Extract(entry.Exception);
+
+        return new TraceEvent(entry.LoggedAt, stage, eventId, entry.Level, entry.Message, entry.Exception, entry.PropertiesJson, failedStage, reason);
     }
 }

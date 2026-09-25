@@ -46,7 +46,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
         PropertiesJson = $$"""{"Stage":"{{stage}}","EventId":{"Id":{{eventId}},"Name":"{{stage}}"},"TransactionId":"{{transactionId}}"}""",
     };
 
-    static AppLogEntry StageFailedEvent(long id, DateTimeOffset at, string failedStage, Guid transactionId) => new()
+    static AppLogEntry StageFailedEvent(long id, DateTimeOffset at, string failedStage, Guid transactionId, string? exception = null) => new()
     {
         Id = id,
         LoggedAt = at,
@@ -54,6 +54,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
         Source = "Noof.Ledger.Host.Workers.CategorizationWorker",
         Message = $"{TransactionStages.StageFailed} at stage {failedStage}",
         Template = "{Stage} at stage {FailedStage}",
+        Exception = exception,
         TransactionId = transactionId,
         PropertiesJson = $$"""
             {"Stage":"{{TransactionStages.StageFailed}}","FailedStage":"{{failedStage}}","EventId":{"Id":{{TransactionStages.StageFailedEventId}},"Name":"{{TransactionStages.StageFailed}}"},"TransactionId":"{{transactionId}}"}
@@ -209,5 +210,126 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
         trace.Exists.Should().BeFalse();
         trace.Events.Should().BeEmpty();
         trace.History.Should().BeEmpty();
+        trace.Summary.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task The_summary_carries_the_raw_text_capture_kind_received_time_status_kind_wallet_and_occurred_on()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await SeedTransactionAsync(db);
+
+        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+
+        trace.Summary.Should().NotBeNull();
+        trace.Summary!.RawText.Should().Be("кофе 250");
+        trace.Summary.CaptureKind.Should().Be(CaptureKind.Text);
+        trace.Summary.ReceivedAt.Should().Be(new DateTimeOffset(2026, 9, 25, 10, 0, 0, TimeSpan.Zero));
+        trace.Summary.Status.Should().Be(TransactionStatus.Completed);
+        trace.Summary.Kind.Should().Be(TransactionKind.Expense);
+        trace.Summary.WalletName.Should().Be("Main Wallet");
+        trace.Summary.OccurredOn.Should().Be(new DateOnly(2026, 9, 25));
+    }
+
+    [Fact]
+    public async Task The_summary_reports_no_wallet_name_when_the_transaction_has_no_wallet()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        db.Transactions.Add(new Transaction
+        {
+            Id = TransactionId,
+            WalletId = null,
+            Kind = TransactionKind.Expense,
+            RawText = null,
+            CaptureKind = CaptureKind.Voice,
+            VoiceFileId = "voice-file-id",
+            Status = TransactionStatus.Failed,
+            TimeZoneId = "Europe/Belgrade",
+            OccurredAt = new DateTimeOffset(2026, 9, 25, 10, 0, 0, TimeSpan.Zero),
+            OccurredOn = new DateOnly(2026, 9, 25),
+            TelegramChatId = 1,
+            TelegramMessageId = 1,
+            CreatedAt = new DateTimeOffset(2026, 9, 25, 10, 0, 0, TimeSpan.Zero),
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+
+        trace.Summary.Should().NotBeNull();
+        trace.Summary!.WalletName.Should().BeNull();
+        trace.Summary.RawText.Should().BeNull();
+        trace.Summary.CaptureKind.Should().Be(CaptureKind.Voice);
+    }
+
+    [Fact]
+    public async Task The_summary_lists_line_items_with_description_amount_and_category_when_any_exist()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await SeedTransactionAsync(db);
+        db.LineItems.Add(new LineItem
+        {
+            Id = Guid.NewGuid(),
+            TransactionId = TransactionId,
+            Description = "Coffee",
+            Amount = new Money(250m, CurrencyCode.Rsd),
+            CategoryId = new Guid("00000000-0000-0000-0001-000000000001"),
+            CategorizedBy = CategorizationAuthority.Model,
+            MerchantId = null,
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+
+        trace.Summary!.LineItems.Should().ContainSingle().Which.Should().Be(
+            new TraceLineItem("Coffee", new Money(250m, CurrencyCode.Rsd), "Groceries"));
+    }
+
+    [Fact]
+    public async Task The_summary_has_no_line_items_when_none_exist()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await SeedTransactionAsync(db);
+
+        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+
+        trace.Summary!.LineItems.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_StageFailed_event_carries_a_one_line_reason_extracted_from_its_exception_text()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await SeedTransactionAsync(db);
+        var t0 = DateTimeOffset.Parse("2026-09-25T10:00:00Z");
+        const string exceptionText = """
+            Noof.Ledger.Application.Categorization.ModelCallException: model call failed ---> Noof.Ledger.Ai.Anthropic.AnthropicBadRequestException: {"type":"error","error":{"type":"invalid_request_error","message":"tools.1.custom: Invalid schema"},"request_id":"req_1"}
+               at Noof.Ledger.Ai.Anthropic.AnthropicTranslatingChatClient.GetResponseAsync()
+            """;
+        db.AppLogs.Add(StageFailedEvent(1, t0, TransactionStages.Categorized, TransactionId, exceptionText));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+
+        trace.Events.Should().ContainSingle().Which.Reason.Should().Be("tools.1.custom: Invalid schema");
+    }
+
+    [Fact]
+    public async Task An_event_with_no_exception_carries_no_reason()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await SeedTransactionAsync(db);
+        var t0 = DateTimeOffset.Parse("2026-09-25T10:00:00Z");
+        db.AppLogs.Add(StageEvent(1, t0, TransactionStages.Received, TransactionStages.ReceivedEventId, TransactionId));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+
+        trace.Events.Should().ContainSingle().Which.Reason.Should().BeNull();
     }
 }
