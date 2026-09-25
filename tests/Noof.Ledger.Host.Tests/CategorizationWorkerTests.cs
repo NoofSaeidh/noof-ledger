@@ -456,6 +456,26 @@ public class CategorizationWorkerTests
     }
 
     [Fact]
+    public async Task Categorized_summarises_an_item_less_expense_as_no_line_items()
+    {
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new CategorizationProposal([]));
+        var logger = new CapturingLogger<CategorizationWorker>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow), logger: logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        var entry = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.CategorizedEventId).Subject;
+        entry.Properties["Kind"].Should().Be(TransactionKind.Expense);
+        entry.Properties["Summary"].Should().Be("no line items");
+    }
+
+    [Fact]
     public async Task Persisted_is_logged_after_the_outcome_is_applied()
     {
         var store = Substitute.For<ICategorizationStore>();
