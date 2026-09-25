@@ -312,6 +312,12 @@ detail — prerequisites included. `Get-Help .\run.ps1 -Full` works too. One lin
 Every `ops/*.ps1` script named above still exists and still works stand-alone; `run.ps1` is what
 calls it with the right arguments, not a replacement for it.
 
+**Changing the port.** Edit `Urls` in the published `appsettings.json` (or pass `--urls` on the
+command line, which always wins) - `ASPNETCORE_URLS` is overridden by it, because
+`WebApplication.CreateBuilder` adds the JSON config source after the `ASPNETCORE_`-prefixed
+environment source, so the file wins over the standard ASP.NET Core environment-variable way of
+re-pointing an app.
+
 **Why the current directory used to matter, and no longer does.** Before Task 11,
 `WebApplication.CreateBuilder` derived the content root from the process's **current directory**, not
 from the executable's location, so a host launched from anywhere but its own install directory
