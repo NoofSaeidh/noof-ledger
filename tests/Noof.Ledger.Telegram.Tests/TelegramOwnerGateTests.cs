@@ -77,4 +77,58 @@ public class TelegramOwnerGateTests
 
         allowed.Should().BeFalse();
     }
+
+    [Fact]
+    public async Task IsOwnerAsync_confirms_the_owner_chat_without_touching_the_store_again()
+    {
+        var secretStore = Substitute.For<ISecretStore>();
+        secretStore.GetAsync(SecretKeys.TelegramOwnerChatId, Arg.Any<CancellationToken>())
+            .Returns(new SecretResult(SecretState.Present, "111"));
+        var gate = new TelegramOwnerGate(secretStore);
+
+        var isOwner = await gate.IsOwnerAsync(111L, TestContext.Current.CancellationToken);
+
+        isOwner.Should().BeTrue();
+        await secretStore.DidNotReceive().TrySetIfMissingAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task IsOwnerAsync_rejects_a_chat_that_is_not_the_recorded_owner()
+    {
+        var secretStore = Substitute.For<ISecretStore>();
+        secretStore.GetAsync(SecretKeys.TelegramOwnerChatId, Arg.Any<CancellationToken>())
+            .Returns(new SecretResult(SecretState.Present, "111"));
+        var gate = new TelegramOwnerGate(secretStore);
+
+        var isOwner = await gate.IsOwnerAsync(999L, TestContext.Current.CancellationToken);
+
+        isOwner.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task IsOwnerAsync_never_claims_ownership_when_none_is_set_yet()
+    {
+        var secretStore = Substitute.For<ISecretStore>();
+        secretStore.GetAsync(SecretKeys.TelegramOwnerChatId, Arg.Any<CancellationToken>())
+            .Returns(new SecretResult(SecretState.Missing, null));
+        var gate = new TelegramOwnerGate(secretStore);
+
+        var isOwner = await gate.IsOwnerAsync(111L, TestContext.Current.CancellationToken);
+
+        isOwner.Should().BeFalse("IsOwnerAsync is a read, not a claim - only IsAllowedAsync may claim");
+        await secretStore.DidNotReceive().TrySetIfMissingAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task IsOwnerAsync_fails_closed_on_an_unreadable_owner_record()
+    {
+        var secretStore = Substitute.For<ISecretStore>();
+        secretStore.GetAsync(SecretKeys.TelegramOwnerChatId, Arg.Any<CancellationToken>())
+            .Returns(new SecretResult(SecretState.Unreadable, null));
+        var gate = new TelegramOwnerGate(secretStore);
+
+        var isOwner = await gate.IsOwnerAsync(111L, TestContext.Current.CancellationToken);
+
+        isOwner.Should().BeFalse();
+    }
 }
