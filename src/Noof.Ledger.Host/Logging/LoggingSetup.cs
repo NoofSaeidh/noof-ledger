@@ -1,6 +1,5 @@
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Host.Diagnostics;
-using Noof.Ledger.Persistence;
 using NpgsqlTypes;
 using Serilog;
 using Serilog.Debugging;
@@ -55,15 +54,15 @@ internal static class LoggingSetup
     // outer `configuration` - the one Log.Logger actually becomes - so a later BeginScope (Task 3's
     // TransactionLogScope) is still ambient when an event is written. `destinations` is a separate
     // inner LoggerConfiguration holding console+file+Postgres; RedactingSink wraps its built logger
-    // so every one of those three sinks only ever sees a redacted LogEvent, per spec.
-    public static void Configure(LoggerConfiguration configuration, string logDirectory, IServiceProvider services)
+    // so every one of those three sinks only ever sees a redacted LogEvent, per spec. `connectionString`
+    // is resolved once by the caller (Program.cs) and passed in - resolving it again here duplicated
+    // LedgerConnectionString.Resolve's work every time the host started.
+    public static void Configure(LoggerConfiguration configuration, string logDirectory, string connectionString, IServiceProvider services)
     {
         var gate = services.GetRequiredService<IDatabaseGate>();
         var sinkStatus = services.GetRequiredService<ILogSinkStatus>();
         var timeProvider = services.GetRequiredService<TimeProvider>();
         var redactor = services.GetRequiredService<SecretRedactor>();
-        var connectionString = LedgerConnectionString.Resolve(
-            services.GetRequiredService<IConfiguration>().GetConnectionString("Ledger"));
 
         SelfLog.Enable(_ => sinkStatus.RecordFailure(timeProvider.GetUtcNow()));
 

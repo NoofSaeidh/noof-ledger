@@ -39,8 +39,10 @@ try
 
     var builder = WebApplication.CreateBuilder(args);
 
+    var ledgerConnectionString = LedgerConnectionString.Resolve(builder.Configuration.GetConnectionString("Ledger"));
+
     builder.Host.UseSerilog((_, services, loggerConfiguration) =>
-        LoggingSetup.Configure(loggerConfiguration, logDirectory, services));
+        LoggingSetup.Configure(loggerConfiguration, logDirectory, ledgerConnectionString, services));
 
     builder.Services.AddRazorComponents()
         .AddInteractiveServerComponents();
@@ -67,7 +69,6 @@ try
 
     builder.Services.AddNoofPersistence(builder.Configuration, categorizationOptions.MaxAttempts);
 
-    var ledgerConnectionString = LedgerConnectionString.Resolve(builder.Configuration.GetConnectionString("Ledger"));
     builder.Services.AddNoofHostDiagnostics(ledgerConnectionString);
 
     builder.Services.AddNoofDatabaseGate();
