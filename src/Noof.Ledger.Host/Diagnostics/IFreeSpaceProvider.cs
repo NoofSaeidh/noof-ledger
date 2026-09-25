@@ -7,9 +7,9 @@ internal interface IFreeSpaceProvider
 
 internal sealed class DriveFreeSpaceProvider : IFreeSpaceProvider
 {
-    public long GetAvailableFreeBytes(string path)
-    {
-        Directory.CreateDirectory(path);
-        return new DriveInfo(Path.GetPathRoot(Path.GetFullPath(path))!).AvailableFreeSpace;
-    }
+    // M-5 (Phase 5 final review): a read-only health check must not have the side effect of
+    // creating directories. DriveInfo measures free space at the volume level, so the path itself
+    // never needs to exist - Path.GetPathRoot(Path.GetFullPath(path)) resolves the drive root alone.
+    public long GetAvailableFreeBytes(string path) =>
+        new DriveInfo(Path.GetPathRoot(Path.GetFullPath(path))!).AvailableFreeSpace;
 }
