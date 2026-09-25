@@ -2,7 +2,8 @@ using Noof.Ledger.Application.Diagnostics;
 
 namespace Noof.Ledger.Host.Diagnostics;
 
-internal sealed class SecretSnapshotRefreshWorker(IDatabaseGate gate, SecretSnapshot snapshot, TimeProvider timeProvider)
+internal sealed partial class SecretSnapshotRefreshWorker(
+    IDatabaseGate gate, SecretSnapshot snapshot, TimeProvider timeProvider, ILogger<SecretSnapshotRefreshWorker> logger)
     : BackgroundService
 {
     static readonly TimeSpan RefreshInterval = TimeSpan.FromMinutes(5);
@@ -13,8 +14,19 @@ internal sealed class SecretSnapshotRefreshWorker(IDatabaseGate gate, SecretSnap
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            await snapshot.RefreshAsync(stoppingToken);
+            try
+            {
+                await snapshot.RefreshAsync(stoppingToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                LogRefreshFailed(ex);
+            }
+
             await Task.Delay(RefreshInterval, timeProvider, stoppingToken);
         }
     }
+
+    [LoggerMessage(EventId = 5103, Level = LogLevel.Warning, Message = "Secret snapshot refresh failed; keeping the previous snapshot")]
+    partial void LogRefreshFailed(Exception exception);
 }

@@ -27,9 +27,7 @@ public sealed class NavBarDiagnosticsLinkTests
 
         // AllowAutoRedirect: false, same as LoginEndpointTests.Correct_credentials_set_an_auth_cookie
         // - otherwise the client follows the login POST's 302 straight into "/", which would query
-        // the fake, unreachable database and race this process's own background workers, which (per
-        // HostOptions.BackgroundServiceExceptionBehavior = StopHost) can tear the whole host down
-        // mid-request on an unrelated worker's unhandled connection failure.
+        // the fake, unreachable database.
         using var client = factory.CreateClient(new() { AllowAutoRedirect = false });
         await LoginHelper.PostWithTokenAsync(client, "noof", "correct");
         // /wallets, not "/": it renders with prerender:false, so the static GET never runs the

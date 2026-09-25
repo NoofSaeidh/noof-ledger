@@ -1,7 +1,9 @@
 using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Host.Diagnostics;
@@ -59,7 +61,7 @@ public class SecretSnapshotRefreshWorkerTests
         var gate = Substitute.For<IDatabaseGate>();
         gate.WaitUntilReadyAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 25, 0, 0, 0, TimeSpan.Zero));
-        var worker = new SecretSnapshotRefreshWorker(gate, snapshot, time);
+        var worker = new SecretSnapshotRefreshWorker(gate, snapshot, time, NullLogger<SecretSnapshotRefreshWorker>.Instance);
 
         await worker.StartAsync(TestContext.Current.CancellationToken);
         try
@@ -70,6 +72,37 @@ public class SecretSnapshotRefreshWorkerTests
             time.Advance(TimeSpan.FromMinutes(5));
             await Task.Delay(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
             await store.Received(2).GetAsync(SecretKeys.TelegramBotToken, Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            await worker.StopAsync(TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task A_refresh_that_throws_is_logged_and_never_faults_the_worker()
+    {
+        var store = Substitute.For<ISecretStore>();
+        store.GetAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("database unreachable"));
+        var snapshot = new SecretSnapshot(ScopeFactoryFor(store), "db-password-long-enough");
+        var gate = Substitute.For<IDatabaseGate>();
+        gate.WaitUntilReadyAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 25, 0, 0, 0, TimeSpan.Zero));
+        var worker = new SecretSnapshotRefreshWorker(gate, snapshot, time, NullLogger<SecretSnapshotRefreshWorker>.Instance);
+
+        await worker.StartAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
+            await store.Received(1).GetAsync(SecretKeys.TelegramBotToken, Arg.Any<CancellationToken>());
+            worker.ExecuteTask!.IsFaulted.Should().BeFalse();
+
+            // Still alive: the failed tick did not stop the loop, so the next scheduled tick still fires.
+            time.Advance(TimeSpan.FromMinutes(5));
+            await Task.Delay(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
+            await store.Received(2).GetAsync(SecretKeys.TelegramBotToken, Arg.Any<CancellationToken>());
+            worker.ExecuteTask!.IsFaulted.Should().BeFalse();
         }
         finally
         {

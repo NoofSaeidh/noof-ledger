@@ -14,7 +14,8 @@ internal static class HostDiagnosticsRegistration
         services.AddSingleton<ISecretValueSource>(sp => sp.GetRequiredService<SecretSnapshot>());
         services.AddSingleton<SecretRedactor>();
         services.AddHostedService(sp => new SecretSnapshotRefreshWorker(
-            sp.GetRequiredService<IDatabaseGate>(), sp.GetRequiredService<SecretSnapshot>(), sp.GetRequiredService<TimeProvider>()));
+            sp.GetRequiredService<IDatabaseGate>(), sp.GetRequiredService<SecretSnapshot>(), sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<ILogger<SecretSnapshotRefreshWorker>>()));
 
         return services;
     }
