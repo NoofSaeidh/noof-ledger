@@ -93,6 +93,7 @@ try
     builder.Services.AddNoofAi(builder.Configuration);
 
     builder.Services.AddNoofWorkers(categorizationOptions, backupOptions);
+    builder.Services.AddNoofDiagnosticsHost();
 
     builder.Services.AddNoofDiagnostics();
 
@@ -110,6 +111,7 @@ try
         .AddInteractiveServerRenderMode();
 
     app.MapAccountEndpoints();
+    app.MapDiagnosticsEndpoints();
 
     app.MapGet("/healthz", () => Results.Ok("ok")).AllowAnonymous();
 
