@@ -6,4 +6,6 @@ public enum JobKind
     Correct = 1,
     Reinterpret = 2,
     Transcribe = 3,
+    ExtractReceipt = 4,
+    CategorizeReceipt = 5,
 }

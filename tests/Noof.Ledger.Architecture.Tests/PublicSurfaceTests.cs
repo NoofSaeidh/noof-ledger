@@ -38,6 +38,7 @@ public class PublicSurfaceTests
             "CurrencyMismatchException", "Entry", "EntryRole", "JobKind", "JobStatus", "LineItem", "Merchant", "MerchantAlias",
             "MerchantKind", "MerchantName", "Money", "Transaction", "TransactionKind",
             "TransactionStatus", "Wallet",
+            "Receipt", "ReceiptLine", "ReceiptSource", "ReceiptKind", "PaymentMethod", "WalletPaymentDefault",
         ],
         ["Noof.Ledger.Application"] =
         [
@@ -70,6 +71,7 @@ public class PublicSurfaceTests
             "FiscalQrPayload", "FiscalQrDecodeResult", "FiscalFetchFailure", "FiscalFetchResult", "IQrReader",
             "IFiscalQrDecoder", "IFiscalReceiptClient", "IReceiptVision", "ReceiptLineToCategorize",
             "ReceiptCategorizationRequest", "ReceiptLineCategory", "ReceiptCategorization", "IReceiptCategorizer",
+            "CapturedReceipt", "IReceiptStore", "ReceiptSaveResult", "ReceiptView", "ReceiptLineView",
             "LogSeverity", "LogRow", "LogFilter", "LogPage", "LogSortOrder", "ILogQuery", "ILogRetention",
             "TransactionStages", "TransactionLogScope", "TraceEvent", "RevisionView", "TraceLineItem", "TransactionSummary",
             "TransactionTrace", "ITransactionTrace",

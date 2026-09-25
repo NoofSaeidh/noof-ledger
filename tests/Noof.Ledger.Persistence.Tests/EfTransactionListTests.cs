@@ -44,7 +44,7 @@ public class EfTransactionListTests(PostgresFixture fixture)
         CreatedAt = occurredAt,
     };
 
-    static LineItem NewLineItem(Guid transactionId, string description, Money amount, Guid? categoryId) => new()
+    static LineItem NewLineItem(Guid transactionId, string description, Money amount, Guid? categoryId, int ordinal = 1) => new()
     {
         Id = Guid.NewGuid(),
         TransactionId = transactionId,
@@ -53,6 +53,7 @@ public class EfTransactionListTests(PostgresFixture fixture)
         CategoryId = categoryId,
         CategorizedBy = CategorizationAuthority.Model,
         MerchantId = null,
+        Ordinal = ordinal,
     };
 
     static Entry NewEntry(Guid transactionId, Guid walletId, Money amount) => new()

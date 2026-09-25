@@ -41,6 +41,7 @@ public class LineItemMoneyMappingTests(PostgresFixture fixture)
             Description = "Flat white",
             Amount = new Money(1234.5678m, CurrencyCode.Eur),
             CategorizedBy = CategorizationAuthority.None,
+            Ordinal = 1,
         });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         db.ChangeTracker.Clear();
@@ -68,6 +69,7 @@ public class LineItemMoneyMappingTests(PostgresFixture fixture)
             Description = "Rounded",
             Amount = new Money(1.00005m, CurrencyCode.Eur),
             CategorizedBy = CategorizationAuthority.None,
+            Ordinal = 1,
         });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         db.ChangeTracker.Clear();

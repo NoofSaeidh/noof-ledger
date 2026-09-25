@@ -109,6 +109,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
             Amount = new Money(9.99m, CurrencyCode.Eur),
             CategoryId = categoryId,
             CategorizedBy = CategorizationAuthority.Model,
+            Ordinal = 1,
             MerchantId = null,
         });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -139,6 +140,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
             Amount = new Money(1.00m, CurrencyCode.Eur),
             CategoryId = categoryId,
             CategorizedBy = CategorizationAuthority.User,
+            Ordinal = 2,
             MerchantId = null,
         });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -275,6 +277,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
             Amount = new Money(3.50m, CurrencyCode.Eur),
             CategoryId = category.Id,
             CategorizedBy = CategorizationAuthority.Model,
+            Ordinal = 1,
             MerchantId = merchant.Id,
         });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);

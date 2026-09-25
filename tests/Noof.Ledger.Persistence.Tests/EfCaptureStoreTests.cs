@@ -247,4 +247,68 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
         (await db.Transactions.CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
         (await db.CategorizationJobs.CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
     }
+
+    [Fact]
+    public async Task Captures_a_receipt_photo_with_no_text_and_an_extract_receipt_job()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var now = new DateTimeOffset(2026, 9, 25, 8, 0, 0, TimeSpan.Zero);
+        var store = new EfCaptureStore(db, new FakeTimeProvider(now));
+
+        var transactionId = await store.CaptureReceiptAsync(
+            new CapturedReceipt(222, 6, now, Caption: null, TelegramFileId: "photo-1", VerificationUrl: null),
+            "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        var transaction = await db.Transactions.SingleAsync(TestContext.Current.CancellationToken);
+        transaction.Id.Should().Be(transactionId);
+        transaction.CaptureKind.Should().Be(CaptureKind.Photo);
+        transaction.RawText.Should().BeNull();
+        transaction.TelegramFileId.Should().Be("photo-1");
+        transaction.VerificationUrl.Should().BeNull();
+        transaction.Status.Should().Be(TransactionStatus.Captured);
+
+        var job = await db.CategorizationJobs.SingleAsync(TestContext.Current.CancellationToken);
+        job.TransactionId.Should().Be(transactionId);
+        job.Kind.Should().Be(JobKind.ExtractReceipt);
+        job.Status.Should().Be(JobStatus.Pending);
+    }
+
+    [Fact]
+    public async Task Captures_a_fiscal_qr_link_sent_as_text_with_the_caption_as_raw_text()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var now = new DateTimeOffset(2026, 9, 25, 8, 30, 0, TimeSpan.Zero);
+        var store = new EfCaptureStore(db, new FakeTimeProvider(now));
+        const string link = "https://suf.purs.gov.rs/v/?vl=synthetic";
+
+        var transactionId = await store.CaptureReceiptAsync(
+            new CapturedReceipt(222, 7, now, Caption: link, TelegramFileId: null, VerificationUrl: link),
+            "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        var transaction = await db.Transactions.SingleAsync(TestContext.Current.CancellationToken);
+        transaction.Id.Should().Be(transactionId);
+        transaction.CaptureKind.Should().Be(CaptureKind.Photo);
+        transaction.RawText.Should().Be(link, "the caption is stored as the transaction's raw text");
+        transaction.TelegramFileId.Should().BeNull();
+        transaction.VerificationUrl.Should().Be(link);
+    }
+
+    [Fact]
+    public async Task A_redelivered_receipt_capture_is_captured_once()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var now = new DateTimeOffset(2026, 9, 25, 9, 0, 0, TimeSpan.Zero);
+        var store = new EfCaptureStore(db, new FakeTimeProvider(now));
+        var receipt = new CapturedReceipt(222, 8, now, Caption: null, TelegramFileId: "photo-2", VerificationUrl: null);
+
+        var first = await store.CaptureReceiptAsync(receipt, "Europe/Belgrade", TestContext.Current.CancellationToken);
+        var second = await store.CaptureReceiptAsync(receipt, "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        second.Should().Be(first);
+        (await db.Transactions.CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
+        (await db.CategorizationJobs.CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
+    }
 }

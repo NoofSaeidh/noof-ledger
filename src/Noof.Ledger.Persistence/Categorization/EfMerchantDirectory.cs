@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Domain;
+using Noof.Ledger.Persistence.Configurations;
 
 namespace Noof.Ledger.Persistence.Categorization;
 
@@ -107,6 +108,40 @@ internal sealed class EfMerchantDirectory(LedgerDbContext db, TimeProvider timeP
         {
             SqlState: PostgresErrorCodes.UniqueViolation,
             ConstraintName: "PK_merchant_aliases",
+        };
+
+    public async Task<Guid?> FindByTaxIdAsync(string taxId, CancellationToken cancellationToken) =>
+        await db.Merchants.AsNoTracking()
+            .Where(m => m.TaxId == taxId)
+            .Select(m => (Guid?)m.Id)
+            .SingleOrDefaultAsync(cancellationToken);
+
+    public async Task LinkTaxIdAsync(Guid merchantId, string taxId, CancellationToken cancellationToken)
+    {
+        var merchant = await db.Merchants.SingleAsync(m => m.Id == merchantId, cancellationToken);
+
+        if (merchant.TaxId is not null)
+            return;
+
+        merchant.TaxId = taxId;
+
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (IsDuplicateTaxIdViolation(ex))
+        {
+            // Another merchant claimed this PIB first (a rare concurrent-first-sighting race, like
+            // LinkAliasAsync's). That mapping stands; ours is left unset rather than fought over.
+            db.Entry(merchant).State = EntityState.Detached;
+        }
+    }
+
+    static bool IsDuplicateTaxIdViolation(DbUpdateException ex) =>
+        ex.InnerException is PostgresException
+        {
+            SqlState: PostgresErrorCodes.UniqueViolation,
+            ConstraintName: MerchantConfiguration.TaxIdIndex,
         };
 
     static void RequireMaxLength(string value, int maxLength, string paramName)

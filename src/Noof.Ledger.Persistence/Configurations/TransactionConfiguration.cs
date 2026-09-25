@@ -12,7 +12,8 @@ internal sealed class TransactionConfiguration : IEntityTypeConfiguration<Transa
         {
             table.HasCheckConstraint(
                 "ck_transactions_capture_has_content",
-                "(capture_kind IN (0, 2) AND raw_text IS NOT NULL) OR (capture_kind = 1 AND voice_file_id IS NOT NULL)");
+                "(capture_kind IN (0, 2) AND raw_text IS NOT NULL) OR (capture_kind = 1 AND voice_file_id IS NOT NULL) "
+                + "OR (capture_kind = 3 AND (telegram_file_id IS NOT NULL OR verification_url IS NOT NULL))");
             table.HasCheckConstraint(
                 "ck_transactions_telegram_ids_match_capture_kind",
                 "(capture_kind = 2 AND telegram_chat_id IS NULL AND telegram_message_id IS NULL) "
@@ -28,6 +29,8 @@ internal sealed class TransactionConfiguration : IEntityTypeConfiguration<Transa
         builder.Property(t => t.CaptureKind).HasColumnName("capture_kind");
         builder.Property(t => t.VoiceFileId).HasColumnName("voice_file_id");
         builder.Property(t => t.VoiceDurationSeconds).HasColumnName("voice_duration_seconds");
+        builder.Property(t => t.TelegramFileId).HasColumnName("telegram_file_id");
+        builder.Property(t => t.VerificationUrl).HasColumnName("verification_url");
         builder.Property(t => t.Status).HasColumnName("status");
         builder.Property(t => t.TimeZoneId).HasColumnName("time_zone_id").HasMaxLength(64).IsRequired();
         builder.Property(t => t.OccurredAt).HasColumnName("occurred_at");

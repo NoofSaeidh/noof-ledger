@@ -37,7 +37,6 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
         if (header is null)
             return null;
 
-        // line_items has no ordinal column, so the order is made deterministic rather than left to the heap.
         var lines = await (
             from li in db.LineItems.AsNoTracking()
             where li.TransactionId == transactionId
@@ -45,7 +44,7 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
             from c in categoryJoin.DefaultIfEmpty()
             join m in db.Merchants.AsNoTracking() on li.MerchantId equals m.Id into merchantJoin
             from m in merchantJoin.DefaultIfEmpty()
-            orderby li.Description
+            orderby li.Ordinal
             select new RecordedLine(
                 li.Description,
                 li.Amount,
@@ -102,6 +101,12 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
             ],
             cancellationToken);
 
+        // Starts after whatever survived the delete above (a Rule- or User-authored line), so a
+        // model re-run's fresh ordinals never collide with an ordinal a kept line already owns.
+        var ordinal = 1 + (await db.LineItems.AsNoTracking()
+            .Where(li => li.TransactionId == transactionId)
+            .Select(li => (int?)li.Ordinal)
+            .MaxAsync(cancellationToken) ?? 0);
         foreach (var item in outcome.Items)
         {
             db.LineItems.Add(new LineItem
@@ -113,6 +118,7 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
                 CategoryId = item.CategoryId,
                 CategorizedBy = CategorizationAuthority.Model,
                 MerchantId = item.MerchantId,
+                Ordinal = ordinal++,
             });
         }
 

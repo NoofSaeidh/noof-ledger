@@ -7,6 +7,7 @@ namespace Noof.Ledger.Persistence.Configurations;
 internal sealed class WalletConfiguration : IEntityTypeConfiguration<Wallet>
 {
     internal const string OneDefaultPerCurrencyIndex = "ix_wallets_one_default_per_currency";
+    internal const string OneDefaultPerPaymentMethodIndex = "ix_wallets_one_default_per_payment_method";
 
     public void Configure(EntityTypeBuilder<Wallet> builder)
     {
@@ -27,10 +28,16 @@ internal sealed class WalletConfiguration : IEntityTypeConfiguration<Wallet>
         builder.Property(w => w.IsDefaultForCurrency).HasColumnName("is_default_for_currency");
         builder.Property(w => w.Archived).HasColumnName("archived").HasDefaultValue(false);
         builder.Property(w => w.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("now()");
+        builder.Property(w => w.DefaultForPayment).HasColumnName("default_for_payment");
 
         builder.HasIndex(w => w.Currency)
             .IsUnique()
             .HasFilter("is_default_for_currency")
             .HasDatabaseName(OneDefaultPerCurrencyIndex);
+
+        builder.HasIndex(w => w.DefaultForPayment)
+            .IsUnique()
+            .HasFilter("default_for_payment IS NOT NULL")
+            .HasDatabaseName(OneDefaultPerPaymentMethodIndex);
     }
 }

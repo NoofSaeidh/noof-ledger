@@ -50,6 +50,7 @@ internal sealed class EfSpendingReadModel(LedgerDbContext db, TimeProvider timeP
             select new
             {
                 li.TransactionId,
+                li.Ordinal,
                 li.Description,
                 li.Amount,
                 CategoryName = c == null ? null : c.NameEn,
@@ -69,6 +70,7 @@ internal sealed class EfSpendingReadModel(LedgerDbContext db, TimeProvider timeP
                 h.Status,
                 h.WalletName,
                 [.. lineItemsByTransaction[h.Id]
+                    .OrderBy(li => li.Ordinal)
                     .Select(li => new RecentLineItem(li.Description, li.Amount, li.CategoryName, li.MerchantName))])),
         ];
     }

@@ -589,12 +589,6 @@ keeps every state so rollback needs no migration when it is built.
 
 ---
 
-## Line items keep no order
-
-`line_items` has no ordinal column, so the echo and the snapshot list lines by description rather than
-in the order the message named them. Harmless for one- and two-line messages; a receipt (Phase 6) will
-want its own order, and that is a column plus a migration.
-
 ## Pressing Изменить twice forgets the first prompt
 
 `transactions.prompt_message_id` holds one prompt. A reply to an older, superseded prompt is not
