@@ -1,3 +1,4 @@
+using System.Net.Sockets;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -6,6 +7,7 @@ using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Secrets;
 using Telegram.Bot;
+using Telegram.Bot.Exceptions;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 
@@ -20,6 +22,7 @@ internal sealed class TelegramPollingService(
     IConfiguration configuration,
     TimeProvider timeProvider,
     IDatabaseGate gate,
+    IPollingHeartbeat heartbeat,
     ILogger<TelegramPollingService> logger)
     : BackgroundService
 {
@@ -91,6 +94,8 @@ internal sealed class TelegramPollingService(
                 allowedUpdates: [UpdateType.Message, UpdateType.EditedMessage, UpdateType.CallbackQuery],
                 cancellationToken: cancellationToken);
 
+            heartbeat.RecordSuccess(timeProvider.GetUtcNow());
+
             if (updates.Length > 0)
             {
                 var router = scope.ServiceProvider.GetRequiredService<ITelegramUpdateRouter>();
@@ -144,10 +149,21 @@ internal sealed class TelegramPollingService(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             consecutiveFailures++;
+            heartbeat.RecordFailure(timeProvider.GetUtcNow(), ClassifyFailure(ex));
             logger.PollTickFailed(ex);
             return TelegramPollResult.Failed;
         }
     }
+
+    static PollFailure ClassifyFailure(Exception ex) => ex switch
+    {
+        ApiRequestException { ErrorCode: 401 } => PollFailure.Unauthorized,
+        HttpRequestException => PollFailure.Network,
+        SocketException => PollFailure.Network,
+        TimeoutException => PollFailure.Network,
+        TaskCanceledException => PollFailure.Network,
+        _ => PollFailure.Other,
+    };
 
     async Task NotifyOperatorOfSkippedUpdateAsync(IServiceScope scope, Update update, CancellationToken cancellationToken)
     {
