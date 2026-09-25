@@ -58,4 +58,21 @@ public class DashboardPageSourceTests
             "an OperationCanceledException from the component's own cancellation token must not fall " +
             "through to the database-unavailable branch, which is reserved for a genuine DbException");
     }
+
+    [Fact]
+    public void Shows_a_health_tile_through_ISystemHealth_only()
+    {
+        var source = SourceText();
+
+        source.Should().Contain("ISystemHealth");
+        source.Should().Contain("id=\"health-tile\"");
+        source.Should().NotContain("id=\"database-unavailable\"",
+            "the health tile replaces the separate database-unavailable alert (spec §4)");
+        source.Should().NotContain("id=\"backup-status\"",
+            "the Backup health check now owns backup staleness; the dashboard stops computing it itself (spec §3)");
+        source.Should().NotContain("BackupIsStale",
+            "M-5's staleness rule moved into the Backup health check - this page must not keep a second copy of it");
+        source.Should().NotContain("DescribeBackup",
+            "same as BackupIsStale: the Backup check now phrases this, not the dashboard");
+    }
 }
