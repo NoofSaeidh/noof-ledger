@@ -108,3 +108,12 @@
     border-color: var(--mud-palette-primary);
     box-shadow: 0 0 0 1px var(--mud-palette-primary);
 }
+
+/* CSS-only truncation, not a title/tooltip popup: MainLayout renders statically, so no popover
+   provider is available to show one, and the full text is a click away on the trace page anyway. */
+.noof-truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 28rem;
+}

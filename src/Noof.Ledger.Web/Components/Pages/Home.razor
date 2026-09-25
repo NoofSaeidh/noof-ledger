@@ -150,7 +150,11 @@ else
         </MudGrid>
     }
 
-    <MudText HtmlTag="h2" Typo="Typo.h6" Class="mt-8 mb-3">Recent transactions</MudText>
+    <div class="noof-txn-header mt-8 mb-3">
+        <MudText HtmlTag="h2" Typo="Typo.h6">Recent transactions</MudText>
+        <MudSpacer />
+        <MudLink Href="/transactions">All transactions</MudLink>
+    </div>
 
     @if (recent.Count == 0)
     {
@@ -165,7 +169,9 @@ else
             <MudPaper id="@($"txn-{transaction.Id}")" Outlined="true" Elevation="0" Class="pa-4 mb-3">
                 <div class="noof-txn-header">
                     <MudText Typo="Typo.body2">@transaction.WalletName</MudText>
-                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@FormatOccurred(transaction)</MudText>
+                    <MudLink Href="@($"/transactions/{transaction.Id}/trace")">
+                        <MudText Typo="Typo.caption">@FormatOccurred(transaction)</MudText>
+                    </MudLink>
                     <MudSpacer />
                     <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
                              Color="@StatusColour(transaction.Status)">

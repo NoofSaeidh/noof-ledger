@@ -60,6 +60,17 @@ public class DashboardPageSourceTests
     }
 
     [Fact]
+    public void Each_recent_transaction_links_to_its_trace_and_the_section_links_to_the_full_list()
+    {
+        var source = SourceText();
+
+        source.Should().Contain("/transactions/{transaction.Id}/trace",
+            "the operator has no other way to find a transaction's id for the trace page (operator request 2026-09-25)");
+        source.Should().Contain("Href=\"/transactions\"",
+            "the Recent transactions section must link to the full grid");
+    }
+
+    [Fact]
     public void Shows_a_health_tile_through_ISystemHealth_only()
     {
         var source = SourceText();
