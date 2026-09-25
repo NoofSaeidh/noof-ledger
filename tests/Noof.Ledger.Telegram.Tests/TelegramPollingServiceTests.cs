@@ -327,6 +327,63 @@ public class TelegramPollingServiceTests
             Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task Registers_the_health_command_scoped_to_the_owner_chat_when_the_client_is_first_built()
+    {
+        var secretStore = WithToken("tok1");
+        secretStore.GetAsync(SecretKeys.TelegramOwnerChatId, Arg.Any<CancellationToken>())
+            .Returns(new SecretResult(SecretState.Present, "555"));
+        var client = Substitute.For<ITelegramBotClient>();
+        client.SendRequest(Arg.Any<GetUpdatesRequest>(), Arg.Any<CancellationToken>()).Returns(Array.Empty<Update>());
+        var clientFactory = Substitute.For<ITelegramBotClientFactory>();
+        clientFactory.Create("tok1").Returns(client);
+
+        await CreateService(secretStore, clientFactory, new TelegramClientHandle())
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        await client.Received(1).SendRequest(
+            Arg.Is<SetMyCommandsRequest>(r => r.Commands!.Single().Command == "health"
+                && r.Commands!.Single().Description == "System health"
+                && r.Scope is BotCommandScopeChat && ((BotCommandScopeChat)r.Scope!).ChatId.Identifier == 555L),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Skips_registering_the_health_command_when_there_is_no_owner_yet()
+    {
+        var secretStore = WithToken("tok1");
+        secretStore.GetAsync(SecretKeys.TelegramOwnerChatId, Arg.Any<CancellationToken>())
+            .Returns(new SecretResult(SecretState.Missing, null));
+        var client = Substitute.For<ITelegramBotClient>();
+        client.SendRequest(Arg.Any<GetUpdatesRequest>(), Arg.Any<CancellationToken>()).Returns(Array.Empty<Update>());
+        var clientFactory = Substitute.For<ITelegramBotClientFactory>();
+        clientFactory.Create("tok1").Returns(client);
+
+        await CreateService(secretStore, clientFactory, new TelegramClientHandle())
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        await client.DidNotReceive().SendRequest(Arg.Any<SetMyCommandsRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_failed_command_registration_does_not_fail_the_tick()
+    {
+        var secretStore = WithToken("tok1");
+        secretStore.GetAsync(SecretKeys.TelegramOwnerChatId, Arg.Any<CancellationToken>())
+            .Returns(new SecretResult(SecretState.Present, "555"));
+        var client = Substitute.For<ITelegramBotClient>();
+        client.SendRequest(Arg.Any<GetUpdatesRequest>(), Arg.Any<CancellationToken>()).Returns(Array.Empty<Update>());
+        client.SendRequest(Arg.Any<SetMyCommandsRequest>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new ApiRequestException("Bad Request: chat not found", 400));
+        var clientFactory = Substitute.For<ITelegramBotClientFactory>();
+        clientFactory.Create("tok1").Returns(client);
+
+        var result = await CreateService(secretStore, clientFactory, new TelegramClientHandle())
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        result.Should().Be(TelegramPollResult.Processed, "a failed command registration is logged, never fatal");
+    }
+
     sealed class ThrowingScopeFactory : IServiceScopeFactory
     {
         public IServiceScope CreateScope() => new ThrowingScope();
