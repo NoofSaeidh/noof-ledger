@@ -1,5 +1,8 @@
+using Microsoft.Extensions.Logging;
 using Noof.Ledger.Application.Capture;
 using Noof.Ledger.Application.Chat;
+using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Domain;
 using Telegram.Bot.Types;
 
 namespace Noof.Ledger.Telegram;
@@ -10,7 +13,8 @@ internal sealed class TelegramUpdateRouter(
     TelegramOwnerGate ownerGate,
     RecordActionHandler actionHandler,
     CorrectionHandler correctionHandler,
-    IRecordEcho recordEcho)
+    IRecordEcho recordEcho,
+    ILogger<TelegramUpdateRouter> logger)
     : ITelegramUpdateRouter
 {
     public async Task HandleAsync(Update update, string timeZoneId, CancellationToken cancellationToken)
@@ -61,8 +65,10 @@ internal sealed class TelegramUpdateRouter(
         var captured = new CapturedMessage(message.Chat.Id, message.Id, text, sentAt);
         var transactionId = await captureStore.CaptureAsync(captured, timeZoneId, cancellationToken);
 
-        var botMessageId = await chatNotifier.SendAsync(message.Chat.Id, recordEcho.Acknowledgement, cancellationToken);
-        await captureStore.AttachBotMessageAsync(transactionId, botMessageId, cancellationToken);
+        using var scope = TransactionLogScope.Begin(logger, transactionId);
+        logger.LogReceived(TransactionStages.Received, CaptureKind.Text, message.Chat.Id);
+
+        await SendAcknowledgementAsync(message.Chat.Id, transactionId, recordEcho.Acknowledgement, cancellationToken);
     }
 
     async Task HandleVoiceAsync(Message message, Voice voice, string timeZoneId, CancellationToken cancellationToken)
@@ -75,7 +81,23 @@ internal sealed class TelegramUpdateRouter(
         var captured = new CapturedVoice(message.Chat.Id, message.Id, voice.FileId, voice.Duration, new DateTimeOffset(message.Date));
         var transactionId = await captureStore.CaptureVoiceAsync(captured, timeZoneId, cancellationToken);
 
-        var botMessageId = await chatNotifier.SendAsync(message.Chat.Id, recordEcho.Transcribing, cancellationToken);
-        await captureStore.AttachBotMessageAsync(transactionId, botMessageId, cancellationToken);
+        using var scope = TransactionLogScope.Begin(logger, transactionId);
+        logger.LogReceived(TransactionStages.Received, CaptureKind.Voice, message.Chat.Id);
+
+        await SendAcknowledgementAsync(message.Chat.Id, transactionId, recordEcho.Transcribing, cancellationToken);
+    }
+
+    async Task SendAcknowledgementAsync(long chatId, Guid transactionId, string text, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var botMessageId = await chatNotifier.SendAsync(chatId, text, cancellationToken);
+            await captureStore.AttachBotMessageAsync(transactionId, botMessageId, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Received, ex);
+            throw;
+        }
     }
 }
