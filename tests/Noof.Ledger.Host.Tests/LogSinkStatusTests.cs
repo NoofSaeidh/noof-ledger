@@ -36,4 +36,34 @@ public class LogSinkStatusTests
 
         status.LastFailureAt.Should().Be(second);
     }
+
+    [Fact]
+    public async Task Concurrent_writers_and_readers_never_observe_a_torn_value()
+    {
+        var status = new LogSinkStatus();
+        var values = Enumerable.Range(0, 8)
+            .Select(i => new DateTimeOffset(2026, 9, 25, 12, 0, 0, TimeSpan.Zero).AddMinutes(i * 137))
+            .ToArray();
+
+        var tornValueSeen = 0;
+
+        var writers = values.Select(value => Task.Run(() =>
+        {
+            for (var i = 0; i < 20_000; i++)
+                status.RecordFailure(value);
+        }));
+
+        var readers = Enumerable.Range(0, 4).Select(_ => Task.Run(() =>
+        {
+            for (var i = 0; i < 20_000; i++)
+            {
+                if (status.LastFailureAt is { } at && !values.Contains(at))
+                    Interlocked.Increment(ref tornValueSeen);
+            }
+        }));
+
+        await Task.WhenAll(writers.Concat(readers));
+
+        tornValueSeen.Should().Be(0);
+    }
 }
