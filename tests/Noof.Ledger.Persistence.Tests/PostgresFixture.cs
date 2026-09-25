@@ -41,7 +41,13 @@ public sealed class PostgresFixture : IAsyncLifetime
         return new LedgerDbContext(options);
     }
 
-    public async Task<NpgsqlConnection> CreateDatabaseAsync()
+    // NpgsqlConnection.ConnectionString drops the password once the connection has been opened
+    // (confirmed empirically, not documented anywhere obvious) - a caller that needs the
+    // connection string itself, to hand to something that opens its own connection (AddNoofPersistence,
+    // a published host process), must capture it before opening, which CreateDatabaseAsync's open
+    // NpgsqlConnection can no longer provide after the fact. This is that string, from the same
+    // full-schema clone CreateDatabaseAsync itself opens.
+    public async Task<string> CreateDatabaseConnectionStringAsync()
     {
         var name = $"noof_test_{Guid.NewGuid():N}";
 
@@ -54,7 +60,14 @@ public sealed class PostgresFixture : IAsyncLifetime
 
         created.Add(name);
 
-        var connection = new NpgsqlConnection(WithoutPooling(DatabaseSettings.For(name)));
+        return WithoutPooling(DatabaseSettings.For(name));
+    }
+
+    public async Task<NpgsqlConnection> CreateDatabaseAsync()
+    {
+        var connectionString = await CreateDatabaseConnectionStringAsync();
+
+        var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync(TestContext.Current.CancellationToken);
         return connection;
     }

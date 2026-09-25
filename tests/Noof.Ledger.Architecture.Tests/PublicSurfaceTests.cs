@@ -63,7 +63,7 @@ public class PublicSurfaceTests
             "BackupRunRecord", "BackupStatus", "DumpResult", "IBackupLog", "IDatabaseDumper",
             "ILogFileTail",
             "IDatabaseGate", "DatabaseState",
-            "LogSeverity", "LogRow", "LogFilter", "LogPage", "ILogQuery", "ILogRetention",
+            "LogSeverity", "LogRow", "LogFilter", "LogPage", "LogSortOrder", "ILogQuery", "ILogRetention",
             "TransactionStages", "TransactionLogScope", "TraceEvent", "RevisionView", "TransactionTrace", "ITransactionTrace",
             "ILogSinkStatus",
             "HealthLevel", "HealthItem", "SystemHealthReport", "ISystemHealth",

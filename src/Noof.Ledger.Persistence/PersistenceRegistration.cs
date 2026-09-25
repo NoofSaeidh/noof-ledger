@@ -1,7 +1,9 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Noof.Ledger.Application.Auth;
 using Noof.Ledger.Application.Backup;
 using Noof.Ledger.Application.Capture;
@@ -41,7 +43,9 @@ public static class PersistenceRegistration
     {
         var connectionString = LedgerConnectionString.Resolve(configuration.GetConnectionString("Ledger"));
 
-        services.AddDbContext<LedgerDbContext>(options => options.UseNpgsql(connectionString));
+        services.AddDbContext<LedgerDbContext>(options => options
+            .UseNpgsql(connectionString)
+            .ConfigureWarnings(w => w.Log((RelationalEventId.CommandExecuted, LogLevel.Debug))));
 
         services.AddScoped<IUserStore, EfUserStore>();
         services.AddScoped<ISecretStore, EfSecretStore>();

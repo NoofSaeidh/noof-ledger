@@ -10,12 +10,15 @@ public sealed record LogRow(
     Guid? TransactionId,
     string? PropertiesJson);
 
+public enum LogSortOrder { NewestFirst, OldestFirst }
+
 public sealed record LogFilter(
     LogSeverity MinLevel = LogSeverity.Information,
     DateTimeOffset? From = null,
     DateTimeOffset? To = null,
     string? Text = null,
     string? Source = null,
-    Guid? TransactionId = null);
+    Guid? TransactionId = null,
+    LogSortOrder Sort = LogSortOrder.NewestFirst);
 
 public sealed record LogPage(IReadOnlyList<LogRow> Rows, int TotalCount);

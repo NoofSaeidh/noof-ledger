@@ -40,8 +40,8 @@ try
 
     var ledgerConnectionString = LedgerConnectionString.Resolve(builder.Configuration.GetConnectionString("Ledger"));
 
-    builder.Host.UseSerilog((_, services, loggerConfiguration) =>
-        LoggingSetup.Configure(loggerConfiguration, logDirectory, ledgerConnectionString, services));
+    builder.Host.UseSerilog((context, services, loggerConfiguration) =>
+        LoggingSetup.Configure(loggerConfiguration, context.Configuration, logDirectory, ledgerConnectionString, services));
 
     builder.Services.AddRazorComponents()
         .AddInteractiveServerComponents();

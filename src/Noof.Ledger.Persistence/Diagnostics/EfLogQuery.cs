@@ -28,8 +28,11 @@ internal sealed class EfLogQuery(LedgerDbContext db) : ILogQuery
 
         var totalCount = await query.CountAsync(cancellationToken);
 
-        var rows = await query
-            .OrderByDescending(e => e.LoggedAt).ThenByDescending(e => e.Id)
+        var sorted = filter.Sort == LogSortOrder.OldestFirst
+            ? query.OrderBy(e => e.LoggedAt).ThenBy(e => e.Id)
+            : query.OrderByDescending(e => e.LoggedAt).ThenByDescending(e => e.Id);
+
+        var rows = await sorted
             .Skip(pageIndex * pageSize)
             .Take(pageSize)
             .Select(e => new LogRow(e.Id, e.LoggedAt, e.Level, e.Source, e.Message, e.Exception, e.TransactionId, e.PropertiesJson))
