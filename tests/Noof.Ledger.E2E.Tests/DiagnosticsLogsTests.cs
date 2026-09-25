@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Playwright;
@@ -124,6 +125,87 @@ public sealed class DiagnosticsLogsTests(CookieModeHostFixture fixture) : PageTe
     }
 
     [Fact]
+    public async Task Selecting_a_quick_range_and_a_minimum_level_narrows_the_grid_to_matching_rows()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var source = $"diagnostics-quickrange-{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+
+        await using (var db = OpenDb())
+        {
+            db.AppLogs.Add(NewRow("old-row-outside-the-hour", loggedAt: now.AddHours(-3), source: source, level: LogSeverity.Warning));
+            db.AppLogs.Add(NewRow("recent-row-below-the-level", loggedAt: now, source: source, level: LogSeverity.Information));
+            db.AppLogs.Add(NewRow("recent-row-at-the-level", loggedAt: now, source: source, level: LogSeverity.Warning));
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + $"/diagnostics/logs?source={source}");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var grid = Page.Locator("#logs-grid");
+        await Expect(grid).ToBeVisibleAsync();
+
+        // Unfiltered (besides the shared source), all three rows are visible.
+        await Expect(grid).ToContainTextAsync("old-row-outside-the-hour");
+        await Expect(grid).ToContainTextAsync("recent-row-below-the-level");
+        await Expect(grid).ToContainTextAsync("recent-row-at-the-level");
+
+        // One select at a time, each confirmed before the next: QuickGrid tears down and remounts on
+        // every filter change (see ReloadAsync's comment), so firing two selects back to back without
+        // letting the first round-trip land races the second change against a grid still being torn
+        // down and rebuilt from the first.
+        await Page.SelectOptionAsync("#logs-quick-range", "LastHour");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        await Expect(grid).Not.ToContainTextAsync("old-row-outside-the-hour");
+
+        await Page.SelectOptionAsync("#logs-filter-level", "Warning");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        // "Last hour" excludes the 3-hour-old row; "Warning" excludes the Information row - only
+        // the row that is both recent and at Warning survives.
+        await Expect(grid).ToContainTextAsync("recent-row-at-the-level");
+        await Expect(grid).Not.ToContainTextAsync("recent-row-below-the-level");
+        await Expect(grid).Not.ToContainTextAsync("old-row-outside-the-hour");
+    }
+
+    [Fact]
+    public async Task The_sort_toggle_reverses_the_order_of_the_grid()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var source = $"diagnostics-sort-{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+
+        await using (var db = OpenDb())
+        {
+            db.AppLogs.Add(NewRow("sort-order-older-row", loggedAt: now.AddMinutes(-10), source: source));
+            db.AppLogs.Add(NewRow("sort-order-newer-row", loggedAt: now, source: source));
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + $"/diagnostics/logs?source={source}");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var grid = Page.Locator("#logs-grid");
+        await Expect(grid).ToBeVisibleAsync();
+
+        // QuickGrid pads its <tbody> with empty rows up to the page size, so a row *count* assertion
+        // is unreliable here; matching a regex against the grid's whole text instead proves ordering
+        // directly - the pattern only matches when the first marker's text precedes the second's.
+        await Expect(grid).ToContainTextAsync(new Regex("sort-order-newer-row[\\s\\S]*sort-order-older-row"));
+
+        await Page.SelectOptionAsync("#logs-sort-order", "OldestFirst");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        await Expect(grid).ToContainTextAsync(new Regex("sort-order-older-row[\\s\\S]*sort-order-newer-row"));
+    }
+
+    [Fact]
     public async Task A_failing_log_sink_check_falls_back_to_the_file_tail()
     {
         if (fixture.DatabaseUnavailable)
@@ -235,11 +317,12 @@ public sealed class DiagnosticsLogsTests(CookieModeHostFixture fixture) : PageTe
         await drop.ExecuteNonQueryAsync(CancellationToken.None);
     }
 
-    static AppLogEntry NewRow(string message, DateTimeOffset? loggedAt = null, string source = "DiagnosticsLogsTests") => new()
+    static AppLogEntry NewRow(
+        string message, DateTimeOffset? loggedAt = null, string source = "DiagnosticsLogsTests", LogSeverity level = LogSeverity.Information) => new()
     {
         Id = 0,
         LoggedAt = loggedAt ?? DateTimeOffset.UtcNow,
-        Level = LogSeverity.Information,
+        Level = level,
         Source = source,
         Message = message,
         Template = "{Message}",

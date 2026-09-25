@@ -1,6 +1,7 @@
 @page "/diagnostics/logs"
 @attribute [Authorize]
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
+@implements IDisposable
 @using Microsoft.AspNetCore.Components.QuickGrid
 @using Noof.Ledger.Application.Diagnostics
 @inject ILogQuery LogQuery
@@ -151,7 +152,8 @@ else
     }
 
     readonly LogFilterEdit filter = new();
-    readonly PaginationState pagination = new() { ItemsPerPage = 100 };
+    readonly SemaphoreSlim queryGate = new(1, 1);
+    PaginationState pagination = new() { ItemsPerPage = 100 };
     int reloadGeneration;
     string? textFilter;
     string? transactionIdText;
@@ -179,10 +181,27 @@ else
         }
     }
 
+    // A filter change tears the old QuickGrid down and mounts a new one (see ReloadAsync's comment),
+    // but the old instance's own in-flight ProvideRowsAsync call is not itself cancelled by that -
+    // it keeps running against this same, one, circuit-scoped LedgerDbContext. Left unserialized, a
+    // second filter change fired while the first is still loading raced a new query against that same
+    // DbContext from the still-live old call: sometimes visible as EF's own "a second operation was
+    // started on this context instance" crashing the whole circuit, sometimes as one of the two calls
+    // simply hanging - both observed here directly. This gate makes the two run one after the other
+    // instead of concurrently, which is correct behaviour for a single shared DbContext regardless of
+    // which of those two failure shapes a given race would otherwise have produced.
     async ValueTask<GridItemsProviderResult<LogRow>> ProvideRowsAsync(GridItemsProviderRequest<LogRow> request)
     {
-        var page = await LogQuery.QueryAsync(ToFilter(), request.StartIndex / pagination.ItemsPerPage, pagination.ItemsPerPage, request.CancellationToken);
-        return GridItemsProviderResult.From<LogRow>([.. page.Rows], page.TotalCount);
+        await queryGate.WaitAsync(request.CancellationToken);
+        try
+        {
+            var page = await LogQuery.QueryAsync(ToFilter(), request.StartIndex / pagination.ItemsPerPage, pagination.ItemsPerPage, request.CancellationToken);
+            return GridItemsProviderResult.From<LogRow>([.. page.Rows], page.TotalCount);
+        }
+        finally
+        {
+            queryGate.Release();
+        }
     }
 
     LogFilter ToFilter() => new(
@@ -196,10 +215,14 @@ else
 
     // The datetime-local input's bound value is a local wall-clock DateTime with no offset of its
     // own; pairing it with this machine's current UTC offset for that instant is what turns it into
-    // the DateTimeOffset the filter (and the timestamptz column it compares against) needs.
+    // the correct DateTimeOffset instant. ToUniversalTime() on top of that is not optional: Npgsql
+    // refuses to write a DateTimeOffset with any non-zero Offset to timestamptz ("only offset 0 (UTC)
+    // is supported"), so on any machine whose local zone isn't UTC - this one included - the quick
+    // ranges and the custom From/To fields threw on every query until this was added, caught live by
+    // DiagnosticsLogsTests.Selecting_a_quick_range_and_a_minimum_level_narrows_the_grid_to_matching_rows.
     static DateTimeOffset? ToOffset(DateTime? localTime) =>
         localTime is { } value
-            ? new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Unspecified), TimeZoneInfo.Local.GetUtcOffset(value))
+            ? new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Unspecified), TimeZoneInfo.Local.GetUtcOffset(value)).ToUniversalTime()
             : null;
 
     Task OnQuickRangeChangedAsync()
@@ -227,8 +250,17 @@ else
         // ItemsProvider calls whose results can arrive out of order and leave a stale (unfiltered)
         // page visible - discarding the whole component sidesteps that race instead of coordinating
         // around it.
+        //
+        // A fresh PaginationState, not SetCurrentPageIndexAsync(0) on the old one: that call notifies
+        // the OLD (about-to-be-discarded) QuickGrid's own subscription to refresh itself, which races
+        // the NEW @key-remounted grid's own first fetch - both against the same scoped DbContext,
+        // which throws "a second operation was started on this context instance" and takes the whole
+        // circuit down. A new PaginationState already starts at page 0 and has no old subscriber to
+        // notify - proven live by DiagnosticsLogsTests.The_sort_toggle_reverses_the_order_of_the_grid,
+        // which crashed the circuit under the old SetCurrentPageIndexAsync approach every single run.
         reloadGeneration++;
-        return pagination.SetCurrentPageIndexAsync(0);
+        pagination = new PaginationState { ItemsPerPage = pagination.ItemsPerPage };
+        return Task.CompletedTask;
     }
 
     Task OnFileTailFilterChangedAsync(string? value)
@@ -241,4 +273,6 @@ else
     }
 
     void ToggleExpanded(long id) => expandedRowId = expandedRowId == id ? -1 : id;
+
+    public void Dispose() => queryGate.Dispose();
 }

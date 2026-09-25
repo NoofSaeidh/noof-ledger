@@ -44,7 +44,7 @@ public sealed class ReadyGatedBufferSinkDbTests
 
             await gate.WaitUntilReadyAsync(TestContext.Current.CancellationToken);
 
-            var row = await PollForRowAsync(connectionString, marker, TestContext.Current.CancellationToken);
+            var row = await PollForRowContainingAsync(connectionString, marker, TestContext.Current.CancellationToken);
 
             row.Should().NotBeNull("the pre-Ready event must be flushed into app_log once the gate turns Ready");
         }
@@ -54,14 +54,64 @@ public sealed class ReadyGatedBufferSinkDbTests
         }
     }
 
-    static async Task<string?> PollForRowAsync(string connectionString, string marker, CancellationToken cancellationToken)
+    [Fact]
+    public async Task A_secret_logged_before_the_gate_is_Ready_is_still_redacted_once_flushed_into_app_log()
+    {
+        if (!await DatabaseIsReachableAsync(TestContext.Current.CancellationToken))
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var databaseName = $"noof_ready_gated_sink_redaction_{Guid.NewGuid():N}";
+        await CreateCloneAsync(databaseName, TestContext.Current.CancellationToken);
+        var connectionString = new NpgsqlConnectionStringBuilder(DatabaseSettings.AdminConnectionString) { Database = databaseName }.ConnectionString;
+        var password = new NpgsqlConnectionStringBuilder(connectionString).Password;
+        password.Should().NotBeNullOrEmpty("the connection string must carry a password for this test to prove anything");
+
+        try
+        {
+            await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+            {
+                builder.UseTempLogDirectory();
+                builder.UseSetting("ConnectionStrings:Ledger", connectionString);
+                builder.UseSetting("Database:MigrateOnStartup", "true");
+                builder.UseSetting("Backup:Enabled", "false");
+                builder.ConfigureServices(FakeUserStore.Register);
+            });
+
+            using var client = factory.CreateClient();
+
+            var gate = factory.Services.GetRequiredService<IDatabaseGate>();
+            var logger = factory.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Noof.Ledger.Host.Tests.PreReadySecretProbe");
+            var marker = $"pre-ready-secret-{Guid.NewGuid():N}";
+
+            // The connection password is known to SecretSnapshot from process start (it is a
+            // constructor parameter, not something learned via a DB query), so - unlike a
+            // DB-stored secret - it is redactable even while the gate is not yet Ready. Logging it
+            // here, before the gate is awaited, proves RedactingSink (which sits above
+            // ReadyGatedBufferSink in the pipeline) redacts an event before it is ever buffered.
+            logger.LogWarning("{Marker} connection password is {Password}", marker, password);
+
+            await gate.WaitUntilReadyAsync(TestContext.Current.CancellationToken);
+
+            var row = await PollForRowContainingAsync(connectionString, marker, TestContext.Current.CancellationToken);
+
+            row.Should().NotBeNull("the pre-Ready event must be flushed into app_log once the gate turns Ready");
+            row.Should().NotContain(password);
+            row.Should().Contain("***");
+        }
+        finally
+        {
+            await DropCloneAsync(databaseName);
+        }
+    }
+
+    static async Task<string?> PollForRowContainingAsync(string connectionString, string mustContain, CancellationToken cancellationToken)
     {
         for (var attempt = 0; attempt < 20; attempt++)
         {
             await using var connection = new NpgsqlConnection(connectionString);
             await connection.OpenAsync(cancellationToken);
-            await using var command = new NpgsqlCommand("SELECT message FROM app_log WHERE message = @marker", connection);
-            command.Parameters.AddWithValue("marker", marker);
+            await using var command = new NpgsqlCommand("SELECT message FROM app_log WHERE message LIKE @pattern", connection);
+            command.Parameters.AddWithValue("pattern", $"%{mustContain}%");
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             if (await reader.ReadAsync(cancellationToken))
                 return reader.GetString(0);

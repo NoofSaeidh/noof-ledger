@@ -14,7 +14,10 @@ public class CommandLoggingTests(PostgresFixture fixture)
     [Fact]
     public async Task Executed_DbCommand_is_logged_at_Debug_not_Information()
     {
-        await using var connection = await fixture.CreateDatabaseAsync();
+        // Not fixture.CreateDatabaseAsync(): its NpgsqlConnection.ConnectionString has already lost
+        // the password by the time an open connection is handed back (confirmed empirically), and
+        // AddNoofPersistence opens its own connection from this string rather than reusing one.
+        var connectionString = await fixture.CreateDatabaseConnectionStringAsync();
 
         var capturing = new CapturingLoggerProvider();
         var services = new ServiceCollection();
@@ -29,7 +32,7 @@ public class CommandLoggingTests(PostgresFixture fixture)
             new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?>
                 {
-                    ["ConnectionStrings:Ledger"] = connection.ConnectionString,
+                    ["ConnectionStrings:Ledger"] = connectionString,
                 })
                 .Build(),
             maxJobAttempts: 8);

@@ -84,8 +84,11 @@ internal static class LoggingSetup
             ["properties"] = new PropertiesColumnWriter(NpgsqlDbType.Jsonb),
         };
 
+        // period: 1s, not the sink's own (much longer) default - an operator reading /diagnostics/logs
+        // right after something happened should see it there, not wonder why a real event is
+        // missing for the length of an unconfigured batching window.
         var postgresLogger = new LoggerConfiguration()
-            .WriteTo.PostgreSQL(connectionString, "app_log", columnOptions, needAutoCreateTable: false)
+            .WriteTo.PostgreSQL(connectionString, "app_log", columnOptions, period: TimeSpan.FromSeconds(1), needAutoCreateTable: false)
             .CreateLogger();
 
         var destinations = new LoggerConfiguration()

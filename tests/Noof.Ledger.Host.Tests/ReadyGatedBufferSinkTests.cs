@@ -109,9 +109,23 @@ public class ReadyGatedBufferSinkTests
 
     sealed class FakeGate : IDatabaseGate
     {
-        public DatabaseState State { get; set; } = DatabaseState.Waiting;
+        readonly TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        DatabaseState state = DatabaseState.Waiting;
+
+        public DatabaseState State
+        {
+            get => state;
+            set
+            {
+                state = value;
+                if (value == DatabaseState.Ready)
+                    ready.TrySetResult();
+            }
+        }
+
         public string? Detail => null;
-        public Task WaitUntilReadyAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task WaitUntilReadyAsync(CancellationToken cancellationToken) => ready.Task;
     }
 
     sealed class CollectingSink : Serilog.Core.ILogEventSink
