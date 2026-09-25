@@ -67,6 +67,18 @@ public class RunScriptTests
             output.Should().Contain(name);
     }
 
+    // M-7 (Phase 5 final review): Invoke-Checked used to swallow the child's own exit code and
+    // always exit run.ps1 with 1. A filter matching zero tests makes the MTP test host exit 8 (not
+    // 1) - safe to run for real since Domain.Tests needs no database and this fails on the very
+    // first fast project, never reaching the others.
+    [Fact]
+    public void A_failing_child_command_propagates_its_own_exit_code()
+    {
+        var (exitCode, _) = RunPwsh("test", "fast", "-Filter", "ThisClassDoesNotExist12345");
+
+        exitCode.Should().Be(8, "dotnet test's own exit code for 'zero tests ran' must propagate, not a generic 1");
+    }
+
     // M-6 (Phase 5 final review): Get-ArgValue returns $null when -Filter is the last token, and
     // every -Filter caller used to treat that the same as "no -Filter given" and run the whole
     // project unfiltered - the one thing the operator's testing rule says db/e2e must not do outside

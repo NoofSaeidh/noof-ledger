@@ -213,10 +213,24 @@ function Exit-SuiteLock {
     if ($LockPath -and (Test-Path $LockPath)) { Remove-Item $LockPath -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
+# M-7 (Phase 5 final review): (a) reading $LASTEXITCODE directly throws under Set-StrictMode
+# ("cannot be retrieved because it has not been set") if no native command has run yet in the
+# session - Test-Path Variable:\LASTEXITCODE guards that. Clearing it first also stops a stale
+# exit code from an EARLIER native command being misread as this $Action's own result, if $Action
+# itself never runs one. (b) the child's own exit code is now stashed in $script:LastCheckedExitCode
+# and the whole command dispatch below is wrapped in try/catch so the script exits with it, instead
+# of the generic 1 every uncaught `throw` produces.
+$script:LastCheckedExitCode = 1
+
 function Invoke-Checked {
     param([scriptblock]$Action)
+    Remove-Item Variable:\LASTEXITCODE -ErrorAction SilentlyContinue
     & $Action
-    if ($LASTEXITCODE -ne 0) { throw "Command failed with exit code $LASTEXITCODE." }
+    $code = if (Test-Path Variable:\LASTEXITCODE) { $LASTEXITCODE } else { 0 }
+    if ($code -ne 0) {
+        $script:LastCheckedExitCode = $code
+        throw "Command failed with exit code $code."
+    }
 }
 
 # Ordered so the table and Get-Help both read top-to-bottom as "the main way, then the rest".
@@ -440,6 +454,7 @@ function Write-CommandDetail {
     Write-Host ''
 }
 
+try {
 switch ($CommandName) {
     'help' {
         if ($Rest.Count -ge 1) { Write-CommandDetail -Name $Rest[0] }
@@ -662,4 +677,8 @@ switch ($CommandName) {
         Write-CommandTable
         exit 1
     }
+}
+} catch {
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    exit $script:LastCheckedExitCode
 }
