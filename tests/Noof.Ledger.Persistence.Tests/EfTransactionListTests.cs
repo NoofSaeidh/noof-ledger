@@ -181,6 +181,48 @@ public class EfTransactionListTests(PostgresFixture fixture)
             "a literal % the operator typed must match literally, not as a wildcard that also matches everything else");
     }
 
+    // M-3 (Phase 5 final review): Blazor binds a cleared <input> to "", not null. ToFilter() used to
+    // pass "" straight through, and `filter.Text is { } text` matches "" - producing
+    // `RawText != null AND ILIKE '%%'`, which hides every voice capture awaiting transcription
+    // (RawText is null until ReplaceRawTextAsync runs) the moment the operator has typed into the
+    // text box and then cleared it.
+    [Fact]
+    public async Task An_empty_text_filter_does_not_hide_a_transaction_with_null_RawText()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var wallet = NewWallet("Cash", CurrencyCode.Eur);
+        db.Wallets.Add(wallet);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var now = new DateTimeOffset(2026, 9, 10, 12, 0, 0, TimeSpan.Zero);
+        var awaitingTranscription = new Transaction
+        {
+            Id = Guid.NewGuid(),
+            WalletId = wallet.Id,
+            RawText = null,
+            CaptureKind = CaptureKind.Voice,
+            VoiceFileId = "voice-file-id",
+            Kind = TransactionKind.Expense,
+            Status = TransactionStatus.Captured,
+            TimeZoneId = "Europe/Belgrade",
+            OccurredAt = now,
+            OccurredOn = DateOnly.FromDateTime(now.UtcDateTime),
+            TelegramChatId = 1,
+            TelegramMessageId = Interlocked.Increment(ref nextTelegramMessageId),
+            CreatedAt = now,
+        };
+        db.Transactions.Add(awaitingTranscription);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var list = new EfTransactionList(db);
+
+        var withEmptyText = await list.QueryAsync(new TransactionListFilter(Text: ""), 0, 50, TestContext.Current.CancellationToken);
+        withEmptyText.Rows.Select(r => r.Id).Should().Contain(awaitingTranscription.Id,
+            "an empty text filter must behave like no text filter at all - it must not hide a voice capture with no RawText yet");
+    }
+
     [Fact]
     public async Task Paging_returns_the_requested_page_and_the_total_count_across_all_pages()
     {

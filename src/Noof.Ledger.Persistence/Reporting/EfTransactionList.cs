@@ -21,7 +21,10 @@ internal sealed class EfTransactionList(LedgerDbContext db) : ITransactionList
             query = query.Where(t => t.Kind == kind);
         if (filter.Status is { } status)
             query = query.Where(t => t.Status == status);
-        if (filter.Text is { } text)
+        // M-3 (Phase 5 final review): Blazor binds a cleared <input> to "", not null - an empty
+        // filter must behave like no filter, not like `RawText != null`, which would hide every
+        // voice capture awaiting transcription (RawText is null until ReplaceRawTextAsync runs).
+        if (filter.Text is { } text && !string.IsNullOrWhiteSpace(text))
         {
             var pattern = $"%{EscapeLike(text)}%";
             query = query.Where(t => t.RawText != null && EF.Functions.ILike(t.RawText, pattern, @"\"));
