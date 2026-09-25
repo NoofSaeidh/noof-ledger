@@ -16,7 +16,7 @@ public sealed class UnreachableDatabaseHostFixture : IAsyncLifetime
             ["Database__MigrateOnStartup"] = "true",
             ["ConnectionStrings__Ledger"] = "Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none;Timeout=2",
             ["Backup__Enabled"] = "false",
-        }, cancellationToken);
+        }, cancellationToken, waitForDatabaseReady: false);
     }
 
     public ValueTask DisposeAsync() => host.DisposeAsync();

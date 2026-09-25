@@ -49,8 +49,17 @@ sealed partial class HostProcess : IAsyncDisposable
         return outputDirectory;
     }
 
+    // waitForDatabaseReady defaults to true: almost every fixture points at a database that will
+    // come up, and Login.razor is statically rendered - it shows DatabaseGateBanner
+    // (id="database-waiting") instead of the sign-in form until DatabaseStartupService's gate opens,
+    // and never re-renders itself once served. A plain HTTP 200 on "/" only proves Kestrel is
+    // listening, not that the gate is Ready, so a caller that skipped this wait and went straight to
+    // SignInAsync could hit the banner instead of the form under load. UnreachableDatabaseHostFixture
+    // is the one caller that passes false: its database never becomes reachable, so waiting for the
+    // banner to disappear would just run out the clock.
     public async Task StartAsync(
-        string publishDirectory, IReadOnlyDictionary<string, string> environment, CancellationToken cancellationToken)
+        string publishDirectory, IReadOnlyDictionary<string, string> environment, CancellationToken cancellationToken,
+        bool waitForDatabaseReady = true)
     {
         this.publishDirectory = publishDirectory;
         process = Launch(publishDirectory, environment);
@@ -60,7 +69,11 @@ sealed partial class HostProcess : IAsyncDisposable
         try
         {
             BaseUrl = await WaitForListeningUrlAsync(process, TimeSpan.FromSeconds(30), cancellationToken);
-            await WaitUntilReadyAsync(BaseUrl, TimeSpan.FromSeconds(30), cancellationToken);
+
+            if (waitForDatabaseReady)
+                await WaitUntilLoginReadyAsync(BaseUrl, TimeSpan.FromSeconds(60), cancellationToken);
+            else
+                await WaitUntilRespondingAsync(BaseUrl, TimeSpan.FromSeconds(30), cancellationToken);
         }
         catch
         {
@@ -200,7 +213,7 @@ sealed partial class HostProcess : IAsyncDisposable
         }
     }
 
-    static async Task WaitUntilReadyAsync(string baseUrl, TimeSpan timeout, CancellationToken cancellationToken)
+    static async Task WaitUntilRespondingAsync(string baseUrl, TimeSpan timeout, CancellationToken cancellationToken)
     {
         using var client = new HttpClient();
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -230,6 +243,50 @@ sealed partial class HostProcess : IAsyncDisposable
             catch (OperationCanceledException)
             {
                 throw new TimeoutException($"Host at {baseUrl} did not become ready within {timeout}.");
+            }
+        }
+    }
+
+    // Polls /account/login itself, not "/" (which 302s there anyway), until it comes back without
+    // DatabaseGateBanner's id="database-waiting" - i.e. until the database gate this login page was
+    // served under was already Ready, not merely until Kestrel answers something.
+    static async Task WaitUntilLoginReadyAsync(string baseUrl, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        using var client = new HttpClient();
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(timeout);
+        var loginUrl = baseUrl.TrimEnd('/') + "/account/login";
+
+        while (true)
+        {
+            try
+            {
+                using var response = await client.GetAsync(loginUrl, timeoutCts.Token);
+                if ((int)response.StatusCode is >= 200 and < 300)
+                {
+                    var html = await response.Content.ReadAsStringAsync(timeoutCts.Token);
+                    if (!html.Contains("id=\"database-waiting\"", StringComparison.Ordinal))
+                        return;
+                }
+            }
+            catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
+            {
+                throw new TimeoutException(
+                    $"Host at {loginUrl} did not become ready (database gate never opened) within {timeout}.");
+            }
+            catch
+            {
+                // Not ready yet - the port may not be accepting connections at all.
+            }
+
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(200), timeoutCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                throw new TimeoutException(
+                    $"Host at {loginUrl} did not become ready (database gate never opened) within {timeout}.");
             }
         }
     }

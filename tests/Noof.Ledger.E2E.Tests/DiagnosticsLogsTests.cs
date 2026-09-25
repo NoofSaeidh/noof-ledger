@@ -140,23 +140,12 @@ public sealed class DiagnosticsLogsTests(CookieModeHostFixture fixture) : PageTe
             ["Diagnostics__ForceLogSinkFailureForTests"] = "true",
         }, TestContext.Current.CancellationToken);
 
-        // Login.razor is statically rendered - it shows DatabaseGateBanner instead of the form if
-        // this freshly started process's own DatabaseStartupService has not yet completed its first
-        // connection at the exact moment this GET is served, and (being static) never re-renders
-        // itself once served. HostProcess.StartAsync only waits for an HTTP 200 on "/", not for the
-        // gate itself, so a fresh navigation is retried until the form - not the banner - is what
-        // came back.
-        for (var attempt = 1; ; attempt++)
-        {
-            await Page.GotoAsync(host.BaseUrl + "/");
-            await Page.WaitForURLAsync("**/account/login*");
-            if (await Page.Locator("input[name='username']").IsVisibleAsync())
-                break;
-            if (attempt >= 20)
-                throw new TimeoutException("The login form never rendered - the database gate did not become ready in time.");
-            await Task.Delay(500, TestContext.Current.CancellationToken);
-        }
-
+        // HostProcess.StartAsync already waited for /account/login to come back without
+        // DatabaseGateBanner (id="database-waiting") before returning, so the database gate is Ready
+        // and the first navigation here lands on the sign-in form, not the banner - Login.razor is
+        // statically rendered and never re-renders itself once served.
+        await Page.GotoAsync(host.BaseUrl + "/");
+        await Page.WaitForURLAsync("**/account/login*");
         await Page.FillAsync("input[name='username']", CookieModeHostFixture.Username);
         await Page.FillAsync("input[name='password']", CookieModeHostFixture.Password);
         await Page.ClickAsync("button[type='submit']");
