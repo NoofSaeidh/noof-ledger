@@ -6,6 +6,7 @@ using Noof.Ledger.Application;
 using Noof.Ledger.Application.Auth;
 using Noof.Ledger.Host.Auth;
 using Noof.Ledger.Host.Cli;
+using Noof.Ledger.Host.Diagnostics;
 using Noof.Ledger.Host.Endpoints;
 using Noof.Ledger.Host.Logging;
 using Noof.Ledger.Host.Startup;
@@ -89,6 +90,8 @@ try
     builder.Services.AddNoofAi(builder.Configuration);
 
     builder.Services.AddNoofWorkers(categorizationOptions, backupOptions);
+
+    builder.Services.AddNoofDiagnostics();
 
     var app = builder.Build();
 
