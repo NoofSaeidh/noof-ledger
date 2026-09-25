@@ -81,6 +81,43 @@ public class ReadyGatedBufferSinkTests
         inner.Events.Select(e => e.MessageTemplate.Text).Should().Equal("one", "two");
     }
 
+    // M-9 (Phase 5 final review): if the gate ends Failed (or the host stops before Ready), buffered
+    // events used to be dropped in Dispose with no trace at all - the only "N dropped" warning ever
+    // existed on the flush path. The fallback sink (console/file in production, never app_log - there
+    // is no database to write to) gets one warning line instead.
+    [Fact]
+    public void Disposing_while_the_gate_never_became_Ready_logs_one_warning_to_the_fallback_sink()
+    {
+        var gate = new FakeGate();
+        var inner = new CollectingSink();
+        var fallback = new CollectingSink();
+        var sink = new ReadyGatedBufferSink(inner, gate, fallback, capacity: 10);
+
+        sink.Emit(Event("one"));
+        sink.Emit(Event("two"));
+
+        sink.Dispose();
+
+        fallback.Events.Should().ContainSingle();
+        fallback.Events[0].Level.Should().Be(LogEventLevel.Warning);
+        fallback.Events[0].RenderMessage().Should().Contain("2");
+        inner.Events.Should().BeEmpty("nothing was ever flushed to the database sink");
+    }
+
+    [Fact]
+    public void Disposing_after_a_clean_flush_logs_no_warning_to_the_fallback_sink()
+    {
+        var gate = new FakeGate { State = DatabaseState.Ready };
+        var inner = new CollectingSink();
+        var fallback = new CollectingSink();
+        var sink = new ReadyGatedBufferSink(inner, gate, fallback);
+
+        sink.Emit(Event("one"));
+        sink.Dispose();
+
+        fallback.Events.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task Concurrent_emits_across_the_Ready_transition_never_throw_or_lose_events()
     {

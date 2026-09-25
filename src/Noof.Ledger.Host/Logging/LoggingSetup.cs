@@ -92,7 +92,11 @@ internal static class LoggingSetup
             .WriteTo.PostgreSQL(connectionString, "app_log", columnOptions, period: TimeSpan.FromSeconds(1), needAutoCreateTable: false)
             .CreateLogger();
 
-        var destinations = new LoggerConfiguration()
+        // consoleAndFileLogger is built once and referenced twice: as `destinations`' own sink, and
+        // as ReadyGatedBufferSink's fallback (M-9, Phase 5 final review) - the one place it can still
+        // report to when it is disposed with events that never reached the database, since there is
+        // no app_log connection to write to at that point.
+        var consoleAndFileLogger = new LoggerConfiguration()
             .WriteTo.Console(restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Information)
             .WriteTo.File(
                 Path.Combine(logDirectory, "noof-ledger-.log"),
@@ -100,7 +104,15 @@ internal static class LoggingSetup
                 retainedFileCountLimit: RetainedFileCountLimit,
                 fileSizeLimitBytes: FileSizeLimitBytes,
                 rollOnFileSizeLimit: true)
-            .WriteTo.Sink(new ReadyGatedBufferSink(postgresLogger, gate));
+            .CreateLogger();
+
+        // ReadyGatedBufferSink's sink is added before consoleAndFileLogger's so that, on dispose,
+        // Serilog tears sinks down in the order they were added - the buffer sink's own Dispose (it
+        // may still need to Emit its fallback warning) runs while consoleAndFileLogger is still live,
+        // not after it has already been disposed.
+        var destinations = new LoggerConfiguration()
+            .WriteTo.Sink(new ReadyGatedBufferSink(postgresLogger, gate, consoleAndFileLogger))
+            .WriteTo.Sink(consoleAndFileLogger);
 
         var builtDestinations = destinations.CreateLogger();
 

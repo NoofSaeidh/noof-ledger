@@ -16,6 +16,7 @@ internal sealed class ReadyGatedBufferSink : ILogEventSink, IDisposable
 
     readonly ILogEventSink inner;
     readonly IDatabaseGate gate;
+    readonly ILogEventSink? fallback;
     readonly int capacity;
     readonly Lock gateLock = new();
     readonly Queue<LogEvent> buffer = new();
@@ -23,10 +24,15 @@ internal sealed class ReadyGatedBufferSink : ILogEventSink, IDisposable
     int dropped;
     bool flushed;
 
-    public ReadyGatedBufferSink(ILogEventSink inner, IDatabaseGate gate, int capacity = 10_000)
+    // fallback (M-9, Phase 5 final review): where Dispose reports events that never reached `inner`
+    // because the gate never turned Ready - console/file in production (LoggingSetup wires it to the
+    // same sub-logger `destinations`' Console+File sinks feed), never app_log, since there is no
+    // database connection to write to at that point.
+    public ReadyGatedBufferSink(ILogEventSink inner, IDatabaseGate gate, ILogEventSink? fallback = null, int capacity = 10_000)
     {
         this.inner = inner;
         this.gate = gate;
+        this.fallback = fallback;
         this.capacity = capacity;
 
         // Emit() also checks gate.State on every call and flushes there if it finds Ready already,
@@ -99,10 +105,26 @@ internal sealed class ReadyGatedBufferSink : ILogEventSink, IDisposable
         DateTimeOffset.Now, LogEventLevel.Warning, null,
         TemplateParser.Parse($"{count} log events from before the database was ready were dropped"), []);
 
+    static LogEvent NeverFlushedWarning(int count) => new(
+        DateTimeOffset.Now, LogEventLevel.Warning, null,
+        TemplateParser.Parse(
+            $"{count} log events were never written to the database because it was never ready before shutdown; they are in the log file"),
+        []);
+
     public void Dispose()
     {
         disposed.Cancel();
         disposed.Dispose();
+
+        lock (gateLock)
+        {
+            if (!flushed)
+            {
+                var neverFlushed = buffer.Count + dropped;
+                if (neverFlushed > 0)
+                    fallback?.Emit(NeverFlushedWarning(neverFlushed));
+            }
+        }
 
         if (inner is IDisposable disposable)
             disposable.Dispose();

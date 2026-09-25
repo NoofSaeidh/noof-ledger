@@ -239,7 +239,10 @@ app creates it if it does not exist. While PostgreSQL is reachable, the same eve
 to the `app_log` table — every known secret (everything in `app_secret`, plus the database password)
 is redacted to `***` before either sink sees a line. If the database is down, or the table sink itself
 starts failing, the file is the only copy; nothing is lost, only the second copy is missing until the
-sink recovers.
+sink recovers. Events logged before the database gate ever turns `Ready` are buffered in memory
+(up to 10,000) and flushed to `app_log` the moment it does; if the gate never turns `Ready` before
+shutdown, one warning line naming how many events never made it lands in the file/console instead —
+they are still in the file itself, just never copied to the table.
 
 **Reading `/diagnostics` and the trace page.** `/diagnostics` lists every health check — Database,
 Migrations, Telegram, AI keys, Backup, Disk, Log sink — each with a "Logs" link that opens

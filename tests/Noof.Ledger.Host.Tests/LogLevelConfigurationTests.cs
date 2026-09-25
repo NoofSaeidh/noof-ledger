@@ -123,10 +123,41 @@ public class LogLevelConfigurationTests
         }
     }
 
-    static IServiceProvider BuildFakeServices()
+    // M-9 (Phase 5 final review): end-to-end through LoggingSetup's real wiring (not just
+    // ReadyGatedBufferSinkTests' own unit tests) - a gate that never turns Ready means the events
+    // buffered before shutdown never reach app_log; disposing the outer logger must still leave a
+    // trace of that in the file, since there is no database connection left to write to.
+    [Fact]
+    public void Disposing_the_logger_while_the_gate_never_became_Ready_leaves_a_warning_in_the_file()
+    {
+        var logDirectory = Directory.CreateTempSubdirectory("noof-logging-setup-test-").FullName;
+        try
+        {
+            var hostConfiguration = new ConfigurationBuilder().Build();
+            var configuration = new LoggerConfiguration();
+            LoggingSetup.Configure(
+                configuration, hostConfiguration, logDirectory, UnreachableConnectionString, BuildFakeServices(new NeverReadyGate()));
+
+            var logger = configuration.CreateLogger();
+            var probe = logger.ForContext(Serilog.Core.Constants.SourceContextPropertyName, "Noof.Ledger.Host.Tests.Probe");
+            probe.Warning("first buffered event");
+            probe.Warning("second buffered event");
+            logger.Dispose();
+
+            var text = ReadAllTextWithRetry(NewestLogFile(logDirectory));
+            text.Should().Contain("2", "the file must name how many buffered events never reached the database");
+            text.Should().Contain("never written to the database");
+        }
+        finally
+        {
+            DeleteWithRetry(new DirectoryInfo(logDirectory));
+        }
+    }
+
+    static IServiceProvider BuildFakeServices(Noof.Ledger.Application.Diagnostics.IDatabaseGate? gate = null)
     {
         var services = new ServiceCollection();
-        services.AddSingleton<Noof.Ledger.Application.Diagnostics.IDatabaseGate>(new AlwaysReadyGate());
+        services.AddSingleton(gate ?? new AlwaysReadyGate());
         services.AddSingleton<Noof.Ledger.Application.Diagnostics.ILogSinkStatus>(new NoopSinkStatus());
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<Noof.Ledger.Host.Diagnostics.ISecretValueSource>(new NoSecrets());
@@ -139,6 +170,16 @@ public class LogLevelConfigurationTests
         public Noof.Ledger.Application.Diagnostics.DatabaseState State => Noof.Ledger.Application.Diagnostics.DatabaseState.Ready;
         public string? Detail => null;
         public Task WaitUntilReadyAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    // M-9 (Phase 5 final review): a gate that never turns Ready, for proving ReadyGatedBufferSink's
+    // dispose-time fallback warning reaches the real file sink end to end through LoggingSetup's own
+    // wiring, not just the sink's own unit tests.
+    sealed class NeverReadyGate : Noof.Ledger.Application.Diagnostics.IDatabaseGate
+    {
+        public Noof.Ledger.Application.Diagnostics.DatabaseState State => Noof.Ledger.Application.Diagnostics.DatabaseState.Waiting;
+        public string? Detail => null;
+        public Task WaitUntilReadyAsync(CancellationToken cancellationToken) => new TaskCompletionSource().Task;
     }
 
     sealed class NoopSinkStatus : Noof.Ledger.Application.Diagnostics.ILogSinkStatus
