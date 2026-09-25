@@ -36,9 +36,9 @@ internal sealed partial class LogRetentionWorker(
         }
     }
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Log retention pruned {PrunedCount} rows")]
+    [LoggerMessage(EventId = 5201, Level = LogLevel.Information, Message = "Log retention pruned {PrunedCount} rows")]
     partial void LogPruned(int prunedCount);
 
-    [LoggerMessage(Level = LogLevel.Error, Message = "Log retention prune failed")]
+    [LoggerMessage(EventId = 5202, Level = LogLevel.Error, Message = "Log retention prune failed")]
     partial void LogPruneFailed(Exception exception);
 }
