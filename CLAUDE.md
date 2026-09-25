@@ -176,7 +176,7 @@ register it into) — named because they are exceptions, not a licence to invent
 
 **Testing**
 - TDD: a failing test first, for all behaviour. Exempt: migrations, DTOs, `Program.cs` wiring.
-- **Test hosts never write into the operator's real log directory** *(settled 2026-09-25, Phase 5)*.
+- **Test hosts never write into the operator's real log directory** (Phase 5).
   Every `WebApplicationFactory<Program>` and E2E host fixture must point `Logging:File:Directory` at a
   per-fixture temp directory (the `TestHostLogging` helpers, guarded by `TestHostLogDirectoryTests`) —
   before this, test runs wrote files straight into `%LOCALAPPDATA%\NoofLedger\logs` and could evict the
