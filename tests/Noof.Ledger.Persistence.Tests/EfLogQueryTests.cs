@@ -145,6 +145,23 @@ public class EfLogQueryTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task OldestFirst_reverses_the_order_and_ties_break_by_id_ascending()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var same = DateTimeOffset.Parse("2026-09-25T10:00:00Z");
+        await SeedAsync(db,
+            Row(1, LogSeverity.Information, same, "first"),
+            Row(2, LogSeverity.Information, same, "second"),
+            Row(3, LogSeverity.Information, DateTimeOffset.Parse("2026-09-25T10:01:00Z"), "third"));
+
+        var page = await new EfLogQuery(db).QueryAsync(
+            new LogFilter(Sort: LogSortOrder.OldestFirst), pageIndex: 0, pageSize: 50, TestContext.Current.CancellationToken);
+
+        page.Rows.Select(r => r.Message).Should().Equal("first", "second", "third");
+    }
+
+    [Fact]
     public async Task PageIndex_skips_the_prior_pages()
     {
         await using var db = await fixture.CreateContextAsync();

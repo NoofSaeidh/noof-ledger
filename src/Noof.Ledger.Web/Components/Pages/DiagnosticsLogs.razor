@@ -7,6 +7,7 @@
 @inject ILogFileTail LogFileTail
 @inject ISystemHealth SystemHealth
 @inject IDatabaseGate Gate
+@inject TimeProvider TimeProvider
 
 <PageTitle>Logs</PageTitle>
 
@@ -73,6 +74,24 @@ else
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">Transaction id</MudText>
                 <input id="logs-filter-transaction-id" class="noof-input" @bind="transactionIdText" @bind:event="oninput" @bind:after="ReloadAsync" />
             </MudItem>
+            <MudItem xs="12" md="2">
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Quick range</MudText>
+                <select id="logs-quick-range" @bind="quickRange" @bind:after="OnQuickRangeChangedAsync" class="noof-native-select">
+                    @foreach (var range in Enum.GetValues<QuickRange>())
+                    {
+                        <option value="@range">@range</option>
+                    }
+                </select>
+            </MudItem>
+            <MudItem xs="12" md="2">
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Sort</MudText>
+                <select id="logs-sort-order" @bind="filter.Sort" @bind:after="ReloadAsync" class="noof-native-select">
+                    @foreach (var sort in Enum.GetValues<LogSortOrder>())
+                    {
+                        <option value="@sort">@(sort == LogSortOrder.NewestFirst ? "Newest first" : "Oldest first")</option>
+                    }
+                </select>
+            </MudItem>
         </MudGrid>
 
         <QuickGrid @key="reloadGeneration" TGridItem="LogRow" id="logs-grid" ItemsProvider="ProvideRowsAsync" Pagination="pagination" Class="mb-2">
@@ -118,6 +137,8 @@ else
     [SupplyParameterFromQuery]
     public string? Source { get; set; }
 
+    enum QuickRange { All, LastHour, Today, Last7Days }
+
     sealed class LogFilterEdit
     {
         public LogSeverity MinLevel { get; set; } = LogSeverity.Information;
@@ -126,6 +147,7 @@ else
         public DateTime? From { get; set; }
         public DateTime? To { get; set; }
         public Guid? TransactionId { get; set; }
+        public LogSortOrder Sort { get; set; } = LogSortOrder.NewestFirst;
     }
 
     readonly LogFilterEdit filter = new();
@@ -133,6 +155,7 @@ else
     int reloadGeneration;
     string? textFilter;
     string? transactionIdText;
+    QuickRange quickRange = QuickRange.All;
     bool fileTailMode;
     long expandedRowId = -1;
     IReadOnlyList<string> fileLines = [];
@@ -168,7 +191,8 @@ else
         To: ToOffset(filter.To),
         Text: filter.Text,
         Source: filter.Source,
-        TransactionId: filter.TransactionId);
+        TransactionId: filter.TransactionId,
+        Sort: filter.Sort);
 
     // The datetime-local input's bound value is a local wall-clock DateTime with no offset of its
     // own; pairing it with this machine's current UTC offset for that instant is what turns it into
@@ -177,6 +201,21 @@ else
         localTime is { } value
             ? new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Unspecified), TimeZoneInfo.Local.GetUtcOffset(value))
             : null;
+
+    Task OnQuickRangeChangedAsync()
+    {
+        var now = TimeProvider.GetLocalNow().DateTime;
+
+        (filter.From, filter.To) = quickRange switch
+        {
+            QuickRange.LastHour => (now.AddHours(-1), (DateTime?)null),
+            QuickRange.Today => (now.Date, (DateTime?)null),
+            QuickRange.Last7Days => (now.AddDays(-7), (DateTime?)null),
+            _ => ((DateTime?)null, (DateTime?)null),
+        };
+
+        return ReloadAsync();
+    }
 
     Task ReloadAsync()
     {

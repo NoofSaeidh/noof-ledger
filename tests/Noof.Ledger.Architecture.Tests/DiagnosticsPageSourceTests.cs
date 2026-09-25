@@ -42,6 +42,10 @@ public class DiagnosticsPageSourceTests
         source.Should().Contain("id=\"logs-filter-from\"",
             "LogFilter carries From/To (binding spec §4) - the UI must expose both, not just MinLevel/Text/Source/TransactionId");
         source.Should().Contain("id=\"logs-filter-to\"");
+        source.Should().Contain("id=\"logs-quick-range\"",
+            "Task 9: quick date ranges (Last hour/Today/7 days/All) alongside the custom From/To fields");
+        source.Should().Contain("id=\"logs-sort-order\"",
+            "Task 9: a sort toggle between newest-first and oldest-first");
         source.Should().Contain("[SupplyParameterFromQuery]",
             "/diagnostics's per-check Logs link navigates to /diagnostics/logs?source=<name> - this page must read that query parameter to seed the filter");
         source.Should().NotContain("Virtualize",
