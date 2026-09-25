@@ -1,6 +1,5 @@
 using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
@@ -11,6 +10,7 @@ using Noof.Ledger.Application.Jobs;
 using Noof.Ledger.Application.Transcription;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Host.Workers;
+using Noof.Ledger.TestKit;
 
 namespace Noof.Ledger.Host.Tests;
 
@@ -100,9 +100,10 @@ public class TranscriptionWorkerTests
     }
 
     static TranscriptionWorker CreateWorker(
-        IServiceScopeFactory scopeFactory, FakeTimeProvider? time = null, IDatabaseGate? gate = null) =>
+        IServiceScopeFactory scopeFactory, FakeTimeProvider? time = null, IDatabaseGate? gate = null,
+        CapturingLogger<TranscriptionWorker>? logger = null) =>
         new(scopeFactory, time ?? new FakeTimeProvider(new DateTimeOffset(2026, 9, 24, 9, 0, 0, TimeSpan.Zero)),
-            new CategorizationWorkerOptions(), WorkerId, Echo, gate ?? ReadyGate(), NullLogger<TranscriptionWorker>.Instance);
+            new CategorizationWorkerOptions(), WorkerId, Echo, gate ?? ReadyGate(), logger ?? new CapturingLogger<TranscriptionWorker>());
 
     static IDatabaseGate ReadyGate()
     {
@@ -149,6 +150,59 @@ public class TranscriptionWorkerTests
         await harness.Queue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
         await harness.TranscriptionStore.DidNotReceiveWithAnyArgs().CompleteCorrectionAsync(default, default!, default, default, Arg.Any<CancellationToken>());
         await harness.Store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Transcribed_is_logged_with_duration_and_character_count()
+    {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 24, 8, 0, 0, TimeSpan.Zero));
+        var harness = Setup(CaptureJob());
+        var logger = new CapturingLogger<TranscriptionWorker>();
+        var worker = CreateWorker(harness.ScopeFactory(), time, logger: logger);
+        harness.Transcriber.TranscribeAsync(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                time.Advance(TimeSpan.FromSeconds(2.5));
+                return Task.FromResult("купил вчера штуку евро");
+            });
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        var entry = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.TranscribedEventId).Subject;
+        entry.Stage.Should().Be(TransactionStages.Transcribed);
+        entry.Properties["DurationSeconds"].Should().Be(2.5);
+        entry.Properties["Characters"].Should().Be("купил вчера штуку евро".Length);
+        entry.Scope![TransactionStages.TransactionIdProperty].Should().Be(TransactionId);
+    }
+
+    [Fact]
+    public async Task A_model_failure_logs_StageFailed_for_Transcribed()
+    {
+        var harness = Setup(CaptureJob());
+        var logger = new CapturingLogger<TranscriptionWorker>();
+        var worker = CreateWorker(harness.ScopeFactory(), logger: logger);
+        harness.Transcriber.TranscribeAsync(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new ModelCallException(ModelFailureKind.Terminal, "bad audio format"));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        var entry = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.StageFailedEventId).Subject;
+        entry.Properties["FailedStage"].Should().Be(TransactionStages.Transcribed);
+        entry.Exception.Should().BeOfType<ModelCallException>();
+        entry.Scope![TransactionStages.TransactionIdProperty].Should().Be(TransactionId);
+    }
+
+    [Fact]
+    public async Task Nothing_heard_logs_StageFailed_for_Transcribed()
+    {
+        var harness = Setup(CaptureJob(), transcript: "");
+        var logger = new CapturingLogger<TranscriptionWorker>();
+        var worker = CreateWorker(harness.ScopeFactory(), logger: logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        var entry = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.StageFailedEventId).Subject;
+        entry.Properties["FailedStage"].Should().Be(TransactionStages.Transcribed);
     }
 
     [Fact]

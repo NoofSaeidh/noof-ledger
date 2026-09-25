@@ -1,3 +1,5 @@
+using Noof.Ledger.Application.Diagnostics;
+
 namespace Noof.Ledger.Host.Workers.TranscriptionLogging;
 
 // A sibling top-level static class, not nested inside TranscriptionWorker: a [LoggerMessage]
@@ -31,4 +33,12 @@ internal static partial class TranscriptionWorkerLog
     [LoggerMessage(EventId = 1306, Level = LogLevel.Warning,
         Message = "SucceedAsync failed for job {JobId} after its transcript was already handed on")]
     public static partial void SucceedAfterHandOffFailed(this ILogger logger, Exception exception, Guid jobId);
+
+    [LoggerMessage(EventId = TransactionStages.TranscribedEventId, EventName = TransactionStages.Transcribed, Level = LogLevel.Information,
+        Message = "{Stage} in {DurationSeconds}s, {Characters} characters")]
+    public static partial void LogTranscribed(this ILogger logger, string stage, double durationSeconds, int characters);
+
+    [LoggerMessage(EventId = TransactionStages.StageFailedEventId, EventName = TransactionStages.StageFailed, Level = LogLevel.Error,
+        Message = "{Stage} at stage {FailedStage}")]
+    public static partial void LogStageFailed(this ILogger logger, string stage, string failedStage, Exception exception);
 }
