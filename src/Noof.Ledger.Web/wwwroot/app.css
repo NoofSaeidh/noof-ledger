@@ -117,3 +117,140 @@
     white-space: nowrap;
     max-width: 28rem;
 }
+
+/* A native <select> has no styling of its own - every filter bar that mixes it with a .noof-input
+   text/date field needs it to match that field's height, border and padding exactly, or the two
+   controls sit at different heights on the same row. */
+.noof-native-select {
+    font: inherit;
+    color: var(--mud-palette-text-primary);
+    background-color: var(--mud-palette-surface, transparent);
+    color-scheme: dark;
+    border: 1px solid var(--mud-palette-lines-inputs, var(--mud-palette-divider));
+    border-radius: var(--mud-default-borderradius);
+    padding: 0.6rem 0.75rem;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.noof-native-select:focus {
+    outline: none;
+    border-color: var(--mud-palette-primary);
+    box-shadow: 0 0 0 1px var(--mud-palette-primary);
+}
+
+/* One filter bar look shared by every page that mixes a quick-range row with labelled native
+   inputs/selects (Transactions, Diagnostics Logs): every control gets the same label placement
+   (caption above) and the same control height, instead of drifting per page. */
+.noof-filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.noof-filter-bar > .noof-filter-quick-ranges {
+    flex-basis: 100%;
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.noof-filter-bar > .noof-filter-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    flex: 1 1 11rem;
+    min-width: 9rem;
+}
+
+/* QuickGrid renders a bare <table> with none of MudBlazor's own styling - every page that uses it
+   (Transactions, Logs) shares this look rather than each page reinventing header/row/cell rules. */
+.noof-grid {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.noof-grid th,
+.noof-grid td {
+    padding: 0.65rem 0.9rem;
+    text-align: left;
+    border-bottom: 1px solid var(--mud-palette-divider);
+}
+
+.noof-grid th {
+    color: var(--mud-palette-text-secondary);
+    font-weight: 500;
+}
+
+.noof-grid tbody tr:hover {
+    background: var(--mud-palette-action-default-hover, rgba(255, 255, 255, 0.06));
+}
+
+/* A paginated (non-virtualized) QuickGrid pads its <tbody> with empty <tr>s up to the page size, so
+   the grid's height stays constant across pages - every <td> in one of those rows is truly empty.
+   Left visible, that is dozens of blank striped rows under a short result set; this hides exactly
+   those rows without touching a real row that happens to have one empty cell (an unstyled Categories
+   column, for instance - that row still has a non-empty Date cell). */
+.noof-grid tbody tr:not(:has(td:not(:empty))) {
+    display: none;
+}
+
+.noof-grid .noof-col-nowrap {
+    white-space: nowrap;
+}
+
+.noof-grid .noof-col-amounts {
+    white-space: nowrap;
+    text-align: right;
+    font-family: 'Cascadia Mono', Consolas, 'SF Mono', 'Liberation Mono', monospace;
+    font-variant-numeric: tabular-nums;
+}
+
+/* QuickGrid's own Paginator ships unstyled (plain #ccc border, no theme colours) - this brings it
+   in line with the dark theme and gives it breathing room under the grid it belongs to. */
+.paginator {
+    color: var(--mud-palette-text-secondary);
+    border-top: 1px solid var(--mud-palette-divider) !important;
+    margin-top: 0.75rem !important;
+}
+
+.noof-trace-summary-table td {
+    padding: 0.35rem 0.75rem;
+    vertical-align: top;
+}
+
+.noof-trace-summary-table td:first-child {
+    color: var(--mud-palette-text-secondary);
+    white-space: nowrap;
+    width: 1%;
+}
+
+#trace-timeline td,
+#trace-timeline th {
+    padding: 0.5rem 0.75rem;
+}
+
+#trace-timeline td:first-child,
+#trace-timeline td:nth-child(2) {
+    white-space: nowrap;
+    width: 1%;
+}
+
+.noof-trace-reason {
+    color: var(--mud-palette-error);
+    margin-top: 0.2rem;
+}
+
+.noof-trace-details summary {
+    cursor: pointer;
+    color: var(--mud-palette-text-secondary);
+    font-size: 0.8125rem;
+}
+
+.noof-trace-details pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 0.8125rem;
+    color: var(--mud-palette-text-secondary);
+}
