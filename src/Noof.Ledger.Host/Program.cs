@@ -36,7 +36,25 @@ try
 {
     Log.Information("Starting host; logging to {LogDirectory}", logDirectory);
 
-    var builder = WebApplication.CreateBuilder(args);
+    // Task 11: the content root must never depend on the process's current directory. Before
+    // this, `dotnet Noof.Ledger.Host.dll` launched from anywhere but its own install directory (or
+    // `dotnet run` from a directory other than the project's own) resolved every static asset
+    // against the wrong folder - MapStaticAssets then answered every request 200 with an empty
+    // body instead of 404, so the page rendered unstyled with no Blazor script and nothing logged.
+    // AppContext.BaseDirectory is the directory the running assembly actually lives in, which is
+    // stable regardless of the caller's working directory.
+    var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+    {
+        Args = args,
+        ContentRootPath = AppContext.BaseDirectory,
+    });
+
+    // Static web assets (the mapping the fingerprinted `Assets[...]` links in App.razor resolve
+    // through) are wired in automatically only for the Development environment. `run.ps1 start`
+    // runs Production from source (no publish step), so this call is what keeps that path from
+    // exhibiting the same empty-body bug as an unpublished, wrongly-launched exe. It is a no-op
+    // against published output, which carries its assets in wwwroot instead of this manifest.
+    builder.WebHost.UseStaticWebAssets();
 
     var ledgerConnectionString = LedgerConnectionString.Resolve(builder.Configuration.GetConnectionString("Ledger"));
 

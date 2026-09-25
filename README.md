@@ -119,14 +119,16 @@ tooltip or menu. Feedback is an inline alert. An inert provider is worse than an
 
 Requires .NET 10 SDK and PostgreSQL 18.
 
-```bash
-ops/reset-database-auth.ps1        # one-time: creates databases, writes a credential outside the repo
-dotnet test --solution NoofLedger.slnx
-ops/publish.ps1                    # builds, tests, and publishes to publish/
+```powershell
+.\run.ps1 db-auth-reset             # one-time: creates databases, writes a credential outside the repo
+.\run.ps1 test all                  # or `.\run.ps1 test fast` for the quick, no-database subset
+.\run.ps1 start                     # dotnet run, in Production - the same behaviour as the published exe
 ```
 
-`ops/publish.ps1` refuses to publish if the suite did not actually run — an exit code alone once
-let a zero-test run look like a pass.
+`run.ps1` in the repo root is the one entry point for launching and operating the app — run
+`.\run.ps1` or `.\run.ps1 help` for the full command table, and `.\run.ps1 help <command>` for any
+one command's detail. `.\run.ps1 publish` refuses to publish if the suite did not actually run — an
+exit code alone once let a zero-test run look like a pass.
 
 Tests run against a real PostgreSQL database, never an in-memory provider. The offline suite proves
 the DDL is right; only a real database proves precision, collation and constraints behave.
