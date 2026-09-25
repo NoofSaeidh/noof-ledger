@@ -54,6 +54,7 @@ public class PublicSurfaceTests
             "RecentLineItem", "RecentTransaction", "MonthTotal", "MonthSummary",
             "WalletBalance", "IBalanceReadModel",
             "ISpendingReadModel", "ProbeResult", "ISecretProbe", "ISecretStore", "SecretKeys",
+            "TransactionListFilter", "TransactionListRow", "TransactionListPage", "ITransactionList",
             "SecretResult", "SecretState", "SecretStatus",
             "RecordAction", "EchoMessage", "IRecordEcho",
             "EchoTarget", "IRecordEditor", "ApplicationRegistration",

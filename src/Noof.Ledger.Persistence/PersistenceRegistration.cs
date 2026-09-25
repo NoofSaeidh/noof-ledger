@@ -56,6 +56,7 @@ public static class PersistenceRegistration
         services.AddScoped<ICategoryCatalog, EfCategoryCatalog>();
         services.AddScoped<IMerchantDirectory, EfMerchantDirectory>();
         services.AddScoped<ISpendingReadModel, EfSpendingReadModel>();
+        services.AddScoped<ITransactionList, EfTransactionList>();
         services.AddScoped<IBalanceReadModel, EfBalanceReadModel>();
         services.AddScoped<IWalletDirectory, EfWalletDirectory>();
         services.AddScoped<IWalletAdmin, EfWalletAdmin>();
