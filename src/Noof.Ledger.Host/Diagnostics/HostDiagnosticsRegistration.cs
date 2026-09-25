@@ -6,7 +6,7 @@ internal static class HostDiagnosticsRegistration
 {
     public static IServiceCollection AddNoofHostDiagnostics(this IServiceCollection services, string connectionString)
     {
-        var databasePassword = new Npgsql.NpgsqlConnectionStringBuilder(connectionString).Password ?? string.Empty;
+        var databasePassword = DatabasePassword.From(connectionString);
 
         services.AddSingleton<LogSinkStatus>();
         services.AddSingleton<ILogSinkStatus>(sp => sp.GetRequiredService<LogSinkStatus>());

@@ -18,7 +18,7 @@ namespace Noof.Ledger.Host.Diagnostics;
 internal sealed class SecretSnapshot(IServiceScopeFactory scopeFactory, string databasePassword)
     : ISecretValueSource
 {
-    const int MinimumSecretLength = 8;
+    internal const int MinimumSecretLength = 8;
 
     volatile IReadOnlyCollection<string> current = databasePassword.Length >= MinimumSecretLength
         ? [databasePassword]

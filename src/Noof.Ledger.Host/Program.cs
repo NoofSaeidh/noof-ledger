@@ -25,7 +25,14 @@ if (UserCommand.TryParse(args, out var cliUsername))
 
 var bootstrapConfiguration = LoggingSetup.BuildBootstrapConfiguration(args);
 var logDirectory = LoggingSetup.ResolveLogDirectory(bootstrapConfiguration);
-Log.Logger = LoggingSetup.CreateBootstrapLogger(logDirectory);
+
+// The one secret knowable this early is the database password, from the same connection string
+// resolved again for real a few lines into the try block below - resolving it twice is harmless
+// (LedgerConnectionString.Resolve is pure), and a failure here just means "no known secret yet":
+// the real resolution below throws the same way and is what Log.Fatal actually reports.
+var bootstrapPassword = TryResolveBootstrapDatabasePassword(bootstrapConfiguration);
+Log.Logger = LoggingSetup.CreateBootstrapLogger(
+    logDirectory, new SecretRedactor(new BootstrapSecretSource(bootstrapPassword)));
 
 // Two-stage initialization (Serilog's own documented ASP.NET Core shape): the bootstrap logger
 // above is live before anything else can fail, and this try/catch/finally is what makes
@@ -166,6 +173,19 @@ catch (Exception ex) when (ex is not HostAbortedException)
 finally
 {
     Log.CloseAndFlush();
+}
+
+static string TryResolveBootstrapDatabasePassword(IConfiguration configuration)
+{
+    try
+    {
+        var connectionString = LedgerConnectionString.Resolve(configuration.GetConnectionString("Ledger"));
+        return DatabasePassword.From(connectionString);
+    }
+    catch (Exception)
+    {
+        return string.Empty;
+    }
 }
 
 internal partial class Program;

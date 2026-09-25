@@ -37,9 +37,13 @@ internal static class LoggingSetup
     public static string ResolveLogDirectory(IConfiguration configuration) =>
         Environment.ExpandEnvironmentVariables(configuration[DirectoryConfigKey] ?? DefaultDirectory);
 
-    public static Serilog.ILogger CreateBootstrapLogger(string logDirectory) =>
-        new LoggerConfiguration()
-            .MinimumLevel.Information()
+    // A startup exception (a bad connection string, a locked log file) is reported through this
+    // logger before UseSerilog ever runs - the console+file sinks below are wrapped in the same
+    // RedactingSink the fully configured logger uses in Configure(), so it never prints the
+    // database password `redactor` was seeded with in the clear.
+    public static Serilog.ILogger CreateBootstrapLogger(string logDirectory, SecretRedactor redactor)
+    {
+        var destinations = new LoggerConfiguration()
             .WriteTo.Console()
             .WriteTo.File(
                 Path.Combine(logDirectory, "noof-ledger-.log"),
@@ -47,7 +51,13 @@ internal static class LoggingSetup
                 retainedFileCountLimit: RetainedFileCountLimit,
                 fileSizeLimitBytes: FileSizeLimitBytes,
                 rollOnFileSizeLimit: true)
+            .CreateLogger();
+
+        return new LoggerConfiguration()
+            .MinimumLevel.Information()
+            .WriteTo.Sink(new RedactingSink(destinations, redactor))
             .CreateBootstrapLogger();
+    }
 
     // The full reconfiguration UseSerilog runs once the host is built. `services` is threaded
     // through so Task 4's Postgres sink and secret-redaction wrap can resolve IDatabaseGate,
