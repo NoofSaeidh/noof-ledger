@@ -26,4 +26,8 @@ internal static partial class TelegramPollingServiceLog
     [LoggerMessage(EventId = 1004, Level = LogLevel.Error,
         Message = "Failed to notify the operator that Telegram update {UpdateId} was skipped")]
     public static partial void SkippedUpdateNotificationFailed(this ILogger logger, Exception exception, int updateId);
+
+    [LoggerMessage(EventId = 6101, Level = LogLevel.Warning,
+        Message = "Failed to register the /health bot command for the owner chat")]
+    public static partial void HealthCommandRegistrationFailed(this ILogger logger, Exception exception);
 }

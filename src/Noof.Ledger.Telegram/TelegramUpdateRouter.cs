@@ -14,6 +14,7 @@ internal sealed class TelegramUpdateRouter(
     RecordActionHandler actionHandler,
     CorrectionHandler correctionHandler,
     IRecordEcho recordEcho,
+    ISystemHealth systemHealth,
     ILogger<TelegramUpdateRouter> logger)
     : ITelegramUpdateRouter
 {
@@ -38,6 +39,16 @@ internal sealed class TelegramUpdateRouter(
 
     async Task HandleMessageAsync(Message message, string timeZoneId, CancellationToken cancellationToken)
     {
+        // /health is a fixed, known literal, not the free-form content the rule just below protects:
+        // recognising it costs a stranger nothing, and IsOwnerAsync never claims ownership or tells
+        // a non-owner anything back - unlike the capture path, which must not even look at the text
+        // of someone who might not be the owner.
+        if (message.Text is { Length: > 0 } possibleCommand && IsHealthCommand(possibleCommand))
+        {
+            await HandleHealthCommandAsync(message.Chat.Id, cancellationToken);
+            return;
+        }
+
         // Reject before reading Text: a stranger's content must never be inspected, not even to
         // decide whether it looks like a spend.
         if (!await ownerGate.IsAllowedAsync(message.Chat.Id, cancellationToken))
@@ -99,5 +110,24 @@ internal sealed class TelegramUpdateRouter(
             logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Received, ex);
             throw;
         }
+    }
+
+    async Task HandleHealthCommandAsync(long chatId, CancellationToken cancellationToken)
+    {
+        if (!await ownerGate.IsOwnerAsync(chatId, cancellationToken))
+        {
+            logger.LogHealthCommandRejected();
+            return;
+        }
+
+        var report = await systemHealth.GetAsync(fresh: true, cancellationToken);
+        await chatNotifier.SendAsync(chatId, HealthReplyFormatter.Format(report), cancellationToken);
+    }
+
+    static bool IsHealthCommand(string text)
+    {
+        var trimmed = text.Trim();
+        return trimmed.Equals("/health", StringComparison.OrdinalIgnoreCase)
+            || trimmed.StartsWith("/health@", StringComparison.OrdinalIgnoreCase);
     }
 }

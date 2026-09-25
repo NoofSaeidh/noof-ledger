@@ -32,9 +32,27 @@ public class TelegramUpdateRouterTests
         var logger = new CapturingLogger<TelegramUpdateRouter>();
         var router = new TelegramUpdateRouter(captureStore, chatNotifier, new TelegramOwnerGate(secretStore),
             new RecordActionHandler(editor, store, chatNotifier, Echo), new CorrectionHandler(editor, chatNotifier, Echo), Echo,
-            logger);
+            Substitute.For<ISystemHealth>(), logger);
 
         return new Harness(router, captureStore, chatNotifier, editor, store, logger);
+    }
+
+    static (TelegramUpdateRouter Router, IChatNotifier ChatNotifier, ISystemHealth SystemHealth, ISecretStore SecretStore)
+        CreateHealthHarness(SecretResult ownerSecret)
+    {
+        var secretStore = Substitute.For<ISecretStore>();
+        secretStore.GetAsync(SecretKeys.TelegramOwnerChatId, Arg.Any<CancellationToken>()).Returns(ownerSecret);
+        var captureStore = Substitute.For<ICaptureStore>();
+        var chatNotifier = Substitute.For<IChatNotifier>();
+        var editor = Substitute.For<IRecordEditor>();
+        var store = Substitute.For<ICategorizationStore>();
+        var systemHealth = Substitute.For<ISystemHealth>();
+        var logger = new CapturingLogger<TelegramUpdateRouter>();
+        var router = new TelegramUpdateRouter(captureStore, chatNotifier, new TelegramOwnerGate(secretStore),
+            new RecordActionHandler(editor, store, chatNotifier, Echo), new CorrectionHandler(editor, chatNotifier, Echo), Echo,
+            systemHealth, logger);
+
+        return (router, chatNotifier, systemHealth, secretStore);
     }
 
     static Update TextMessage(long chatId, int messageId, string text, DateTime date) => new()
@@ -470,5 +488,66 @@ public class TelegramUpdateRouterTests
 
         await editor.DidNotReceiveWithAnyArgs().FindByUserMessageAsync(default, default, Arg.Any<CancellationToken>());
         await editor.DidNotReceiveWithAnyArgs().ReplaceRawTextAsync(default, default!, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task The_owner_gets_a_formatted_health_reply_and_captures_nothing()
+    {
+        var (router, chatNotifier, systemHealth, _) = CreateHealthHarness(new SecretResult(SecretState.Present, "111"));
+        var report = new SystemHealthReport(HealthLevel.Ok,
+            [new HealthItem("Database", HealthLevel.Ok, "ready", DateTimeOffset.Parse("2026-09-25T10:00:00Z"))]);
+        systemHealth.GetAsync(true, Arg.Any<CancellationToken>()).Returns(report);
+
+        await router.HandleAsync(TextMessage(111L, 5, "/health", DateTime.UtcNow), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await chatNotifier.Received(1).SendAsync(111L, HealthReplyFormatter.Format(report), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Health_at_bot_suffix_is_recognised_as_the_command()
+    {
+        var (router, chatNotifier, systemHealth, _) = CreateHealthHarness(new SecretResult(SecretState.Present, "111"));
+        var report = new SystemHealthReport(HealthLevel.Ok, []);
+        systemHealth.GetAsync(true, Arg.Any<CancellationToken>()).Returns(report);
+
+        await router.HandleAsync(TextMessage(111L, 5, "/HEALTH@my_ledger_bot", DateTime.UtcNow), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await chatNotifier.Received(1).SendAsync(111L, HealthReplyFormatter.Format(report), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_strangers_health_command_gets_no_reply_and_never_reads_system_health()
+    {
+        var (router, chatNotifier, systemHealth, _) = CreateHealthHarness(new SecretResult(SecretState.Present, "111"));
+
+        await router.HandleAsync(TextMessage(999L, 5, "/health", DateTime.UtcNow), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await chatNotifier.DidNotReceiveWithAnyArgs().SendAsync(default, default!, Arg.Any<CancellationToken>());
+        await systemHealth.DidNotReceiveWithAnyArgs().GetAsync(default, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_health_command_with_no_owner_yet_is_silent_and_never_claims_ownership()
+    {
+        var (router, chatNotifier, systemHealth, secretStore) = CreateHealthHarness(new SecretResult(SecretState.Missing, null));
+
+        await router.HandleAsync(TextMessage(111L, 5, "/health", DateTime.UtcNow), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await chatNotifier.DidNotReceiveWithAnyArgs().SendAsync(default, default!, Arg.Any<CancellationToken>());
+        await systemHealth.DidNotReceiveWithAnyArgs().GetAsync(default, Arg.Any<CancellationToken>());
+        await secretStore.DidNotReceive().TrySetIfMissingAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Text_that_merely_starts_with_health_but_is_not_the_exact_command_is_still_captured()
+    {
+        var (router, captureStore, chatNotifier, _, _, _) = CreateRouter(ownerChatId: 111L);
+        captureStore.CaptureAsync(Arg.Any<CapturedMessage>(), "Europe/Belgrade", Arg.Any<CancellationToken>()).Returns(Guid.NewGuid());
+        chatNotifier.SendAsync(111L, Echo.Acknowledgement, Arg.Any<CancellationToken>()).Returns(777);
+
+        await router.HandleAsync(TextMessage(111L, 5, "/healthclub 500", DateTime.UtcNow), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await captureStore.Received(1).CaptureAsync(
+            Arg.Is<CapturedMessage>(m => m.Text == "/healthclub 500"), "Europe/Belgrade", Arg.Any<CancellationToken>());
     }
 }
