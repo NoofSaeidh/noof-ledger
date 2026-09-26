@@ -37,7 +37,8 @@ public interface IRecordEcho
     EchoMessage ComposeReceipt(CategorizationSubject record, ReceiptView receipt, bool amountChangeDeclined = false);
 
     // The receipt equivalent of Failure (R-6): a copy/training/proforma/advance slip is not a
-    // purchase, so nothing was posted - the transaction is marked Failed exactly like Failure's own
-    // case, and Edit still lets the person record it by hand as an ordinary text correction.
+    // purchase, so nothing was posted - the transaction is Cancelled, a deliberate non-post rather
+    // than a processing failure (M-4, Phase 6 final review), and Edit still lets the person record it
+    // by hand as an ordinary text correction.
     EchoMessage ComposeReceiptNotRecorded(Receipts.ReceiptKind kind);
 }

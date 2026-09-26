@@ -5,6 +5,7 @@ using NSubstitute;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Editing;
 using Noof.Ledger.Application.Jobs;
 using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
@@ -77,7 +78,7 @@ public class ReceiptCategorizationWorkerTests
         IJobQueue jobQueue, IModelProvider modelProvider, ICategorizationStore? store = null,
         AppReceipts.IReceiptStore? receiptStore = null, ICategoryCatalog? categoryCatalog = null,
         IMerchantDirectory? merchantDirectory = null, AppReceipts.IReceiptCategorizer? categorizer = null,
-        IChatNotifier? notifier = null, IWalletDirectory? walletDirectory = null)
+        IChatNotifier? notifier = null, IWalletDirectory? walletDirectory = null, IRecordEditor? recordEditor = null)
     {
         var resolvedStore = store ?? DefaultStore();
         var resolvedReceiptStore = receiptStore ?? DefaultReceiptStore();
@@ -86,6 +87,7 @@ public class ReceiptCategorizationWorkerTests
         var resolvedCategorizer = categorizer ?? DefaultCategorizer();
         var resolvedNotifier = notifier ?? Substitute.For<IChatNotifier>();
         var resolvedWalletDirectory = walletDirectory ?? DefaultWalletDirectory();
+        var resolvedRecordEditor = recordEditor ?? Substitute.For<IRecordEditor>();
 
         var provider = Substitute.For<IServiceProvider>();
         provider.GetService(typeof(IJobQueue)).Returns(jobQueue);
@@ -97,6 +99,7 @@ public class ReceiptCategorizationWorkerTests
         provider.GetService(typeof(AppReceipts.IReceiptCategorizer)).Returns(resolvedCategorizer);
         provider.GetService(typeof(IChatNotifier)).Returns(resolvedNotifier);
         provider.GetService(typeof(IWalletDirectory)).Returns(resolvedWalletDirectory);
+        provider.GetService(typeof(IRecordEditor)).Returns(resolvedRecordEditor);
 
         var scope = Substitute.For<IServiceScope>();
         scope.ServiceProvider.Returns(provider);
@@ -182,9 +185,10 @@ public class ReceiptCategorizationWorkerTests
         return gate;
     }
 
-    static ReceiptCategorizationWorker CreateWorker(IServiceScopeFactory scopeFactory, FakeTimeProvider time) =>
+    static ReceiptCategorizationWorker CreateWorker(
+        IServiceScopeFactory scopeFactory, FakeTimeProvider time, CapturingLogger<ReceiptCategorizationWorker>? logger = null) =>
         new(scopeFactory, time, new CategorizationWorkerOptions(), WorkerId, Echo, Utc, ReadyGate(),
-            new CapturingLogger<ReceiptCategorizationWorker>());
+            logger ?? new CapturingLogger<ReceiptCategorizationWorker>());
 
     static FakeTimeProvider Time() => new(new DateTimeOffset(2026, 9, 25, 12, 0, 0, TimeSpan.Zero));
 
@@ -349,29 +353,44 @@ public class ReceiptCategorizationWorkerTests
             Arg.Any<CancellationToken>());
     }
 
+    // M-4 (Phase 6 final review): a copy/training/proforma/advance slip is a recognised, deliberate
+    // non-post - the same kind of decision a duplicate receipt already gets (Cancelled via
+    // IRecordEditor.CancelAsync, never MarkFailedAsync) - not a processing error. Cancelled keeps
+    // TransactionStatus.Failed meaning "something broke, worth investigating"; Cancelled also writes
+    // a revision, and StageFailed at Categorized (with a FailedStage) gives the trace page a row to
+    // explain the gap instead of showing Extracted-then-nothing.
     [Theory]
     [InlineData(AppReceipts.ReceiptKind.Copy, "copy")]
     [InlineData(AppReceipts.ReceiptKind.Training, "training")]
     [InlineData(AppReceipts.ReceiptKind.Proforma, "proforma")]
     [InlineData(AppReceipts.ReceiptKind.Advance, "advance")]
-    public async Task A_non_money_receipt_kind_is_not_posted_and_the_transaction_is_marked_failed(
+    public async Task A_non_money_receipt_kind_is_not_posted_and_the_transaction_is_cancelled_with_a_traceable_reason(
         AppReceipts.ReceiptKind kind, string word)
     {
         var receiptStore = DefaultReceiptStore();
         receiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Receipt(kind: kind));
         var store = DefaultStore();
         var notifier = Substitute.For<IChatNotifier>();
+        var recordEditor = Substitute.For<IRecordEditor>();
         var jobQueue = QueueWith(Job());
+        var logger = new CapturingLogger<ReceiptCategorizationWorker>();
         var worker = CreateWorker(
-            ScopeFactoryFor(jobQueue, KeyPresent(), store, receiptStore: receiptStore, notifier: notifier), Time());
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, receiptStore: receiptStore, notifier: notifier, recordEditor: recordEditor),
+            Time(), logger);
 
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
-        await store.Received(1).MarkFailedAsync(TransactionId, Arg.Any<CancellationToken>());
+        await recordEditor.Received(1).CancelAsync(TransactionId, Arg.Any<CancellationToken>());
+        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
         await store.DidNotReceive().ApplyAsync(Arg.Any<Guid>(), Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
         await notifier.Received(1).EditAsync(
             111L, 42, Arg.Is<EchoMessage>(echo => echo.Text == $"This receipt is a {word} — not recorded"), Arg.Any<CancellationToken>());
         await jobQueue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
+
+        var stageFailed = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.StageFailedEventId).Subject;
+        stageFailed.Stage.Should().Be(TransactionStages.StageFailed);
+        stageFailed.Properties["FailedStage"].Should().Be(TransactionStages.Categorized);
+        stageFailed.Exception.Should().NotBeNull();
     }
 
     [Fact]

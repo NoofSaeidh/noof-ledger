@@ -1,6 +1,7 @@
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Editing;
 using Noof.Ledger.Application.Jobs;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Application.Wallets;
@@ -93,6 +94,7 @@ internal sealed class ReceiptCategorizationWorker(
         var walletDirectory = scope.ServiceProvider.GetRequiredService<IWalletDirectory>();
         var receiptCategorizer = scope.ServiceProvider.GetRequiredService<IReceiptCategorizer>();
         var notifier = scope.ServiceProvider.GetRequiredService<IChatNotifier>();
+        var recordEditor = scope.ServiceProvider.GetRequiredService<IRecordEditor>();
 
         CategorizationSubject? subject = null;
         var currentStage = TransactionStages.Categorized;
@@ -119,7 +121,7 @@ internal sealed class ReceiptCategorizationWorker(
 
             if (IsNonMoneyKind(receipt.Kind))
             {
-                await ReportNotRecordedAsync(store, notifier, job, sub, receipt.Kind, cancellationToken);
+                await ReportNotRecordedAsync(recordEditor, notifier, job, sub, receipt.Kind, cancellationToken);
                 await SucceedQuietlyAsync(jobQueue, job, cancellationToken);
                 return;
             }
@@ -257,12 +259,20 @@ internal sealed class ReceiptCategorizationWorker(
         wallets.FirstOrDefault(wallet =>
             wallet.IsDefaultForCurrency && string.Equals(wallet.Currency.Value, currency, StringComparison.OrdinalIgnoreCase))?.Id;
 
+    // M-4 (Phase 6 final review): a copy/training/proforma/advance slip is a deliberate non-post, the
+    // same kind of decision a duplicate receipt already gets (Cancelled, never Failed) - not a
+    // processing error, so it is Cancelled through IRecordEditor rather than MarkFailedAsync. That
+    // keeps Failed meaning "something broke", and CancelAsync's own revision plus this StageFailed
+    // row (at Categorized, since nothing ever reached Persisted) give the trace page something to
+    // show instead of Extracted-then-silence.
     async Task ReportNotRecordedAsync(
-        ICategorizationStore store, IChatNotifier notifier, CategorizationJob job, CategorizationSubject subject,
+        IRecordEditor recordEditor, IChatNotifier notifier, CategorizationJob job, CategorizationSubject subject,
         AppReceiptKind kind, CancellationToken cancellationToken)
     {
         logger.ReceiptNotRecorded(kind.ToString(), job.TransactionId);
-        await store.MarkFailedAsync(job.TransactionId, cancellationToken);
+        logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Categorized,
+            new InvalidOperationException($"Receipt kind {kind} is not a purchase; nothing was recorded"));
+        await recordEditor.CancelAsync(job.TransactionId, cancellationToken);
 
         if (subject.BotMessageId is not { } messageId)
             return;
