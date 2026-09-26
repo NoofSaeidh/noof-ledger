@@ -17,6 +17,7 @@ internal sealed class ExtractReceiptWorker(
     CategorizationWorkerOptions options,
     string workerId,
     IRecordEcho recordEcho,
+    TimeZoneInfo captureTimeZone,
     IDatabaseGate gate,
     ILogger<ExtractReceiptWorker> logger)
     : BackgroundService
@@ -202,7 +203,12 @@ internal sealed class ExtractReceiptWorker(
                 await recordEditor.CancelAsync(job.TransactionId, cancellationToken);
                 logger.LogReceiptDuplicate(duplicateId);
                 var duplicateReceipt = await receiptStore.GetByTransactionAsync(duplicateId, cancellationToken);
-                var duplicateDate = duplicateReceipt?.IssuedAt is { } issuedAt ? DateOnly.FromDateTime(issuedAt.UtcDateTime) : (DateOnly?)null;
+                // M-6 (2026-09-25 final review): UtcDateTime shifted a receipt issued before 02:00
+                // Belgrade onto the previous day. Converted through the capture time zone, as
+                // ReceiptCategorizationWorker already computes OccurredOn.
+                var duplicateDate = duplicateReceipt?.IssuedAt is { } issuedAt
+                    ? DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(issuedAt, captureTimeZone).DateTime)
+                    : (DateOnly?)null;
                 var echo = recordEcho.ComposeReceiptDuplicate(
                     duplicateDate, duplicateReceipt?.Total ?? 0m, duplicateReceipt?.Currency ?? CurrencyCode.Rsd);
                 await EditQuietlyAsync(notifier, record, echo, cancellationToken);

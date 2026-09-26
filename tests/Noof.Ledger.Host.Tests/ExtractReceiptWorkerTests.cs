@@ -116,11 +116,14 @@ public class ExtractReceiptWorkerTests
             fetchClient, vision, Substitute.For<IReceiptFetchStatus>());
     }
 
+    static readonly TimeZoneInfo Belgrade = TimeZoneInfo.FindSystemTimeZoneById("Europe/Belgrade");
+
     static ExtractReceiptWorker CreateWorker(
         IServiceScopeFactory scopeFactory, FakeTimeProvider? time = null, IDatabaseGate? gate = null,
-        CapturingLogger<ExtractReceiptWorker>? logger = null) =>
+        CapturingLogger<ExtractReceiptWorker>? logger = null, TimeZoneInfo? captureTimeZone = null) =>
         new(scopeFactory, time ?? new FakeTimeProvider(new DateTimeOffset(2026, 9, 25, 9, 0, 0, TimeSpan.Zero)),
-            new CategorizationWorkerOptions(), WorkerId, Echo, gate ?? ReadyGate(), logger ?? new CapturingLogger<ExtractReceiptWorker>());
+            new CategorizationWorkerOptions(), WorkerId, Echo, captureTimeZone ?? Belgrade, gate ?? ReadyGate(),
+            logger ?? new CapturingLogger<ExtractReceiptWorker>());
 
     static IDatabaseGate ReadyGate()
     {
@@ -285,6 +288,26 @@ public class ExtractReceiptWorkerTests
             Arg.Is<EchoMessage>(m => m.Text.StartsWith("Already recorded", StringComparison.Ordinal)), Arg.Any<CancellationToken>());
         await harness.Queue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
         logger.Entries.Should().Contain(e => e.EventId.Id == 5014);
+    }
+
+    [Fact]
+    public async Task The_duplicate_echo_computes_the_date_in_the_capture_time_zone_not_UTC()
+    {
+        var harness = Setup(ExtractJob());
+        var duplicateId = Guid.NewGuid();
+        harness.ReceiptStore.SaveExtractedAsync(Arg.Any<Guid>(), Arg.Any<ExtractedReceipt>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(new ReceiptSaveResult(null, duplicateId));
+        // 00:30 Belgrade (+02:00 in September) is 22:30 the PREVIOUS day in UTC - M-6 (final review).
+        var issuedAt = new DateTimeOffset(2026, 9, 25, 0, 30, 0, TimeSpan.FromHours(2));
+        harness.ReceiptStore.GetByTransactionAsync(duplicateId, Arg.Any<CancellationToken>()).Returns(new ReceiptView(
+            Guid.NewGuid(), ReceiptSource.FiscalQr, "SYN-1", "Test Market", null, null, "SYN-F1",
+            issuedAt, 500m, CurrencyCode.Rsd, ReceiptKind.Sale, PaymentMethod.Card, 500m,
+            "https://suf.purs.gov.rs/v/?vl=abc", []));
+
+        await CreateWorker(harness.ScopeFactory(), captureTimeZone: Belgrade).RunTickAsync(TestContext.Current.CancellationToken);
+
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text.Contains("25.09.2026", StringComparison.Ordinal)), Arg.Any<CancellationToken>());
     }
 
     [Fact]

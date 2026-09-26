@@ -51,6 +51,7 @@ internal static class WorkerRegistration
             options,
             CategorizationWorker.CreateWorkerId(),
             sp.GetRequiredService<IRecordEcho>(),
+            captureTimeZone,
             sp.GetRequiredService<IDatabaseGate>(),
             sp.GetRequiredService<ILogger<ExtractReceiptWorker>>()));
 
