@@ -421,6 +421,23 @@ summary:focus-visible,
     }
 }
 
+/* ---- Retention grid (Log settings) ----
+   A fixed column count, not auto-fill/minmax like .noof-filter-bar above: that grid was sized for
+   the Logs page's filter fields, and at typical desktop widths its 12rem minimum fits exactly five
+   of Log settings' six retention inputs per row, orphaning the sixth (Fatal) alone on a second row.
+*/
+.noof-retention-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.875rem 1rem;
+}
+
+@media (max-width: 599.98px) {
+    .noof-retention-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
 .mud-button-root.noof-quick-range {
     border-radius: 999px;
     padding: 3px 14px;
