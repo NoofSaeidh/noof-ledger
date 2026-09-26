@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Noof.Ledger.Application.Reporting;
 using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
+using Npgsql;
 
 namespace Noof.Ledger.Demo.Tests;
 
@@ -38,6 +39,22 @@ public sealed class MockLedgerTests(DemoTestDatabase database) : IClassFixture<D
                 ["Old Revolut"] = [new(900.00m, CurrencyCode.Eur)],
                 ["Main Wallet"] = [],
             });
+    }
+
+    [Fact]
+    public async Task No_two_transactions_share_a_moment_so_every_list_orders_them_the_same_way_each_run()
+    {
+        if (database.Unavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        await Refresh.RunAsync(database.Admin, database.Name, database.Paths, TestContext.Current.CancellationToken);
+
+        await using var connection = new NpgsqlConnection(database.ConnectionString);
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        await using var command = new NpgsqlCommand(
+            "SELECT count(*) - count(DISTINCT occurred_at) FROM transactions", connection);
+
+        (await command.ExecuteScalarAsync(TestContext.Current.CancellationToken)).Should().Be(0L);
     }
 
     [Fact]

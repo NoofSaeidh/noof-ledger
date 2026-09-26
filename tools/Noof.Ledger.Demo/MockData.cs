@@ -12,11 +12,15 @@ internal static class MockData
     public const string AnthropicKeySecret = "anthropic-api-key";
     public const string GroqKeySecret = "groq-api-key";
 
-    public static readonly DateTimeOffset Now = new(2026, 9, 20, 18, 0, 0, TimeSpan.Zero);
+    // The dashboard's "This month" follows the real calendar, so the mock month is the current one: the
+    // pictures change at most once a month, when the dates roll over, instead of the charts going empty.
+    static readonly DateOnly MonthStart = new(DateTime.Today.Year, DateTime.Today.Month, 1);
+
+    public static readonly DateTimeOffset Now = At(20, 18, 0);
     public static readonly Guid UserId = Guid.Parse("7a1c0000-0000-4000-8000-0000000000aa");
-    public static readonly DateOnly OpeningDate = new(2026, 9, 1);
-    public static readonly DateOnly LogWindowStart = new(2026, 9, 1);
-    public static readonly DateOnly LogWindowEnd = new(2026, 9, 21);
+    public static readonly DateOnly OpeningDate = MonthStart;
+    public static readonly DateOnly LogWindowStart = MonthStart;
+    public static readonly DateOnly LogWindowEnd = MonthStart.AddDays(20);
     public static readonly Guid TracedTransactionId = Id(900);
     public static readonly Guid FailedTransactionId = Id(901);
 
@@ -55,7 +59,10 @@ internal static class MockData
 
     public static Guid Id(int number) => Guid.Parse($"7a1c0000-0000-4000-8000-{number:D12}");
 
-    static DateOnly Day(int day) => new(2026, 9, day);
+    public static DateTimeOffset At(int day, int hour, int minute) =>
+        new(MonthStart.Year, MonthStart.Month, day, hour, minute, 0, TimeSpan.Zero);
+
+    static DateOnly Day(int day) => MonthStart.AddDays(day - 1);
 
     static MockRecord Expense(string wallet, string raw, DateOnly day, IReadOnlyList<MockLine> lines, Guid? id = null) =>
         new(wallet, TransactionKind.Expense, TransactionStatus.Completed, raw, day, lines, id);

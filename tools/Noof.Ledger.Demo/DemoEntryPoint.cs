@@ -10,6 +10,7 @@ internal static class DemoEntryPoint
             {
                 ["start"] => await DemoCommands.StartAsync(),
                 ["refresh"] => await DemoCommands.RefreshAsync(),
+                ["shots"] => await Shots.ShotsCommand.RunAsync(),
                 _ => Usage(),
             };
         }

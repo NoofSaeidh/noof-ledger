@@ -10,7 +10,7 @@ public class RunScriptTests
 {
     static readonly string[] CommandNames =
     [
-        "start", "demo", "publish", "start-published", "set-password", "test", "update-test-template",
+        "start", "demo", "screenshots", "publish", "start-published", "set-password", "test", "update-test-template",
         "clean-test-dbs", "restore-check", "db-auth-reset", "pg", "status", "logs", "backups", "inspect",
     ];
 

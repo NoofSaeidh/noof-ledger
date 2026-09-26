@@ -17,7 +17,7 @@ internal static class MockDataWriter
     public static async Task WriteAsync(IServiceProvider services, CancellationToken cancellationToken)
     {
         var db = services.GetRequiredService<LedgerDbContext>();
-        var wallets = await WriteWalletsAsync(services.GetRequiredService<IWalletAdmin>(), cancellationToken);
+        var wallets = await WriteWalletsAsync(services.GetRequiredService<IWalletAdmin>(), db, cancellationToken);
         var categories = await db.Categories.ToDictionaryAsync(category => category.Slug, category => category.Id, cancellationToken);
         var merchants = await WriteMerchantsAsync(db, cancellationToken);
 
@@ -30,17 +30,26 @@ internal static class MockDataWriter
         await WriteBackupRunAsync(db, cancellationToken);
     }
 
-    static async Task<Dictionary<string, Guid>> WriteWalletsAsync(IWalletAdmin admin, CancellationToken cancellationToken)
+    static async Task<Dictionary<string, Guid>> WriteWalletsAsync(IWalletAdmin admin, LedgerDbContext db, CancellationToken cancellationToken)
     {
         var ids = new Dictionary<string, Guid>();
         foreach (var wallet in MockData.Wallets)
         {
-            ids[wallet.Name] = await admin.CreateAsync(
+            var id = await admin.CreateAsync(
                 new NewWallet(wallet.Name, wallet.Currency, wallet.Opening, MockData.OpeningDate, wallet.Aliases, wallet.Default),
                 cancellationToken);
 
+            // Every opening lands at the same start of day and the lists order ties arbitrarily; a minute
+            // apart, they come out in the same order on every run, and so do the screenshots.
+            var openedAt = ZonedClock.StartOfDay(MockData.OpeningDate, MockData.TimeZoneId).AddMinutes(ids.Count);
+            await db.Transactions
+                .Where(transaction => transaction.WalletId == id && transaction.Kind == TransactionKind.BalanceCheck)
+                .ExecuteUpdateAsync(set => set.SetProperty(transaction => transaction.OccurredAt, openedAt), cancellationToken);
+
             if (wallet.Archived)
-                await admin.ArchiveAsync(ids[wallet.Name], cancellationToken);
+                await admin.ArchiveAsync(id, cancellationToken);
+
+            ids[wallet.Name] = id;
         }
 
         return ids;
@@ -152,10 +161,10 @@ internal static class MockDataWriter
             Stage(traced.Id, traced.OccurredAt.AddMilliseconds(1690), "Noof.Ledger.Telegram.TelegramChatNotifier", TransactionStages.Replied, TransactionStages.RepliedEventId),
             Stage(failed.Id, failed.OccurredAt, "Noof.Ledger.Telegram.TelegramUpdateRouter", TransactionStages.Received, TransactionStages.ReceivedEventId),
             StageFailed(failed.Id, failed.OccurredAt.AddMilliseconds(2300), TransactionStages.Categorized),
-            Row(new DateTimeOffset(2026, 9, 19, 9, 0, 0, TimeSpan.Zero), LogSeverity.Debug, "Noof.Ledger.Telegram.TelegramPollingService", "Polled Telegram: 1 update"),
-            Row(new DateTimeOffset(2026, 9, 19, 9, 5, 0, TimeSpan.Zero), LogSeverity.Information, "Noof.Ledger.Host.Workers.BackupWorker", "Backup finished: noof_ledger-20260919.dump"),
-            Row(new DateTimeOffset(2026, 9, 19, 14, 30, 0, TimeSpan.Zero), LogSeverity.Warning, "Noof.Ledger.Ai", "Model call took 31.2 s, over its 30 s threshold"),
-            Row(new DateTimeOffset(2026, 9, 20, 8, 15, 0, TimeSpan.Zero), LogSeverity.Error, "Noof.Ledger.Ai", "Categorisation call failed",
+            Row(MockData.At(19, 9, 0), LogSeverity.Debug, "Noof.Ledger.Telegram.TelegramPollingService", "Polled Telegram: 1 update"),
+            Row(MockData.At(19, 9, 5), LogSeverity.Information, "Noof.Ledger.Host.Workers.BackupWorker", $"Backup finished: noof_ledger-{MockData.At(19, 9, 5):yyyyMMdd}.dump"),
+            Row(MockData.At(19, 14, 30), LogSeverity.Warning, "Noof.Ledger.Ai", "Model call took 31.2 s, over its 30 s threshold"),
+            Row(MockData.At(20, 8, 15), LogSeverity.Error, "Noof.Ledger.Ai", "Categorisation call failed",
                 "System.TimeoutException: The operation timed out after 00:00:30."));
 
         await db.SaveChangesAsync(cancellationToken);

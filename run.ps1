@@ -286,6 +286,20 @@ The demo never touches noof_ledger: it has its own database, logs and key ring
 Prerequisites: PostgreSQL reachable; a .NET 10 SDK.
 '@
     }
+    'screenshots' = @{
+        Summary = 'Refresh the demo, photograph every page and the bot replies into docs\screenshots'
+        Detail  = @'
+screenshots
+
+Refreshes the demo database, starts the host on it, and writes phone and desktop screenshots of
+every page, plus Telegram-style pictures of the bot's real replies, to docs\screenshots (with its
+README.md gallery). Only images whose pixels changed are rewritten, so git shows exactly what a
+change did. The changed ones are listed, and phone-sized JPEG copies of them land in
+artifacts\screenshots for sending. Refuses while a demo is running.
+
+Prerequisites: PostgreSQL reachable; the Chromium install the E2E tests use.
+'@
+    }
     'publish' = @{
         Summary = 'Build, test and publish to a directory (refuses to publish if a test failed)'
         Detail  = @'
@@ -517,6 +531,11 @@ switch ($CommandName) {
         if ($demoAction -notin @('start', 'refresh')) { throw "Unknown demo action '$demoAction'. Use start or refresh." }
         Assert-DemoNotRunning
         Invoke-Checked { dotnet run --project (Join-Path $Root 'tools\Noof.Ledger.Demo') -c Release -- $demoAction }
+    }
+
+    'screenshots' {
+        Assert-DemoNotRunning
+        Invoke-Checked { dotnet run --project (Join-Path $Root 'tools\Noof.Ledger.Demo') -c Release -- shots }
     }
 
     'publish' {
