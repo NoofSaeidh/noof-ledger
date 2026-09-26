@@ -122,6 +122,8 @@ public class DiagnosticsPageSourceTests
         source.Should().Contain("Enum.GetValues<LogSeverity>()");
         source.Should().Contain("Off",
             "decision (a): the database log level must offer Off, not just the six real severities");
+        source.Should().NotContain("@bind:after",
+            "decision (b): nothing may auto-save on change - every field is plain @bind/@oninput, applied only when SaveAsync runs from the Save button");
         source.Should().NotContain("MudSelect");
         source.Should().NotContain("MudDatePicker");
         source.Should().NotContain("MudAutocomplete");
