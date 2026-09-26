@@ -144,7 +144,7 @@ Moved to `.claude/rules/logging.md` — loads automatically when you touch a `Lo
 
   | Target | Step 1 (≈p90) | Step 2 (≈p99) |
   |---|---|---|
-  | Domain, Ai, Telegram, Architecture, Host | 30000 | 120000 |
+  | Domain, Ai, Telegram, Receipts, Architecture, Host | 30000 | 120000 |
   | Persistence, filtered | 60000 | 120000 |
   | Persistence, full | 180000 | 330000 |
   | Full solution | 150000 | 600000 |

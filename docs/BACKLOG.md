@@ -945,19 +945,27 @@ instrumenting the next time it is seen live rather than chasing from this descri
 
 ### Test-infrastructure flakes seen at the Phase 5 close
 
-- **E2E fixture teardown timed out once — closed 2026-09-26 (Phase 6).**
+- **E2E fixture teardown timed out once, and Phase 6's own full-suite run hit the same class of failure
+  — traced to a concurrent checkout, not an under-timed connection (Phase 6).**
   `CookieModeHostFixture.DropCloneAsync` hit an Npgsql read timeout in `DisposeAsync` during a
-  full-solution run (1 of ~4 full runs); the rerun of all E2E tests was green. The suspected cause —
-  `DROP`/`CREATE DATABASE ... TEMPLATE` waiting on the shared server's checkpoint under load, with no
-  timeout raised on the admin connection itself — is the same class of gap Phase 6's own full-suite run
-  hit for `AppLogSinkTests`/`ReadyGatedBufferSinkDbTests` (11 first-pass failures, all green on rerun).
-  `DatabaseSettings.OpenAdminConnectionAsync`/`CreateDatabaseFromTemplateAsync`/`DropDatabaseAsync` now
-  put an explicit 120s budget on both the admin connect and every admin DDL command, and every fixture
-  that clones the template goes through them (`.claude/rules/tests-detail.md`). Not proven by
-  reproduction — no stack trace ever placed the original failures specifically in `CreateCloneAsync` —
-  so if a bare Npgsql read timeout recurs on a fixture that already uses these helpers, this fix did not
-  address it and the investigation should restart from measurement, not from this paragraph's
-  hypothesis.
+  full-solution run (1 of ~4 full runs); the rerun of all E2E tests was green. Phase 6's own full-suite
+  run then hit `AppLogSinkTests`/`ReadyGatedBufferSinkDbTests` timeouts on `CREATE`/`DROP DATABASE`
+  (11 first-pass failures, all green on rerun) even after raising the admin connect/command timeouts to
+  120s — raising the timeout alone did not fix it, because the actual cause was a second checkout
+  running its own full database/E2E suite against the same PostgreSQL server at the same time: two
+  concurrent `CREATE DATABASE ... TEMPLATE`/`DROP DATABASE` runs against one server's checkpoints
+  produce exactly this timeout, whatever the budget. The real fix is procedural, not a timeout value:
+  **full database/E2E runs go one at a time across checkouts** (CLAUDE.md's end-of-phase rule — "Database
+  and E2E test projects run filtered... and in full once at the end of a phase" — because both share a
+  PostgreSQL server across worktrees). `DatabaseSettings.OpenAdminConnectionAsync`/
+  `CreateDatabaseFromTemplateAsync`/`DropDatabaseAsync` still put an explicit 120s budget on the admin
+  connect and every admin DDL command, and every fixture that clones the template goes through them
+  (`.claude/rules/tests-detail.md`) — worth keeping as a genuine defence against slow checkpoints under
+  a loaded-but-uncontended server, just not what closed this flake. **Deferred fix:** a server-side
+  PostgreSQL advisory lock around clone DDL in `Noof.Ledger.TestKit`, so a second checkout's clone/drop
+  blocks and waits instead of racing and timing out — not built yet because the one-at-a-time operator
+  discipline above is sufficient today and an advisory lock adds its own failure mode (a stuck holder)
+  that would need its own timeout and diagnostics.
 - **`SecretRedactionSentinelTests` hits an `IOException` in its cleanup — closed 2026-09-26 (Phase 6)**,
   not its assertions:
   `Directory.Delete(logDirectory)` in the `finally` runs while the host's file sink still holds

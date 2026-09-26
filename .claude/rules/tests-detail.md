@@ -21,8 +21,14 @@ paths:
   `BeCloseTo`. This shipped twice before it was caught.
 - **Admin DDL in test fixtures (`CREATE`/`DROP DATABASE`, and the admin connection itself) always uses
   the explicit connect/command timeouts on `Noof.Ledger.TestKit.DatabaseSettings`, never Npgsql's 30s
-  default** *(Phase 6)*. `CREATE DATABASE ... TEMPLATE` forces the same PostgreSQL checkpoint wait as
-  `DROP`, and opening a fresh admin connection under a loaded shared server can outlast Npgsql's 15s
-  connect timeout too; every fixture that clones the test template goes through
+  default** *(Phase 6)*. Every fixture that clones the test template goes through
   `DatabaseSettings.OpenAdminConnectionAsync`/`CreateDatabaseFromTemplateAsync`/`DropDatabaseAsync`
-  rather than its own copy of the `CREATE`/`DROP` boilerplate.
+  rather than its own copy of the `CREATE`/`DROP` boilerplate. Set these because CREATE/DROP DATABASE
+  is uniquely slow to wait on — but the Phase 6 full-suite timeouts this was written for (11 failures,
+  even at 120s) turned out to be caused by a second checkout running its own full suite against the
+  same PostgreSQL server at the same time, not by an under-timed admin connection; raising the timeout
+  alone did not fix them, and never will for that cause. **Full database/E2E runs go one at a time
+  across checkouts** — CLAUDE.md's "Database and E2E test projects run filtered... and in full once at
+  the end of a phase" rule exists for exactly this. Keep these explicit timeouts regardless: they are
+  still the right defence against genuine checkpoint/connect slowness under a loaded shared server,
+  just not what closed this particular flake.
