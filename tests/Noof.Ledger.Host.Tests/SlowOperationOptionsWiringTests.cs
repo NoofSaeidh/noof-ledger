@@ -6,7 +6,7 @@ using Noof.Ledger.Application.Diagnostics;
 namespace Noof.Ledger.Host.Tests;
 
 // Task V2: proves appsettings.json's Logging:SlowOperationMs section binds through the real host
-// pipeline, following the same shape as LogRetentionOptionsWiringTests.
+// pipeline.
 public class SlowOperationOptionsWiringTests
 {
     static WebApplicationFactory<Program> Factory(Action<Microsoft.AspNetCore.Hosting.IWebHostBuilder>? configure = null) =>

@@ -1,6 +1,7 @@
 using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
+using NSubstitute;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Persistence.Diagnostics;
 
@@ -24,8 +25,12 @@ public class EfLogRetentionTests(PostgresFixture fixture)
     static async Task<List<long>> RemainingIdsAsync(LedgerDbContext db) =>
         await db.AppLogs.AsNoTracking().OrderBy(e => e.Id).Select(e => e.Id).ToListAsync(TestContext.Current.CancellationToken);
 
-    static EfLogRetention RetentionFor(LedgerDbContext db, LogRetentionOptions? options = null) =>
-        new(db, new FakeTimeProvider(Now), options ?? new LogRetentionOptions());
+    static EfLogRetention RetentionFor(LedgerDbContext db, LogRetentionDays? days = null)
+    {
+        var settings = Substitute.For<ILogRetentionSettings>();
+        settings.GetAsync(Arg.Any<CancellationToken>()).Returns(days ?? LogRetentionDays.Default);
+        return new(db, new FakeTimeProvider(Now), settings);
+    }
 
     [Theory]
     [InlineData(LogSeverity.Verbose)]
@@ -46,10 +51,10 @@ public class EfLogRetentionTests(PostgresFixture fixture)
     }
 
     [Theory]
-    [InlineData(LogSeverity.Information, 90)]
-    [InlineData(LogSeverity.Warning, 730)]
-    [InlineData(LogSeverity.Error, 730)]
-    [InlineData(LogSeverity.Fatal, 730)]
+    [InlineData(LogSeverity.Information, 30)]
+    [InlineData(LogSeverity.Warning, 90)]
+    [InlineData(LogSeverity.Error, 90)]
+    [InlineData(LogSeverity.Fatal, 90)]
     public async Task Information_and_above_older_than_their_default_window_are_pruned_but_not_exactly_at_the_boundary(LogSeverity level, int windowDays)
     {
         await using var db = await fixture.CreateContextAsync();
@@ -71,7 +76,7 @@ public class EfLogRetentionTests(PostgresFixture fixture)
         await using var db = await fixture.CreateContextAsync();
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
         // Two days old: past Debug's default one-day window, well inside Information's default
-        // ninety-day window - proves each level's cutoff is computed and applied independently, not
+        // thirty-day window - proves each level's cutoff is computed and applied independently, not
         // one shared cutoff for the whole table.
         db.AppLogs.AddRange(
             Row(1, LogSeverity.Debug, Now.AddDays(-2)),
@@ -94,9 +99,9 @@ public class EfLogRetentionTests(PostgresFixture fixture)
             Row(2, LogSeverity.Error, Now.AddDays(-10)));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var options = new LogRetentionOptions { Days = new() { Warning = 5 } };
+        var days = LogRetentionDays.Default with { Warning = 5 };
 
-        var deleted = await RetentionFor(db, options).PruneAsync(TestContext.Current.CancellationToken);
+        var deleted = await RetentionFor(db, days).PruneAsync(TestContext.Current.CancellationToken);
 
         deleted.Should().Be(1);
         (await RemainingIdsAsync(db)).Should().Equal(2);
