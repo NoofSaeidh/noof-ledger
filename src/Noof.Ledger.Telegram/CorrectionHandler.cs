@@ -60,8 +60,10 @@ internal sealed class CorrectionHandler(
             && ReceiptLinkDetector.TryFind(text, out var editedLink)
             && !string.Equals(editedLink, originalLink, StringComparison.Ordinal))
         {
-            if (target.EchoMessageId is { } linkEchoId)
-                await chatNotifier.EditAsync(edited.Chat.Id, linkEchoId, recordEcho.NewReceiptLinkMustBeSentSeparately, cancellationToken);
+            // R2-2 (Phase 6 second re-review): a chatNotifier.EditAsync here would overwrite the
+            // record's own echo - its "Recorded" summary and Cancel/Edit buttons - with this notice,
+            // for a record the notice itself says is unchanged. A separate message keeps the echo intact.
+            await chatNotifier.SendAsync(edited.Chat.Id, recordEcho.NewReceiptLinkMustBeSentSeparately.Text, cancellationToken);
             return;
         }
 

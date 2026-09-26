@@ -445,8 +445,11 @@ public class TelegramUpdateRouterTests
         await router.HandleAsync(update, "Europe/Belgrade", TestContext.Current.CancellationToken);
 
         await editor.DidNotReceiveWithAnyArgs().ReplaceRawTextAsync(default, default!, Arg.Any<CancellationToken>());
-        await chatNotifier.Received(1).EditAsync(
-            111L, 42, Arg.Is<EchoMessage>(m => m.Text == Echo.NewReceiptLinkMustBeSentSeparately.Text), Arg.Any<CancellationToken>());
+        // R2-2 (Phase 6 second re-review): the notice must NOT overwrite the record's own echo -
+        // that would wipe its "Recorded" summary and Cancel/Edit buttons for a record the text itself
+        // says is unchanged. It goes out as a separate message instead.
+        await chatNotifier.Received(1).SendAsync(111L, Echo.NewReceiptLinkMustBeSentSeparately.Text, Arg.Any<CancellationToken>());
+        await chatNotifier.DidNotReceiveWithAnyArgs().EditAsync(default, default, default!, Arg.Any<CancellationToken>());
     }
 
     // Resending the SAME link (no change at all), or any other edit text, is an ordinary edit -
