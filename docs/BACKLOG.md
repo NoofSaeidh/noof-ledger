@@ -910,20 +910,6 @@ from leaking request/response bodies (which could carry secrets) into the log pi
 `RemoveAllLoggers()` call. Low risk today (nothing in the Groq request path carries an app secret),
 but the gap is real and cheap to close whenever `Noof.Ledger.Ai/Groq` is next touched.
 
-**Phase-6 merge fix-ups, to land in the next phase-5 → phase-6 merge commit, not before:**
-- Convert phase-6's `ReceiptsHealthCheck` from `IHealthCheck` to `ISystemHealthCheck` (Order 80, Name
-  `Receipts`, LogCategory `Noof.Ledger.Host.Workers.ExtractReceiptWorker`) and extend
-  `HealthCheckCompositionTests` to eight (Name, LogCategory) pairs.
-- Renumber phase-6's duplicate `[LoggerMessage]` EventIds, which `LoggerMessageEventIdTests` (V1)
-  will reject on that branch: `ReceiptCategorizationWorkerLog` reuses 1301–1306 from
-  `TranscriptionWorkerLog`, and `ReceiptCategorizerLog`/`ExtractReceiptWorkerLog` both use 1501–1502.
-- Re-scaffold or hand-merge `LedgerDbContextModelSnapshot` so this branch's `AddAppSetting` migration
-  follows phase-6's `AddReceipts` in the migration history, rather than conflicting with it.
-- The **shared** `noof_ledger_test_template` (as opposed to this integration's private
-  `noof_ledger_test_template_p5l`) still lacks the `AddAppSetting` migration until that merge runs
-  `.\run.ps1 update-test-template` against it — any phase-6 worktree cloning the shared template before
-  then is working against a stale schema for this feature.
-
 **FX freshness check arrives with the FX phase.** The observability spec named this out of scope
 because there is no FX rate source yet (`docs/OPEN-QUESTIONS.md` Q4) — nothing to check the freshness
 of. Add it alongside whichever phase builds currency conversion.
@@ -966,6 +952,24 @@ instrumenting the next time it is seen live rather than chasing from this descri
   blocks and waits instead of racing and timing out — not built yet because the one-at-a-time operator
   discipline above is sufficient today and an advisory lock adds its own failure mode (a stuck holder)
   that would need its own timeout and diagnostics.
+- **`run.ps1 test all` times out on clone DDL even with no other checkout running (Phase 6 rebase,
+  2026-09-26).** Two back-to-back `test all` runs on the rebased `phase-6` tree, under the suite lock,
+  with no other checkout's test process visible, each failed 16–18 entries: every one a 120 s
+  `DatabaseSettings.ExecuteAdminDdlAsync` read timeout (`CookieModeHostFixture.DropCloneAsync` for
+  `TransactionTraceTests`/`DashboardBalancesTests`, clone creation in the Database-tagged Host.Tests
+  classes); no assertion failed. `test db` then `test e2e`, run one after the other, were fully green
+  (401 + 10 + 65). So the contention can come from inside one run — `dotnet test --solution` runs
+  Persistence, Host and E2E concurrently against one server — not only from a second checkout. The
+  server was also degraded: about 200 leftover `noof_test_*`/`noof_e2e_*` clones, and Persistence alone
+  took 12.5 min against a historic p90 of 3. **Next step:** `.\run.ps1 clean-test-dbs`, then `test all`
+  again; if it still times out, run the database and browser projects one after the other inside
+  `test all` rather than raising the timeout again.
+- **`DatabaseLogLevelDbTests.A_stored_Off_level_drops_the_next_hosts_own_startup_burst...` failed once
+  in five runs** (2026-09-26, same slow server): EF's "No migrations were applied" row reached
+  `app_log` despite a stored Off. `ReadyGatedBufferSink` gives the stored-level load 5 s
+  (`LoadTimeout`) before it flushes the startup buffer at the compiled-in default, so a load slower
+  than that lets the startup burst through. It passed on an immediate rerun and was not changed in
+  Phase 6. Revisit if it recurs on a healthy server.
 - **`SecretRedactionSentinelTests` hits an `IOException` in its cleanup — closed 2026-09-26 (Phase 6)**,
   not its assertions:
   `Directory.Delete(logDirectory)` in the `finally` runs while the host's file sink still holds
