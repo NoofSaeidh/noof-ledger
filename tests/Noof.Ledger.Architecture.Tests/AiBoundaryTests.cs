@@ -107,6 +107,12 @@ public class AiBoundaryTests
             .Select(file => Path.GetRelativePath(root, file))
             .ToArray();
 
+        // M-12 (Phase 6 final review): receiptWorker used to be exempted as a whole file, so a second,
+        // unguarded "new Money(" anywhere in it (from a future model answer, say) would have passed
+        // silently. Counting the site pins it at exactly one - the same one the comment above names.
+        CountOccurrences(File.ReadAllText(receiptWorker), "new Money(").Should().Be(
+            1, "the receipt worker's exemption covers its one permitted construction site, not the whole file");
+
         // One door, not a check: the model's reading of an amount becomes a Money in exactly one place,
         // so a wrong figure has exactly one place to be traced to. The verbatim check that used to live
         // here was removed on purpose (decision D1).
@@ -121,6 +127,15 @@ public class AiBoundaryTests
         Directory.EnumerateFiles(SrcRoot, pattern, SearchOption.AllDirectories);
 
     static bool InProviderFolder(string file) => file.StartsWith(ProviderFolder, StringComparison.OrdinalIgnoreCase);
+
+    static int CountOccurrences(string text, string value)
+    {
+        var count = 0;
+        for (var index = text.IndexOf(value, StringComparison.Ordinal); index >= 0; index = text.IndexOf(value, index + value.Length, StringComparison.Ordinal))
+            count++;
+
+        return count;
+    }
 
     static string Relative(string file) => Path.GetRelativePath(SrcRoot, file);
 }
