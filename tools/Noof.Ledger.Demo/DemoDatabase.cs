@@ -61,9 +61,11 @@ internal static class DemoDatabase
         await ExecuteAsync(admin, $"DROP DATABASE IF EXISTS \"{database}\" WITH (FORCE)", cancellationToken);
     }
 
+    // CREATE and DROP DATABASE wait for a checkpoint, and on a server shared with a parallel session's
+    // test runs that wait has been seen past two minutes.
     static async Task ExecuteAsync(NpgsqlConnection connection, string sql, CancellationToken cancellationToken)
     {
-        await using var command = new NpgsqlCommand(sql, connection) { CommandTimeout = 120 };
+        await using var command = new NpgsqlCommand(sql, connection) { CommandTimeout = 600 };
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 }
