@@ -3,7 +3,8 @@ using Noof.Ledger.Application.Diagnostics;
 namespace Noof.Ledger.Host.Diagnostics;
 
 internal sealed class SystemHealth(
-    IServiceScopeFactory scopeFactory, TimeProvider timeProvider, ILoggerFactory loggerFactory) : ISystemHealth
+    IServiceScopeFactory scopeFactory, TimeProvider timeProvider, ILoggerFactory loggerFactory,
+    IOperationTimer timer, ILogger<SystemHealth> logger) : ISystemHealth
 {
     static readonly TimeSpan CacheDuration = TimeSpan.FromSeconds(30);
     internal static readonly TimeSpan CheckTimeout = TimeSpan.FromSeconds(5);
@@ -38,6 +39,8 @@ internal sealed class SystemHealth(
     // operation - hence one at a time.
     async Task<SystemHealthReport> RunAsync(CancellationToken cancellationToken)
     {
+        using var running = timer.Start(logger, TimedOperations.HealthRun);
+
         await using var scope = scopeFactory.CreateAsyncScope();
         var checks = scope.ServiceProvider.GetServices<ISystemHealthCheck>()
             .OrderBy(check => check.Order).ThenBy(check => check.Name, StringComparer.Ordinal);
@@ -57,9 +60,14 @@ internal sealed class SystemHealth(
 
     async Task<HealthOutcome> OutcomeOfAsync(ISystemHealthCheck check, CancellationToken cancellationToken)
     {
+        // Logged under SystemHealth's own category, not the check's: a checked-in Override on the
+        // check's category (e.g. Microsoft.EntityFrameworkCore=Information for Migrations) would
+        // otherwise drop this Debug timing.
+        using var timing = timer.Start(logger, TimedOperations.HealthCheck(check.Name));
+
         using var timeout = new CancellationTokenSource(CheckTimeout, timeProvider);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
-        var logger = loggerFactory.CreateLogger(check.LogCategory);
+        var checkLogger = loggerFactory.CreateLogger(check.LogCategory);
 
         try
         {
@@ -67,12 +75,12 @@ internal sealed class SystemHealth(
         }
         catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
-            logger.HealthCheckTimedOut(check.Name, (int)CheckTimeout.TotalSeconds);
+            checkLogger.HealthCheckTimedOut(check.Name, (int)CheckTimeout.TotalSeconds);
             return HealthOutcome.Failing($"No answer within {(int)CheckTimeout.TotalSeconds} s");
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
-            logger.HealthCheckFailed(check.Name, exception);
+            checkLogger.HealthCheckFailed(check.Name, exception);
             return HealthOutcome.Failing($"Check failed ({exception.GetType().Name}) — see logs");
         }
     }

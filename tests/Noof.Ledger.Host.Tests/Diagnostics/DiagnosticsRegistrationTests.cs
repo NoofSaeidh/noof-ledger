@@ -1,5 +1,6 @@
 using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Noof.Ledger.Application;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Host.Diagnostics;
 
@@ -13,6 +14,7 @@ public class DiagnosticsRegistrationTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton(TimeProvider.System);
+        services.AddNoofApplication(new SlowOperationOptions());
 
         services.AddNoofDiagnostics();
 

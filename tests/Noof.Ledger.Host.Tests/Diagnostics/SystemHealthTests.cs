@@ -18,7 +18,9 @@ public class SystemHealthTests
         foreach (var check in checks)
             services.AddScoped<ISystemHealthCheck>(_ => check);
         var provider = services.BuildServiceProvider();
-        return new SystemHealth(provider.GetRequiredService<IServiceScopeFactory>(), time, loggerFactory);
+        var timer = new OperationTimer(time, new SlowOperationOptions());
+        return new SystemHealth(
+            provider.GetRequiredService<IServiceScopeFactory>(), time, loggerFactory, timer, loggerFactory.CreateLogger<SystemHealth>());
     }
 
     [Fact]
@@ -194,7 +196,10 @@ public class SystemHealthTests
         services.AddScoped<ISystemHealthCheck>(sp => new ProbeCheck(sp.GetRequiredService<ScopeProbe>(), "First", 10));
         services.AddScoped<ISystemHealthCheck>(sp => new ProbeCheck(sp.GetRequiredService<ScopeProbe>(), "Second", 20));
         var provider = services.BuildServiceProvider();
-        var health = new SystemHealth(provider.GetRequiredService<IServiceScopeFactory>(), new FakeTimeProvider(T0), NullLoggerFactory.Instance);
+        var time = new FakeTimeProvider(T0);
+        var health = new SystemHealth(
+            provider.GetRequiredService<IServiceScopeFactory>(), time, NullLoggerFactory.Instance,
+            new OperationTimer(time, new SlowOperationOptions()), NullLoggerFactory.Instance.CreateLogger<SystemHealth>());
 
         var first = await health.GetAsync(fresh: true, TestContext.Current.CancellationToken);
         var second = await health.GetAsync(fresh: true, TestContext.Current.CancellationToken);
@@ -241,5 +246,44 @@ public class SystemHealthTests
         await health.GetAsync(fresh: true, TestContext.Current.CancellationToken);
 
         check.Runs.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task A_run_logs_one_health_run_and_one_timing_per_check()
+    {
+        var a = new FakeCheck("A", 10, _ => Task.FromResult(HealthOutcome.Ok("ok")));
+        var b = new FakeCheck("B", 20, _ => Task.FromResult(HealthOutcome.Ok("ok")));
+        var c = new FakeCheck("C", 30, _ => Task.FromResult(HealthOutcome.Ok("ok")));
+        var recorder = new RecordingLoggerFactory();
+        var health = HealthOver(new FakeTimeProvider(T0), recorder, a, b, c);
+
+        await health.GetAsync(fresh: true, TestContext.Current.CancellationToken);
+
+        var timings = recorder.Entries.Where(e => e.Category == "Noof.Ledger.Host.Diagnostics.SystemHealth" && e.EventId.Id == 5301).ToList();
+        timings.Should().ContainSingle(e => (string)e.Properties["Operation"] == "health.run");
+        timings.Should().ContainSingle(e => (string)e.Properties["Operation"] == "health.A");
+        timings.Should().ContainSingle(e => (string)e.Properties["Operation"] == "health.B");
+        timings.Should().ContainSingle(e => (string)e.Properties["Operation"] == "health.C");
+        timings.Should().HaveCount(4);
+    }
+
+    [Fact]
+    public async Task A_check_slower_than_two_seconds_logs_5302()
+    {
+        var time = new FakeTimeProvider(T0);
+        var recorder = new RecordingLoggerFactory();
+        var slow = new FakeCheck("Slow", 10, _ =>
+        {
+            time.Advance(TimeSpan.FromSeconds(3));
+            return Task.FromResult(HealthOutcome.Ok("ok"));
+        });
+        var health = HealthOver(time, recorder, slow);
+
+        await health.GetAsync(fresh: true, TestContext.Current.CancellationToken);
+
+        recorder.Entries.Should().ContainSingle(e =>
+            e.Category == "Noof.Ledger.Host.Diagnostics.SystemHealth"
+            && e.EventId.Id == 5302
+            && (string)e.Properties["Operation"] == "health.Slow");
     }
 }
