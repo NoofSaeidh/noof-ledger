@@ -1,7 +1,7 @@
 @inject NavigationManager Navigation
 
 <MudAppBar Elevation="0" Dense="true" Color="Color.Transparent" Class="noof-appbar">
-    <MudText Typo="Typo.h6" Class="noof-brand mr-8">noof&#8202;<span class="noof-brand-accent">ledger</span></MudText>
+    <MudText Typo="Typo.h6" Class="noof-brand">noof&#8202;<span class="noof-brand-accent">ledger</span></MudText>
 
     <AuthorizeView>
         <Authorized>
@@ -10,20 +10,21 @@
                 <MudButton Href="@link.Href"
                            StartIcon="@link.Icon"
                            Color="@(IsCurrent(link.Href) ? Color.Primary : Color.Inherit)"
-                           Class="mr-2">
-                    @link.Label
+                           aria-current="@(IsCurrent(link.Href) ? "page" : null)"
+                           Class="noof-nav-link">
+                    <span class="noof-nav-label">@link.Label</span>
                 </MudButton>
             }
 
             <MudSpacer />
 
-            <MudText Typo="Typo.body2" Class="mr-4 mud-text-secondary">@context.User.Identity?.Name</MudText>
+            <MudText Typo="Typo.body2" Class="noof-user mud-text-secondary">@context.User.Identity?.Name</MudText>
             @* POST, not a link: a GET sign-out is something any page you visit can trigger for you. *@
             <form method="post" action="/account/logout">
                 <AntiforgeryToken />
                 <MudButton id="sign-out" ButtonType="ButtonType.Submit" Variant="Variant.Text"
-                           Color="Color.Inherit" StartIcon="@Icons.Material.Outlined.Logout">
-                    Sign out
+                           Color="Color.Inherit" StartIcon="@Icons.Material.Outlined.Logout" Class="noof-nav-link">
+                    <span class="noof-nav-label">Sign out</span>
                 </MudButton>
             </form>
         </Authorized>
