@@ -130,31 +130,66 @@ public sealed class WalletsTests(CookieModeHostFixture fixture) : PageTest, ICla
         await Page.ClickAsync("#create-wallet");
         await Expect(Page.Locator("#wallets-saved")).ToContainTextAsync("Created");
 
-        Guid firstId, secondId;
-        await using (var db = OpenDb())
-        {
-            firstId = (await db.Wallets.SingleAsync(w => w.Name == firstName, TestContext.Current.CancellationToken)).Id;
-            secondId = (await db.Wallets.SingleAsync(w => w.Name == secondName, TestContext.Current.CancellationToken)).Id;
-        }
+        var firstId = await WaitForWalletIdAsync(firstName, TestContext.Current.CancellationToken);
+        var secondId = await WaitForWalletIdAsync(secondName, TestContext.Current.CancellationToken);
 
         await Page.SelectOptionAsync($"#wallet-payment-default-{firstId}", "Card");
         await Expect(Page.Locator("#wallets-saved")).ToContainTextAsync("Payment default saved");
 
-        await using (var db = OpenDb())
-        {
-            (await db.Wallets.AsNoTracking().SingleAsync(w => w.Id == firstId, TestContext.Current.CancellationToken))
-                .DefaultForPayment.Should().Be(WalletPaymentDefault.Card);
-        }
+        // "Payment default saved" is the same text both times this test triggers it, so Playwright's
+        // wait above can pass on the *previous* action's leftover text before this one actually
+        // commits (the same race as WaitForWalletIdAsync's "Created" - see there). Reading the wallet
+        // back with a bounded poll, rather than trusting the confirmation text alone, is immune to it.
+        (await WaitForPaymentDefaultAsync(firstId, WalletPaymentDefault.Card, TestContext.Current.CancellationToken))
+            .Should().Be(WalletPaymentDefault.Card);
 
         await Page.SelectOptionAsync($"#wallet-payment-default-{secondId}", "Card");
         await Expect(Page.Locator("#wallets-saved")).ToContainTextAsync("Payment default saved");
 
-        await using (var verify = OpenDb())
+        (await WaitForPaymentDefaultAsync(secondId, WalletPaymentDefault.Card, TestContext.Current.CancellationToken))
+            .Should().Be(WalletPaymentDefault.Card);
+        (await WaitForPaymentDefaultAsync(firstId, null, TestContext.Current.CancellationToken))
+            .Should().BeNull("only the second wallet must show the card default now");
+    }
+
+    // The same confirmation text ("Created {name}.", "Payment default saved.") is reused across
+    // repeated actions in a test, so Playwright's wait for it can be satisfied by a PREVIOUS action's
+    // still-visible text before the current one has actually committed - Setting_a_card_default_on_
+    // one_wallet_then_another_moves_it flaked with "Sequence contains no elements" from exactly that
+    // gap. Polling the database with a bounded wait, instead of reading it once right after the UI
+    // wait, is immune to it regardless of which confirmation raced.
+    async Task<Guid> WaitForWalletIdAsync(string name, CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (true)
         {
-            (await verify.Wallets.AsNoTracking().SingleAsync(w => w.Id == secondId, TestContext.Current.CancellationToken))
-                .DefaultForPayment.Should().Be(WalletPaymentDefault.Card);
-            (await verify.Wallets.AsNoTracking().SingleAsync(w => w.Id == firstId, TestContext.Current.CancellationToken))
-                .DefaultForPayment.Should().BeNull("only the second wallet must show the card default now");
+            await using var db = OpenDb();
+            var wallet = await db.Wallets.AsNoTracking().SingleOrDefaultAsync(w => w.Name == name, cancellationToken);
+            if (wallet is not null)
+                return wallet.Id;
+
+            if (DateTime.UtcNow >= deadline)
+                throw new TimeoutException($"No wallet named '{name}' appeared within the timeout.");
+
+            await Task.Delay(100, cancellationToken);
+        }
+    }
+
+    async Task<WalletPaymentDefault?> WaitForPaymentDefaultAsync(
+        Guid walletId, WalletPaymentDefault? expected, CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (true)
+        {
+            await using var db = OpenDb();
+            var current = (await db.Wallets.AsNoTracking()
+                    .SingleAsync(w => w.Id == walletId, cancellationToken))
+                .DefaultForPayment;
+
+            if (current == expected || DateTime.UtcNow >= deadline)
+                return current;
+
+            await Task.Delay(100, cancellationToken);
         }
     }
 
