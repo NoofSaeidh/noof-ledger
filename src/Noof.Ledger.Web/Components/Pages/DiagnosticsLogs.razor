@@ -11,17 +11,19 @@
 
 <PageTitle>Logs</PageTitle>
 
-<MudText HtmlTag="h1" Typo="Typo.h4" Class="mb-4">Logs</MudText>
-
 @if (Gate.State != DatabaseState.Ready)
 {
+    <MudText HtmlTag="h1" Typo="Typo.h4" Class="mb-6">Logs</MudText>
     <DatabaseGateBanner />
 }
 else
 {
-    <div class="noof-filter-bar mb-2">
-        <div class="noof-filter-field">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">Record to database from</MudText>
+    @* The database level changes what gets recorded, not what is shown, so it sits with the page
+       title as a setting rather than among the filters. *@
+    <div class="noof-page-header">
+        <MudText HtmlTag="h1" Typo="Typo.h4">Logs</MudText>
+        <div class="noof-filter-field noof-setting">
+            <MudText HtmlTag="label" for="logs-database-level" Typo="Typo.caption" Class="mud-text-secondary">Record to database from</MudText>
             <select id="logs-database-level" @bind="databaseLevel" @bind:after="SaveDatabaseLevelAsync" class="noof-native-select">
                 @foreach (var level in DatabaseLogLevel.Choices)
                 {
@@ -33,14 +35,14 @@ else
 
     @if (databaseLevelError)
     {
-        <MudAlert id="logs-database-level-error" Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-2">
+        <MudAlert id="logs-database-level-error" Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-4">
             Could not save the database log level. Try again.
         </MudAlert>
     }
 
     <div class="noof-filter-bar">
         <div class="noof-filter-field">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">Level</MudText>
+            <MudText HtmlTag="label" for="logs-filter-level" Typo="Typo.caption" Class="mud-text-secondary">Level</MudText>
             <select id="logs-filter-level" @bind="filter.MinLevel" @bind:after="ReloadAsync" class="noof-native-select">
                 @foreach (var level in Enum.GetValues<LogSeverity>())
                 {
@@ -48,37 +50,8 @@ else
                 }
             </select>
         </div>
-        @* Plain native inputs, not MudTextField: a QuickGrid refresh needs to fire on every
-           keystroke, and a native input's @bind:event="oninput" does that directly, without
-           depending on MudTextField's own (JS-interop-driven) Immediate/debounce plumbing. *@
         <div class="noof-filter-field">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">Text</MudText>
-            <input id="logs-filter-text" class="noof-input" @bind="filter.Text" @bind:event="oninput" @bind:after="ReloadAsync" />
-        </div>
-        <div class="noof-filter-field">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">Source</MudText>
-            <input id="logs-filter-source" class="noof-input" @bind="filter.Source" @bind:event="oninput" @bind:after="ReloadAsync" />
-        </div>
-        <div class="noof-filter-field">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">From</MudText>
-            @* @bind against a DateTime? field, not a string: Razor's @bind directive infers a
-               DateTime target type from a "datetime-local" input regardless of the bound
-               property's own declared type, and generates Blazor's own built-in date/time
-               round-trip conversion - the native binding path, rather than a hand-rolled
-               value/@onchange pair reading a string. *@
-            <input type="datetime-local" id="logs-filter-from" class="noof-input" @bind="filter.From" @bind:event="oninput" @bind:after="ReloadAsync" />
-        </div>
-        <div class="noof-filter-field">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">To</MudText>
-            <input type="datetime-local" id="logs-filter-to" class="noof-input" @bind="filter.To" @bind:event="oninput" @bind:after="ReloadAsync" />
-        </div>
-        <div class="noof-filter-field">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">Transaction id</MudText>
-            <input id="logs-filter-transaction-id" class="noof-input" placeholder="e.g. 3a70ddca-2352-…"
-                   @bind="transactionIdText" @bind:event="oninput" @bind:after="ReloadAsync" />
-        </div>
-        <div class="noof-filter-field">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">Quick range</MudText>
+            <MudText HtmlTag="label" for="logs-quick-range" Typo="Typo.caption" Class="mud-text-secondary">Quick range</MudText>
             <select id="logs-quick-range" @bind="quickRange" @bind:after="OnQuickRangeChangedAsync" class="noof-native-select">
                 @foreach (var range in Enum.GetValues<QuickRange>())
                 {
@@ -86,8 +59,37 @@ else
                 }
             </select>
         </div>
+        <div class="noof-filter-field noof-filter-field-wide">
+            <MudText HtmlTag="label" for="logs-filter-from" Typo="Typo.caption" Class="mud-text-secondary">From</MudText>
+            @* @bind against a DateTime? field, not a string: Razor's @bind directive infers a
+               DateTime target type from a "datetime-local" input regardless of the bound
+               property's own declared type, and generates Blazor's own built-in date/time
+               round-trip conversion - the native binding path, rather than a hand-rolled
+               value/@onchange pair reading a string. *@
+            <input type="datetime-local" id="logs-filter-from" class="noof-input" @bind="filter.From" @bind:event="oninput" @bind:after="ReloadAsync" />
+        </div>
+        <div class="noof-filter-field noof-filter-field-wide">
+            <MudText HtmlTag="label" for="logs-filter-to" Typo="Typo.caption" Class="mud-text-secondary">To</MudText>
+            <input type="datetime-local" id="logs-filter-to" class="noof-input" @bind="filter.To" @bind:event="oninput" @bind:after="ReloadAsync" />
+        </div>
+        @* Plain native inputs, not MudTextField: a QuickGrid refresh needs to fire on every
+           keystroke, and a native input's @bind:event="oninput" does that directly, without
+           depending on MudTextField's own (JS-interop-driven) Immediate/debounce plumbing. *@
         <div class="noof-filter-field">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">Sort</MudText>
+            <MudText HtmlTag="label" for="logs-filter-text" Typo="Typo.caption" Class="mud-text-secondary">Text</MudText>
+            <input id="logs-filter-text" class="noof-input" type="search" placeholder="Search messages" @bind="filter.Text" @bind:event="oninput" @bind:after="ReloadAsync" />
+        </div>
+        <div class="noof-filter-field">
+            <MudText HtmlTag="label" for="logs-filter-source" Typo="Typo.caption" Class="mud-text-secondary">Source</MudText>
+            <input id="logs-filter-source" class="noof-input" type="search" placeholder="e.g. Noof.Ledger.Ai" @bind="filter.Source" @bind:event="oninput" @bind:after="ReloadAsync" />
+        </div>
+        <div class="noof-filter-field noof-filter-field-wide">
+            <MudText HtmlTag="label" for="logs-filter-transaction-id" Typo="Typo.caption" Class="mud-text-secondary">Transaction id</MudText>
+            <input id="logs-filter-transaction-id" class="noof-input noof-mono" placeholder="e.g. 3a70ddca-2352-…"
+                   @bind="transactionIdText" @bind:event="oninput" @bind:after="ReloadAsync" />
+        </div>
+        <div class="noof-filter-field">
+            <MudText HtmlTag="label" for="logs-sort-order" Typo="Typo.caption" Class="mud-text-secondary">Sort</MudText>
             <select id="logs-sort-order" @bind="filter.Sort" @bind:after="ReloadAsync" class="noof-native-select">
                 @foreach (var sort in Enum.GetValues<LogSortOrder>())
                 {
@@ -97,39 +99,46 @@ else
         </div>
     </div>
 
-    <QuickGrid @key="reloadGeneration" TGridItem="LogRow" id="logs-grid" ItemsProvider="ProvideRowsAsync" Pagination="pagination" Class="noof-grid mb-2">
-        @* Local time, the same zone the From/To inputs above are read in. *@
-        <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="LogRow" TProp="DateTimeOffset" Property="@(row => row.LoggedAt.ToLocalTime())" Format="yyyy-MM-dd HH:mm:ss" Title="Logged at" Class="noof-col-nowrap" />
-        <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="LogRow" TProp="LogSeverity" Property="@(row => row.Level)" Title="Level" Class="noof-col-nowrap" />
-        <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="LogRow" TProp="string" Property="@(row => row.Source)" Title="Source" />
-        <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="LogRow" Title="Message" Context="row">
-            <ChildContent>
-                <div>
-                    @row.Message
-                    <MudLink OnClick="@(() => ToggleExpanded(row.Id))" Class="ml-2">
-                        @(expandedRowId == row.Id ? "Hide" : "Details")
-                    </MudLink>
-                    @if (expandedRowId == row.Id)
-                    {
-                        <div class="noof-log-details">
-                            @if (row.Exception is not null)
-                            {
-                                <pre>@row.Exception</pre>
-                            }
-                            @if (row.PropertiesJson is not null)
-                            {
-                                <pre>@row.PropertiesJson</pre>
-                            }
-                            @if (row.TransactionId is { } id)
-                            {
-                                <MudLink Href="@($"/transactions/{id}/trace")">View trace</MudLink>
-                            }
-                        </div>
-                    }
-                </div>
-            </ChildContent>
-        </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
-    </QuickGrid>
+    <div class="noof-grid-frame" data-empty="No log entries match these filters.">
+        <QuickGrid @key="reloadGeneration" TGridItem="LogRow" id="logs-grid" ItemsProvider="ProvideRowsAsync" Pagination="pagination" Class="noof-grid noof-grid-top">
+            @* Local time, the same zone the From/To inputs above are read in. *@
+            <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="LogRow" TProp="DateTimeOffset" Property="@(row => row.LoggedAt.ToLocalTime())" Format="yyyy-MM-dd HH:mm:ss" Title="Logged at" Class="noof-col-nowrap" />
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="LogRow" Title="Level" Class="noof-col-nowrap" Context="row">
+                <span class="noof-level @LevelClass(row.Level)">@row.Level</span>
+            </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
+            <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="LogRow" TProp="string" Property="@(row => row.Source)" Title="Source" />
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="LogRow" Title="Message" Class="noof-col-message" Context="row">
+                <ChildContent>
+                    <div>
+                        @row.Message
+                        @* A button, not a link without an href: such a link is not in the tab order,
+                           so a keyboard could never open a row's details. *@
+                        <button type="button" class="noof-link-button" aria-expanded="@(expandedRowId == row.Id ? "true" : "false")"
+                                @onclick="@(() => ToggleExpanded(row.Id))">
+                            @(expandedRowId == row.Id ? "Hide" : "Details")
+                        </button>
+                        @if (expandedRowId == row.Id)
+                        {
+                            <div class="noof-log-details">
+                                @if (row.Exception is not null)
+                                {
+                                    <pre>@row.Exception</pre>
+                                }
+                                @if (row.PropertiesJson is not null)
+                                {
+                                    <pre>@row.PropertiesJson</pre>
+                                }
+                                @if (row.TransactionId is { } id)
+                                {
+                                    <MudLink Href="@($"/transactions/{id}/trace")">View trace</MudLink>
+                                }
+                            </div>
+                        }
+                    </div>
+                </ChildContent>
+            </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
+        </QuickGrid>
+    </div>
     <Paginator State="pagination" />
 }
 
@@ -282,6 +291,8 @@ else
         pagination = new PaginationState { ItemsPerPage = pagination.ItemsPerPage };
         return Task.CompletedTask;
     }
+
+    static string LevelClass(LogSeverity level) => $"noof-level-{level.ToString().ToLowerInvariant()}";
 
     void ToggleExpanded(long id) => expandedRowId = expandedRowId == id ? -1 : id;
 

@@ -17,7 +17,7 @@
 
 <PageTitle>Transactions</PageTitle>
 
-<MudText HtmlTag="h1" Typo="Typo.h4" Class="mb-4">Transactions</MudText>
+<MudText HtmlTag="h1" Typo="Typo.h4" Class="mb-6">Transactions</MudText>
 
 @if (Gate.State != DatabaseState.Ready)
 {
@@ -31,21 +31,21 @@ else
 {
     <div id="transactions-filters" class="noof-filter-bar">
         <div class="noof-filter-quick-ranges">
-            <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="@(() => SetQuickRangeAsync(QuickRange.Today))">Today</MudButton>
-            <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="@(() => SetQuickRangeAsync(QuickRange.Last7Days))">7 days</MudButton>
-            <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="@(() => SetQuickRangeAsync(QuickRange.ThisMonth))">This month</MudButton>
-            <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="@(() => SetQuickRangeAsync(QuickRange.All))">All</MudButton>
+            <MudButton Variant="Variant.Text" Size="Size.Small" Class="noof-quick-range" OnClick="@(() => SetQuickRangeAsync(QuickRange.Today))">Today</MudButton>
+            <MudButton Variant="Variant.Text" Size="Size.Small" Class="noof-quick-range" OnClick="@(() => SetQuickRangeAsync(QuickRange.Last7Days))">7 days</MudButton>
+            <MudButton Variant="Variant.Text" Size="Size.Small" Class="noof-quick-range" OnClick="@(() => SetQuickRangeAsync(QuickRange.ThisMonth))">This month</MudButton>
+            <MudButton Variant="Variant.Text" Size="Size.Small" Class="noof-quick-range" OnClick="@(() => SetQuickRangeAsync(QuickRange.All))">All</MudButton>
         </div>
         <div class="noof-filter-field">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">From</MudText>
+            <MudText HtmlTag="label" for="transactions-filter-from" Typo="Typo.caption" Class="mud-text-secondary">From</MudText>
             <input type="date" id="transactions-filter-from" class="noof-input" @bind="filter.From" @bind:event="oninput" @bind:after="ReloadAsync" />
         </div>
         <div class="noof-filter-field">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">To</MudText>
+            <MudText HtmlTag="label" for="transactions-filter-to" Typo="Typo.caption" Class="mud-text-secondary">To</MudText>
             <input type="date" id="transactions-filter-to" class="noof-input" @bind="filter.To" @bind:event="oninput" @bind:after="ReloadAsync" />
         </div>
         <div class="noof-filter-field">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">Wallet</MudText>
+            <MudText HtmlTag="label" for="transactions-filter-wallet" Typo="Typo.caption" Class="mud-text-secondary">Wallet</MudText>
             <select id="transactions-filter-wallet" @bind="filter.WalletId" @bind:after="ReloadAsync" class="noof-native-select">
                 <option value="">All wallets</option>
                 @foreach (var wallet in wallets)
@@ -55,7 +55,7 @@ else
             </select>
         </div>
         <div class="noof-filter-field">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">Kind</MudText>
+            <MudText HtmlTag="label" for="transactions-filter-kind" Typo="Typo.caption" Class="mud-text-secondary">Kind</MudText>
             <select id="transactions-filter-kind" @bind="filter.Kind" @bind:after="ReloadAsync" class="noof-native-select">
                 <option value="">All kinds</option>
                 @foreach (var kind in Enum.GetValues<TransactionKind>())
@@ -65,7 +65,7 @@ else
             </select>
         </div>
         <div class="noof-filter-field">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">Status</MudText>
+            <MudText HtmlTag="label" for="transactions-filter-status" Typo="Typo.caption" Class="mud-text-secondary">Status</MudText>
             <select id="transactions-filter-status" @bind="filter.Status" @bind:after="ReloadAsync" class="noof-native-select">
                 <option value="">All statuses</option>
                 @foreach (var status in Enum.GetValues<TransactionStatus>())
@@ -75,32 +75,34 @@ else
             </select>
         </div>
         <div class="noof-filter-field">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">Text</MudText>
-            <input id="transactions-filter-text" class="noof-input" @bind="filter.Text" @bind:event="oninput" @bind:after="ReloadAsync" />
+            <MudText HtmlTag="label" for="transactions-filter-text" Typo="Typo.caption" Class="mud-text-secondary">Text</MudText>
+            <input id="transactions-filter-text" class="noof-input" type="search" placeholder="Search messages" @bind="filter.Text" @bind:event="oninput" @bind:after="ReloadAsync" />
         </div>
     </div>
 
-    <QuickGrid @key="reloadGeneration" TGridItem="TransactionListRow" id="transactions-grid" ItemsProvider="ProvideRowsAsync" Pagination="pagination" Class="noof-grid mb-2">
-        <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Date" Class="noof-col-nowrap" Context="row">
-            <MudLink Href="@($"/transactions/{row.Id}/trace")">@FormatOccurred(row)</MudLink>
-        </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
-        <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Wallet" Class="noof-col-nowrap" Context="row">
-            @(string.IsNullOrEmpty(row.WalletName) ? "—" : row.WalletName)
-        </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
-        <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="TransactionListRow" TProp="TransactionKind" Property="@(row => row.Kind)" Title="Kind" Class="noof-col-nowrap" />
-        <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Status" Class="noof-col-nowrap" Context="row">
-            <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@StatusColor(row.Status)">@row.Status</MudChip>
-        </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
-        <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Text" Context="row">
-            <span class="noof-truncate" style="display:inline-block;" title="@row.RawText">@row.RawText</span>
-        </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
-        <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Amounts" Class="noof-col-amounts" Context="row">
-            @FormatAmounts(row.Amounts)
-        </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
-        <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Categories" Context="row">
-            @string.Join(", ", row.Categories)
-        </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
-    </QuickGrid>
+    <div class="noof-grid-frame" data-empty="No transactions match these filters.">
+        <QuickGrid @key="reloadGeneration" TGridItem="TransactionListRow" id="transactions-grid" ItemsProvider="ProvideRowsAsync" Pagination="pagination" Class="noof-grid">
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Date" Class="noof-col-nowrap" Context="row">
+                <MudLink Href="@($"/transactions/{row.Id}/trace")">@FormatOccurred(row)</MudLink>
+            </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Wallet" Class="noof-col-nowrap" Context="row">
+                @(string.IsNullOrEmpty(row.WalletName) ? "—" : row.WalletName)
+            </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
+            <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="TransactionListRow" TProp="TransactionKind" Property="@(row => row.Kind)" Title="Kind" Class="noof-col-nowrap" />
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Status" Class="noof-col-nowrap" Context="row">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@StatusColor(row.Status)">@row.Status</MudChip>
+            </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Text" Context="row">
+                <span class="noof-truncate" title="@row.RawText">@row.RawText</span>
+            </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Amounts" Class="noof-col-amounts" Context="row">
+                @FormatAmounts(row.Amounts)
+            </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Categories" Context="row">
+                @string.Join(", ", row.Categories)
+            </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
+        </QuickGrid>
+    </div>
     <Paginator State="pagination" />
 }
 
