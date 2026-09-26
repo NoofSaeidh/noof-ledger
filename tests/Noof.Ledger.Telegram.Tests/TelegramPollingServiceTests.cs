@@ -1,6 +1,7 @@
 ﻿using AwesomeAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
@@ -8,6 +9,7 @@ using NSubstitute.ExceptionExtensions;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Secrets;
+using Noof.Ledger.TestKit;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Requests;
@@ -65,16 +67,20 @@ public class TelegramPollingServiceTests
         IChatNotifier? chatNotifier = null,
         IDatabaseGate? gate = null,
         IPollingHeartbeat? heartbeat = null,
-        TimeProvider? timeProvider = null) =>
+        TimeProvider? timeProvider = null,
+        IOperationTimer? timer = null,
+        CapturingLogger<TelegramPollingService>? capturingLogger = null,
+        IConfiguration? configuration = null) =>
         new(
             ScopeFactoryFor(secretStore, router, chatNotifier),
             clientFactory,
             handle,
-            new ConfigurationBuilder().Build(),
+            configuration ?? new ConfigurationBuilder().Build(),
             timeProvider ?? TimeProvider.System,
             gate ?? ReadyGate(),
             heartbeat ?? Substitute.For<IPollingHeartbeat>(),
-            NullLogger<TelegramPollingService>.Instance);
+            timer ?? new OperationTimer(timeProvider ?? TimeProvider.System, new SlowOperationOptions()),
+            (ILogger<TelegramPollingService>?)capturingLogger ?? NullLogger<TelegramPollingService>.Instance);
 
     static IDatabaseGate ReadyGate()
     {
@@ -302,6 +308,7 @@ public class TelegramPollingServiceTests
             TimeProvider.System,
             ReadyGate(),
             Substitute.For<IPollingHeartbeat>(),
+            new OperationTimer(TimeProvider.System, new SlowOperationOptions()),
             NullLogger<TelegramPollingService>.Instance);
 
         var result = await service.RunTickAsync(TestContext.Current.CancellationToken);
@@ -325,6 +332,102 @@ public class TelegramPollingServiceTests
             Arg.Is<GetUpdatesRequest>(r => r.AllowedUpdates!.Contains(UpdateType.Message) && r.AllowedUpdates!.Contains(UpdateType.CallbackQuery)
                 && r.AllowedUpdates!.Contains(UpdateType.EditedMessage)),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task An_empty_poll_logs_no_timing()
+    {
+        var client = Substitute.For<ITelegramBotClient>();
+        client.SendRequest(Arg.Any<GetUpdatesRequest>(), Arg.Any<CancellationToken>()).Returns([]);
+        var clientFactory = Substitute.For<ITelegramBotClientFactory>();
+        clientFactory.Create("tok1").Returns(client);
+        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var logger = new CapturingLogger<TelegramPollingService>();
+
+        await CreateService(WithToken("tok1"), clientFactory, new TelegramClientHandle(), timeProvider: clock, capturingLogger: logger)
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        logger.Entries.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_poll_returning_updates_logs_one_getUpdates_and_one_handleUpdate_per_update()
+    {
+        var update10 = new Update { Id = 10, Message = new Message { Id = 1, Chat = new Chat { Id = 111L }, Text = "a" } };
+        var update11 = new Update { Id = 11, Message = new Message { Id = 2, Chat = new Chat { Id = 111L }, Text = "b" } };
+        var client = Substitute.For<ITelegramBotClient>();
+        client.SendRequest(Arg.Any<GetUpdatesRequest>(), Arg.Any<CancellationToken>()).Returns([update10, update11]);
+        var clientFactory = Substitute.For<ITelegramBotClientFactory>();
+        clientFactory.Create("tok1").Returns(client);
+        var router = Substitute.For<ITelegramUpdateRouter>();
+        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var logger = new CapturingLogger<TelegramPollingService>();
+
+        await CreateService(WithToken("tok1"), clientFactory, new TelegramClientHandle(), router, timeProvider: clock, capturingLogger: logger)
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        logger.Entries.Count(entry => entry.Properties.GetValueOrDefault("Operation") as string == "telegram.getUpdates").Should().Be(1);
+        logger.Entries.Count(entry => entry.Properties.GetValueOrDefault("Operation") as string == "telegram.handleUpdate").Should().Be(2);
+    }
+
+    [Fact]
+    public async Task An_idle_poll_at_92_seconds_with_a_90_second_polling_interval_logs_nothing()
+    {
+        var client = Substitute.For<ITelegramBotClient>();
+        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        client.SendRequest(Arg.Any<GetUpdatesRequest>(), Arg.Any<CancellationToken>())
+            .Returns(_ => { clock.Advance(TimeSpan.FromSeconds(92)); return Array.Empty<Update>(); });
+        var clientFactory = Substitute.For<ITelegramBotClientFactory>();
+        clientFactory.Create("tok1").Returns(client);
+        var logger = new CapturingLogger<TelegramPollingService>();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Telegram:PollingSeconds"] = "90" }).Build();
+
+        await CreateService(WithToken("tok1"), clientFactory, new TelegramClientHandle(),
+                timeProvider: clock, capturingLogger: logger, configuration: configuration)
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        logger.Entries.Should().BeEmpty("92 s is below the 93 s threshold (3 s telegram + 90 s expected wait)");
+    }
+
+    [Fact]
+    public async Task An_idle_poll_at_94_seconds_with_a_90_second_polling_interval_logs_5302_with_the_combined_threshold()
+    {
+        var client = Substitute.For<ITelegramBotClient>();
+        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        client.SendRequest(Arg.Any<GetUpdatesRequest>(), Arg.Any<CancellationToken>())
+            .Returns(_ => { clock.Advance(TimeSpan.FromSeconds(94)); return Array.Empty<Update>(); });
+        var clientFactory = Substitute.For<ITelegramBotClientFactory>();
+        clientFactory.Create("tok1").Returns(client);
+        var logger = new CapturingLogger<TelegramPollingService>();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Telegram:PollingSeconds"] = "90" }).Build();
+
+        await CreateService(WithToken("tok1"), clientFactory, new TelegramClientHandle(),
+                timeProvider: clock, capturingLogger: logger, configuration: configuration)
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        var entry = logger.Entries.Should().ContainSingle().Subject;
+        entry.EventId.Id.Should().Be(5302);
+        entry.Properties["ThresholdMs"].Should().Be(93000L);
+    }
+
+    [Fact]
+    public async Task A_GetUpdates_call_that_throws_after_10_seconds_still_logs_telegram_getUpdates()
+    {
+        var client = Substitute.For<ITelegramBotClient>();
+        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        client.SendRequest(Arg.Any<GetUpdatesRequest>(), Arg.Any<CancellationToken>())
+            .Returns<Update[]>(_ => { clock.Advance(TimeSpan.FromSeconds(10)); throw new HttpRequestException("cable pulled"); });
+        var clientFactory = Substitute.For<ITelegramBotClientFactory>();
+        clientFactory.Create("tok1").Returns(client);
+        var logger = new CapturingLogger<TelegramPollingService>();
+
+        var result = await CreateService(WithToken("tok1"), clientFactory, new TelegramClientHandle(), timeProvider: clock, capturingLogger: logger)
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        result.Should().Be(TelegramPollResult.Failed);
+        logger.Entries.Should().ContainSingle(entry => entry.Properties.GetValueOrDefault("Operation") as string == "telegram.getUpdates");
     }
 
     [Fact]

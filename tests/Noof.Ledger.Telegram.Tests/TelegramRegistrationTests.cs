@@ -2,6 +2,7 @@ using AwesomeAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Noof.Ledger.Application;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Secrets;
@@ -30,6 +31,7 @@ public class TelegramRegistrationTests
             return gate;
         });
         services.AddSingleton(_ => Substitute.For<IPollingHeartbeat>());
+        services.AddNoofApplication(new SlowOperationOptions());
         services.AddScoped(_ => Substitute.For<ISecretStore>());
         services.AddScoped(_ => Substitute.For<Application.Capture.ICaptureStore>());
         services.AddScoped(_ => Substitute.For<Application.Editing.IRecordEditor>());

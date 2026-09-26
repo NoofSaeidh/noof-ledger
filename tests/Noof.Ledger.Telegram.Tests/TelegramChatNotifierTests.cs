@@ -1,7 +1,11 @@
-﻿using AwesomeAssertions;
+using AwesomeAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Noof.Ledger.Application.Chat;
+using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.TestKit;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Requests;
@@ -15,13 +19,27 @@ public class TelegramChatNotifierTests
     static readonly string[] CancelEditLabels = ["Cancel", "Edit"];
     static readonly string[] CancelEditCallbackData = ["cancel", "edit"];
 
+    static TelegramChatNotifier Notifier(ITelegramBotClient? client) =>
+        new(new TelegramClientHandle { Current = client }, new OperationTimer(TimeProvider.System, new SlowOperationOptions()),
+            NullLogger<TelegramChatNotifier>.Instance);
+
+    static (TelegramChatNotifier Notifier, FakeTimeProvider Clock, CapturingLogger<TelegramChatNotifier> Logger) TimedNotifier(
+        ITelegramBotClient client)
+    {
+        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var logger = new CapturingLogger<TelegramChatNotifier>();
+        var notifier = new TelegramChatNotifier(
+            new TelegramClientHandle { Current = client }, new OperationTimer(clock, new SlowOperationOptions()), logger);
+        return (notifier, clock, logger);
+    }
+
     [Fact]
     public async Task SendAsync_sends_the_text_and_returns_the_new_message_id()
     {
         var client = Substitute.For<ITelegramBotClient>();
         client.SendRequest(Arg.Any<SendMessageRequest>(), Arg.Any<CancellationToken>())
             .Returns(new Message { Id = 555 });
-        var notifier = new TelegramChatNotifier(new TelegramClientHandle { Current = client });
+        var notifier = Notifier(client);
 
         var messageId = await notifier.SendAsync(42L, "Saved.", TestContext.Current.CancellationToken);
 
@@ -32,11 +50,63 @@ public class TelegramChatNotifierTests
     }
 
     [Fact]
+    public async Task SendAsync_logs_telegram_sendMessage_exactly_once()
+    {
+        var client = Substitute.For<ITelegramBotClient>();
+        var (notifier, clock, logger) = TimedNotifier(client);
+        client.SendRequest(Arg.Any<SendMessageRequest>(), Arg.Any<CancellationToken>())
+            .Returns(_ => { clock.Advance(TimeSpan.FromMilliseconds(10)); return new Message { Id = 555 }; });
+
+        await notifier.SendAsync(42L, "Saved.", TestContext.Current.CancellationToken);
+
+        logger.Entries.Should().ContainSingle(entry => (string)entry.Properties["Operation"] == "telegram.sendMessage");
+    }
+
+    [Fact]
+    public async Task EditAsync_logs_telegram_editMessage_exactly_once()
+    {
+        var client = Substitute.For<ITelegramBotClient>();
+        var (notifier, clock, logger) = TimedNotifier(client);
+        client.SendRequest(Arg.Any<EditMessageTextRequest>(), Arg.Any<CancellationToken>())
+            .Returns(_ => { clock.Advance(TimeSpan.FromMilliseconds(10)); return new Message { Id = 555 }; });
+
+        await notifier.EditAsync(42L, 555, new EchoMessage("Recorded", []), TestContext.Current.CancellationToken);
+
+        logger.Entries.Should().ContainSingle(entry => (string)entry.Properties["Operation"] == "telegram.editMessage");
+    }
+
+    [Fact]
+    public async Task AskAsync_logs_telegram_askReply_exactly_once()
+    {
+        var client = Substitute.For<ITelegramBotClient>();
+        var (notifier, clock, logger) = TimedNotifier(client);
+        client.SendRequest(Arg.Any<SendMessageRequest>(), Arg.Any<CancellationToken>())
+            .Returns(_ => { clock.Advance(TimeSpan.FromMilliseconds(10)); return new Message { Id = 77 }; });
+
+        await notifier.AskAsync(42L, 555, "What should I fix?", TestContext.Current.CancellationToken);
+
+        logger.Entries.Should().ContainSingle(entry => (string)entry.Properties["Operation"] == "telegram.askReply");
+    }
+
+    [Fact]
+    public async Task AnswerActionAsync_logs_telegram_answerCallback_exactly_once()
+    {
+        var client = Substitute.For<ITelegramBotClient>();
+        var (notifier, clock, logger) = TimedNotifier(client);
+        client.SendRequest(Arg.Any<AnswerCallbackQueryRequest>(), Arg.Any<CancellationToken>())
+            .Returns(_ => { clock.Advance(TimeSpan.FromMilliseconds(10)); return true; });
+
+        await notifier.AnswerActionAsync("cb-1", TestContext.Current.CancellationToken);
+
+        logger.Entries.Should().ContainSingle(entry => (string)entry.Properties["Operation"] == "telegram.answerCallback");
+    }
+
+    [Fact]
     public async Task EditAsync_edits_the_message_and_attaches_one_row_of_record_buttons()
     {
         var client = Substitute.For<ITelegramBotClient>();
         client.SendRequest(Arg.Any<EditMessageTextRequest>(), Arg.Any<CancellationToken>()).Returns(new Message { Id = 555 });
-        var notifier = new TelegramChatNotifier(new TelegramClientHandle { Current = client });
+        var notifier = Notifier(client);
 
         await notifier.EditAsync(42L, 555, new EchoMessage("Recorded", [RecordAction.Cancel, RecordAction.Edit]),
             TestContext.Current.CancellationToken);
@@ -53,7 +123,7 @@ public class TelegramChatNotifierTests
     {
         var client = Substitute.For<ITelegramBotClient>();
         client.SendRequest(Arg.Any<EditMessageTextRequest>(), Arg.Any<CancellationToken>()).Returns(new Message { Id = 555 });
-        var notifier = new TelegramChatNotifier(new TelegramClientHandle { Current = client });
+        var notifier = Notifier(client);
 
         await notifier.EditAsync(42L, 555, new EchoMessage("Correcting…", []), TestContext.Current.CancellationToken);
 
@@ -67,7 +137,7 @@ public class TelegramChatNotifierTests
         client.SendRequest(Arg.Any<EditMessageTextRequest>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new ApiRequestException(
                 "Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message", 400));
-        var notifier = new TelegramChatNotifier(new TelegramClientHandle { Current = client });
+        var notifier = Notifier(client);
 
         var act = () => notifier.EditAsync(42L, 555, new EchoMessage("Cancelled", [RecordAction.Restore]), TestContext.Current.CancellationToken);
 
@@ -80,7 +150,7 @@ public class TelegramChatNotifierTests
         var client = Substitute.For<ITelegramBotClient>();
         client.SendRequest(Arg.Any<EditMessageTextRequest>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new ApiRequestException("Bad Request: message to edit not found", 400));
-        var notifier = new TelegramChatNotifier(new TelegramClientHandle { Current = client });
+        var notifier = Notifier(client);
 
         var act = () => notifier.EditAsync(42L, 555, new EchoMessage("x", []), TestContext.Current.CancellationToken);
 
@@ -90,7 +160,7 @@ public class TelegramChatNotifierTests
     [Fact]
     public async Task SendAsync_throws_when_no_client_is_ready_yet()
     {
-        var notifier = new TelegramChatNotifier(new TelegramClientHandle());
+        var notifier = Notifier(null);
 
         var act = () => notifier.SendAsync(42L, "hi", TestContext.Current.CancellationToken);
 
@@ -101,7 +171,7 @@ public class TelegramChatNotifierTests
     public async Task AnswerActionAsync_answers_the_callback_query()
     {
         var client = Substitute.For<ITelegramBotClient>();
-        var notifier = new TelegramChatNotifier(new TelegramClientHandle { Current = client });
+        var notifier = Notifier(client);
 
         await notifier.AnswerActionAsync("cb-1", TestContext.Current.CancellationToken);
 
@@ -114,7 +184,7 @@ public class TelegramChatNotifierTests
         var client = Substitute.For<ITelegramBotClient>();
         client.SendRequest(Arg.Any<AnswerCallbackQueryRequest>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new ApiRequestException("Bad Request: query is too old and response timeout expired or query ID is invalid", 400));
-        var notifier = new TelegramChatNotifier(new TelegramClientHandle { Current = client });
+        var notifier = Notifier(client);
 
         var act = () => notifier.AnswerActionAsync("cb-1", TestContext.Current.CancellationToken);
 
@@ -126,7 +196,7 @@ public class TelegramChatNotifierTests
     {
         var client = Substitute.For<ITelegramBotClient>();
         client.SendRequest(Arg.Any<SendMessageRequest>(), Arg.Any<CancellationToken>()).Returns(new Message { Id = 77 });
-        var notifier = new TelegramChatNotifier(new TelegramClientHandle { Current = client });
+        var notifier = Notifier(client);
 
         var promptId = await notifier.AskAsync(42L, 555, "What should I fix?", TestContext.Current.CancellationToken);
 
