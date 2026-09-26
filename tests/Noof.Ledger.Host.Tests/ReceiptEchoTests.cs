@@ -119,6 +119,18 @@ public class ReceiptEchoTests
     }
 
     [Fact]
+    public void A_cancelled_receipt_transaction_keeps_the_shop_header_and_offers_restore()
+    {
+        var record = Record() with { Status = TransactionStatus.Cancelled };
+
+        var echo = Echo.ComposeReceipt(record, Receipt());
+
+        echo.Text.Should().StartWith("Cancelled — Test Market — Test Market - Centre · Cash · balance 0.00 RSD");
+        echo.Text.Should().Contain("• Bread — 123.46 RSD · Groceries");
+        echo.Actions.Should().Equal(RecordAction.Restore);
+    }
+
+    [Fact]
     public void A_declined_amount_change_is_noted_ahead_of_the_receipt_body()
     {
         var echo = Echo.ComposeReceipt(Record(), Receipt(), amountChangeDeclined: true);
