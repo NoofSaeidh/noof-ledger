@@ -31,11 +31,26 @@ public class DatabaseLogLevelTests
 
         Received.InOrder(() =>
         {
-            store.SaveAsync(LogSeverity.Debug, Arg.Any<CancellationToken>());
+            store.SaveAsync(DatabaseLogLevelSetting.For(LogSeverity.Debug), Arg.Any<CancellationToken>());
         });
-        await store.Received(1).SaveAsync(LogSeverity.Debug, Arg.Any<CancellationToken>());
+        await store.Received(1).SaveAsync(DatabaseLogLevelSetting.For(LogSeverity.Debug), Arg.Any<CancellationToken>());
         switches.Database.MinimumLevel.Should().Be(LogEventLevel.Debug);
         logLevel.Current.Should().Be(LogSeverity.Debug);
+    }
+
+    [Fact]
+    public async Task SetAsync_with_null_turns_the_database_sink_Off_without_lowering_the_root()
+    {
+        var (logLevel, store, switches) = Build();
+        switches.SetFileLevel(LogEventLevel.Debug);
+        switches.SetConsoleLevel(LogEventLevel.Information);
+
+        await logLevel.SetAsync(null, TestContext.Current.CancellationToken);
+
+        await store.Received(1).SaveAsync(DatabaseLogLevelSetting.Off, Arg.Any<CancellationToken>());
+        switches.Database.MinimumLevel.Should().Be(LogLevelSwitches.Off);
+        logLevel.Current.Should().BeNull();
+        switches.Root.MinimumLevel.Should().Be(LogEventLevel.Debug, "Off must not lower the root below file/console");
     }
 
     [Fact]
@@ -43,17 +58,17 @@ public class DatabaseLogLevelTests
     {
         var (logLevel, store, _) = Build();
 
-        var act = () => logLevel.SetAsync(LogSeverity.Warning, TestContext.Current.CancellationToken);
+        var act = () => logLevel.SetAsync((LogSeverity)99, TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<ArgumentOutOfRangeException>();
-        await store.DidNotReceive().SaveAsync(Arg.Any<LogSeverity>(), Arg.Any<CancellationToken>());
+        await store.DidNotReceive().SaveAsync(Arg.Any<DatabaseLogLevelSetting>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
     public async Task A_store_that_throws_on_save_leaves_Current_and_the_switch_unchanged()
     {
         var (logLevel, store, switches) = Build();
-        store.SaveAsync(Arg.Any<LogSeverity>(), Arg.Any<CancellationToken>())
+        store.SaveAsync(Arg.Any<DatabaseLogLevelSetting>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new InvalidOperationException("database unreachable"));
         var before = logLevel.Current;
 
@@ -68,7 +83,7 @@ public class DatabaseLogLevelTests
     public async Task LoadAsync_applies_a_stored_Debug()
     {
         var (logLevel, store, switches) = Build();
-        store.GetAsync(Arg.Any<CancellationToken>()).Returns(LogSeverity.Debug);
+        store.GetAsync(Arg.Any<CancellationToken>()).Returns((DatabaseLogLevelSetting?)DatabaseLogLevelSetting.For(LogSeverity.Debug));
 
         await logLevel.LoadAsync(TestContext.Current.CancellationToken);
 
@@ -77,21 +92,22 @@ public class DatabaseLogLevelTests
     }
 
     [Fact]
-    public async Task LoadAsync_ignores_a_null_stored_value()
+    public async Task LoadAsync_applies_a_stored_Off()
     {
         var (logLevel, store, switches) = Build();
-        store.GetAsync(Arg.Any<CancellationToken>()).Returns((LogSeverity?)null);
+        store.GetAsync(Arg.Any<CancellationToken>()).Returns((DatabaseLogLevelSetting?)DatabaseLogLevelSetting.Off);
 
         await logLevel.LoadAsync(TestContext.Current.CancellationToken);
 
-        switches.Database.MinimumLevel.Should().Be(LogEventLevel.Information);
+        switches.Database.MinimumLevel.Should().Be(LogLevelSwitches.Off);
+        logLevel.Current.Should().BeNull();
     }
 
     [Fact]
-    public async Task LoadAsync_ignores_a_stored_Warning_because_it_is_not_a_choice()
+    public async Task LoadAsync_ignores_no_stored_row()
     {
         var (logLevel, store, switches) = Build();
-        store.GetAsync(Arg.Any<CancellationToken>()).Returns(LogSeverity.Warning);
+        store.GetAsync(Arg.Any<CancellationToken>()).Returns((DatabaseLogLevelSetting?)null);
 
         await logLevel.LoadAsync(TestContext.Current.CancellationToken);
 
@@ -112,10 +128,12 @@ public class DatabaseLogLevelTests
     }
 
     [Fact]
-    public void Choices_is_Verbose_Debug_Information()
+    public void Choices_is_every_LogSeverity_not_capped_at_Information()
     {
         var (logLevel, _, _) = Build();
 
-        ((IDatabaseLogLevel)logLevel).Choices.Should().Equal(LogSeverity.Verbose, LogSeverity.Debug, LogSeverity.Information);
+        ((IDatabaseLogLevel)logLevel).Choices.Should().Equal(
+            LogSeverity.Verbose, LogSeverity.Debug, LogSeverity.Information,
+            LogSeverity.Warning, LogSeverity.Error, LogSeverity.Fatal);
     }
 }

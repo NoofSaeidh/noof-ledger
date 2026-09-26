@@ -16,10 +16,10 @@ namespace Noof.Ledger.Host.Logging;
 internal static class LoggingSetup
 {
     public const string DirectoryConfigKey = "Logging:File:Directory";
-    const string FileSizeLimitBytesConfigKey = "Logging:File:FileSizeLimitBytes";
-    const string RetainedFileCountLimitConfigKey = "Logging:File:RetainedFileCountLimit";
-    const string FileMinimumLevelConfigKey = "Logging:File:MinimumLevel";
-    const string ConsoleMinimumLevelConfigKey = "Logging:Console:MinimumLevel";
+    internal const string FileSizeLimitBytesConfigKey = "Logging:File:FileSizeLimitBytes";
+    internal const string RetainedFileCountLimitConfigKey = "Logging:File:RetainedFileCountLimit";
+    internal const string FileMinimumLevelConfigKey = "Logging:File:MinimumLevel";
+    internal const string ConsoleMinimumLevelConfigKey = "Logging:Console:MinimumLevel";
 
     // I-1's successor (decision (d), 2026-09-26): Serilog.Settings.Configuration's own
     // Serilog:MinimumLevel:Default key is deliberately never read any more - the file and console
@@ -50,13 +50,13 @@ internal static class LoggingSetup
     public static string ResolveLogDirectory(IConfiguration configuration) =>
         Environment.ExpandEnvironmentVariables(configuration[DirectoryConfigKey] ?? DefaultDirectory);
 
-    static long ResolveFileSizeLimitBytes(IConfiguration configuration) =>
+    internal static long ResolveFileSizeLimitBytes(IConfiguration configuration) =>
         configuration.GetValue(FileSizeLimitBytesConfigKey, DefaultFileSizeLimitBytes);
 
-    static int ResolveRetainedFileCountLimit(IConfiguration configuration) =>
+    internal static int ResolveRetainedFileCountLimit(IConfiguration configuration) =>
         configuration.GetValue(RetainedFileCountLimitConfigKey, DefaultRetainedFileCountLimit);
 
-    static LogEventLevel ResolveFileMinimumLevel(IConfiguration configuration) =>
+    internal static LogEventLevel ResolveFileMinimumLevel(IConfiguration configuration) =>
         configuration[FileMinimumLevelConfigKey] is { } value
             ? ParseLevel(value, FileMinimumLevelConfigKey)
             : DefaultFileMinimumLevel;

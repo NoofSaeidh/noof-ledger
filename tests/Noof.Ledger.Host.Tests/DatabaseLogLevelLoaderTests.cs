@@ -46,7 +46,9 @@ public class DatabaseLogLevelLoaderTests
     {
         var store = Substitute.For<IDatabaseLogLevelStore>();
         store.GetAsync(Arg.Any<CancellationToken>())
-            .Returns(_ => throw new InvalidOperationException("database unreachable"), _ => LogSeverity.Debug);
+            .Returns(
+                _ => throw new InvalidOperationException("database unreachable"),
+                _ => (DatabaseLogLevelSetting?)DatabaseLogLevelSetting.For(LogSeverity.Debug));
         var logLevel = LogLevelFor(store);
         var gate = Substitute.For<IDatabaseGate>();
         gate.WaitUntilReadyAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);

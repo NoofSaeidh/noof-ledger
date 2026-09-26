@@ -22,6 +22,7 @@ internal static class HostDiagnosticsRegistration
         services.AddSingleton<DatabaseLogLevel>();
         services.AddSingleton<IDatabaseLogLevel>(sp => sp.GetRequiredService<DatabaseLogLevel>());
         services.AddHostedService<DatabaseLogLevelLoader>();
+        services.AddSingleton<IFileLogSinkInfo>(sp => new FileLogSinkInfo(sp.GetRequiredService<IConfiguration>()));
 
         return services;
     }
