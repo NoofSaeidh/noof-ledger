@@ -59,4 +59,21 @@ public class ShellSourceTests
         layout.Should().NotContain("<MudDialogProvider");
         layout.Should().NotContain("<MudSnackbarProvider");
     }
+
+    // Master's 8fe9d25 fixed exactly this class of bug for the rest of app.css: a rule painted for
+    // one color scheme rendered wrong inside the other, because it named a literal color instead of
+    // one of MudThemeProvider's own --mud-palette-* variables, which already flip with the theme.
+    // .trace-row-warning (Phase 6) named #fff3cd/#7a4a00 outright.
+    [Fact]
+    public void The_trace_timelines_warning_row_uses_a_theme_variable_not_a_literal_color()
+    {
+        var css = Read("wwwroot", "app.css");
+
+        css.Should().NotContain("#fff3cd");
+        css.Should().NotContain("#7a4a00");
+        css.Should().Contain(".trace-row-warning");
+        css.Should().MatchRegex(
+            @"\.trace-row-warning\s*\{[^}]*var\(--mud-palette-warning[^}]*\}",
+            "a warning row must take its color from the theme, the same way .noof-level-warning does");
+    }
 }

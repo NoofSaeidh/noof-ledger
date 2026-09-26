@@ -935,8 +935,12 @@ summary:focus-visible,
 }
 
 /* A degraded-but-recovered step (the Tax Administration site was unreachable) on the trace
-   timeline: distinct from the Error rows MudBlazor's own chip colors already cover. */
+   timeline: distinct from the Error rows MudBlazor's own chip colors already cover. Themed off
+   --mud-palette-warning the same way .noof-level-warning is, not a literal color pair - a light-mode
+   hex pair here would look wrong the moment the page switches to dark, the class of bug 8fe9d25
+   fixed for the rest of this file. */
 .trace-row-warning {
-    background-color: #fff3cd;
-    color: #7a4a00;
+    background-color: color-mix(in srgb, var(--mud-palette-warning) 15%, transparent);
+    color: var(--mud-palette-warning);
+    font-weight: 600;
 }
