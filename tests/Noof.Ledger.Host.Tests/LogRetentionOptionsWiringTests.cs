@@ -29,9 +29,9 @@ public class LogRetentionOptionsWiringTests
         options.Days.Verbose.Should().Be(1);
         options.Days.Debug.Should().Be(1);
         options.Days.Information.Should().Be(90);
-        options.Days.Warning.Should().Be(90);
-        options.Days.Error.Should().Be(90);
-        options.Days.Fatal.Should().Be(90);
+        options.Days.Warning.Should().Be(730, "warnings and errors kept two years before per-level retention existed");
+        options.Days.Error.Should().Be(730);
+        options.Days.Fatal.Should().Be(730);
     }
 
     [Fact]

@@ -90,7 +90,7 @@ else
     @if (trace.Events.Count == 0)
     {
         <MudAlert id="trace-timeline" Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-6">
-            Trace expired (logs older than 90 days)
+            Trace expired (its log rows are older than the retention window)
         </MudAlert>
     }
     else

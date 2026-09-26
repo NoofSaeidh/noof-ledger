@@ -46,17 +46,17 @@ public class EfLogRetentionTests(PostgresFixture fixture)
     }
 
     [Theory]
-    [InlineData(LogSeverity.Information)]
-    [InlineData(LogSeverity.Warning)]
-    [InlineData(LogSeverity.Error)]
-    [InlineData(LogSeverity.Fatal)]
-    public async Task Information_and_above_older_than_the_default_ninety_day_window_are_pruned_but_not_exactly_at_the_boundary(LogSeverity level)
+    [InlineData(LogSeverity.Information, 90)]
+    [InlineData(LogSeverity.Warning, 730)]
+    [InlineData(LogSeverity.Error, 730)]
+    [InlineData(LogSeverity.Fatal, 730)]
+    public async Task Information_and_above_older_than_their_default_window_are_pruned_but_not_exactly_at_the_boundary(LogSeverity level, int windowDays)
     {
         await using var db = await fixture.CreateContextAsync();
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
         db.AppLogs.AddRange(
-            Row(1, level, Now.AddDays(-90).AddSeconds(1)),
-            Row(2, level, Now.AddDays(-90).AddSeconds(-1)));
+            Row(1, level, Now.AddDays(-windowDays).AddSeconds(1)),
+            Row(2, level, Now.AddDays(-windowDays).AddSeconds(-1)));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var deleted = await RetentionFor(db).PruneAsync(TestContext.Current.CancellationToken);

@@ -11,9 +11,9 @@ internal sealed class LogRetentionOptions
         public int Verbose { get; init; } = 1;
         public int Debug { get; init; } = 1;
         public int Information { get; init; } = 90;
-        public int Warning { get; init; } = 90;
-        public int Error { get; init; } = 90;
-        public int Fatal { get; init; } = 90;
+        public int Warning { get; init; } = 730;
+        public int Error { get; init; } = 730;
+        public int Fatal { get; init; } = 730;
 
         public int For(LogSeverity level) => level switch
         {

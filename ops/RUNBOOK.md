@@ -247,13 +247,14 @@ they are still in the file itself, just never copied to the table.
 **Reading `/diagnostics` and the trace page.** `/diagnostics` lists every health check — Database,
 Migrations, Telegram, AI keys, Backup, Disk, Log sink — each with a "Logs" link that opens
 `/diagnostics/logs` pre-filtered to that check's own log category. `/diagnostics/logs` is a paged,
-filterable grid (level, time range, free text, source, transaction id) over `app_log`; when the
-database or the log sink is unavailable it falls back automatically to tailing the newest log file
-instead, with a banner saying so. Every transaction has its own page at
-`/transactions/{id}/trace` — its path from received to replied with timings, and the
-`transaction_revisions` history below it; if the log rows have aged out under retention (Debug 7
-days, Information 90 days, Warning and above 730 days) the trace strip says so but the revision
-history still shows, since that table is never pruned.
+filterable grid (level, time range, free text, source, transaction id) over `app_log`, reached from
+the **Logs** tab; while the database is unavailable it shows the waiting banner like every other
+page — read the file log with `.\run.ps1 logs` instead. Every transaction has its own page at
+`/transactions/{id}/trace` — the message itself, its path from received to replied with timings and
+the reason for any failure, and the `transaction_revisions` history below it; if the log rows have
+aged out under retention the trace strip says so but the revision history still shows, since that
+table is never pruned. Retention is per level, in `appsettings.json` under
+`Logging:Retention:Days` (defaults: Verbose and Debug 1 day, Information 90, Warning and above 730).
 
 **Setting the PostgreSQL service to start automatically is the operator's decision, not the app's.**
 The host waits indefinitely for PostgreSQL and needs no help to recover once it is up — but if you
