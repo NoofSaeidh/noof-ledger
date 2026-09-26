@@ -101,7 +101,7 @@ public class LogLevelConfigurationTests
     }
 
     [Fact]
-    public void An_invalid_MinimumLevel_value_fails_with_a_clear_error()
+    public void An_invalid_File_MinimumLevel_value_fails_with_a_clear_error()
     {
         var logDirectory = Directory.CreateTempSubdirectory("noof-logging-setup-test-").FullName;
         try
@@ -109,14 +109,66 @@ public class LogLevelConfigurationTests
             var hostConfiguration = new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?>
                 {
-                    ["Serilog:MinimumLevel:Default"] = "NotALevel",
+                    ["Logging:File:MinimumLevel"] = "NotALevel",
                 })
                 .Build();
 
             var act = () => LoggingSetup.Configure(
                 new LoggerConfiguration(), hostConfiguration, logDirectory, UnreachableConnectionString, BuildFakeServices());
 
-            act.Should().Throw<InvalidOperationException>().WithMessage("*Serilog:MinimumLevel:Default*NotALevel*");
+            act.Should().Throw<InvalidOperationException>().WithMessage("*Logging:File:MinimumLevel*NotALevel*");
+        }
+        finally
+        {
+            DeleteWithRetry(new DirectoryInfo(logDirectory));
+        }
+    }
+
+    [Fact]
+    public void An_invalid_Console_MinimumLevel_value_fails_with_a_clear_error()
+    {
+        var logDirectory = Directory.CreateTempSubdirectory("noof-logging-setup-test-").FullName;
+        try
+        {
+            var hostConfiguration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Logging:Console:MinimumLevel"] = "NotALevel",
+                })
+                .Build();
+
+            var act = () => LoggingSetup.Configure(
+                new LoggerConfiguration(), hostConfiguration, logDirectory, UnreachableConnectionString, BuildFakeServices());
+
+            act.Should().Throw<InvalidOperationException>().WithMessage("*Logging:Console:MinimumLevel*NotALevel*");
+        }
+        finally
+        {
+            DeleteWithRetry(new DirectoryInfo(logDirectory));
+        }
+    }
+
+    // Decision (d), 2026-09-26: Serilog:MinimumLevel:Default is withdrawn - a value left behind under
+    // that key would otherwise apply to neither sink and silently stop doing anything, so its mere
+    // presence must fail fast and name the two keys that replace it.
+    [Fact]
+    public void A_leftover_Serilog_MinimumLevel_Default_key_fails_fast_naming_its_replacements()
+    {
+        var logDirectory = Directory.CreateTempSubdirectory("noof-logging-setup-test-").FullName;
+        try
+        {
+            var hostConfiguration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Serilog:MinimumLevel:Default"] = "Debug",
+                })
+                .Build();
+
+            var act = () => LoggingSetup.Configure(
+                new LoggerConfiguration(), hostConfiguration, logDirectory, UnreachableConnectionString, BuildFakeServices());
+
+            act.Should().Throw<InvalidOperationException>()
+                .WithMessage("*Serilog:MinimumLevel:Default*Logging:File:MinimumLevel*Logging:Console:MinimumLevel*");
         }
         finally
         {
@@ -220,14 +272,14 @@ public class LogLevelConfigurationTests
     }
 
     [Fact]
-    public void Default_is_the_files_floor_and_Information_stops_a_Debug_marker_reaching_the_file()
+    public void The_files_own_MinimumLevel_is_the_files_floor_and_Information_stops_a_Debug_marker_reaching_the_file()
     {
         var logDirectory = Directory.CreateTempSubdirectory("noof-logging-setup-test-").FullName;
         try
         {
             var marker = $"debug-{Guid.NewGuid():N}";
             var hostConfiguration = new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?> { ["Serilog:MinimumLevel:Default"] = "Information" })
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["Logging:File:MinimumLevel"] = "Information" })
                 .Build();
             var fakeServices = BuildFakeServices();
             fakeServices.GetRequiredService<LogLevelSwitches>().SetDatabaseLevel(LogEventLevel.Debug);
@@ -242,7 +294,7 @@ public class LogLevelConfigurationTests
             }
 
             var text = ReadAllTextWithRetry(NewestLogFile(logDirectory));
-            text.Should().NotContain(marker, "the file's floor is Default, not the database level");
+            text.Should().NotContain(marker, "the file's floor is Logging:File:MinimumLevel, not the database level");
         }
         finally
         {
@@ -251,15 +303,41 @@ public class LogLevelConfigurationTests
     }
 
     [Fact]
-    public void Default_at_Debug_lets_a_Debug_marker_reach_the_file()
+    public void The_files_own_MinimumLevel_at_Verbose_lets_a_Verbose_marker_reach_the_file()
+    {
+        var logDirectory = Directory.CreateTempSubdirectory("noof-logging-setup-test-").FullName;
+        try
+        {
+            var marker = $"verbose-{Guid.NewGuid():N}";
+            var hostConfiguration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["Logging:File:MinimumLevel"] = "Verbose" })
+                .Build();
+
+            var configuration = new LoggerConfiguration();
+            LoggingSetup.Configure(configuration, hostConfiguration, logDirectory, UnreachableConnectionString, BuildFakeServices());
+            using (var logger = configuration.CreateLogger())
+            {
+                var probe = logger.ForContext(Serilog.Core.Constants.SourceContextPropertyName, "Noof.Ledger.Host.Tests.Probe");
+                probe.Verbose("{Marker}", marker);
+            }
+
+            var text = ReadAllTextWithRetry(NewestLogFile(logDirectory));
+            text.Should().Contain(marker, "Logging:File:MinimumLevel=Verbose is the file's floor");
+        }
+        finally
+        {
+            DeleteWithRetry(new DirectoryInfo(logDirectory));
+        }
+    }
+
+    [Fact]
+    public void The_files_default_MinimumLevel_is_Debug_when_unconfigured()
     {
         var logDirectory = Directory.CreateTempSubdirectory("noof-logging-setup-test-").FullName;
         try
         {
             var marker = $"debug-{Guid.NewGuid():N}";
-            var hostConfiguration = new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?> { ["Serilog:MinimumLevel:Default"] = "Debug" })
-                .Build();
+            var hostConfiguration = new ConfigurationBuilder().Build();
 
             var configuration = new LoggerConfiguration();
             LoggingSetup.Configure(configuration, hostConfiguration, logDirectory, UnreachableConnectionString, BuildFakeServices());
@@ -270,10 +348,53 @@ public class LogLevelConfigurationTests
             }
 
             var text = ReadAllTextWithRetry(NewestLogFile(logDirectory));
-            text.Should().Contain(marker, "Default=Debug is the file's floor");
+            text.Should().Contain(marker, "the file's floor defaults to Debug when Logging:File:MinimumLevel is unset");
         }
         finally
         {
+            DeleteWithRetry(new DirectoryInfo(logDirectory));
+        }
+    }
+
+    [Fact]
+    public void The_consoles_own_MinimumLevel_is_configurable_independently_of_the_file()
+    {
+        var logDirectory = Directory.CreateTempSubdirectory("noof-logging-setup-test-").FullName;
+        var originalOut = Console.Out;
+        var capturedConsole = new StringWriter();
+
+        try
+        {
+            var marker = $"info-{Guid.NewGuid():N}";
+            var hostConfiguration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["Logging:Console:MinimumLevel"] = "Warning" })
+                .Build();
+
+            var configuration = new LoggerConfiguration();
+            LoggingSetup.Configure(configuration, hostConfiguration, logDirectory, UnreachableConnectionString, BuildFakeServices());
+            using (var logger = configuration.CreateLogger())
+            {
+                var probe = logger.ForContext(Serilog.Core.Constants.SourceContextPropertyName, "Noof.Ledger.Host.Tests.Probe");
+                Console.SetOut(capturedConsole);
+                try
+                {
+                    probe.Information("{Marker}", marker);
+                }
+                finally
+                {
+                    Console.SetOut(originalOut);
+                }
+            }
+
+            capturedConsole.ToString().Should().NotContain(marker,
+                "Logging:Console:MinimumLevel=Warning must stop an Information event reaching the console");
+
+            var text = ReadAllTextWithRetry(NewestLogFile(logDirectory));
+            text.Should().Contain(marker, "the file keeps its own, unrelated floor");
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
             DeleteWithRetry(new DirectoryInfo(logDirectory));
         }
     }

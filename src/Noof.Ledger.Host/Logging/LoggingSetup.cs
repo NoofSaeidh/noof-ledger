@@ -18,10 +18,21 @@ internal static class LoggingSetup
     public const string DirectoryConfigKey = "Logging:File:Directory";
     const string FileSizeLimitBytesConfigKey = "Logging:File:FileSizeLimitBytes";
     const string RetainedFileCountLimitConfigKey = "Logging:File:RetainedFileCountLimit";
+    const string FileMinimumLevelConfigKey = "Logging:File:MinimumLevel";
+    const string ConsoleMinimumLevelConfigKey = "Logging:Console:MinimumLevel";
+
+    // I-1's successor (decision (d), 2026-09-26): Serilog.Settings.Configuration's own
+    // Serilog:MinimumLevel:Default key is deliberately never read any more - the file and console
+    // sinks each carry their own explicit floor above, so a value left over from before this change
+    // would silently apply to neither and quietly stop doing anything. ReadMinimumLevels below fails
+    // fast the moment it sees this key rather than let that happen unnoticed.
+    const string LegacyDefaultConfigKey = "Serilog:MinimumLevel:Default";
 
     const string DefaultDirectory = @"%LOCALAPPDATA%\NoofLedger\logs";
     const long DefaultFileSizeLimitBytes = 50 * 1024 * 1024;
     const int DefaultRetainedFileCountLimit = 14;
+    const LogEventLevel DefaultFileMinimumLevel = LogEventLevel.Debug;
+    const LogEventLevel DefaultConsoleMinimumLevel = LogEventLevel.Information;
 
     // A plain ConfigurationBuilder, not builder.Configuration - this runs before
     // WebApplication.CreateBuilder exists, because the bootstrap logger must be live before
@@ -45,24 +56,38 @@ internal static class LoggingSetup
     static int ResolveRetainedFileCountLimit(IConfiguration configuration) =>
         configuration.GetValue(RetainedFileCountLimitConfigKey, DefaultRetainedFileCountLimit);
 
+    static LogEventLevel ResolveFileMinimumLevel(IConfiguration configuration) =>
+        configuration[FileMinimumLevelConfigKey] is { } value
+            ? ParseLevel(value, FileMinimumLevelConfigKey)
+            : DefaultFileMinimumLevel;
+
+    static LogEventLevel ResolveConsoleMinimumLevel(IConfiguration configuration) =>
+        configuration[ConsoleMinimumLevelConfigKey] is { } value
+            ? ParseLevel(value, ConsoleMinimumLevelConfigKey)
+            : DefaultConsoleMinimumLevel;
+
     // A startup exception (a bad connection string, a locked log file) is reported through this
     // logger before UseSerilog ever runs - the console+file sinks below are wrapped in the same
     // RedactingSink the fully configured logger uses in Configure(), so it never prints the
     // database password `redactor` was seeded with in the clear.
     public static Serilog.ILogger CreateBootstrapLogger(string logDirectory, SecretRedactor redactor, IConfiguration configuration)
     {
+        var fileLevel = ResolveFileMinimumLevel(configuration);
+        var consoleLevel = ResolveConsoleMinimumLevel(configuration);
+
         var destinations = new LoggerConfiguration()
-            .WriteTo.Console()
+            .WriteTo.Console(restrictedToMinimumLevel: consoleLevel)
             .WriteTo.File(
                 Path.Combine(logDirectory, "noof-ledger-.log"),
                 rollingInterval: RollingInterval.Day,
                 retainedFileCountLimit: ResolveRetainedFileCountLimit(configuration),
                 fileSizeLimitBytes: ResolveFileSizeLimitBytes(configuration),
-                rollOnFileSizeLimit: true)
+                rollOnFileSizeLimit: true,
+                restrictedToMinimumLevel: fileLevel)
             .CreateLogger();
 
         return new LoggerConfiguration()
-            .MinimumLevel.Information()
+            .MinimumLevel.Is(Min(fileLevel, consoleLevel))
             .WriteTo.Sink(new RedactingSink(destinations, redactor))
             .CreateBootstrapLogger();
     }
@@ -119,7 +144,8 @@ internal static class LoggingSetup
             .CreateLogger();
 
         var levels = ReadMinimumLevels(hostConfiguration);
-        switches.SetFileLevel(levels.Default);
+        switches.SetFileLevel(levels.File);
+        switches.SetConsoleLevel(levels.Console);
 
         // consoleAndFileLogger is built once and referenced twice: as `destinations`' own sink, and
         // as ReadyGatedBufferSink's fallback (M-9, Phase 5 final review) - the one place it can still
@@ -128,14 +154,14 @@ internal static class LoggingSetup
         // reason as postgresLogger above: each restrictedToMinimumLevel call below is what actually
         // narrows what reaches Console and File, never this inner Logger's own floor.
         var consoleAndFileLogger = new LoggerConfiguration()
-            .WriteTo.Console(restrictedToMinimumLevel: Max(LogEventLevel.Information, levels.Default))
+            .WriteTo.Console(restrictedToMinimumLevel: levels.Console)
             .WriteTo.File(
                 Path.Combine(logDirectory, "noof-ledger-.log"),
                 rollingInterval: RollingInterval.Day,
                 retainedFileCountLimit: ResolveRetainedFileCountLimit(hostConfiguration),
                 fileSizeLimitBytes: ResolveFileSizeLimitBytes(hostConfiguration),
                 rollOnFileSizeLimit: true,
-                restrictedToMinimumLevel: levels.Default)
+                restrictedToMinimumLevel: levels.File)
             .CreateLogger();
 
         // ReadyGatedBufferSink's sink is added before consoleAndFileLogger's so that, on dispose,
@@ -150,9 +176,10 @@ internal static class LoggingSetup
 
         var builtDestinations = destinations.CreateLogger();
 
-        // Root: controlled by switches.Root, always min(file, database) - see LogLevelSwitches. An
-        // override still quiets a namespace for every sink, unchanged; below a sink's own floor an
-        // override now stops reaching that sink too (see LogLevelSwitches' doc comment for why).
+        // Root: controlled by switches.Root, always min(file, console, database) - see
+        // LogLevelSwitches. An override still quiets a namespace for every sink, unchanged; below a
+        // sink's own floor an override now stops reaching that sink too (see LogLevelSwitches' doc
+        // comment for why).
         configuration.MinimumLevel.ControlledBy(switches.Root);
         foreach (var over in levels.Overrides)
             configuration.MinimumLevel.Override(over.Key, over.Value);
@@ -162,28 +189,38 @@ internal static class LoggingSetup
             .WriteTo.Sink(new RedactingSink(builtDestinations, redactor));
     }
 
-    static LogEventLevel Max(LogEventLevel a, LogEventLevel b) => a > b ? a : b;
+    static LogEventLevel Min(LogEventLevel a, LogEventLevel b) => a < b ? a : b;
 
     // I-1 (Phase 5 final review): ReadFrom.Configuration handed the whole "Serilog" section to
     // Serilog.Settings.Configuration, which honours WriteTo/AuditTo/Enrich/Filter/Destructure too -
     // not just MinimumLevel. A stray Serilog:WriteTo:* setting (an operator's leftover environment
     // variable, or one supplied deliberately) then attached a sink directly to the outer
     // LoggerConfiguration, as a sibling of WriteTo.Sink(RedactingSink) rather than a child of it, so
-    // it received every LogEvent unredacted. Reading exactly the two keys the brief names removes
-    // that whole class of sink injection - only MinimumLevel:Default and MinimumLevel:Override:* are
-    // ever read from configuration; every sink stays hard-coded in this file.
-    static (LogEventLevel Default, IReadOnlyDictionary<string, LogEventLevel> Overrides) ReadMinimumLevels(IConfiguration hostConfiguration)
+    // it received every LogEvent unredacted. Reading exactly the keys named below removes that whole
+    // class of sink injection - only Serilog:MinimumLevel:Override:*, Logging:File:MinimumLevel and
+    // Logging:Console:MinimumLevel are ever read from configuration; every sink stays hard-coded in
+    // this file.
+    //
+    // Decision (d), 2026-09-26: Serilog:MinimumLevel:Default is withdrawn in favour of an explicit
+    // floor per static sink - Logging:File:MinimumLevel and Logging:Console:MinimumLevel - because a
+    // single Default could not express "the file keeps Debug detail, the console stays terse" at
+    // once, which is exactly the shape the operator wanted. A leftover Default key would silently
+    // stop doing anything under the new keys, so its mere presence fails fast here instead.
+    static (LogEventLevel File, LogEventLevel Console, IReadOnlyDictionary<string, LogEventLevel> Overrides) ReadMinimumLevels(
+        IConfiguration hostConfiguration)
     {
-        var levels = hostConfiguration.GetSection("Serilog:MinimumLevel");
+        if (hostConfiguration[LegacyDefaultConfigKey] is not null)
+            throw new InvalidOperationException(
+                $"{LegacyDefaultConfigKey} is no longer read. Set {FileMinimumLevelConfigKey} and/or " +
+                $"{ConsoleMinimumLevelConfigKey} instead.");
 
-        var defaultLevel = levels["Default"] is { } defaultValue
-            ? ParseLevel(defaultValue, "Serilog:MinimumLevel:Default")
-            : LogEventLevel.Information;
+        var fileLevel = ResolveFileMinimumLevel(hostConfiguration);
+        var consoleLevel = ResolveConsoleMinimumLevel(hostConfiguration);
 
-        var overrides = levels.GetSection("Override").GetChildren()
+        var overrides = hostConfiguration.GetSection("Serilog:MinimumLevel:Override").GetChildren()
             .ToDictionary(over => over.Key, over => ParseLevel(over.Value!, $"Serilog:MinimumLevel:Override:{over.Key}"));
 
-        return (defaultLevel, overrides);
+        return (fileLevel, consoleLevel, overrides);
     }
 
     static LogEventLevel ParseLevel(string value, string key) =>

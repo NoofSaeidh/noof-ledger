@@ -233,9 +233,13 @@ Record the result here once it has been run:
 ## Logging and diagnostics
 
 **Where logs live.** `%LOCALAPPDATA%\NoofLedger\logs\noof-ledger-<date>.log` by default — daily
-rolling, 14 files kept, 50 MB cap each. To use a different folder, set `Logging:File:Directory` in
+rolling, 14 files kept (`Logging:File:RetainedFileCountLimit`, by file count only, never by days), 50 MB
+cap each (`Logging:File:FileSizeLimitBytes`). To use a different folder, set `Logging:File:Directory` in
 `appsettings.json` (or the `Logging__File__Directory` environment variable) to the path you want; the
-app creates it if it does not exist. While PostgreSQL is reachable, the same events are also written
+app creates it if it does not exist. The file's own floor is `Logging:File:MinimumLevel` (`Debug` as
+checked in) and the console's is `Logging:Console:MinimumLevel` (`Information`); `Serilog:MinimumLevel`
+now holds only `Override` — a `Serilog:MinimumLevel:Default` left over from before this fails startup
+fast, naming these two keys as its replacement. While PostgreSQL is reachable, the same events are also written
 to the `app_log` table — every known secret (everything in `app_secret`, plus the database password)
 is redacted to `***` before either sink sees a line. If the database is down, or the table sink itself
 starts failing, the file is the only copy; nothing is lost, only the second copy is missing until the
@@ -279,9 +283,9 @@ Verbose/Debug 1 day, Information 90, Warning/Error/Fatal 730 — `appsettings.js
    `Serilog:MinimumLevel:Override:Microsoft.EntityFrameworkCore` is `Information`, and an override
    applies at the root logger, before any sink sees the event. To get SQL, set
    `Serilog__MinimumLevel__Override__Microsoft.EntityFrameworkCore.Database.Command=Debug` and
-   restart. It then reaches the file (whose floor is `Serilog:MinimumLevel:Default`, `Debug` as checked
-   in) **and** `app_log` whenever step 1's level is `Debug` or lower — every query of every page and
-   worker, so expect a large table for that day; remove the variable when done.
+   restart. It then reaches the file (whose own floor is `Logging:File:MinimumLevel`, `Debug` as
+   checked in) **and** `app_log` whenever step 1's level is `Debug` or lower — every query of every
+   page and worker, so expect a large table for that day; remove the variable when done.
 4. From a transaction's own trace page (`/transactions/{id}/trace`), the **Timings and debug log**
    link opens `/diagnostics/logs` pre-filtered to that transaction at Debug — the quickest way to see
    everything that happened to one message without hunting through the whole table.

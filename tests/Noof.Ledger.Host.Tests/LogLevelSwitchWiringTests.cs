@@ -23,7 +23,7 @@ public class LogLevelSwitchWiringTests
                 builder.UseSetting("Database:MigrateOnStartup", "false");
                 builder.UseSetting("Backup:Enabled", "false");
                 builder.UseSetting("ConnectionStrings:Ledger", UnreachableConnectionString);
-                builder.UseSetting("Serilog:MinimumLevel:Default", "Information");
+                builder.UseSetting("Logging:File:MinimumLevel", "Information");
             });
 
             using var client = factory.CreateClient();

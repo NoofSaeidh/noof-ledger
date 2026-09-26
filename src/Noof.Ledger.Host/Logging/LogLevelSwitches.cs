@@ -7,6 +7,7 @@ internal sealed class LogLevelSwitches
 {
     readonly Lock gate = new();
     LogEventLevel file = LogEventLevel.Information;
+    LogEventLevel console = LogEventLevel.Information;
 
     public LoggingLevelSwitch Root { get; } = new(LogEventLevel.Information);
     public LoggingLevelSwitch Database { get; } = new(LogEventLevel.Information);
@@ -16,7 +17,16 @@ internal sealed class LogLevelSwitches
         lock (gate)
         {
             file = level;
-            Root.MinimumLevel = Min(file, Database.MinimumLevel);
+            RecomputeRoot();
+        }
+    }
+
+    public void SetConsoleLevel(LogEventLevel level)
+    {
+        lock (gate)
+        {
+            console = level;
+            RecomputeRoot();
         }
     }
 
@@ -25,9 +35,11 @@ internal sealed class LogLevelSwitches
         lock (gate)
         {
             Database.MinimumLevel = level;
-            Root.MinimumLevel = Min(file, level);
+            RecomputeRoot();
         }
     }
+
+    void RecomputeRoot() => Root.MinimumLevel = Min(Min(file, console), Database.MinimumLevel);
 
     static LogEventLevel Min(LogEventLevel a, LogEventLevel b) => a < b ? a : b;
 }

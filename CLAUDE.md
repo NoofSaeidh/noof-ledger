@@ -21,7 +21,8 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
 > Telegram, worker and health-check call is timed through `IOperationTimer`, logged as Debug or, over
 > its own slow threshold (`Logging:SlowOperationMs`), a Warning. The database log sink's minimum level
 > is runtime state — Verbose/Debug/Information, switched on the Logs page, persisted in `app_setting`,
-> never above Information — while the file floor stays `Serilog:MinimumLevel:Default`; a transaction's
+> never above Information — while the file and console sinks each keep their own static floor,
+> `Logging:File:MinimumLevel` and `Logging:Console:MinimumLevel`; a transaction's
 > trace page links straight into the Logs page at Debug for that transaction. Transactions carry a `Kind`
 > (`Expense`/`Income`/`BalanceCheck`); expense and income transactions own signed double-entry-lite
 > `entries`; a balance statement is a `balance_checks` checkpoint; a wallet's balance is computed by the
@@ -191,8 +192,13 @@ register it into) — named because they are exceptions, not a licence to invent
   `GetTimestamp`/`GetElapsedTime` end to end.
 - **The database sink's minimum level is runtime state**, set from the Logs page, persisted in
   `app_setting`, and capped at Information (Warning+ would empty the trace page, which reads
-  Information-level stage events). `Serilog:MinimumLevel:Default` is the file sink's own floor, and
-  the root level is `min(file floor, database level)`. A per-sink floor is `restrictedToMinimumLevel`
+  Information-level stage events). The file and console sinks are static configuration instead —
+  `Logging:File:MinimumLevel` (default `Debug`) and `Logging:Console:MinimumLevel` (default
+  `Information`) — and the root level is `min(file, console, database)`. `Serilog:MinimumLevel:Default`
+  is withdrawn *(decision (d), 2026-09-26)*: a value left under that key fails startup fast, naming
+  the two keys above, rather than silently binding neither sink. `Serilog:MinimumLevel` now holds only
+  `Override` (per-category); file retention is by file count only (`Logging:File:RetainedFileCountLimit`,
+  `Logging:File:FileSizeLimitBytes`), never by days. A per-sink floor is `restrictedToMinimumLevel`
   or a `levelSwitch` on the `WriteTo` call — and an inner `LoggerConfiguration` reached through
   `WriteTo.Sink(innerLogger)` or any other direct `ILogEventSink.Emit` call **bypasses its own
   `MinimumLevel` entirely** (`SerilogInnerLoggerSinkTests`, against Serilog 4.4.0): `Logger.Emit`
