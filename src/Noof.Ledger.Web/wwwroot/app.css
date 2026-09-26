@@ -127,6 +127,13 @@ summary:focus-visible,
     margin: 0;
 }
 
+@media (max-width: 599.98px) {
+    .noof-page-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}
+
 .noof-mono {
     font-family: var(--noof-mono);
 }
@@ -193,6 +200,17 @@ summary:focus-visible,
     display: flex;
     justify-content: space-between;
     gap: 1rem;
+    padding: 0.125rem 0;
+}
+
+/* A MudItem gives its paper no definite height, so h-100 did nothing and side-by-side month cards
+   ended at different heights; stretching through flex lines their bottoms up. */
+.noof-month-grid .mud-grid-item {
+    display: flex;
+}
+
+.noof-month-grid .mud-grid-item > .mud-paper {
+    flex: 1 1 auto;
 }
 
 /* ---- Wallets and secrets forms ---- */
@@ -205,14 +223,49 @@ summary:focus-visible,
     flex-wrap: wrap;
 }
 
-.noof-wallet-row .mud-button-outlined {
+.noof-wallet-row > .mud-input-control ~ .mud-button-root {
     min-width: 8.5rem;
+}
+
+/* MudBlazor's medium button is 36px, its dense outlined field 40px; side by side on every card the
+   gap reads as unfinished, so a button that shares a row with a field takes the field's height. It
+   aligns to the bottom edge, since a floating label's notch starts the field's box above its border. */
+.noof-wallet-row > .mud-input-control ~ .mud-button-root,
+.noof-secret-entry > .mud-input-control ~ .mud-button-root {
+    height: var(--noof-control-height);
+    align-self: flex-end;
 }
 
 .noof-wallet-row .mud-input-control,
 .noof-secret-entry .mud-input-control {
     flex: 1 1 18rem;
-    margin-top: 0;
+}
+
+/* MudBlazor gives a labelled outlined field 8px above and 4px below; in a row that margin box, not
+   the border, is what the button beside it lines up with. Same specificity as MudBlazor's rule and
+   loaded after it, so this one wins. */
+.noof-wallet-row > .mud-input-control.mud-input-control-margin-dense,
+.noof-secret-entry > .mud-input-control.mud-input-control-margin-dense,
+.noof-form-grid .mud-input-control.mud-input-control-margin-dense {
+    margin: 0;
+}
+
+.noof-wallet-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+@media (max-width: 599.98px) {
+    .noof-wallet-row .mud-input-control,
+    .noof-secret-entry .mud-input-control {
+        flex-basis: 9rem;
+    }
+
+    .noof-wallet-row > .mud-input-control ~ .mud-button-root {
+        min-width: 0;
+    }
 }
 
 .noof-form-grid {
@@ -221,10 +274,6 @@ summary:focus-visible,
     gap: 1rem;
     align-items: end;
     margin-bottom: 1.25rem;
-}
-
-.noof-form-grid .mud-input-control {
-    margin-top: 0;
 }
 
 .noof-form-grid .noof-field-full {
@@ -387,6 +436,13 @@ summary:focus-visible,
     background-color: var(--mud-palette-surface);
 }
 
+.mud-button-root.noof-quick-range[aria-pressed="true"],
+.mud-button-root.noof-quick-range[aria-pressed="true"]:hover {
+    color: var(--mud-palette-primary);
+    border-color: var(--mud-palette-primary);
+    background-color: color-mix(in srgb, var(--mud-palette-primary) 12%, var(--mud-palette-surface));
+}
+
 .noof-setting {
     min-width: 13rem;
 }
@@ -414,7 +470,10 @@ summary:focus-visible,
     vertical-align: middle;
 }
 
-.noof-grid th {
+/* MudSimpleTable (Diagnostics, the trace page) shares this header look, so every table in the app
+   reads the same; the extra type selectors outrank MudBlazor's own ".mud-simple-table table * tr>th". */
+.noof-grid th,
+.mud-simple-table table thead tr th {
     color: var(--mud-palette-text-secondary);
     font-size: 0.75rem;
     font-weight: 600;
@@ -491,6 +550,101 @@ summary:focus-visible,
     vertical-align: top;
 }
 
+/* At phone width a ledger row of seven columns cannot fit, and a sideways scroll hid the text and
+   the amount - the two things a row is for. So each row stacks: the lead cell (date, time) and the
+   trail cell (amount, level) on the first line, the main cell (text, message) under them, and the
+   meta cells (status, wallet, kind, categories, source) as a caption line. The headers leave the
+   screen but stay in the accessibility tree. */
+@media (max-width: 599.98px) {
+    .noof-grid-stack thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
+
+    .noof-grid-stack,
+    .noof-grid-stack tbody {
+        display: block;
+    }
+
+    .noof-grid-stack tbody tr {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.375rem 0.625rem;
+        padding: 0.75rem 0.875rem;
+    }
+
+    .noof-grid-stack tbody tr:not(:first-child) {
+        border-top: 1px solid var(--mud-palette-divider);
+    }
+
+    .noof-grid-stack tbody tr td,
+    .noof-grid-stack tbody tr:not(:first-child) td {
+        padding: 0;
+        border-top: 0;
+        min-width: 0;
+    }
+
+    .noof-grid-stack td:empty {
+        display: none;
+    }
+
+    .noof-grid-stack .noof-cell-lead {
+        order: 1;
+        flex: 1 1 auto;
+    }
+
+    .noof-grid-stack .noof-cell-trail {
+        order: 2;
+        flex: 0 0 auto;
+    }
+
+    .noof-grid-stack .noof-cell-main {
+        order: 3;
+        flex: 1 0 100%;
+    }
+
+    .noof-grid-stack .noof-cell-meta {
+        order: 5;
+        flex: 0 1 auto;
+        font-size: 0.8125rem;
+        color: var(--mud-palette-text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* The last caption cell (categories) takes what is left of the line and ellipsises there,
+       rather than wrapping on its own onto a fourth line. */
+    .noof-grid-stack .noof-cell-meta:last-child {
+        flex: 1 1 0;
+    }
+
+    .noof-grid-stack .noof-cell-meta-first {
+        order: 4;
+        flex-shrink: 0;
+        overflow: visible;
+    }
+
+    .noof-grid-stack .noof-cell-meta-joined::before {
+        content: "·";
+        margin-right: 0.625rem;
+    }
+
+    .noof-grid-stack .noof-truncate {
+        display: block;
+        max-width: 100%;
+    }
+
+    .noof-grid .noof-col-message {
+        min-width: 0;
+    }
+}
+
 .noof-link-button {
     font: inherit;
     font-size: 0.8125rem;
@@ -528,8 +682,13 @@ summary:focus-visible,
     font-size: 0.8125rem;
     line-height: 1.5;
     color: var(--mud-palette-text-primary);
+    /* Wraps at spaces only - a stack trace split mid-identifier is harder to scan than one long
+       token scrolling sideways inside the box. overflow-wrap is inherited, and the log message cell
+       around this box breaks anywhere, so it is reset here. inline-size containment keeps that long
+       token from widening the table column: the box takes the cell's width and scrolls instead. */
     white-space: pre-wrap;
-    overflow-wrap: anywhere;
+    overflow-wrap: normal;
+    contain: inline-size;
     max-height: 22rem;
     overflow: auto;
 }
@@ -568,6 +727,11 @@ summary:focus-visible,
     align-items: center;
     gap: 0.25rem;
     margin-left: auto;
+}
+
+/* One page: four disabled arrows and "Page 1 of 1" say nothing the item count does not. */
+.paginator:has(.go-previous:disabled):has(.go-next:disabled) nav {
+    display: none;
 }
 
 .paginator .pagination-text {
@@ -626,6 +790,26 @@ summary:focus-visible,
 
 .noof-nowrap {
     white-space: nowrap;
+}
+
+/* width:1% + nowrap: Check and Level hug their content and Summary gets the rest, instead of an
+   even split that wrapped a short summary onto four lines at phone width. */
+#diagnostics-checks th:nth-child(-n + 2),
+#diagnostics-checks td:nth-child(-n + 2),
+#trace-history th:nth-child(-n + 2),
+#trace-history td:nth-child(-n + 2) {
+    white-space: nowrap;
+    width: 1%;
+}
+
+/* MudBlazor's 16px cell inset left a phone-width Summary about 90px, so short sentences wrapped to
+   four lines; halving it gives the text column the room. */
+@media (max-width: 599.98px) {
+    .mud-simple-table.mud-table-dense table tr td,
+    .mud-simple-table.mud-table-dense table tr th {
+        padding-left: 0.5rem;
+        padding-right: 0.5rem;
+    }
 }
 
 @media (max-width: 599.98px) {
@@ -691,6 +875,7 @@ summary:focus-visible,
     color: var(--mud-palette-text-secondary);
 }
 
+#trace-timeline th:nth-child(-n + 2),
 #trace-timeline td:first-child,
 #trace-timeline td:nth-child(2) {
     white-space: nowrap;
@@ -698,6 +883,7 @@ summary:focus-visible,
 }
 
 @media (max-width: 599.98px) {
+    #trace-timeline th:nth-child(2),
     #trace-timeline td:nth-child(2) {
         display: none;
     }

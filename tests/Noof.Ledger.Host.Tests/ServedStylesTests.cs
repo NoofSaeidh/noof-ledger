@@ -57,6 +57,30 @@ public sealed partial class ServedStylesTests
     static IEnumerable<string> BodiesFor(string css, string selector) =>
         Rules(css).Where(rule => rule.Selectors.Contains(selector)).Select(rule => rule.Body);
 
+    // The rules inside every @media block for phone widths; Rules alone cannot tell them apart from
+    // the desktop rules, since it ignores the at-rule a rule sits in.
+    static string PhoneRules(string css)
+    {
+        var blocks = new List<string>();
+        var index = 0;
+        while ((index = css.IndexOf("@media", index, StringComparison.Ordinal)) >= 0)
+        {
+            var open = css.IndexOf('{', index);
+            var (depth, cursor) = (1, open + 1);
+            while (depth > 0)
+            {
+                depth += css[cursor] switch { '{' => 1, '}' => -1, _ => 0 };
+                cursor++;
+            }
+
+            if (css[index..open].Contains("max-width: 599.98px", StringComparison.Ordinal))
+                blocks.Add(css[(open + 1)..(cursor - 1)]);
+            index = cursor;
+        }
+
+        return string.Join("\n", blocks);
+    }
+
     static string ThemeVariable(string html, string name)
     {
         var match = Regex.Match(html, $@"--{Regex.Escape(name)}:\s*(?<value>[^;]+);");
@@ -125,6 +149,67 @@ public sealed partial class ServedStylesTests
         Rules(served.Css)
             .Where(rule => rule.Selectors.Any(selector => selector.EndsWith(":focus-visible", StringComparison.Ordinal)))
             .Should().Contain(rule => rule.Body.Contains("outline:") && rule.Body.Contains("var(--mud-palette-primary)"));
+    }
+
+    [Fact]
+    public async Task At_phone_width_a_grid_row_stacks_so_its_text_and_amount_stay_on_screen()
+    {
+        var served = await ServedAsync();
+
+        var phone = PhoneRules(served.Css);
+
+        string.Join("\n", BodiesFor(phone, ".noof-grid-stack tbody tr")).Should().Contain("display: flex",
+            "a seven-column ledger at 390px pushed the text and the amounts into a sideways scroll "
+            + "nothing on the page announced; each row stacks into lines instead");
+        string.Join("\n", BodiesFor(phone, ".noof-grid-stack thead")).Should().Contain("clip-path",
+            "the column headers leave the screen but stay in the accessibility tree, not display:none");
+    }
+
+    [Theory]
+    [InlineData(".noof-wallet-row > .mud-input-control ~ .mud-button-root")]
+    [InlineData(".noof-secret-entry > .mud-input-control ~ .mud-button-root")]
+    public async Task A_button_beside_a_field_is_as_tall_as_the_field(string selector)
+    {
+        var served = await ServedAsync();
+
+        BodiesFor(served.Css, selector).Should().Contain(body => body.Contains("height: var(--noof-control-height)"),
+            "a 36px button beside a 40px field on every card reads as unfinished");
+    }
+
+    [Fact]
+    public async Task Every_table_header_shares_one_look()
+    {
+        var served = await ServedAsync();
+
+        Rules(served.Css).Should().Contain(rule =>
+                rule.Selectors.Contains(".noof-grid th")
+                && rule.Selectors.Contains(".mud-simple-table table thead tr th")
+                && rule.Body.Contains("text-transform: uppercase"),
+            "QuickGrid and MudSimpleTable headers were styled apart - three header looks on four pages");
+    }
+
+    [Fact]
+    public async Task The_active_quick_range_is_drawn_as_pressed()
+    {
+        var served = await ServedAsync();
+
+        string.Join("\n", BodiesFor(served.Css, ".mud-button-root.noof-quick-range[aria-pressed=\"true\"]"))
+            .Should().Contain("var(--mud-palette-primary)",
+                "a toggle with no pressed look gives a touch screen, which has no hover, nothing to go on");
+    }
+
+    [Fact]
+    public async Task A_stack_trace_wraps_at_spaces_and_never_splits_an_identifier()
+    {
+        var served = await ServedAsync();
+
+        var pre = string.Join("\n", BodiesFor(served.Css, ".noof-log-details pre"));
+
+        pre.Should().Contain("overflow-wrap: normal",
+            "'CategorizeA' / 'sync(' is harder to scan than a pre that scrolls a long token sideways; "
+            + "and overflow-wrap is inherited, so leaving it unset still splits identifiers wherever the "
+            + "message cell around the pre allows breaks anywhere");
+        pre.Should().Contain("overflow: auto");
     }
 
     [Theory]

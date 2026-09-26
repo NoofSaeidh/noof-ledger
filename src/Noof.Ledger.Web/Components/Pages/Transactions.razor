@@ -31,18 +31,20 @@ else
 {
     <div id="transactions-filters" class="noof-filter-bar">
         <div class="noof-filter-quick-ranges">
-            <MudButton Variant="Variant.Text" Size="Size.Small" Class="noof-quick-range" OnClick="@(() => SetQuickRangeAsync(QuickRange.Today))">Today</MudButton>
-            <MudButton Variant="Variant.Text" Size="Size.Small" Class="noof-quick-range" OnClick="@(() => SetQuickRangeAsync(QuickRange.Last7Days))">7 days</MudButton>
-            <MudButton Variant="Variant.Text" Size="Size.Small" Class="noof-quick-range" OnClick="@(() => SetQuickRangeAsync(QuickRange.ThisMonth))">This month</MudButton>
-            <MudButton Variant="Variant.Text" Size="Size.Small" Class="noof-quick-range" OnClick="@(() => SetQuickRangeAsync(QuickRange.All))">All</MudButton>
+            @foreach (var (range, label) in QuickRanges)
+            {
+                <MudButton Variant="Variant.Text" Size="Size.Small" Class="noof-quick-range"
+                           aria-pressed="@(activeRange == range ? "true" : "false")"
+                           OnClick="@(() => SetQuickRangeAsync(range))">@label</MudButton>
+            }
         </div>
         <div class="noof-filter-field">
             <MudText HtmlTag="label" for="transactions-filter-from" Typo="Typo.caption" Class="mud-text-secondary">From</MudText>
-            <input type="date" id="transactions-filter-from" class="noof-input" @bind="filter.From" @bind:event="oninput" @bind:after="ReloadAsync" />
+            <input type="date" id="transactions-filter-from" class="noof-input" @bind="filter.From" @bind:event="oninput" @bind:after="DatesEditedAsync" />
         </div>
         <div class="noof-filter-field">
             <MudText HtmlTag="label" for="transactions-filter-to" Typo="Typo.caption" Class="mud-text-secondary">To</MudText>
-            <input type="date" id="transactions-filter-to" class="noof-input" @bind="filter.To" @bind:event="oninput" @bind:after="ReloadAsync" />
+            <input type="date" id="transactions-filter-to" class="noof-input" @bind="filter.To" @bind:event="oninput" @bind:after="DatesEditedAsync" />
         </div>
         <div class="noof-filter-field">
             <MudText HtmlTag="label" for="transactions-filter-wallet" Typo="Typo.caption" Class="mud-text-secondary">Wallet</MudText>
@@ -81,24 +83,24 @@ else
     </div>
 
     <div class="noof-grid-frame" data-empty="No transactions match these filters.">
-        <QuickGrid @key="reloadGeneration" TGridItem="TransactionListRow" id="transactions-grid" ItemsProvider="ProvideRowsAsync" Pagination="pagination" Class="noof-grid">
-            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Date" Class="noof-col-nowrap" Context="row">
+        <QuickGrid @key="reloadGeneration" TGridItem="TransactionListRow" id="transactions-grid" ItemsProvider="ProvideRowsAsync" Pagination="pagination" Class="noof-grid noof-grid-stack">
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Date" Class="noof-col-nowrap noof-cell-lead" Context="row">
                 <MudLink Href="@($"/transactions/{row.Id}/trace")">@FormatOccurred(row)</MudLink>
             </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
-            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Wallet" Class="noof-col-nowrap" Context="row">
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Wallet" Class="noof-col-nowrap noof-cell-meta" Context="row">
                 @(string.IsNullOrEmpty(row.WalletName) ? "—" : row.WalletName)
             </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
-            <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="TransactionListRow" TProp="TransactionKind" Property="@(row => row.Kind)" Title="Kind" Class="noof-col-nowrap" />
-            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Status" Class="noof-col-nowrap" Context="row">
+            <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="TransactionListRow" TProp="TransactionKind" Property="@(row => row.Kind)" Title="Kind" Class="noof-col-nowrap noof-cell-meta noof-cell-meta-joined" />
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Status" Class="noof-col-nowrap noof-cell-meta noof-cell-meta-first" Context="row">
                 <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@StatusColor(row.Status)">@row.Status</MudChip>
             </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
-            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Text" Context="row">
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Text" Class="noof-cell-main" Context="row">
                 <span class="noof-truncate" title="@row.RawText">@row.RawText</span>
             </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
-            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Amounts" Class="noof-col-amounts" Context="row">
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Amounts" Class="noof-col-amounts noof-cell-trail" Context="row">
                 @FormatAmounts(row.Amounts)
             </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
-            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Categories" Context="row">
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Categories" Class="noof-cell-meta noof-cell-meta-joined" Context="row">
                 @string.Join(", ", row.Categories)
             </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
         </QuickGrid>
@@ -108,6 +110,16 @@ else
 
 @code {
     enum QuickRange { Today, Last7Days, ThisMonth, All }
+
+    static readonly (QuickRange Range, string Label)[] QuickRanges =
+    [
+        (QuickRange.Today, "Today"),
+        (QuickRange.Last7Days, "7 days"),
+        (QuickRange.ThisMonth, "This month"),
+        (QuickRange.All, "All"),
+    ];
+
+    QuickRange? activeRange = QuickRange.All;
 
     sealed class TransactionFilterEdit
     {
@@ -177,6 +189,13 @@ else
             QuickRange.ThisMonth => (new DateOnly(today.Year, today.Month, 1), today),
             _ => ((DateOnly?)null, (DateOnly?)null),
         };
+        activeRange = range;
+        return ReloadAsync();
+    }
+
+    Task DatesEditedAsync()
+    {
+        activeRange = null;
         return ReloadAsync();
     }
 

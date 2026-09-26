@@ -75,7 +75,7 @@ else
         @* Plain native inputs, not MudTextField: a QuickGrid refresh needs to fire on every
            keystroke, and a native input's @bind:event="oninput" does that directly, without
            depending on MudTextField's own (JS-interop-driven) Immediate/debounce plumbing. *@
-        <div class="noof-filter-field">
+        <div class="noof-filter-field noof-filter-field-wide">
             <MudText HtmlTag="label" for="logs-filter-text" Typo="Typo.caption" Class="mud-text-secondary">Text</MudText>
             <input id="logs-filter-text" class="noof-input" type="search" placeholder="Search messages" @bind="filter.Text" @bind:event="oninput" @bind:after="ReloadAsync" />
         </div>
@@ -100,14 +100,14 @@ else
     </div>
 
     <div class="noof-grid-frame" data-empty="No log entries match these filters.">
-        <QuickGrid @key="reloadGeneration" TGridItem="LogRow" id="logs-grid" ItemsProvider="ProvideRowsAsync" Pagination="pagination" Class="noof-grid noof-grid-top">
+        <QuickGrid @key="reloadGeneration" TGridItem="LogRow" id="logs-grid" ItemsProvider="ProvideRowsAsync" Pagination="pagination" Class="noof-grid noof-grid-top noof-grid-stack">
             @* Local time, the same zone the From/To inputs above are read in. *@
-            <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="LogRow" TProp="DateTimeOffset" Property="@(row => row.LoggedAt.ToLocalTime())" Format="yyyy-MM-dd HH:mm:ss" Title="Logged at" Class="noof-col-nowrap" />
-            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="LogRow" Title="Level" Class="noof-col-nowrap" Context="row">
+            <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="LogRow" TProp="DateTimeOffset" Property="@(row => row.LoggedAt.ToLocalTime())" Format="yyyy-MM-dd HH:mm:ss" Title="Logged at" Class="noof-col-nowrap noof-cell-lead" />
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="LogRow" Title="Level" Class="noof-col-nowrap noof-cell-trail" Context="row">
                 <span class="noof-level @LevelClass(row.Level)">@row.Level</span>
             </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
-            <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="LogRow" TProp="string" Property="@(row => row.Source)" Title="Source" />
-            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="LogRow" Title="Message" Class="noof-col-message" Context="row">
+            <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="LogRow" TProp="string" Property="@(row => row.Source)" Title="Source" Class="noof-cell-meta" />
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="LogRow" Title="Message" Class="noof-col-message noof-cell-main" Context="row">
                 <ChildContent>
                     <div>
                         @row.Message

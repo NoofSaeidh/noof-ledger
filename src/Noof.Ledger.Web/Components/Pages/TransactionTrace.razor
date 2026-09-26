@@ -105,6 +105,13 @@ else
     else
     {
         <MudSimpleTable id="trace-timeline" Dense="true" Elevation="0" Outlined="true" Class="mb-8">
+            <thead>
+                <tr>
+                    <th>Offset</th>
+                    <th>Stage</th>
+                    <th>Event</th>
+                </tr>
+            </thead>
             <tbody>
                 @foreach (var e in trace.Events)
                 {
@@ -136,6 +143,13 @@ else
     else
     {
         <MudSimpleTable id="trace-history" Dense="true" Elevation="0" Outlined="true">
+            <thead>
+                <tr>
+                    <th>When</th>
+                    <th>Change</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
             <tbody>
                 @foreach (var revision in trace.History)
                 {

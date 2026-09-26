@@ -187,6 +187,31 @@ public sealed class TransactionsTests(CookieModeHostFixture fixture) : PageTest,
     }
 
     [Fact]
+    public async Task The_quick_range_buttons_mark_the_active_range_until_a_date_is_edited_by_hand()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/transactions");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var all = Page.GetByRole(AriaRole.Button, new() { Name = "All", Exact = true });
+        var today = Page.GetByRole(AriaRole.Button, new() { Name = "Today", Exact = true });
+
+        await Expect(all).ToHaveAttributeAsync("aria-pressed", "true");
+        await Expect(today).ToHaveAttributeAsync("aria-pressed", "false");
+
+        await today.ClickAsync();
+        await Expect(today).ToHaveAttributeAsync("aria-pressed", "true");
+        await Expect(all).ToHaveAttributeAsync("aria-pressed", "false");
+
+        await Page.FillAsync("#transactions-filter-from", "2026-01-01");
+        await Expect(today).ToHaveAttributeAsync("aria-pressed", "false");
+        await Expect(all).ToHaveAttributeAsync("aria-pressed", "false");
+    }
+
+    [Fact]
     public async Task A_dashboard_recent_row_links_to_the_trace_page()
     {
         if (fixture.DatabaseUnavailable)
