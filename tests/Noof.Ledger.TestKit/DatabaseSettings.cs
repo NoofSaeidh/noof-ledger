@@ -9,7 +9,8 @@ public static class DatabaseSettings
     // under a loaded shared server (several worktrees, or several test collections, each creating
     // and dropping clone databases) that wait can outlast Npgsql's default 30s CommandTimeout.
     // Several fixtures had already raised it for DROP alone; CREATE never got the same treatment,
-    // which is the gap a Phase 6 full-suite run's flaky Npgsql read timeouts traced back to.
+    // which is the most likely explanation for a Phase 6 full-suite run's flaky Npgsql read timeouts -
+    // a hypothesis, not a reproduced trace: if the timeouts recur, look elsewhere too.
     //
     // This used to be one AdminDdlTimeoutSeconds backing both budgets below. They happened to share
     // a value, which let editing one look like it covered both - it did not: the connect timeout

@@ -174,10 +174,24 @@ public class SelfLogOwnershipTests
             LoggingSetup.Configure(
                 secondConfiguration, new ConfigurationBuilder().Build(), secondLogDirectory,
                 UnreachableConnectionString, BuildFakeServices(secondStatus));
+            // R2-6 (Phase 6 second re-review): built and disposed like the first, rather than left as
+            // a bare Configure() call - LoggingSetup.Configure starts its own Postgres batching sink
+            // retrying immediately, independent of whether CreateLogger() is ever called on the
+            // LoggerConfiguration it configured, so leaving this uncreated (and undisposed) would make
+            // this very test manufacture the kind of orphaned, never-disposed sink SelfLogOwnership's
+            // content filter exists to tolerate.
+            var secondLogger = secondConfiguration.CreateLogger();
 
-            firstStatus.LastFailureAt.Should().BeNull(
-                "disposing the first host's logger must release its SelfLog claim through the real " +
-                "LoggingSetup wiring, not just leave the shared delegate pointing at its now-disposed status");
+            try
+            {
+                firstStatus.LastFailureAt.Should().BeNull(
+                    "disposing the first host's logger must release its SelfLog claim through the real " +
+                    "LoggingSetup wiring, not just leave the shared delegate pointing at its now-disposed status");
+            }
+            finally
+            {
+                secondLogger.Dispose();
+            }
         }
         finally
         {
