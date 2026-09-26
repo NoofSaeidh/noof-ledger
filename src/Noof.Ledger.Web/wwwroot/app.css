@@ -1,24 +1,141 @@
 /* Everything here is what MudBlazor does not already do. Colours come from its theme variables
    rather than literals, so NoofTheme stays the single place the palette is decided. */
 
+/* Native controls (the <select> dropdown list, the date picker's calendar popup and icon, scrollbars)
+   are drawn by the browser for whichever scheme the root declares - left unset, they are drawn for a
+   light page inside a dark one. MudThemeProvider publishes the theme's own scheme as this variable,
+   so a theme change carries the native controls with it. ServedStylesTests reads this rule. */
+:root {
+    color-scheme: var(--mud-native-html-color-scheme, dark);
+    --noof-control-height: 2.5rem;
+    --noof-control-radius: 8px;
+    --noof-control-background: var(--mud-palette-surface);
+    --noof-chevron: var(--mud-palette-text-secondary);
+    --noof-focus-ring: 0 0 0 3px color-mix(in srgb, var(--mud-palette-primary) 35%, transparent);
+    --noof-mono: 'Cascadia Mono', Consolas, 'SF Mono', 'Liberation Mono', monospace;
+}
+
+/* Keyboard focus must always be visible. MudBlazor's buttons show focus only as a faint ripple tint,
+   which on this dark surface is close to invisible. */
+a:focus-visible,
+button:focus-visible,
+summary:focus-visible,
+.mud-button-root:focus-visible,
+.mud-chip:focus-visible {
+    outline: 2px solid var(--mud-palette-primary);
+    outline-offset: 2px;
+}
+
+/* FocusOnNavigate moves focus to each page's <h1> (tabindex="-1") so a screen reader announces the
+   new page; it is not a control, and the browser's ring around the whole heading row is noise. */
+[tabindex="-1"]:focus {
+    outline: none;
+}
+
+/* ---- App bar ---- */
+
 .noof-appbar {
     border-bottom: 1px solid var(--mud-palette-divider);
     backdrop-filter: blur(6px);
 }
 
+.noof-appbar .mud-toolbar {
+    gap: 0.25rem;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
 .noof-brand {
     letter-spacing: -0.01em;
+    white-space: nowrap;
+    margin-right: 1.5rem;
+    flex-shrink: 0;
 }
 
 .noof-brand-accent {
     color: var(--mud-palette-primary);
 }
 
+.noof-nav-link {
+    flex-shrink: 0;
+    color: var(--mud-palette-text-secondary);
+}
+
+.noof-nav-link:hover {
+    color: var(--mud-palette-text-primary);
+}
+
+.noof-appbar .noof-nav-link[aria-current="page"] {
+    color: var(--mud-palette-primary);
+    background-color: color-mix(in srgb, var(--mud-palette-primary) 12%, transparent);
+}
+
+.noof-user {
+    white-space: nowrap;
+    margin-right: 0.5rem;
+}
+
+/* Below this width the labels do not fit on one line, so the bar keeps its icons and the labels
+   stay in the accessibility tree (visually hidden, not display:none) as each link's name. */
+@media (max-width: 959.98px) {
+    .noof-nav-label {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
+
+    .noof-appbar .mud-toolbar {
+        gap: 0;
+        padding-left: 12px;
+        padding-right: 8px;
+    }
+
+    .noof-nav-link {
+        min-width: 0;
+        padding: 6px 8px;
+    }
+
+    .noof-nav-link .mud-button-icon-start {
+        margin: 0;
+    }
+
+    .noof-brand {
+        margin-right: 0.5rem;
+        font-size: 1.05rem;
+    }
+
+    .noof-user {
+        display: none;
+    }
+}
+
+/* ---- Page structure ---- */
+
+.noof-page-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.5rem;
+}
+
+.noof-page-header h1 {
+    margin: 0;
+}
+
+.noof-mono {
+    font-family: var(--noof-mono);
+}
+
 /* Figures line up column-wise only in a monospaced face, and a ledger whose numbers do not line up
    is harder to read than an unstyled one. Tabular numerals keep the digits the same width in the
    variable-width faces that have them. */
 .noof-amount {
-    font-family: 'Cascadia Mono', Consolas, 'SF Mono', 'Liberation Mono', monospace;
+    font-family: var(--noof-mono);
     font-variant-numeric: tabular-nums;
 }
 
@@ -55,21 +172,162 @@
     margin: 0.5rem 0 0.25rem;
 }
 
+/* ---- Dashboard balances ---- */
+
+.noof-balance-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 1rem;
+    align-items: center;
+    padding: 0.625rem 0;
+    border-bottom: 1px solid var(--mud-palette-divider);
+}
+
+.noof-balance-row > :nth-child(2) {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    text-align: right;
+}
+
+.noof-balance-total {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+/* ---- Wallets and secrets forms ---- */
+
+.noof-wallet-row,
 .noof-secret-entry {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 0.75rem;
     flex-wrap: wrap;
 }
 
+.noof-wallet-row .mud-button-outlined {
+    min-width: 8.5rem;
+}
+
+.noof-wallet-row .mud-input-control,
 .noof-secret-entry .mud-input-control {
     flex: 1 1 18rem;
     margin-top: 0;
 }
 
-/* The sign-in form keeps native inputs, because its POST is what signs you in and a component that
-   may or may not emit a name attribute is not worth that risk. So the MudBlazor look has to be
-   borrowed by hand here - and only here. */
+.noof-form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+    gap: 1rem;
+    align-items: end;
+    margin-bottom: 1.25rem;
+}
+
+.noof-form-grid .mud-input-control {
+    margin-top: 0;
+}
+
+.noof-form-grid .noof-field-full {
+    grid-column: 1 / -1;
+}
+
+/* ---- Native form controls ----
+   The sign-in form and the filter bars use native <input>/<select>: the sign-in POST must not depend
+   on a component emitting a name attribute, a filter must re-query on every keystroke, and a
+   MudSelect needs a popover provider this statically rendered layout cannot host. So the MudBlazor
+   look is borrowed by hand here, once, for both kinds of control together. */
+
+.noof-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+}
+
+.noof-field-label {
+    font-size: 0.8125rem;
+    color: var(--mud-palette-text-secondary);
+}
+
+.noof-input,
+.noof-native-select {
+    font: inherit;
+    font-size: 0.875rem;
+    color: var(--mud-palette-text-primary);
+    background-color: var(--noof-control-background);
+    border: 1px solid var(--mud-palette-lines-inputs);
+    border-radius: var(--noof-control-radius);
+    height: var(--noof-control-height);
+    padding: 0 0.75rem;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.noof-input::placeholder {
+    color: var(--mud-palette-text-secondary);
+    opacity: 1;
+}
+
+.noof-input:hover:not(:disabled),
+.noof-native-select:hover:not(:disabled) {
+    border-color: var(--mud-palette-text-secondary);
+}
+
+.noof-input:focus,
+.noof-native-select:focus {
+    outline: none;
+    border-color: var(--mud-palette-primary);
+    box-shadow: var(--noof-focus-ring);
+}
+
+.noof-input:disabled,
+.noof-native-select:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* The OS arrow ignores the theme and sits at its own inset, so it goes; the chevron is two gradient
+   triangles in a theme colour, since a data-URI SVG cannot read a CSS variable. */
+.noof-native-select {
+    appearance: none;
+    cursor: pointer;
+    padding-right: 2.25rem;
+    background-image:
+        linear-gradient(45deg, transparent 50%, var(--noof-chevron) 50%),
+        linear-gradient(135deg, var(--noof-chevron) 50%, transparent 50%);
+    background-position:
+        calc(100% - 1.125rem) calc(50% + 1px),
+        calc(100% - 0.8rem) calc(50% + 1px);
+    background-size: 0.325rem 0.325rem;
+    background-repeat: no-repeat;
+}
+
+.noof-native-select:hover:not(:disabled),
+.noof-native-select:focus {
+    --noof-chevron: var(--mud-palette-text-primary);
+}
+
+/* Chromium on Windows paints the open list with each option's own colours. */
+.noof-native-select option {
+    background-color: var(--mud-palette-surface);
+    color: var(--mud-palette-text-primary);
+}
+
+.noof-input::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 0.7;
+    border-radius: 4px;
+    padding: 2px;
+}
+
+.noof-input::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+    background-color: var(--mud-palette-action-default-hover);
+}
+
+/* ---- Sign-in ---- */
+
 .noof-login {
     max-width: 24rem;
     margin: 4rem auto 0;
@@ -81,119 +339,103 @@
     gap: 1rem;
 }
 
-.noof-field {
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-}
+/* ---- Filter bars (Transactions, Logs) ---- */
 
-.noof-field-label {
-    font-size: 0.8125rem;
-    color: var(--mud-palette-text-secondary);
-}
-
-.noof-input {
-    font: inherit;
-    color: var(--mud-palette-text-primary);
-    background: transparent;
-    border: 1px solid var(--mud-palette-lines-inputs, var(--mud-palette-divider));
-    border-radius: var(--mud-default-borderradius);
-    padding: 0.6rem 0.75rem;
-    width: 100%;
-    box-sizing: border-box;
-}
-
-.noof-input:focus {
-    outline: none;
-    border-color: var(--mud-palette-primary);
-    box-shadow: 0 0 0 1px var(--mud-palette-primary);
-}
-
-/* CSS-only truncation, not a title/tooltip popup: MainLayout renders statically, so no popover
-   provider is available to show one, and the full text is a click away on the trace page anyway. */
-.noof-truncate {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 28rem;
-}
-
-/* A native <select> has no styling of its own - every filter bar that mixes it with a .noof-input
-   text/date field needs it to match that field's height, border and padding exactly, or the two
-   controls sit at different heights on the same row. */
-.noof-native-select {
-    font: inherit;
-    color: var(--mud-palette-text-primary);
-    background-color: var(--mud-palette-surface, transparent);
-    color-scheme: dark;
-    border: 1px solid var(--mud-palette-lines-inputs, var(--mud-palette-divider));
-    border-radius: var(--mud-default-borderradius);
-    padding: 0.6rem 0.75rem;
-    width: 100%;
-    box-sizing: border-box;
-}
-
-.noof-native-select:focus {
-    outline: none;
-    border-color: var(--mud-palette-primary);
-    box-shadow: 0 0 0 1px var(--mud-palette-primary);
-}
-
-/* One filter bar look shared by every page that mixes a quick-range row with labelled native
-   inputs/selects (Transactions, Diagnostics Logs): every control gets the same label placement
-   (caption above) and the same control height, instead of drifting per page. */
 .noof-filter-bar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 1rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+    gap: 0.875rem 1rem;
     margin-bottom: 1.5rem;
 }
 
 .noof-filter-bar > .noof-filter-quick-ranges {
-    flex-basis: 100%;
+    grid-column: 1 / -1;
     display: flex;
     gap: 0.5rem;
     flex-wrap: wrap;
 }
 
-.noof-filter-bar > .noof-filter-field {
+.noof-filter-field {
     display: flex;
     flex-direction: column;
-    gap: 0.3rem;
-    flex: 1 1 11rem;
-    min-width: 9rem;
-    max-width: 18rem;
+    gap: 0.375rem;
+    min-width: 0;
 }
 
-/* QuickGrid renders a bare <table> with none of MudBlazor's own styling - every page that uses it
-   (Transactions, Logs) shares this look rather than each page reinventing header/row/cell rules. */
+.noof-filter-field-wide {
+    grid-column: span 2;
+}
+
+@media (max-width: 599.98px) {
+    .noof-filter-bar {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+.mud-button-root.noof-quick-range {
+    border-radius: 999px;
+    padding: 3px 14px;
+    min-width: 0;
+    border: 1px solid var(--mud-palette-lines-default);
+    background-color: var(--mud-palette-surface);
+    color: var(--mud-palette-text-secondary);
+}
+
+.mud-button-root.noof-quick-range:hover {
+    color: var(--mud-palette-text-primary);
+    border-color: var(--mud-palette-lines-inputs);
+    background-color: var(--mud-palette-surface);
+}
+
+.noof-setting {
+    min-width: 13rem;
+}
+
+/* ---- QuickGrid tables (Transactions, Logs) ----
+   QuickGrid renders a bare <table>; its own scoped stylesheet is a light theme and is not linked. */
+
+.noof-grid-frame {
+    overflow-x: auto;
+    border: 1px solid var(--mud-palette-lines-default);
+    border-radius: var(--mud-default-borderradius);
+    background-color: var(--mud-palette-surface);
+}
+
 .noof-grid {
     width: 100%;
     border-collapse: collapse;
+    font-size: 0.875rem;
 }
 
 .noof-grid th,
 .noof-grid td {
-    padding: 0.65rem 0.9rem;
+    padding: 0.625rem 0.875rem;
     text-align: left;
     vertical-align: middle;
-    border-bottom: 1px solid var(--mud-palette-divider);
 }
 
 .noof-grid th {
     color: var(--mud-palette-text-secondary);
-    font-weight: 500;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--mud-palette-lines-default);
+}
+
+.noof-grid tbody tr:not(:first-child) td {
+    border-top: 1px solid var(--mud-palette-divider);
 }
 
 .noof-grid tbody tr:hover {
-    background: var(--mud-palette-action-default-hover, rgba(255, 255, 255, 0.06));
+    background-color: var(--mud-palette-action-default-hover);
 }
 
 /* A paginated (non-virtualized) QuickGrid pads its <tbody> with empty <tr>s up to the page size, so
    the grid's height stays constant across pages - every <td> in one of those rows is truly empty.
-   Left visible, that is dozens of blank striped rows under a short result set; this hides exactly
-   those rows without touching a real row that happens to have one empty cell (an unstyled Categories
-   column, for instance - that row still has a non-empty Date cell). */
+   Left visible, that is dozens of blank rows under a short result set; this hides exactly those rows
+   without touching a real row that happens to have one empty cell. */
 .noof-grid tbody tr:not(:has(td:not(:empty))) {
     display: none;
 }
@@ -208,20 +450,207 @@
 }
 
 .noof-grid td.noof-col-amounts {
-    font-family: 'Cascadia Mono', Consolas, 'SF Mono', 'Liberation Mono', monospace;
+    font-family: var(--noof-mono);
     font-variant-numeric: tabular-nums;
 }
 
-/* QuickGrid's own Paginator ships unstyled (plain #ccc border, no theme colours) - this brings it
-   in line with the dark theme and gives it breathing room under the grid it belongs to. */
-.paginator {
-    color: var(--mud-palette-text-secondary);
-    border-top: 1px solid var(--mud-palette-divider) !important;
-    margin-top: 0.75rem !important;
+.noof-grid .noof-col-message {
+    overflow-wrap: anywhere;
+    min-width: 16rem;
 }
 
+/* CSS-only truncation, not a title/tooltip popup: MainLayout renders statically, so no popover
+   provider is available to show one, and the full text is a click away on the trace page anyway. */
+.noof-truncate {
+    display: inline-block;
+    vertical-align: middle;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 28rem;
+}
+
+.noof-level-verbose,
+.noof-level-debug {
+    color: var(--mud-palette-text-secondary);
+}
+
+.noof-level-warning {
+    font-weight: 600;
+    color: var(--mud-palette-warning);
+}
+
+.noof-level-error,
+.noof-level-fatal {
+    font-weight: 600;
+    color: var(--mud-palette-error);
+}
+
+/* Rows that can expand to several lines read from the top, not from their vertical middle. */
+.noof-grid-top td {
+    vertical-align: top;
+}
+
+.noof-link-button {
+    font: inherit;
+    font-size: 0.8125rem;
+    color: var(--mud-palette-primary);
+    background: none;
+    border: 0;
+    padding: 0 0.125rem;
+    margin-left: 0.5rem;
+    cursor: pointer;
+    border-radius: 4px;
+}
+
+.noof-link-button:hover {
+    text-decoration: underline;
+}
+
+.noof-log-details {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+    margin-top: 0.625rem;
+}
+
+.noof-log-details pre,
+.noof-trace-details pre {
+    margin: 0;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.75rem 0.875rem;
+    background-color: var(--mud-palette-background);
+    border: 1px solid var(--mud-palette-lines-default);
+    border-radius: 6px;
+    font-family: var(--noof-mono);
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: var(--mud-palette-text-primary);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 22rem;
+    overflow: auto;
+}
+
+/* QuickGrid has no empty-state slot, and a header row over nothing reads as "still loading". Once a
+   load has finished (no "loading" class) with no non-empty cell, the frame shows its data-empty
+   text. (:has cannot nest, hence :not(:has(...)) rather than :has(... :not(:has(...))).) */
+.noof-grid-frame:not(:has(tbody td:not(:empty))):not(:has(table.loading))::after {
+    content: attr(data-empty);
+    display: block;
+    padding: 2.5rem 1rem;
+    text-align: center;
+    color: var(--mud-palette-text-secondary);
+}
+
+/* QuickGrid's Paginator ships unstyled here (its scoped stylesheet is not linked, and is a light
+   theme anyway), and its page buttons are empty elements that draw their arrows from a black
+   background image - invisible on this theme. The arrows are masks filled with the text colour. */
+.paginator {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    padding: 0.75rem 0.25rem 0;
+    font-size: 0.875rem;
+    color: var(--mud-palette-text-secondary);
+}
+
+.paginator strong {
+    color: var(--mud-palette-text-primary);
+    font-weight: 600;
+}
+
+.paginator nav {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-left: auto;
+}
+
+.paginator .pagination-text {
+    margin: 0 0.5rem;
+}
+
+.paginator nav button {
+    position: relative;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border: 1px solid var(--mud-palette-lines-default);
+    border-radius: 6px;
+    background: var(--mud-palette-surface);
+    color: var(--mud-palette-text-primary);
+    cursor: pointer;
+}
+
+.paginator nav button::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    width: 1rem;
+    height: 1rem;
+    background-color: currentColor;
+    mask: var(--noof-pager-icon) center / contain no-repeat;
+}
+
+.paginator nav button:not(:disabled):hover {
+    border-color: var(--mud-palette-lines-inputs);
+    background-color: var(--mud-palette-action-default-hover);
+}
+
+.paginator nav button:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+
+.paginator .go-first,
+.paginator .go-last {
+    --noof-pager-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18.4 7.4 17 6l-6 6 6 6 1.4-1.4-4.6-4.6zM6 6h2v12H6z"/></svg>');
+}
+
+.paginator .go-previous,
+.paginator .go-next {
+    --noof-pager-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M15.4 7.4 14 6l-6 6 6 6 1.4-1.4-4.6-4.6z"/></svg>');
+}
+
+.paginator .go-next,
+.paginator .go-last {
+    transform: scaleX(-1);
+}
+
+/* ---- Diagnostics ---- */
+
+.noof-nowrap {
+    white-space: nowrap;
+}
+
+@media (max-width: 599.98px) {
+    .noof-hide-narrow,
+    .mud-simple-table .noof-hide-narrow {
+        display: none;
+    }
+
+    /* A legend beside the ring pushes past a phone's width; below it, it wraps. */
+    .noof-chart .mud-chart-legend-right {
+        flex-direction: column;
+    }
+
+    .noof-chart .mud-chart-legend-right .mud-chart-legend {
+        flex-direction: row;
+        justify-content: center;
+        width: 100%;
+        margin-left: 0;
+    }
+}
+
+/* ---- Transaction trace ---- */
+
 .noof-trace-summary-table td {
-    padding: 0.35rem 0.75rem;
+    padding: 0.5rem 0.875rem;
     vertical-align: top;
 }
 
@@ -231,9 +660,35 @@
     width: 1%;
 }
 
+.noof-stage-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+}
+
+.noof-stage-list .mud-chip {
+    margin: 0;
+}
+
+.noof-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.75rem;
+}
+
 #trace-timeline td,
 #trace-timeline th {
-    padding: 0.5rem 0.75rem;
+    padding: 0.625rem 0.875rem;
+    vertical-align: top;
+}
+
+#trace-timeline td:first-child {
+    font-family: var(--noof-mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--mud-palette-text-secondary);
 }
 
 #trace-timeline td:first-child,
@@ -242,20 +697,36 @@
     width: 1%;
 }
 
+@media (max-width: 599.98px) {
+    #trace-timeline td:nth-child(2) {
+        display: none;
+    }
+}
+
 .noof-trace-reason {
     color: var(--mud-palette-error);
-    margin-top: 0.2rem;
+    margin-top: 0.25rem;
+    overflow-wrap: anywhere;
+}
+
+.noof-trace-details {
+    margin-top: 0.5rem;
 }
 
 .noof-trace-details summary {
+    width: fit-content;
     cursor: pointer;
     color: var(--mud-palette-text-secondary);
     font-size: 0.8125rem;
+    border-radius: 4px;
+    padding: 0.125rem 0.25rem;
+    margin-left: -0.25rem;
 }
 
-.noof-trace-details pre {
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-size: 0.8125rem;
-    color: var(--mud-palette-text-secondary);
+.noof-trace-details summary:hover {
+    color: var(--mud-palette-text-primary);
+}
+
+.noof-trace-details[open] summary {
+    margin-bottom: 0.5rem;
 }
