@@ -2,7 +2,9 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Domain;
 
@@ -11,7 +13,8 @@ namespace Noof.Ledger.Ai;
 // The vision fallback: one forced, strict read_receipt call carrying the photo as a DataContent
 // image. Reached only when the fiscal QR could not be decoded or the Tax Administration site did
 // not answer - Noof.Ledger.Receipts is the path that reads a receipt without ever asking the model.
-internal sealed class ChatReceiptVision(IChatClientFactory clientFactory) : IReceiptVision
+internal sealed class ChatReceiptVision(
+    IChatClientFactory clientFactory, IOperationTimer timer, ILogger<ChatReceiptVision> logger) : IReceiptVision
 {
     const string ReadReceiptName = "read_receipt";
     const string ReadReceiptDescription = "Record what a photographed shop receipt prints.";
@@ -33,6 +36,8 @@ internal sealed class ChatReceiptVision(IChatClientFactory clientFactory) : IRec
                 ModelFailureKind.Terminal,
                 $"Receipt image is {image.Length} bytes, over the {MaxImageBytes}-byte limit.");
         }
+
+        using var timing = timer.Start(logger, TimedOperations.ModelReadReceipt);
 
         var readReceipt = new SchemaTool(ReadReceiptName, ReadReceiptDescription, ReadReceiptSchema);
 

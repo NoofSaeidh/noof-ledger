@@ -4,6 +4,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Noof.Ledger.Ai.ReceiptCategorizerLogging;
 using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Application.Wallets;
 
@@ -17,6 +18,7 @@ internal sealed class ChatReceiptCategorizer(
     IChatClientFactory clientFactory,
     ICategoryCatalog categoryCatalog,
     IWalletDirectory walletDirectory,
+    IOperationTimer timer,
     ILogger<ChatReceiptCategorizer> logger) : IReceiptCategorizer
 {
     const string CategorizeReceiptName = "categorize_receipt";
@@ -29,6 +31,8 @@ internal sealed class ChatReceiptCategorizer(
 
     public async Task<ReceiptCategorization> CategorizeAsync(ReceiptCategorizationRequest request, CancellationToken cancellationToken)
     {
+        using var timing = timer.Start(logger, TimedOperations.ModelCategorizeReceipt);
+
         var categories = await categoryCatalog.ActiveAsync(cancellationToken);
         var options = categories.Select(category => new CategoryOption(category.Slug, category.NameEn, category.NameRu, category.ParentSlug)).ToList();
         var wallets = await walletDirectory.ActiveAsync(cancellationToken);

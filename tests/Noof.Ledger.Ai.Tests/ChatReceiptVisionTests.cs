@@ -1,6 +1,10 @@
 using AwesomeAssertions;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.TestKit;
 
 namespace Noof.Ledger.Ai.Tests;
 
@@ -8,6 +12,8 @@ namespace Noof.Ledger.Ai.Tests;
 // ChatReceiptVisionOverAnthropicTests; this pins what the provider-neutral layer itself says.
 public class ChatReceiptVisionTests
 {
+    static readonly IOperationTimer NoopTimer = new OperationTimer(TimeProvider.System, new SlowOperationOptions());
+
     static readonly byte[] TinyImage = [1, 2, 3, 4];
 
     static FunctionCallContent Answer() => new(
@@ -28,7 +34,7 @@ public class ChatReceiptVisionTests
     public async Task The_tool_it_offers_is_strict_in_provider_neutral_terms()
     {
         var provider = new ScriptedChatClient().Answer(Answer());
-        var vision = new ChatReceiptVision(new FixedChatClientFactory(provider));
+        var vision = new ChatReceiptVision(new FixedChatClientFactory(provider), NoopTimer, NullLogger<ChatReceiptVision>.Instance);
 
         await vision.ReadAsync(TinyImage, "image/jpeg", null, TestContext.Current.CancellationToken);
 
@@ -56,7 +62,7 @@ public class ChatReceiptVisionTests
                 ["lines"] = Array.Empty<object>(),
             });
         var provider = new ScriptedChatClient().Answer(answer);
-        var vision = new ChatReceiptVision(new FixedChatClientFactory(provider));
+        var vision = new ChatReceiptVision(new FixedChatClientFactory(provider), NoopTimer, NullLogger<ChatReceiptVision>.Instance);
 
         var receipt = await vision.ReadAsync(TinyImage, "image/jpeg", null, TestContext.Current.CancellationToken);
 
@@ -64,10 +70,24 @@ public class ChatReceiptVisionTests
     }
 
     [Fact]
+    public async Task A_scripted_client_that_advances_the_clock_gives_one_model_readReceipt_timing()
+    {
+        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var timer = new OperationTimer(clock, new SlowOperationOptions());
+        var logger = new CapturingLogger<ChatReceiptVision>();
+        var provider = new ScriptedChatClient().AnswerAfterDelay(clock, TimeSpan.FromMilliseconds(10), Answer());
+        var vision = new ChatReceiptVision(new FixedChatClientFactory(provider), timer, logger);
+
+        await vision.ReadAsync(TinyImage, "image/jpeg", null, TestContext.Current.CancellationToken);
+
+        logger.Entries.Should().ContainSingle(entry => (string)entry.Properties["Operation"] == "model.readReceipt");
+    }
+
+    [Fact]
     public async Task An_oversized_image_never_reaches_the_provider()
     {
         var provider = new ScriptedChatClient();
-        var vision = new ChatReceiptVision(new FixedChatClientFactory(provider));
+        var vision = new ChatReceiptVision(new FixedChatClientFactory(provider), NoopTimer, NullLogger<ChatReceiptVision>.Instance);
         var oversized = new byte[(5 * 1024 * 1024) + 1];
 
         var act = () => vision.ReadAsync(oversized, "image/jpeg", null, TestContext.Current.CancellationToken);

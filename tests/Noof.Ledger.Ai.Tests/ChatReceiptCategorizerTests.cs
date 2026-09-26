@@ -1,9 +1,12 @@
 using AwesomeAssertions;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Application.Wallets;
+using Noof.Ledger.TestKit;
 using NSubstitute;
 
 namespace Noof.Ledger.Ai.Tests;
@@ -12,12 +15,14 @@ namespace Noof.Ledger.Ai.Tests;
 // what reaches the wire is pinned by ChatReceiptCategorizerOverAnthropicTests.
 public class ChatReceiptCategorizerTests
 {
+    static readonly IOperationTimer NoopTimer = new OperationTimer(TimeProvider.System, new SlowOperationOptions());
+
     static readonly IReadOnlyList<CategoryEntry> Categories =
         [new CategoryEntry(Guid.NewGuid(), "groceries", "Groceries", "Продукты", null),
          new CategoryEntry(Guid.NewGuid(), "other", "Other", "Прочее", null)];
 
-    static ChatReceiptCategorizer Build(IChatClient provider) =>
-        new(new FixedChatClientFactory(provider), CatalogOf(Categories), Wallets([]), NullLogger<ChatReceiptCategorizer>.Instance);
+    static ChatReceiptCategorizer Build(IChatClient provider, IOperationTimer? timer = null, Microsoft.Extensions.Logging.ILogger<ChatReceiptCategorizer>? logger = null) =>
+        new(new FixedChatClientFactory(provider), CatalogOf(Categories), Wallets([]), timer ?? NoopTimer, logger ?? NullLogger<ChatReceiptCategorizer>.Instance);
 
     static ICategoryCatalog CatalogOf(IReadOnlyList<CategoryEntry> categories)
     {
@@ -93,6 +98,20 @@ public class ChatReceiptCategorizerTests
 
         var offered = provider.Requests.SelectMany(request => request.Options!.Tools!).ToList();
         offered.Should().ContainSingle().Which.IsStrict().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task A_scripted_client_that_advances_the_clock_gives_one_model_categorizeReceipt_timing()
+    {
+        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var timer = new OperationTimer(clock, new SlowOperationOptions());
+        var logger = new CapturingLogger<ChatReceiptCategorizer>();
+        var provider = new ScriptedChatClient().AnswerAfterDelay(clock, TimeSpan.FromMilliseconds(10), Answer((1, "groceries")));
+        var categorizer = Build(provider, timer, logger);
+
+        await categorizer.CategorizeAsync(RequestWithOrdinals(1), TestContext.Current.CancellationToken);
+
+        logger.Entries.Should().ContainSingle(entry => (string)entry.Properties["Operation"] == "model.categorizeReceipt");
     }
 
     sealed class FixedChatClientFactory(IChatClient client) : IChatClientFactory

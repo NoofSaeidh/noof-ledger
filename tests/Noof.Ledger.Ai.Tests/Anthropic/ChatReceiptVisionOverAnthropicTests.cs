@@ -27,7 +27,8 @@ public class ChatReceiptVisionOverAnthropicTests
         var clientFactory = new AnthropicChatClientFactory(
             secretStore, httpClient, options, new OperationTimer(TimeProvider.System, new SlowOperationOptions()),
             NullLogger<AnthropicChatClientFactory>.Instance);
-        return (new ChatReceiptVision(clientFactory), handler);
+        return (new ChatReceiptVision(
+            clientFactory, new OperationTimer(TimeProvider.System, new SlowOperationOptions()), NullLogger<ChatReceiptVision>.Instance), handler);
     }
 
     [Fact]

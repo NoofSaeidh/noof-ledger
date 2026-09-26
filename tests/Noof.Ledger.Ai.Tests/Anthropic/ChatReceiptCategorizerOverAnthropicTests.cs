@@ -41,7 +41,8 @@ public class ChatReceiptCategorizerOverAnthropicTests
         walletDirectory.ActiveAsync(Arg.Any<CancellationToken>()).Returns(wallets ?? NoWallets);
 
         var categorizer = new ChatReceiptCategorizer(
-            clientFactory, categoryCatalog, walletDirectory, NullLogger<ChatReceiptCategorizer>.Instance);
+            clientFactory, categoryCatalog, walletDirectory,
+            new OperationTimer(TimeProvider.System, new SlowOperationOptions()), NullLogger<ChatReceiptCategorizer>.Instance);
         return (categorizer, handler);
     }
 

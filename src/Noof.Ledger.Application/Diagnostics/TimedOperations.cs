@@ -7,8 +7,11 @@ public static class TimedOperations
     public const string ModelRequest = "model.request";
     public const string ModelCanonicalize = "model.canonicalize";
     public const string ModelProbe = "model.probe";
+    public const string ModelReadReceipt = "model.readReceipt";
+    public const string ModelCategorizeReceipt = "model.categorizeReceipt";
     public const string SpeechProbe = "speech.probe";
     public const string SpeechTranscribe = "speech.transcribe";
+    public const string ReceiptFiscalFetch = "receipt.fiscalFetch";
 
     public const string TelegramGetUpdates = "telegram.getUpdates";
     public const string TelegramHandleUpdate = "telegram.handleUpdate";
@@ -28,6 +31,8 @@ public static class TimedOperations
     public const string JobQueueWait = "job.queueWait";
     public const string JobCategorize = "job.categorize";
     public const string JobTranscribe = "job.transcribe";
+    public const string JobExtractReceipt = "job.extractReceipt";
+    public const string JobCategorizeReceipt = "job.categorizeReceipt";
 
     public const string BackupDump = "backup.dump";
     public const string LogsPrune = "logs.prune";

@@ -34,7 +34,8 @@ public sealed class LiveReceiptTests
         if (!LiveModelGate.TryGetApiKey(out var apiKey))
             Assert.Skip(LiveModelGate.SkipMessage);
 
-        var vision = new ChatReceiptVision(CreateFactory(apiKey));
+        var vision = new ChatReceiptVision(
+            CreateFactory(apiKey), new OperationTimer(TimeProvider.System, new SlowOperationOptions()), NullLogger<ChatReceiptVision>.Instance);
 
         var receipt = await vision.ReadAsync(SyntheticReceiptPng, "image/png", null, TestContext.Current.CancellationToken);
 
@@ -58,7 +59,8 @@ public sealed class LiveReceiptTests
         walletDirectory.ActiveAsync(Arg.Any<CancellationToken>()).Returns([]);
 
         var categorizer = new ChatReceiptCategorizer(
-            CreateFactory(apiKey), categoryCatalog, walletDirectory, NullLogger<ChatReceiptCategorizer>.Instance);
+            CreateFactory(apiKey), categoryCatalog, walletDirectory,
+            new OperationTimer(TimeProvider.System, new SlowOperationOptions()), NullLogger<ChatReceiptCategorizer>.Instance);
         var request = new ReceiptCategorizationRequest(
             [new ReceiptLineToCategorize(1, "Mleko", 1, 120), new ReceiptLineToCategorize(2, "Hleb", 2, 180.50m)],
             "Maxi", "123456789", MerchantKnown: false, Caption: null);
