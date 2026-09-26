@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Noof.Ledger.Ai.Tests;
 
@@ -14,6 +15,16 @@ public sealed class ScriptedChatClient : IChatClient
     public ScriptedChatClient Answer(params AIContent[] contents)
     {
         answers.Enqueue(() => new ChatResponse(new ChatMessage(ChatRole.Assistant, contents)));
+        return this;
+    }
+
+    public ScriptedChatClient AnswerAfterDelay(FakeTimeProvider clock, TimeSpan elapsed, params AIContent[] contents)
+    {
+        answers.Enqueue(() =>
+        {
+            clock.Advance(elapsed);
+            return new ChatResponse(new ChatMessage(ChatRole.Assistant, contents));
+        });
         return this;
     }
 

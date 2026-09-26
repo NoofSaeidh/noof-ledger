@@ -1,7 +1,9 @@
 using System.Text.Json;
 using AwesomeAssertions;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging.Abstractions;
 using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Application.Diagnostics;
 
 namespace Noof.Ledger.Ai.Tests;
 
@@ -40,7 +42,9 @@ public class ChatCategorizerFunctionInvokerTests
     static FunctionCallContent ListMerchantsCall(string callId) =>
         new(callId, "list_merchants", new Dictionary<string, object?>());
 
-    static ChatCategorizer Build(ScriptedChatClient provider) => new(new FixedChatClientFactory(provider));
+    static ChatCategorizer Build(ScriptedChatClient provider) => new(
+        new FixedChatClientFactory(provider), new OperationTimer(TimeProvider.System, new SlowOperationOptions()),
+        NullLogger<ChatCategorizer>.Instance);
 
     [Fact]
     public async Task A_direct_record_transaction_answer_on_the_first_call_ends_the_loop_in_one_call()

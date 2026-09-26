@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Application.Transcription;
 
@@ -22,7 +24,9 @@ internal static class GroqRegistration
         services.AddScoped(sp => new GroqSpeechToTextClientFactory(
             sp.GetRequiredService<ISecretStore>(),
             sp.GetRequiredService<IHttpClientFactory>().CreateClient(HttpClientName),
-            sp.GetRequiredService<GroqOptions>()));
+            sp.GetRequiredService<GroqOptions>(),
+            sp.GetRequiredService<IOperationTimer>(),
+            sp.GetRequiredService<ILogger<GroqSpeechToTextClientFactory>>()));
 
         services.AddScoped<ISpeechToTextClientFactory>(sp => sp.GetRequiredService<GroqSpeechToTextClientFactory>());
         services.AddScoped<ISpeechProvider>(sp => sp.GetRequiredService<GroqSpeechToTextClientFactory>());

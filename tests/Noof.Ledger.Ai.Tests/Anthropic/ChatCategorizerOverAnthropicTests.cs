@@ -3,8 +3,10 @@ using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AwesomeAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
 using Noof.Ledger.Ai.Anthropic;
 using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Secrets;
 
 namespace Noof.Ledger.Ai.Tests.Anthropic;
@@ -30,8 +32,12 @@ public class ChatCategorizerOverAnthropicTests
         var httpClient = new HttpClient(handler);
         var secretStore = new StubSecretStore(state, key);
         var options = new AnthropicOptions { Model = "claude-haiku-4-5-20251001", MaxTokens = maxTokens, Timeout = TimeSpan.FromSeconds(90) };
-        var clientFactory = new AnthropicChatClientFactory(secretStore, httpClient, options);
-        return (new ChatCategorizer(clientFactory), handler);
+        var clientFactory = new AnthropicChatClientFactory(
+            secretStore, httpClient, options, new OperationTimer(TimeProvider.System, new SlowOperationOptions()),
+            NullLogger<AnthropicChatClientFactory>.Instance);
+        return (new ChatCategorizer(
+            clientFactory, new OperationTimer(TimeProvider.System, new SlowOperationOptions()),
+            NullLogger<ChatCategorizer>.Instance), handler);
     }
 
     [Fact]

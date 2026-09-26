@@ -1,7 +1,9 @@
 using Anthropic;
 using Anthropic.Exceptions;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Secrets;
 
 namespace Noof.Ledger.Ai.Anthropic;
@@ -10,7 +12,9 @@ namespace Noof.Ledger.Ai.Anthropic;
 // to call tools strictly, what its failures mean (AnthropicTranslatingChatClient), and how the
 // settings page tests its key. Everything above this reaches it through IChatClientFactory or
 // IModelProvider and never learns its name.
-internal sealed class AnthropicChatClientFactory(ISecretStore secretStore, HttpClient httpClient, AnthropicOptions options)
+internal sealed class AnthropicChatClientFactory(
+    ISecretStore secretStore, HttpClient httpClient, AnthropicOptions options,
+    IOperationTimer timer, ILogger<AnthropicChatClientFactory> logger)
     : IChatClientFactory, IModelProvider
 {
     // The operator's real key is stored encrypted under exactly this string, and EfSecretStore
@@ -37,6 +41,7 @@ internal sealed class AnthropicChatClientFactory(ISecretStore secretStore, HttpC
     // key works, never throwing into the Blazor circuit.
     public async Task<ProbeResult> ProbeAsync(CancellationToken cancellationToken)
     {
+        using var timing = timer.Start(logger, TimedOperations.ModelProbe);
         try
         {
             var client = await CreateSdkClientAsync(cancellationToken);

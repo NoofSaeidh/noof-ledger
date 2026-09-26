@@ -1,4 +1,6 @@
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
+using Noof.Ledger.Application.Diagnostics;
 
 namespace Noof.Ledger.Ai;
 
@@ -7,13 +9,15 @@ namespace Noof.Ledger.Ai;
 // forced. FunctionInvokingChatClient cannot be told this - it resets a required ToolMode after the
 // first iteration and strips every function declaration from its last one - so the rule lives here,
 // where the request is about to leave for the provider.
-internal sealed class AnswerToolGuard(IChatClient innerClient, AIFunctionDeclaration answerTool) : DelegatingChatClient(innerClient)
+internal sealed class AnswerToolGuard(IChatClient innerClient, AIFunctionDeclaration answerTool, IOperationTimer timer, ILogger logger)
+    : DelegatingChatClient(innerClient)
 {
-    public override Task<ChatResponse> GetResponseAsync(
+    public override async Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
     {
+        using var timing = timer.Start(logger, TimedOperations.ModelRequest);
         List<ChatMessage> history = [.. messages];
-        return base.GetResponseAsync(history, HoldsToolResult(history) ? ForceAnswer(options) : options, cancellationToken);
+        return await base.GetResponseAsync(history, HoldsToolResult(history) ? ForceAnswer(options) : options, cancellationToken);
     }
 
     public override IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(

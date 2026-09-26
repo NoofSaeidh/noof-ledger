@@ -1,14 +1,16 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Application.Diagnostics;
 
 namespace Noof.Ledger.Ai;
 
 // Everything about categorisation that does not depend on who answers it: the prompt, the schemas,
 // the list_merchants round trip, reading the answer back. The provider is whatever IChatClient the
 // factory hands out, and every failure it can have arrives here already as a ModelCallException.
-internal sealed class ChatCategorizer(IChatClientFactory clientFactory) : ICategorizer
+internal sealed class ChatCategorizer(IChatClientFactory clientFactory, IOperationTimer timer, ILogger<ChatCategorizer> logger) : ICategorizer
 {
     const string RecordTransactionName = "record_transaction";
     const string RecordTransactionDescription =
@@ -27,6 +29,8 @@ internal sealed class ChatCategorizer(IChatClientFactory clientFactory) : ICateg
 
     public async Task<CategorizationProposal> ProposeAsync(CategorizationRequest request, CancellationToken cancellationToken)
     {
+        using var timing = timer.Start(logger, TimedOperations.ModelCategorize);
+
         var recordTransaction = new SchemaTool(
             RecordTransactionName, RecordTransactionDescription,
             CategorizationSchema.BuildRecordTransaction(request.Categories, request.MerchantHints, request.Wallets ?? []));
@@ -47,7 +51,7 @@ internal sealed class ChatCategorizer(IChatClientFactory clientFactory) : ICateg
         // still sends one last request with every declaration stripped - which the guard re-arms.
         // So 1 means at most two provider calls; 2 lets a second lookup through and makes three.
         using var chat = new FunctionInvokingChatClient(
-            new AnswerToolGuard(await clientFactory.CreateAsync(cancellationToken), recordTransaction))
+            new AnswerToolGuard(await clientFactory.CreateAsync(cancellationToken), recordTransaction, timer, logger))
         {
             MaximumIterationsPerRequest = 1,
         };
@@ -75,6 +79,8 @@ internal sealed class ChatCategorizer(IChatClientFactory clientFactory) : ICateg
     public async Task<string> CanonicalizeMerchantAsync(
         string merchantText, IReadOnlyList<MerchantOption> knownMerchants, CancellationToken cancellationToken)
     {
+        using var timing = timer.Start(logger, TimedOperations.ModelCanonicalize);
+
         using var chat = await clientFactory.CreateAsync(cancellationToken);
 
         var instructions =
