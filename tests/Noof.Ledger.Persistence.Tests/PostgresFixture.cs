@@ -92,7 +92,7 @@ public sealed class PostgresFixture : IAsyncLifetime
             // pg_stat_activity as wait_event = CheckpointDone, not a stuck or leaked connection.
             await using var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)", admin)
             {
-                CommandTimeout = DatabaseSettings.AdminDdlTimeoutSeconds,
+                CommandTimeout = DatabaseSettings.AdminCommandTimeoutSeconds,
             };
 
             // The second reason 166 databases had accumulated: this loop used to let a failed drop

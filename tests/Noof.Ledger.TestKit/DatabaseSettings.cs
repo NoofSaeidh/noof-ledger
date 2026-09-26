@@ -10,7 +10,13 @@ public static class DatabaseSettings
     // and dropping clone databases) that wait can outlast Npgsql's default 30s CommandTimeout.
     // Several fixtures had already raised it for DROP alone; CREATE never got the same treatment,
     // which is the gap a Phase 6 full-suite run's flaky Npgsql read timeouts traced back to.
-    public const int AdminDdlTimeoutSeconds = 120;
+    //
+    // This used to be one AdminDdlTimeoutSeconds backing both budgets below. They happened to share
+    // a value, which let editing one look like it covered both - it did not: the connect timeout
+    // and the command timeout bound entirely different waits (handshake vs. checkpoint), and a fix
+    // aimed at one silently changed the other too. Two names close that trap even though the values
+    // still happen to match.
+    public const int AdminCommandTimeoutSeconds = 120;
 
     // Opening a fresh admin connection is not covered by CommandTimeout at all - that only bounds a
     // command once connected - so under the same loaded server just the TCP/protocol handshake can
@@ -18,9 +24,11 @@ public static class DatabaseSettings
     // stream"/"timeout during reading attempt" path a slow query does. Every admin DDL connection
     // this test infrastructure opens goes through here so the connect phase gets the same grace the
     // commands below do.
+    public const int AdminConnectTimeoutSeconds = 120;
+
     public static async Task<NpgsqlConnection> OpenAdminConnectionAsync(CancellationToken cancellationToken)
     {
-        var builder = new NpgsqlConnectionStringBuilder(AdminConnectionString) { Timeout = AdminDdlTimeoutSeconds };
+        var builder = new NpgsqlConnectionStringBuilder(AdminConnectionString) { Timeout = AdminConnectTimeoutSeconds };
         var connection = new NpgsqlConnection(builder.ConnectionString);
         await connection.OpenAsync(cancellationToken);
         return connection;
@@ -38,7 +46,7 @@ public static class DatabaseSettings
     static async Task ExecuteAdminDdlAsync(string sql, CancellationToken cancellationToken)
     {
         await using var admin = await OpenAdminConnectionAsync(cancellationToken);
-        await using var command = new NpgsqlCommand(sql, admin) { CommandTimeout = AdminDdlTimeoutSeconds };
+        await using var command = new NpgsqlCommand(sql, admin) { CommandTimeout = AdminCommandTimeoutSeconds };
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
