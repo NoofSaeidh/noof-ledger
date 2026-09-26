@@ -124,7 +124,7 @@ internal sealed class CategorizationWorker(
                 return;
             }
 
-            if (await TryRouteToReceiptAsync(scope, jobQueue, job, sub, cancellationToken))
+            if (await TryRouteToReceiptAsync(scope, jobQueue, store, notifier, job, sub, cancellationToken))
                 return;
 
             var categories = await categoryCatalog.ActiveAsync(cancellationToken);
@@ -274,7 +274,8 @@ internal sealed class CategorizationWorker(
     static readonly TimeSpan ReceiptExtractionPendingDelay = TimeSpan.FromSeconds(5);
 
     async Task<bool> TryRouteToReceiptAsync(
-        IServiceScope scope, IJobQueue jobQueue, CategorizationJob job, CategorizationSubject sub, CancellationToken cancellationToken)
+        IServiceScope scope, IJobQueue jobQueue, ICategorizationStore store, IChatNotifier notifier,
+        CategorizationJob job, CategorizationSubject sub, CancellationToken cancellationToken)
     {
         if (job.Kind is not (JobKind.Correct or JobKind.Reinterpret))
             return false;
@@ -310,13 +311,27 @@ internal sealed class CategorizationWorker(
         if (receipt is null && sub is { CaptureKind: CaptureKind.Photo, Status: TransactionStatus.Captured })
         {
             var runAfter = timeProvider.GetUtcNow() + ReceiptExtractionPendingDelay;
+            // R2-3 (Phase 6 second re-review): the same predicate the other retry paths use (see
+            // HandleModelFailureAsync) - without it, the 8th deferral quietly marks the job Failed with
+            // nobody told, breaking this method's own "never discards the operator's text" promise.
+            var isLastAttempt = job.AttemptCount >= options.MaxAttempts;
             var outcome = await jobQueue.RetryAsync(
                 job.Id, workerId, runAfter, "the receipt for this transaction is still being extracted", cancellationToken);
 
             if (outcome == JobCompletionOutcome.NotOwned)
+            {
                 logger.JobAlreadyReclaimed(job.Id);
+            }
             else
+            {
                 logger.ReceiptCorrectionDeferred(job.Id, job.TransactionId);
+
+                if (isLastAttempt)
+                {
+                    logger.ReceiptCorrectionDeferralExhausted(job.Id, job.TransactionId);
+                    await NotifyFailureAsync(store, notifier, sub, job, cancellationToken);
+                }
+            }
 
             return true;
         }

@@ -1611,6 +1611,31 @@ public class CategorizationWorkerTests
             Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
+    // R2-3 (Phase 6 second re-review): the defer branch used to call RetryAsync with no isLastAttempt
+    // bookkeeping, so its 8th deferral fell straight to "the receipt for this transaction is still
+    // being extracted" as the job's terminal last_error with nobody told - the comment above promises
+    // "it never discards the operator's text", but silence at exhaustion is exactly that from the
+    // operator's chair.
+    [Fact]
+    public async Task A_deferred_correction_that_exhausts_its_attempts_tells_the_operator_it_could_not_be_applied()
+    {
+        var jobQueue = QueueWith(Job(kind: JobKind.Correct, instruction: "that was cash", attemptCount: 8));
+        var receiptStore = NoReceiptStore();
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(status: TransactionStatus.Captured) with { CaptureKind = CaptureKind.Photo });
+        var notifier = Substitute.For<IChatNotifier>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, notifier: notifier, receiptStore: receiptStore),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await notifier.Received(1).EditAsync(
+            111L, 42, Arg.Is<EchoMessage>(m => m.Text.Contains("Could not apply that correction")), Arg.Any<CancellationToken>());
+        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task A_first_reading_is_never_routed_to_the_receipt_path_even_when_one_exists()
     {
