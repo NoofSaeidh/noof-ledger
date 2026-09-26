@@ -38,9 +38,13 @@ internal sealed class SystemHealth(HealthCheckService healthCheckService, TimePr
         var raw = await healthCheckService.CheckHealthAsync(cancellationToken);
         var now = timeProvider.GetUtcNow();
 
-        HealthItem[] items = [.. HealthCheckNames.Ordered.Select(name => raw.Entries.TryGetValue(name, out var entry)
-            ? new HealthItem(name, Map(entry.Status), entry.Description ?? string.Empty, now)
-            : new HealthItem(name, HealthLevel.Failing, "Check not registered", now))];
+        HealthItem[] items = [.. HealthCheckNames.Ordered.Select(name =>
+        {
+            var logCategory = HealthCheckLogCategories.ByCheckName.GetValueOrDefault(name, string.Empty);
+            return raw.Entries.TryGetValue(name, out var entry)
+                ? new HealthItem(name, Map(entry.Status), entry.Description ?? string.Empty, now, logCategory)
+                : new HealthItem(name, HealthLevel.Failing, "Check not registered", now, logCategory);
+        })];
 
         // Overall is the worst of the items exactly as displayed, so a check missing from
         // registration - shown as Failing, "Check not registered" - counts toward it the same way.

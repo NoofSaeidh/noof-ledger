@@ -119,6 +119,18 @@ public class SystemHealthTests
     }
 
     [Fact]
+    public async Task An_item_carries_its_checks_log_category()
+    {
+        var report = ReportOf((HealthCheckNames.Database, HealthStatus.Healthy, "ready"));
+        var health = new SystemHealth(ServiceReturning(report), new FakeTimeProvider(T0));
+
+        var result = await health.GetAsync(fresh: true, TestContext.Current.CancellationToken);
+
+        result.Items.Single(i => i.Name == HealthCheckNames.Database).LogCategory
+            .Should().Be("Noof.Ledger.Host.Startup.DatabaseStartupService");
+    }
+
+    [Fact]
     public async Task Fresh_true_always_runs_the_checks_again()
     {
         var service = ServiceReturning(ReportOf((HealthCheckNames.Database, HealthStatus.Healthy, "ready")));

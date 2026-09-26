@@ -16,8 +16,9 @@ public class DiagnosticsPageSourceTests
         source.Should().Contain("[Authorize]");
         source.Should().Contain("ISystemHealth");
         source.Should().Contain("id=\"diagnostics-checks\"");
-        source.Should().Contain("HealthCheckLogCategories",
+        source.Should().Contain("item.LogCategory",
             "the Logs link must open the check's owning logger category, not the check's display name (I-1)");
+        source.Should().NotContain("HealthCheckLogCategories");
         source.Should().Contain("id=\"diagnostics-view-all-logs\"");
         source.Should().NotContain("diagnostics-transaction-id",
             "the confusing transaction-id lookup form was removed - the trace is reachable from Transactions and log rows instead");

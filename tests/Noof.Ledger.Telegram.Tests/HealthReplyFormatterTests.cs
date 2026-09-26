@@ -6,7 +6,7 @@ namespace Noof.Ledger.Telegram.Tests;
 public class HealthReplyFormatterTests
 {
     static HealthItem Item(string name, HealthLevel level, string summary) =>
-        new(name, level, summary, DateTimeOffset.Parse("2026-09-25T10:00:00Z"));
+        new(name, level, summary, DateTimeOffset.Parse("2026-09-25T10:00:00Z"), string.Empty);
 
     [Fact]
     public void All_ok_checks_produce_the_all_good_header()
