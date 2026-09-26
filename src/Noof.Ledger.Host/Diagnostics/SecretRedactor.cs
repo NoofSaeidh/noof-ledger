@@ -1,9 +1,12 @@
 using Serilog.Events;
+using Serilog.Parsing;
 
 namespace Noof.Ledger.Host.Diagnostics;
 
 internal sealed class SecretRedactor(ISecretValueSource secrets)
 {
+    static readonly MessageTemplateParser TemplateParser = new();
+
     public LogEvent Redact(LogEvent logEvent)
     {
         var known = secrets.CurrentValues;
@@ -15,8 +18,15 @@ internal sealed class SecretRedactor(ISecretValueSource secrets)
             ? new RedactedException(original, RedactText(original.Message, known), RedactText(original.ToString(), known))
             : null;
 
-        return new LogEvent(logEvent.Timestamp, logEvent.Level, exception, logEvent.MessageTemplate, properties);
+        return new LogEvent(logEvent.Timestamp, logEvent.Level, exception, RedactTemplate(logEvent.MessageTemplate, known), properties);
     }
+
+    // A library that logs an interpolated string hands Serilog the finished text as the template, so
+    // a secret can sit in the template itself, not only in a property.
+    static MessageTemplate RedactTemplate(MessageTemplate template, IReadOnlyCollection<string> secrets) =>
+        secrets.Any(secret => template.Text.Contains(secret, StringComparison.Ordinal))
+            ? TemplateParser.Parse(RedactText(template.Text, secrets))
+            : template;
 
     static LogEventPropertyValue RedactValue(LogEventPropertyValue value, IReadOnlyCollection<string> secrets) => value switch
     {

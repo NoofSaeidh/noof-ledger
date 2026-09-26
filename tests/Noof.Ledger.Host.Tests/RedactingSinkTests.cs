@@ -24,6 +24,24 @@ public class RedactingSinkTests
         ((ScalarValue)recording.Received[0].Properties["Token"]).Value.Should().Be("***");
     }
 
+    // Our own code cannot put a runtime value into a template (CA2254, [LoggerMessage]), but a library
+    // that logs an interpolated string hands Serilog the finished text as the template itself.
+    [Fact]
+    public void A_secret_baked_into_the_message_template_is_redacted_and_its_placeholders_still_bind()
+    {
+        var recording = new RecordingSink();
+        var sink = new RedactingSink(recording, new SecretRedactor(new FixedSecrets("sk-super-secret-token")));
+        var evt = new LogEvent(DateTimeOffset.UtcNow, LogEventLevel.Warning, null,
+            new MessageTemplateParser().Parse("Connecting with Password=sk-super-secret-token to {Host}"),
+            [new LogEventProperty("Host", new ScalarValue("db.local"))]);
+
+        sink.Emit(evt);
+
+        var redacted = recording.Received.Should().ContainSingle().Subject;
+        redacted.MessageTemplate.Text.Should().NotContain("sk-super-secret-token");
+        redacted.RenderMessage().Should().Be("Connecting with Password=*** to \"db.local\"");
+    }
+
     [Fact]
     public void Disposing_the_sink_disposes_an_inner_sink_that_is_disposable()
     {

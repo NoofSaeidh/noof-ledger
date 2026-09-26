@@ -928,9 +928,12 @@ instrumenting the next time it is seen live rather than chasing from this descri
   timeout in `DisposeAsync` during a full-solution run (1 of ~4 full runs); the rerun of all E2E tests
   was green. Likely `DROP DATABASE ... WITH (FORCE)` waiting on the shared server under load. A longer
   command timeout on the admin connection is the cheap fix if it recurs.
-- **`SecretRedactionSentinelTests` hit an `IOException` once** on a rolling log file held by another
-  Host test host in the same run; passed alone. Each host has its own temp log directory, so the
-  collision is inside one directory — worth a look if it recurs.
+- **`SecretRedactionSentinelTests` hits an `IOException` in its cleanup**, not its assertions:
+  `Directory.Delete(logDirectory)` in the `finally` runs while the host's file sink still holds
+  `noof-ledger-<date>.log`. Seen once at the Phase 5 close; on 2026-09-26 it reproduced 2 runs in 3
+  when the class ran together with `SecretRedactorTests` straight through the xUnit exe, and passed
+  alone and in every full `run.ps1 test all`. Parked by the operator as test-only (no effect on the
+  running app); the fix is to dispose the factory before deleting, or retry the delete briefly.
 - **Configuration-added Serilog sinks did not reproduce through `WebApplicationFactory`** while they did
   in an isolated logger (follow-up review I-1). `ReadFrom.Configuration` is gone, so the risk is closed,
   but the reason the hosted repro stayed silent was never found.
@@ -960,3 +963,23 @@ growth becomes a real problem, or a GDPR-shaped request to actually forget somet
 migration never taking effect on `noof_ledger` or the test template — was `merchant_aliases_no_truncate`
 in commit `01b4961`, a different table; that story does not apply to `transaction_revisions`, whose
 guards shipped in their own migration from the start.)
+
+### Copilot review items parked by the operator — 2026-09-26
+
+Copilot's second pass on PR #1 raised five items. The template-borne secret leak was fixed (a
+library logging an interpolated string puts the text in the message template itself;
+`SecretRedactor` now redacts the template too). Two described decisions the operator had already
+made (Debug retention of 1 day; no file-tail fallback on the Logs page). The operator parked the
+other two as not mattering in real use:
+
+- **Secrets shorter than 8 characters are never redacted** (`SecretSnapshot.MinimumSecretLength`).
+  Deliberate: a short value such as `1234` would be replaced everywhere it occurs in a log. The only
+  secret this can realistically hit is a short database password — keep that password at 8+
+  characters and the gap is closed. Lowering the cutoff just for the database password is the fix if
+  that is ever not an option.
+- **Most `WebApplicationFactory` fixtures still use the real DataProtection key ring**
+  (`%LOCALAPPDATA%\NoofLedger\dp-keys`); only three call `UseTempKeyRingDirectory()`. A fixture only
+  writes there when no valid default key exists — about once per 90-day key lifetime — and a key it
+  creates is a valid member of the same DPAPI-protected ring, so the running app is unaffected. The
+  fix mirrors the log directory: apply `TestHostDataProtection` everywhere and add an architecture
+  guard like `TestHostLogDirectoryTests`.
