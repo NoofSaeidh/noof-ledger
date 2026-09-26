@@ -41,6 +41,7 @@ public class PublicSurfaceTests
         ],
         ["Noof.Ledger.Application"] =
         [
+            "IOperationTimer", "OperationTiming", "SlowOperationOptions", "TimedOperations",
             "IPasswordHasher", "IUserStore", "PasswordVerifyResult", "CapturedMessage",
             "ICaptureStore", "CategoryOption", "MerchantOption", "CategorizationRequest", "CorrectionRequest",
             "ProposedLineItem", "CategorizationProposal", "ResolvedLineItem", "CategorizedLineItem",
