@@ -19,6 +19,10 @@ internal static class HostDiagnosticsRegistration
             sp.GetRequiredService<IDatabaseGate>(), sp.GetRequiredService<SecretSnapshot>(), sp.GetRequiredService<TimeProvider>(),
             sp.GetRequiredService<ILogger<SecretSnapshotRefreshWorker>>()));
 
+        services.AddSingleton<DatabaseLogLevel>();
+        services.AddSingleton<IDatabaseLogLevel>(sp => sp.GetRequiredService<DatabaseLogLevel>());
+        services.AddHostedService<DatabaseLogLevelLoader>();
+
         return services;
     }
 }

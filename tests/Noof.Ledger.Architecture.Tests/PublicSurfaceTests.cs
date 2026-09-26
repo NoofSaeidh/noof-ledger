@@ -68,6 +68,7 @@ public class PublicSurfaceTests
             "TransactionStages", "TransactionLogScope", "TraceEvent", "RevisionView", "TraceLineItem", "TransactionSummary",
             "TransactionTrace", "ITransactionTrace",
             "ILogSinkStatus",
+            "IDatabaseLogLevel",
             "HealthLevel", "HealthItem", "SystemHealthReport", "ISystemHealth",
             "PollFailure", "IPollingHeartbeat", "HealthCheckNames", "HealthCheckLogCategories",
         ],
