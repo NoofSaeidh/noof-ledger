@@ -208,6 +208,8 @@ public class SelfLogOwnershipTests
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<ISecretValueSource>(new NoSecrets());
         services.AddSingleton<SecretRedactor>();
+        services.AddSingleton<LogLevelSwitches>();
+        services.AddSingleton<DatabaseLogLevelReadySignal>();
         return services.BuildServiceProvider();
     }
 
