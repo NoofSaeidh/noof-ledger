@@ -931,45 +931,30 @@ instrumenting the next time it is seen live rather than chasing from this descri
 
 ### Test-infrastructure flakes seen at the Phase 5 close
 
-- **E2E fixture teardown timed out once, and Phase 6's own full-suite run hit the same class of failure
-  — traced to a concurrent checkout, not an under-timed connection (Phase 6).**
-  `CookieModeHostFixture.DropCloneAsync` hit an Npgsql read timeout in `DisposeAsync` during a
-  full-solution run (1 of ~4 full runs); the rerun of all E2E tests was green. Phase 6's own full-suite
-  run then hit `AppLogSinkTests`/`ReadyGatedBufferSinkDbTests` timeouts on `CREATE`/`DROP DATABASE`
-  (11 first-pass failures, all green on rerun) even after raising the admin connect/command timeouts to
-  120s — raising the timeout alone did not fix it, because the actual cause was a second checkout
-  running its own full database/E2E suite against the same PostgreSQL server at the same time: two
-  concurrent `CREATE DATABASE ... TEMPLATE`/`DROP DATABASE` runs against one server's checkpoints
-  produce exactly this timeout, whatever the budget. The real fix is procedural, not a timeout value:
-  **full database/E2E runs go one at a time across checkouts** (CLAUDE.md's end-of-phase rule — "Database
-  and E2E test projects run filtered... and in full once at the end of a phase" — because both share a
-  PostgreSQL server across worktrees). `DatabaseSettings.OpenAdminConnectionAsync`/
-  `CreateDatabaseFromTemplateAsync`/`DropDatabaseAsync` still put an explicit 120s budget on the admin
-  connect and every admin DDL command, and every fixture that clones the template goes through them
-  (`.claude/rules/tests-detail.md`) — worth keeping as a genuine defence against slow checkpoints under
-  a loaded-but-uncontended server, just not what closed this flake. **Deferred fix:** a server-side
-  PostgreSQL advisory lock around clone DDL in `Noof.Ledger.TestKit`, so a second checkout's clone/drop
-  blocks and waits instead of racing and timing out — not built yet because the one-at-a-time operator
-  discipline above is sufficient today and an advisory lock adds its own failure mode (a stuck holder)
-  that would need its own timeout and diagnostics.
-- **`run.ps1 test all` times out on clone DDL even with no other checkout running (Phase 6 rebase,
-  2026-09-26).** Two back-to-back `test all` runs on the rebased `phase-6` tree, under the suite lock,
-  with no other checkout's test process visible, each failed 16–18 entries: every one a 120 s
-  `DatabaseSettings.ExecuteAdminDdlAsync` read timeout (`CookieModeHostFixture.DropCloneAsync` for
-  `TransactionTraceTests`/`DashboardBalancesTests`, clone creation in the Database-tagged Host.Tests
-  classes); no assertion failed. `test db` then `test e2e`, run one after the other, were fully green
-  (401 + 10 + 65). So the contention can come from inside one run — `dotnet test --solution` runs
-  Persistence, Host and E2E concurrently against one server — not only from a second checkout. The
-  server was also degraded: about 200 leftover `noof_test_*`/`noof_e2e_*` clones, and Persistence alone
-  took 12.5 min against a historic p90 of 3. **Next step:** `.\run.ps1 clean-test-dbs`, then `test all`
-  again; if it still times out, run the database and browser projects one after the other inside
-  `test all` rather than raising the timeout again.
+- **Clone `CREATE`/`DROP DATABASE` timeouts in full runs — closed 2026-09-27 (Phase 6).**
+  `CookieModeHostFixture.DropCloneAsync` and the Database-tagged Host.Tests classes hit 120 s
+  `DatabaseSettings.ExecuteAdminDdlAsync` read timeouts: once at the Phase 5 close, then 11–23 entries
+  per full run during Phase 6 — with a second checkout's suite running, and later with none. Raising
+  the admin timeouts to 120 s did not help, and a concurrent checkout was only an amplifier. Sampling
+  `pg_stat_activity` during a run showed the drops waiting on `IPC/CheckpointDone` and
+  `ProcSignalBarrier` while a single checkpoint took over two minutes. The cause: every `DROP DATABASE`
+  forces a checkpoint and waits for it, and under PostgreSQL's default `WAL_LOG` strategy each clone's
+  ~300 files go through shared buffers, so every checkpoint had to fsync every clone created since the
+  previous one. With 40 live clones, one `CHECKPOINT` took 42.6 s under `WAL_LOG` and 0.17 s under
+  `FILE_COPY`, and creating the 40 cost about the same (33 s vs 36 s). `DatabaseSettings` now creates
+  every test database `STRATEGY FILE_COPY` (commit `3b04301`, guarded by
+  `DatabaseSettingsCloneStrategyTests`). Checkpoint sync time over a full run fell from 515 s to 42 s,
+  and the slowest DDL from 120 s to 4 s. Two consecutive full `dotnet test --solution` runs then passed
+  first time. The advisory lock around clone DDL that was once proposed here is not needed. Leftover
+  clones from interrupted runs are harmless but still worth `.\run.ps1 clean-test-dbs`: 200 had built
+  up, mostly from these timed-out drops.
 - **`DatabaseLogLevelDbTests.A_stored_Off_level_drops_the_next_hosts_own_startup_burst...` failed once
   in five runs** (2026-09-26, same slow server): EF's "No migrations were applied" row reached
   `app_log` despite a stored Off. `ReadyGatedBufferSink` gives the stored-level load 5 s
   (`LoadTimeout`) before it flushes the startup buffer at the compiled-in default, so a load slower
   than that lets the startup burst through. It passed on an immediate rerun and was not changed in
-  Phase 6. Revisit if it recurs on a healthy server.
+  Phase 6. It failed once more on 2026-09-26 in a full run with the checkpoint stalls above, and
+  passed in every run after the `FILE_COPY` fix. Revisit if it recurs on a healthy server.
 - **`SecretRedactionSentinelTests` hits an `IOException` in its cleanup — closed 2026-09-26 (Phase 6)**,
   not its assertions:
   `Directory.Delete(logDirectory)` in the `finally` runs while the host's file sink still holds

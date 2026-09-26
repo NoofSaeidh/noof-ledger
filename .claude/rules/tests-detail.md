@@ -19,19 +19,15 @@ paths:
   whose final tick digit is non-zero is truncated on the round trip, so the assertion fails most
   runs but not all — the worst kind of flake. Seed from a fixed literal, or compare with
   `BeCloseTo`. This shipped twice before it was caught.
-- **Admin DDL in test fixtures (`CREATE`/`DROP DATABASE`, and the admin connection itself) always uses
-  the explicit connect/command timeouts on `Noof.Ledger.TestKit.DatabaseSettings`, never Npgsql's 30s
-  default** *(Phase 6)*. Every fixture that clones the test template goes through
-  `DatabaseSettings.OpenAdminConnectionAsync`/`CreateDatabaseFromTemplateAsync`/`DropDatabaseAsync` for
-  a single statement, or `OpenAdminConnectionAsync` + `AdminCommandTimeoutSeconds` directly for a
-  batched loop of several (`PostgresFixture.DisposeAsync` drops every database it created on one
-  admin connection this way, rather than opening one per drop) — never its own copy of the
-  `CREATE`/`DROP` boilerplate with Npgsql's default timeout. Set these because CREATE/DROP DATABASE
-  is uniquely slow to wait on — but the Phase 6 full-suite timeouts this was written for (11 failures,
-  even at 120s) turned out to be caused by a second checkout running its own full suite against the
-  same PostgreSQL server at the same time, not by an under-timed admin connection; raising the timeout
-  alone did not fix them, and never will for that cause. **Full database/E2E runs go one at a time
-  across checkouts** — CLAUDE.md's "Database and E2E test projects run filtered... and in full once at
-  the end of a phase" rule exists for exactly this. Keep these explicit timeouts regardless: they are
-  still the right defence against genuine checkpoint/connect slowness under a loaded shared server,
-  just not what closed this particular flake.
+- **Test databases are created with `STRATEGY FILE_COPY`, and all admin DDL goes through
+  `Noof.Ledger.TestKit.DatabaseSettings`** *(Phase 6)*. Every `DROP DATABASE` forces a checkpoint and
+  waits for it. Under PostgreSQL's default `WAL_LOG` strategy a clone's ~300 files go through shared
+  buffers, so that checkpoint must fsync every clone created since the last one and still alive —
+  measured with 40 live clones, one `CHECKPOINT` took 42.6s under `WAL_LOG` and 0.17s under
+  `FILE_COPY`. That, not the timeout values and not only a second checkout, is what made full-suite
+  drops outlast 120s; raising timeouts never fixed it. `DatabaseSettingsCloneStrategyTests` guards the
+  strategy. Every fixture uses `DatabaseSettings.OpenAdminConnectionAsync`/
+  `CreateDatabaseFromTemplateAsync`/`CreateEmptyDatabaseAsync`/`DropDatabaseAsync` for one statement,
+  or `OpenAdminConnectionAsync` + `AdminCommandTimeoutSeconds` for a batched loop
+  (`PostgresFixture.DisposeAsync`) — never its own copy of the `CREATE`/`DROP` boilerplate. Full
+  database/E2E runs still go one at a time across checkouts (CLAUDE.md's end-of-phase rule).

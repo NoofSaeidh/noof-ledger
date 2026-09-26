@@ -147,7 +147,7 @@ Moved to `.claude/rules/logging.md` — loads automatically when you touch a `Lo
   | Domain, Ai, Telegram, Receipts, Architecture, Host | 30000 | 120000 |
   | Persistence, filtered | 60000 | 120000 |
   | Persistence, full | 180000 | 330000 |
-  | Full solution | 150000 | 600000 |
+  | Full solution (13–15 min since Phase 6) | 600000 | 600000 |
   | E2E (no data yet — recalibrate) | 180000 | 600000 |
 
 - Waiting for something you did not start (the shared test-database lock, another session): same
