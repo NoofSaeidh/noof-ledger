@@ -229,6 +229,17 @@ function Exit-SuiteLock {
 # of the generic 1 every uncaught `throw` produces.
 $script:LastCheckedExitCode = 1
 
+function Assert-DemoNotRunning {
+    $client = [System.Net.Sockets.TcpClient]::new()
+    try {
+        $listening = $false
+        try { $listening = $client.ConnectAsync('127.0.0.1', 5264).Wait(500) } catch [System.AggregateException] { }
+        if ($listening) {
+            throw 'A demo is already running on http://127.0.0.1:5264 - stop it (Ctrl+C in its window) first.'
+        }
+    } finally { $client.Dispose() }
+}
+
 function Invoke-Checked {
     param([scriptblock]$Action)
     Remove-Item Variable:\LASTEXITCODE -ErrorAction SilentlyContinue
@@ -256,6 +267,23 @@ local debugging in an IDE-like setting. Same URL either way.
 
 Prerequisites: PostgreSQL reachable (or the host just shows the "Waiting for the database..."
 banner until it is); a .NET 10 SDK.
+'@
+    }
+    'demo' = @{
+        Summary = 'Refresh the demo database with mock data and run the app on it (127.0.0.1:5264)'
+        Detail  = @'
+demo [start|refresh]
+
+start (the default) rebuilds noof_ledger_demo at this branch's schema, fills it with the fixed mock
+data from tools\Noof.Ledger.Demo, then runs the real host on it at http://127.0.0.1:5264 until
+Ctrl+C. Sign in as demo / demo. The real app keeps 5263, so both can run at once.
+
+refresh only rebuilds and refills the database.
+
+The demo never touches noof_ledger: it has its own database, logs and key ring
+(%LOCALAPPDATA%\NoofLedger\demo), and backups are off. Refuses while a demo is already running.
+
+Prerequisites: PostgreSQL reachable; a .NET 10 SDK.
 '@
     }
     'publish' = @{
@@ -302,12 +330,12 @@ Prerequisites: PostgreSQL reachable.
 test [fast|db|e2e|all] [-Filter <class>]
 
 fast (the default) runs every project that needs neither PostgreSQL nor a browser: Domain, Ai,
-Architecture, Telegram and Host.Tests - except the handful of Host.Tests classes tagged
-[Trait("Category", "Database")] (AppLogSinkTests, DashboardCultureTests, ReadyGatedBufferSinkDbTests,
-SecretRedactionSentinelTests), which clone noof_ledger_test_template whenever PostgreSQL is reachable
-and so belong under the lock, not in fast.
+Architecture, Telegram, Host.Tests and Demo.Tests - except the classes in Host.Tests and Demo.Tests
+tagged [Trait("Category", "Database")] (AppLogSinkTests, DashboardCultureTests,
+ReadyGatedBufferSinkDbTests, SecretRedactionSentinelTests; RefreshTests, MockLedgerTests), which
+create databases whenever PostgreSQL is reachable and so belong under the lock, not in fast.
 
-db runs Noof.Ledger.Persistence.Tests plus those Database-tagged Host.Tests classes, e2e runs
+db runs Noof.Ledger.Persistence.Tests plus those Database-tagged classes, e2e runs
 Noof.Ledger.E2E.Tests, all runs the whole solution suite (`dotnet test --solution`). Each of these
 three acquires the shared suite lock ($env:TEMP\noof-suite.lock - PostgreSQL and Playwright browsers
 are shared across worktrees) before running and always releases it afterwards, even on failure.
@@ -483,6 +511,14 @@ switch ($CommandName) {
         }
     }
 
+    'demo' {
+        # Not $action: Invoke-Checked's own [scriptblock]$Action parameter would shadow it inside the block.
+        $demoAction = if ($Rest.Count -ge 1) { $Rest[0] } else { 'start' }
+        if ($demoAction -notin @('start', 'refresh')) { throw "Unknown demo action '$demoAction'. Use start or refresh." }
+        Assert-DemoNotRunning
+        Invoke-Checked { dotnet run --project (Join-Path $Root 'tools\Noof.Ledger.Demo') -c Release -- $demoAction }
+    }
+
     'publish' {
         $output = Get-ArgValue $Rest '-Output' (Join-Path $Root 'publish')
         # M-5 (Phase 5 final review): ops/publish.ps1 runs the identical full-solution test pass
@@ -537,7 +573,8 @@ switch ($CommandName) {
             'tests\Noof.Ledger.Ai.Tests\Noof.Ledger.Ai.Tests.csproj',
             'tests\Noof.Ledger.Architecture.Tests\Noof.Ledger.Architecture.Tests.csproj',
             'tests\Noof.Ledger.Telegram.Tests\Noof.Ledger.Telegram.Tests.csproj',
-            'tests\Noof.Ledger.Host.Tests\Noof.Ledger.Host.Tests.csproj'
+            'tests\Noof.Ledger.Host.Tests\Noof.Ledger.Host.Tests.csproj',
+            'tests\Noof.Ledger.Demo.Tests\Noof.Ledger.Demo.Tests.csproj'
         )
 
         # I-3 (Phase 5 final review): four Host.Tests classes clone noof_ledger_test_template
@@ -559,7 +596,7 @@ switch ($CommandName) {
             'fast' {
                 foreach ($project in $fastProjects) {
                     $full = Join-Path $Root $project
-                    $baseFilter = if ($project -like '*Noof.Ledger.Host.Tests*') { $hostTestsDatabaseExclusion } else { $null }
+                    $baseFilter = if ($project -like '*Noof.Ledger.Host.Tests*' -or $project -like '*Noof.Ledger.Demo.Tests*') { $hostTestsDatabaseExclusion } else { $null }
                     $effective = Combine-Filter -Base $baseFilter -UserFilter $filter
                     if ($effective) { Invoke-Checked { dotnet test --project $full --filter $effective } }
                     else { Invoke-Checked { dotnet test --project $full } }
@@ -576,6 +613,9 @@ switch ($CommandName) {
                     # them here, under the same lock, every time `db` runs.
                     $hostTests = Join-Path $Root 'tests\Noof.Ledger.Host.Tests\Noof.Ledger.Host.Tests.csproj'
                     Invoke-Checked { dotnet test --project $hostTests --filter 'Category=Database' }
+
+                    $demoTests = Join-Path $Root 'tests\Noof.Ledger.Demo.Tests\Noof.Ledger.Demo.Tests.csproj'
+                    Invoke-Checked { dotnet test --project $demoTests --filter 'Category=Database' }
                 } finally { Exit-SuiteLock $lock }
             }
             'e2e' {
