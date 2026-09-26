@@ -80,11 +80,16 @@ public sealed record ReceiptCategorizationRequest(
 
 public sealed record ReceiptLineCategory(int Ordinal, string CategorySlug);
 
+// N-8 (Phase 6 re-review): a receipt correction cannot change the date or the amounts - both come
+// from the receipt itself - and the model, not C# text matching, is what decides whether a
+// correction asked for either, since it is the one reading the operator's own words.
+public enum UnsupportedChangeKind { None, Date, Amount }
+
 public sealed record ReceiptCategorization(
     IReadOnlyList<ReceiptLineCategory> Lines,
     string? MerchantCanonicalName,
     Guid? WalletId,
-    bool AmountChangeDeclined = false);
+    UnsupportedChangeKind UnsupportedChange = UnsupportedChangeKind.None);
 
 public interface IReceiptCategorizer
 {

@@ -30,7 +30,7 @@ internal static class ReceiptCategorizationSchema
         {
             ["type"] = "object",
             ["additionalProperties"] = false,
-            ["required"] = new JsonArray("lines", "merchant_name", "wallet_id", "amount_change_declined"),
+            ["required"] = new JsonArray("lines", "merchant_name", "wallet_id", "unsupported_change"),
             ["properties"] = new JsonObject
             {
                 ["lines"] = new JsonObject
@@ -50,13 +50,18 @@ internal static class ReceiptCategorizationSchema
                 ["wallet_id"] = wallets.Count > 0
                     ? NullableEnum.String(wallets.Select(wallet => wallet.Id.ToString()), WalletIdDescription)
                     : new JsonObject { ["type"] = "null", ["description"] = WalletIdDescription },
-                ["amount_change_declined"] = new JsonObject
+                // N-8 (Phase 6 re-review): "none" carries the field's own not-applicable case, so it
+                // needs no nullable/anyOf treatment - a correction can ask for at most one of a
+                // different date or a different amount, and you cannot honour either.
+                ["unsupported_change"] = new JsonObject
                 {
-                    ["type"] = "boolean",
+                    ["type"] = "string",
+                    ["enum"] = new JsonArray("date", "amount", "none"),
                     ["description"] =
-                        "true only when a correction asked for a different amount than the receipt already "
-                        + "shows - you cannot change amounts, so answer the rest of the correction as usual and "
-                        + "set this to true; false otherwise, including when there is no correction.",
+                        "\"date\" when a correction asked for a different date than the receipt already shows, "
+                        + "\"amount\" when it asked for a different amount - you cannot change either, so answer "
+                        + "the rest of the correction as usual and set this accordingly; \"none\" otherwise, "
+                        + "including when there is no correction.",
                 },
             },
         };

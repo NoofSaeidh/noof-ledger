@@ -93,20 +93,36 @@ public class ChatReceiptCategorizerOverAnthropicTests
         var (categorizer, handler) = Build();
         handler.Enqueue(HttpStatusCode.OK, """
             {"id":"msg_11","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
-             "content":[{"type":"tool_use","id":"toolu_11","name":"categorize_receipt","input":{"lines":[{"ordinal":1,"category_slug":"groceries"},{"ordinal":2,"category_slug":"groceries"}],"merchant_name":"Maxi","wallet_id":null,"amount_change_declined":true}}],
+             "content":[{"type":"tool_use","id":"toolu_11","name":"categorize_receipt","input":{"lines":[{"ordinal":1,"category_slug":"groceries"},{"ordinal":2,"category_slug":"groceries"}],"merchant_name":"Maxi","wallet_id":null,"unsupported_change":"amount"}}],
              "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":150,"output_tokens":20}}
             """);
 
         var request = Request() with { Correction = "actually it was 200, not 180.50" };
         var result = await categorizer.CategorizeAsync(request, TestContext.Current.CancellationToken);
 
-        result.AmountChangeDeclined.Should().BeTrue();
+        result.UnsupportedChange.Should().Be(UnsupportedChangeKind.Amount);
         handler.Requests[0].Body.Should().Contain("actually it was 200, not 180.50");
 
         var schema = JsonDocument.Parse(handler.Requests[0].Body).RootElement
             .GetProperty("tools")[0].GetProperty("input_schema");
         schema.GetProperty("required").EnumerateArray().Select(e => e.GetString())
-            .Should().Contain("amount_change_declined");
+            .Should().Contain("unsupported_change");
+    }
+
+    [Fact]
+    public async Task A_declined_date_change_is_mapped_back_too()
+    {
+        var (categorizer, handler) = Build();
+        handler.Enqueue(HttpStatusCode.OK, """
+            {"id":"msg_12","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
+             "content":[{"type":"tool_use","id":"toolu_12","name":"categorize_receipt","input":{"lines":[{"ordinal":1,"category_slug":"groceries"},{"ordinal":2,"category_slug":"groceries"}],"merchant_name":"Maxi","wallet_id":null,"unsupported_change":"date"}}],
+             "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":150,"output_tokens":20}}
+            """);
+
+        var request = Request() with { Correction = "that was yesterday" };
+        var result = await categorizer.CategorizeAsync(request, TestContext.Current.CancellationToken);
+
+        result.UnsupportedChange.Should().Be(UnsupportedChangeKind.Date);
     }
 
     [Fact]

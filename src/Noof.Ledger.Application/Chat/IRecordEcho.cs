@@ -34,10 +34,12 @@ public interface IRecordEcho
 
     // Read back from the database exactly as Compose is (D4): record.Lines already carries the
     // categories the worker just wrote. receipt supplies what a plain capture has no equivalent of -
-    // the shop, its lines' own order, and the source warnings (R-2, R-7). amountChangeDeclined (I-2,
-    // Phase 6 final review) is true only after a correction asked for a different amount than the
-    // receipt shows - amounts never change, so the echo says so instead of silently ignoring it.
-    EchoMessage ComposeReceipt(CategorizationSubject record, ReceiptView receipt, bool amountChangeDeclined = false);
+    // the shop, its lines' own order, and the source warnings (R-2, R-7). unsupportedChange (I-2, Phase
+    // 6 final review; generalised from a plain bool to date|amount|none by N-8, Phase 6 re-review) is
+    // set only after a correction asked for a different date or amount than the receipt shows - neither
+    // ever changes, so the echo says so instead of silently ignoring it.
+    EchoMessage ComposeReceipt(
+        CategorizationSubject record, ReceiptView receipt, UnsupportedChangeKind unsupportedChange = UnsupportedChangeKind.None);
 
     // The receipt equivalent of Failure (R-6): a copy/training/proforma/advance slip is not a
     // purchase, so nothing was posted - the transaction is Cancelled, a deliberate non-post rather

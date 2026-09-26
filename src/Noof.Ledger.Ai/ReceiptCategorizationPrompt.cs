@@ -26,9 +26,11 @@ internal static class ReceiptCategorizationPrompt
 
         You may also be told a correction - something the person said after already seeing this
         receipt recorded, asking you to fix it. Apply it to the categories, the merchant name and the
-        wallet only. You cannot change amounts, no matter what the correction asks: if it asks for a
-        different amount, ignore that part, still answer everything else it asks for, and answer
-        amount_change_declined as true. Otherwise answer amount_change_declined as false.
+        wallet only. You cannot change the date or the amounts, no matter what the correction asks: if
+        it asks for a different date, ignore that part and answer unsupported_change as "date"; if it
+        asks for a different amount, ignore that part and answer unsupported_change as "amount" -
+        either way, still answer everything else it asks for. Otherwise answer unsupported_change as
+        "none".
         """;
 
     public static string RenderCategories(IReadOnlyList<CategoryOption> categories) =>

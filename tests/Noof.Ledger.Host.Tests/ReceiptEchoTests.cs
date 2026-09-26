@@ -153,16 +153,26 @@ public class ReceiptEchoTests
     [Fact]
     public void A_declined_amount_change_is_noted_ahead_of_the_receipt_body()
     {
-        var echo = Echo.ComposeReceipt(Record(), Receipt(), amountChangeDeclined: true);
+        var echo = Echo.ComposeReceipt(Record(), Receipt(), AppReceipts.UnsupportedChangeKind.Amount);
 
         echo.Text.Should().StartWith("Amounts come from the receipt and cannot be changed here — press Cancel if this record is wrong.\n\n");
         echo.Text.Should().Contain("Recorded — Test Market — Test Market - Centre · Cash · balance 0.00 RSD");
     }
 
+    // N-8 (Phase 6 re-review): a date request earns its own warning, distinct from the amount one.
     [Fact]
-    public void No_declined_amount_change_carries_no_note()
+    public void A_declined_date_change_is_noted_ahead_of_the_receipt_body()
     {
-        Echo.ComposeReceipt(Record(), Receipt(), amountChangeDeclined: false).Text.Should().NotContain("cannot be changed here");
+        var echo = Echo.ComposeReceipt(Record(), Receipt(), AppReceipts.UnsupportedChangeKind.Date);
+
+        echo.Text.Should().StartWith("The date comes from the receipt and cannot be changed here — press Cancel if this record is wrong.\n\n");
+        echo.Text.Should().Contain("Recorded — Test Market — Test Market - Centre · Cash · balance 0.00 RSD");
+    }
+
+    [Fact]
+    public void No_declined_change_carries_no_note()
+    {
+        Echo.ComposeReceipt(Record(), Receipt(), AppReceipts.UnsupportedChangeKind.None).Text.Should().NotContain("cannot be changed here");
     }
 
     [Theory]

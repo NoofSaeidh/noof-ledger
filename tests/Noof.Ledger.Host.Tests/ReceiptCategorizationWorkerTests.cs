@@ -70,9 +70,9 @@ public class ReceiptCategorizationWorkerTests
 
     static AppReceipts.ReceiptCategorization Categorization(
         Guid? walletId = null, string? merchantCanonicalName = null, IReadOnlyList<AppReceipts.ReceiptLineCategory>? lines = null,
-        bool amountChangeDeclined = false) =>
+        AppReceipts.UnsupportedChangeKind unsupportedChange = AppReceipts.UnsupportedChangeKind.None) =>
         new(lines ?? [new AppReceipts.ReceiptLineCategory(1, "groceries"), new AppReceipts.ReceiptLineCategory(2, "groceries")],
-            merchantCanonicalName, walletId, amountChangeDeclined);
+            merchantCanonicalName, walletId, unsupportedChange);
 
     static IServiceScopeFactory ScopeFactoryFor(
         IJobQueue jobQueue, IModelProvider modelProvider, ICategorizationStore? store = null,
@@ -459,15 +459,59 @@ public class ReceiptCategorizationWorkerTests
     {
         var categorizer = DefaultCategorizer();
         categorizer.CategorizeAsync(Arg.Any<AppReceipts.ReceiptCategorizationRequest>(), Arg.Any<CancellationToken>())
-            .Returns(Categorization(merchantCanonicalName: "Test Market", amountChangeDeclined: true));
+            .Returns(Categorization(merchantCanonicalName: "Test Market", unsupportedChange: AppReceipts.UnsupportedChangeKind.Amount));
+        // N-5 (Phase 6 re-review): ComposeReceipt now renders Captured (DefaultStore's own default
+        // status) as the waiting text, not "Recorded" - a correction's own echo reads the record back
+        // as Completed, exactly as ApplyAsync would have already left it by the time EchoAsync runs.
+        var store = DefaultStore();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject(status: TransactionStatus.Completed));
         var notifier = Substitute.For<IChatNotifier>();
         var worker = CreateWorker(
-            ScopeFactoryFor(QueueWith(Job("make it 1000")), KeyPresent(), categorizer: categorizer, notifier: notifier), Time());
+            ScopeFactoryFor(QueueWith(Job("make it 1000")), KeyPresent(), store, categorizer: categorizer, notifier: notifier), Time());
 
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
         await notifier.Received(1).EditAsync(
             111L, 42, Arg.Is<EchoMessage>(echo => echo.Text.StartsWith("Amounts come from the receipt")), Arg.Any<CancellationToken>());
+    }
+
+    // N-8 (Phase 6 re-review): a date request gets its own, distinct warning, decided by the model's
+    // unsupported_change answer rather than C# text matching.
+    [Fact]
+    public async Task A_categorizers_declined_date_change_reaches_the_echo()
+    {
+        var categorizer = DefaultCategorizer();
+        categorizer.CategorizeAsync(Arg.Any<AppReceipts.ReceiptCategorizationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(Categorization(merchantCanonicalName: "Test Market", unsupportedChange: AppReceipts.UnsupportedChangeKind.Date));
+        var store = DefaultStore();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject(status: TransactionStatus.Completed));
+        var notifier = Substitute.For<IChatNotifier>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job("that was yesterday")), KeyPresent(), store, categorizer: categorizer, notifier: notifier), Time());
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await notifier.Received(1).EditAsync(
+            111L, 42, Arg.Is<EchoMessage>(echo => echo.Text.StartsWith("The date comes from the receipt")), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_receipt_correction_always_recomputes_OccurredOn_from_the_receipts_own_issued_at()
+    {
+        // N-8: the date always comes from the receipt (ExtractReceiptWorker's IssuedAt), whatever a
+        // correction asked for - categorize_receipt has no date field to answer with either way.
+        var categorizer = DefaultCategorizer();
+        categorizer.CategorizeAsync(Arg.Any<AppReceipts.ReceiptCategorizationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(Categorization(merchantCanonicalName: "Test Market", unsupportedChange: AppReceipts.UnsupportedChangeKind.Date));
+        var store = DefaultStore();
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job("that was yesterday")), KeyPresent(), store, categorizer: categorizer), Time());
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await store.Received(1).ApplyAsync(
+            TransactionId, Arg.Is<CategorizationOutcome>(outcome => outcome.OccurredOn == new DateOnly(2026, 9, 25)),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]

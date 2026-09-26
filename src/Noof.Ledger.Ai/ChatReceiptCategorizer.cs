@@ -96,14 +96,21 @@ internal sealed class ChatReceiptCategorizer(
             logger.ExtraOrdinalIgnored(extraOrdinal);
 
         var walletId = string.IsNullOrEmpty(payload.WalletId) ? (Guid?)null : Guid.Parse(payload.WalletId);
-        return new ReceiptCategorization(lines, payload.MerchantName, walletId, payload.AmountChangeDeclined);
+        return new ReceiptCategorization(lines, payload.MerchantName, walletId, ParseUnsupportedChange(payload.UnsupportedChange));
     }
+
+    static UnsupportedChangeKind ParseUnsupportedChange(string value) => value switch
+    {
+        "date" => UnsupportedChangeKind.Date,
+        "amount" => UnsupportedChangeKind.Amount,
+        _ => UnsupportedChangeKind.None,
+    };
 
     sealed record CategorizeReceiptPayload(
         [property: JsonPropertyName("lines")] IReadOnlyList<CategorizeReceiptLineDto> Lines,
         [property: JsonPropertyName("merchant_name")] string? MerchantName,
         [property: JsonPropertyName("wallet_id")] string? WalletId,
-        [property: JsonPropertyName("amount_change_declined")] bool AmountChangeDeclined = false);
+        [property: JsonPropertyName("unsupported_change")] string UnsupportedChange = "none");
 
     sealed record CategorizeReceiptLineDto(
         [property: JsonPropertyName("ordinal")] int Ordinal,

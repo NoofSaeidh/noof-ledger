@@ -90,11 +90,13 @@ internal sealed class RecordEcho : IRecordEcho
     const int MaxDetailedReceiptLines = 40;
 
     const string AmountChangeDeclinedNote = "Amounts come from the receipt and cannot be changed here — press Cancel if this record is wrong.";
+    const string DateChangeDeclinedNote = "The date comes from the receipt and cannot be changed here — press Cancel if this record is wrong.";
 
     // M-3 (Phase 6 final review): Cancel/Restore call this too (RecordActionHandler), so a receipt
     // transaction keeps its shop header and its lines' own order through both states, instead of
     // falling back to the generic Compose the moment it is Cancelled.
-    public EchoMessage ComposeReceipt(CategorizationSubject record, ReceiptView receipt, bool amountChangeDeclined = false)
+    public EchoMessage ComposeReceipt(
+        CategorizationSubject record, ReceiptView receipt, UnsupportedChangeKind unsupportedChange = UnsupportedChangeKind.None)
     {
         var header = record.Status == TransactionStatus.Cancelled ? "Cancelled" : "Recorded";
         var text = $"{header} — {ShopHeader(receipt)} · {record.WalletName} · balance {Balances(record)}\n{ReceiptBody(record, receipt)}";
@@ -102,7 +104,14 @@ internal sealed class RecordEcho : IRecordEcho
         if (record.Status == TransactionStatus.Cancelled)
             return new(text, [RecordAction.Restore]);
 
-        return new(amountChangeDeclined ? $"{AmountChangeDeclinedNote}\n\n{text}" : text, [RecordAction.Cancel, RecordAction.Edit]);
+        var note = unsupportedChange switch
+        {
+            UnsupportedChangeKind.Date => DateChangeDeclinedNote,
+            UnsupportedChangeKind.Amount => AmountChangeDeclinedNote,
+            _ => null,
+        };
+
+        return new(note is null ? text : $"{note}\n\n{text}", [RecordAction.Cancel, RecordAction.Edit]);
     }
 
     public EchoMessage ComposeReceiptNotRecorded(ReceiptKind kind) =>

@@ -181,7 +181,7 @@ internal sealed class ReceiptCategorizationWorker(
 
             // From here on, as in CategorizationWorker: the line items and status are already
             // committed, so nothing past this line may be treated as a job failure.
-            await EchoAsync(store, receiptStore, notifier, job, categorization.AmountChangeDeclined, cancellationToken);
+            await EchoAsync(store, receiptStore, notifier, job, categorization.UnsupportedChange, cancellationToken);
 
             try
             {
@@ -289,7 +289,7 @@ internal sealed class ReceiptCategorizationWorker(
 
     async Task EchoAsync(
         ICategorizationStore store, IReceiptStore receiptStore, IChatNotifier notifier, CategorizationJob job,
-        bool amountChangeDeclined, CancellationToken cancellationToken)
+        UnsupportedChangeKind unsupportedChange, CancellationToken cancellationToken)
     {
         try
         {
@@ -301,7 +301,7 @@ internal sealed class ReceiptCategorizationWorker(
                 return;
 
             await notifier.EditAsync(
-                record.TelegramChatId, messageId, recordEcho.ComposeReceipt(record, receipt, amountChangeDeclined), cancellationToken);
+                record.TelegramChatId, messageId, recordEcho.ComposeReceipt(record, receipt, unsupportedChange), cancellationToken);
             logger.LogReplied(TransactionStages.Replied, messageId);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

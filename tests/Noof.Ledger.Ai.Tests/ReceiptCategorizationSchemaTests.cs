@@ -35,15 +35,19 @@ public class ReceiptCategorizationSchemaTests
         branches[1].GetProperty("type").GetString().Should().Be("null");
     }
 
+    // N-8 (Phase 6 re-review): "none" is a plain enum value, not a nullable type, so the field needs
+    // no anyOf treatment - a required three-valued string enum is the whole schema.
     [Fact]
-    public void Amount_change_declined_is_a_required_boolean()
+    public void Unsupported_change_is_a_required_string_enum_of_date_amount_or_none()
     {
         var schema = ReceiptCategorizationSchema.BuildCategorizeReceipt(Categories, NoWallets);
 
-        schema.GetProperty("properties").GetProperty("amount_change_declined").GetProperty("type").GetString()
-            .Should().Be("boolean");
+        var unsupportedChange = schema.GetProperty("properties").GetProperty("unsupported_change");
+        unsupportedChange.GetProperty("type").GetString().Should().Be("string");
+        unsupportedChange.GetProperty("enum").EnumerateArray().Select(e => e.GetString())
+            .Should().BeEquivalentTo(["date", "amount", "none"]);
         schema.GetProperty("required").EnumerateArray().Select(e => e.GetString())
-            .Should().Contain("amount_change_declined");
+            .Should().Contain("unsupported_change");
     }
 
     [Fact]
