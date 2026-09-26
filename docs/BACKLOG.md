@@ -113,8 +113,8 @@ obstacle is that several tests call `MigrateAsync` themselves and some assert on
 they cannot all share one database unchanged. Worth doing before the Persistence suite grows again,
 and worth measuring first: the win is wall-clock as much as reliability.
 
-**Do not** reach for the EF InMemory provider. `CLAUDE.md` bans it for good reasons, and every one of
-these tests exists precisely because it runs against real PostgreSQL.
+**Do not** reach for the EF InMemory provider. `.claude/rules/database.md` bans it for good reasons,
+and every one of these tests exists precisely because it runs against real PostgreSQL.
 
 ---
 
@@ -523,12 +523,12 @@ the TRUNCATE guard while every freshly created database had it. Found by acciden
 `MerchantAliasWriteOnceTests.Truncating_the_alias_table_is_rejected_by_the_database` fail — a true
 positive from an experiment that was measuring something else entirely.
 
-Both databases were dropped and recreated from migrations, and `CLAUDE.md` now carries the rule that
-caused it. What is still missing is a guard: nothing compares the template against a freshly
-migrated database, so the next drift will be found the same way — by luck. A test that migrates a
+Both databases were dropped and recreated from migrations, and `.claude/rules/database.md` now
+carries the rule that caused it. What is still missing is a guard: nothing compares the template
+against a freshly migrated database, so the next drift will be found the same way — by luck. A test that migrates a
 scratch database and diffs `pg_dump --schema-only` against the template would close it, at the cost
 of one full migration run per suite execution. Phase 2 added the runbook step "After adding a
-migration" and a CLAUDE.md rule; the drift guard itself is still missing.
+migration" and a Database rule; the drift guard itself is still missing.
 
 ## MudBlazor features that need a render-mode decision first — deferred 2026-09-22
 
@@ -959,7 +959,7 @@ allow a retention job's own `DELETE`, which is a bigger decision than this featu
 one guarantee that table currently makes, and loosening it for one more caller is not something to do
 as a side effect of a settings screen. Revisit alongside a real reason to prune old revisions (disk
 growth becomes a real problem, or a GDPR-shaped request to actually forget something).
-(The drift CLAUDE.md's Database rules warn about — a guard trigger added to an already-applied
+(The drift `.claude/rules/database.md` warns about — a guard trigger added to an already-applied
 migration never taking effect on `noof_ledger` or the test template — was `merchant_aliases_no_truncate`
 in commit `01b4961`, a different table; that story does not apply to `transaction_revisions`, whose
 guards shipped in their own migration from the start.)

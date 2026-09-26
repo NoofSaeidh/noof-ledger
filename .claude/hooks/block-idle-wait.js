@@ -1,7 +1,7 @@
 // PreToolUse hook: refuses idle-polling Bash/PowerShell calls (see CLAUDE.md §4 "Waiting on tests").
 const WAITING_WORDS = /^(waiting|wait|still|polling|poll)/i;
 const STRIP_PREFIX_RE = /^(cd|Set-Location)\s+(?:"[^"]*"|'[^']*'|\S+)\s*(?:&&|;)\s*/i;
-const SLEEP_RE = /^(?:sleep\s+\d+(?:\.\d+)?|Start-Sleep\s+(?:-Seconds\s+)?\d+(?:\.\d+)?)\s*(?:(?:&&|;)\s*(?:echo|Write-Output|Write-Host)\s+.+)?$/i;
+const SLEEP_RE = /^(?:sleep\s+\d+(?:\.\d+)?|Start-Sleep\s+(?:-(?:s|Seconds|ms|Milliseconds)\s+)?\d+(?:\.\d+)?)\s*(?:(?:&&|;)\s*(?:echo|Write-Output|Write-Host)\s+.+)?$/i;
 
 function isPureEchoWaiting(cmd) {
   const match = cmd.match(/^(?:echo|Write-Output|Write-Host)\s+(.*)$/i);

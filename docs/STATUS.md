@@ -34,15 +34,10 @@
 > `%LOCALAPPDATA%\NoofLedger\backups`, the newest 14 kept, every run logged to `backup_runs` — and
 > `ops/restore-check.ps1` proves a dump restores to the same balances, checked so far against a
 > template clone; the one check against the live ledger itself is the operator's to run
-> (`ops/RUNBOOK.md`). **1305 solution tests — 1294 passing, 11 live-only tests skipped, none failing** —
+> (`ops/RUNBOOK.md`). **1306 solution tests — 1295 passing, 11 live-only tests skipped, none failing** —
 > the Playwright browser tests are in the solution now, so `dotnet test --solution` runs them too and
 > needs Chromium present. Live suites stay skipped unless `NOOF_LEDGER_LIVE_ANTHROPIC_KEY` /
 > `NOOF_LEDGER_LIVE_GROQ_KEY` + `NOOF_LEDGER_LIVE_VOICE_FILE` are set; `ops/publish.ps1` produces a
 > runnable host. **`run.ps1` in the repo root is the one entry point for launching and operating the
 > app** (`.\run.ps1 help`) — `dotnet run` and the published exe now behave the same. Cross-currency
-> conversion, transfers and receipt photos remain future phases. Rules
-> below marked *(settled)* are direct user decisions and are not up for re-litigation.
->
-> Deferred **decisions** live in `docs/OPEN-QUESTIONS.md`; deferred **work** lives in `docs/BACKLOG.md`. Check both before proposing something as missing.
->
-> **`noof_ledger` holds the operator's real credentials now.** Never run tests, experiments or manual checks against it, or call the live model, without an explicit request. Tests use the `noof_ledger_test_template` clones only.
+> conversion, transfers and receipt photos remain future phases.

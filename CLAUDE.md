@@ -3,7 +3,8 @@
 Personal finance tracker. Telegram bot captures spending (text, voice, receipt photos), an LLM categorises it per line item, a local Blazor dashboard shows it across multiple wallets and currencies. C# / .NET 10, EF Core, strict TDD, local hosting, **public repo**.
 
 > **Status:** Phases 0, 0b, 1A, 1B, 1C, 1D, 2, 3, 4 and 5 complete — full detail in `docs/STATUS.md`.
-> Cross-currency conversion, transfers and receipt photos remain future phases.
+> Cross-currency conversion, transfers and receipt photos remain future phases. Rules
+> below marked *(settled)* are direct user decisions and are not up for re-litigation.
 >
 > Deferred **decisions** live in `docs/OPEN-QUESTIONS.md`; deferred **work** lives in `docs/BACKLOG.md`. Check both before proposing something as missing.
 >
@@ -109,8 +110,8 @@ tests, `TestKit`, any `Migrations` folder, `ops/**`, `run.ps1`, or the backup co
 **Logging** *(settled 2026-09-25, Phase 5)*
 
 Moved to `.claude/rules/logging.md` — loads automatically when you touch a `Logging/` or
-`Diagnostics/` folder, any `*Log.cs` file, `appsettings*.json`, the Host project, or the Log
-settings/Diagnostics/Trace razor pages.
+`Diagnostics/` folder, any `*Log.cs` file or test with `Log` in its name, `appsettings*.json`,
+`Noof.Ledger.Host` or its tests, the trace tests, or the Log settings/Diagnostics/Trace razor pages.
 
 **Testing**
 - TDD: a failing test first, for all behaviour. Exempt: migrations, DTOs, `Program.cs` wiring.
@@ -141,7 +142,7 @@ settings/Diagnostics/Trace razor pages.
 
   | Target | Step 1 (≈p90) | Step 2 (≈p99) |
   |---|---|---|
-  | Domain, Ai, Telegram, Receipts, Architecture, Host | 30000 | 120000 |
+  | Domain, Ai, Telegram, Architecture, Host | 30000 | 120000 |
   | Persistence, filtered | 60000 | 120000 |
   | Persistence, full | 180000 | 330000 |
   | Full solution | 150000 | 600000 |
@@ -176,3 +177,5 @@ the code that builds the echo text.
 When closing a phase, read and follow `docs/CLOSING-A-PHASE.md` *(settled)*.
 
 Keep this file short: path-specific rules go in `.claude/rules/` with `paths:` frontmatter, anything longer in `docs/`.
+A path-scoped rule loads when a matching file is read, not when a shell command touches one — after
+`dotnet ef migrations add`, `run.ps1` or a scripted edit, read the file (or the rule) before relying on it.

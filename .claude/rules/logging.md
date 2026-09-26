@@ -13,6 +13,9 @@ paths:
   - "src/Noof.Ledger.Web/Components/Pages/TransactionTrace.razor"
   - "src/Noof.Ledger.Web/Components/Pages/Diagnostics.razor"
   - "src/Noof.Ledger.Web/Components/Pages/DiagnosticsLogs.razor"
+  - "tests/Noof.Ledger.Host.Tests/**"
+  - "tests/**/*Log*.cs"
+  - "tests/**/*TransactionTrace*.cs"
 ---
 
 ## CLAUDE.md §4 — Logging *(settled 2026-09-25, Phase 5)*
@@ -60,3 +63,9 @@ paths:
   Changes on that page take effect only on **Save**, never on a field's own `@bind:after` — the same
   pattern as `Secrets.razor` — matching decision (b): no setting in this feature autosaves on change.
   `transaction_revisions` retention is explicitly not part of this — `docs/BACKLOG.md`.
+- **`LoggingSetup.Configure` never resolves a service whose construction needs `ILogger<T>`.** It runs
+  while the `ILoggerFactory` singleton is itself being built, so such a resolution re-enters that
+  construction on the same thread and the host hangs (a hung `WebApplicationFactory` test, confirmed
+  by a memory dump). What it needs from DI must be dependency-free, like `DatabaseLogLevelReadySignal`:
+  `DatabaseLogLevelLoader` marks it once the stored level is loaded, and `ReadyGatedBufferSink` waits
+  on it (up to 5 s) before flushing the startup burst, so a stored `Off` governs that burst too.
