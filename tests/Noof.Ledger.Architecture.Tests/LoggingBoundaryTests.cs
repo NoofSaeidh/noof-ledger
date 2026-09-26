@@ -30,6 +30,10 @@ public class LoggingBoundaryTests
         @"public\s+const\s+int\s+(?<name>\w+)\s*=\s*(?<value>\d+)\s*;",
         RegexOptions.Compiled);
 
+    static readonly Regex LoggerMessageAttribute = new(
+        @"\[LoggerMessage\(",
+        RegexOptions.Compiled);
+
     [Fact]
     public void Only_Noof_Ledger_Host_references_Serilog()
     {
@@ -105,6 +109,26 @@ public class LoggingBoundaryTests
             "every [LoggerMessage] EventId must be unique, except the TransactionStages ids (5001-5010) " +
             "that multiple stage writers deliberately share");
         usages.Should().HaveCountGreaterThan(1, "the scan must actually find [LoggerMessage] attributes, or this proves nothing");
+    }
+
+    // N-7 (2026-09-25 re-review): the uniqueness scan above only recognises `EventId = 1234` or
+    // `EventId = TransactionStages.Whatever` (EventIdAssignment). A positional
+    // `[LoggerMessage(1234, LogLevel.Information, "…")]`, or an `EventId = SomeClass.Const` naming a
+    // constant outside TransactionStages, carries an EventId that scan cannot see and drops silently
+    // out of the uniqueness check - two such attributes could collide and nothing here would notice.
+    // Counting every `[LoggerMessage(` attribute and requiring it to match the number of
+    // EventIdAssignment matches catches exactly that: a [LoggerMessage] whose EventId this scan
+    // could not read.
+    [Fact]
+    public void Every_LoggerMessage_attribute_has_an_EventId_the_uniqueness_scan_can_see()
+    {
+        var attributeCount = SourceFiles("*.cs").Sum(file => LoggerMessageAttribute.Matches(File.ReadAllText(file)).Count);
+        var recognisedEventIdCount = SourceFiles("*.cs").Sum(file => EventIdAssignment.Matches(File.ReadAllText(file)).Count);
+
+        recognisedEventIdCount.Should().Be(attributeCount,
+            "every [LoggerMessage] attribute must spell its EventId as `EventId = 1234` or " +
+            "`EventId = TransactionStages.Whatever`, or the uniqueness scan above cannot see it at all");
+        attributeCount.Should().BeGreaterThan(1, "the scan must actually find [LoggerMessage] attributes, or this proves nothing");
     }
 
     static Dictionary<string, int> TransactionStageEventIds()
