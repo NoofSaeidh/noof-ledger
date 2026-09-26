@@ -476,6 +476,35 @@ public class TelegramUpdateRouterTests
         await chatNotifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(m => m.Text == Echo.Correcting), Arg.Any<CancellationToken>());
     }
 
+    // R2-5 (Phase 6 second re-review): Telegram delivers an edited photo's own free text as Caption,
+    // not Text, so a receipt photo's caption edit used to be dropped silently at the top of
+    // HandleEditAsync - the operator's edited words went nowhere and no echo changed. A caption edit on
+    // a photo (or a document, the other receipt-photo entry point) reaches the same claim-time route as
+    // any other edit; a Voice message's own caption stays ignored (An_edited_voice_note_is_ignored)
+    // because a voice note's correction text is its transcript, not its caption.
+    [Fact]
+    public async Task Editing_a_receipt_photos_caption_reaches_ReplaceRawTextAsync_the_same_way_as_editing_its_text()
+    {
+        var (router, _, chatNotifier, editor, _, _, _) = CreateRouter(ownerChatId: 111L);
+        var transactionId = Guid.NewGuid();
+        editor.FindByUserMessageAsync(111L, 5, Arg.Any<CancellationToken>()).Returns(new EchoTarget(transactionId, 42));
+        editor.ReplaceRawTextAsync(transactionId, "actually this was cash", Arg.Any<CancellationToken>()).Returns(true);
+        var update = new Update
+        {
+            Id = 909,
+            EditedMessage = new Message
+            {
+                Id = 5, Chat = new Chat { Id = 111L }, Caption = "actually this was cash",
+                Photo = [new PhotoSize { FileId = "receipt-photo", Width = 1280, Height = 1280 }],
+            },
+        };
+
+        await router.HandleAsync(update, "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await editor.Received(1).ReplaceRawTextAsync(transactionId, "actually this was cash", Arg.Any<CancellationToken>());
+        await chatNotifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(m => m.Text == Echo.Correcting), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task A_strangers_edit_is_ignored()
     {

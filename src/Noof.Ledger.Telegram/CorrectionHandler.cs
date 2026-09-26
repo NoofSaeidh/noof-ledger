@@ -45,7 +45,12 @@ internal sealed class CorrectionHandler(
 
     public async Task HandleEditAsync(Message edited, CancellationToken cancellationToken)
     {
-        if (edited.Text is not { Length: > 0 } text)
+        // R2-5 (Phase 6 second re-review): Telegram delivers an edited photo's or document's own free
+        // text as Caption, never Text - dropping it here silently lost every receipt-photo caption
+        // edit. A voice note can carry a Caption too, but its correction text is its transcript
+        // (TryHandleVoiceReplyAsync), not a caption, so only a photo/document edit falls back to it.
+        var text = edited.Text ?? (edited.Photo is not null || edited.Document is not null ? edited.Caption : null);
+        if (text is not { Length: > 0 })
             return;
 
         if (await editor.FindByUserMessageAsync(edited.Chat.Id, edited.Id, cancellationToken) is not { } target)
