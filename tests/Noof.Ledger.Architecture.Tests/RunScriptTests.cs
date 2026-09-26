@@ -173,6 +173,20 @@ public class RunScriptTests
         }
     }
 
+    // Noof.Ledger.Receipts.Tests was added in Phase 6, after this fastProjects list was written, and
+    // needs neither PostgreSQL nor a browser - the same source-text pattern as
+    // Publish_takes_the_suite_lock_around_its_test_run, since actually running the fast list here
+    // would duplicate the suite's own fast run rather than test run.ps1 itself.
+    [Fact]
+    public void Fast_project_list_includes_Receipts_Tests()
+    {
+        var source = File.ReadAllText(Path.Combine(RepoRoot.Find().FullName, "run.ps1"));
+
+        source.Should().Contain(
+            @"tests\Noof.Ledger.Receipts.Tests\Noof.Ledger.Receipts.Tests.csproj",
+            "the fast suite must include the Receipts project added in Phase 6");
+    }
+
     public static TheoryData<string> CommandNameTheoryData()
     {
         var data = new TheoryData<string>();
