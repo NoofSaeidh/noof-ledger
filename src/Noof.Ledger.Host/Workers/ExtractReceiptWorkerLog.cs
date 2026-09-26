@@ -9,26 +9,26 @@ namespace Noof.Ledger.Host.Workers.ExtractReceiptLogging;
 // candidates at a shared call site.
 internal static partial class ExtractReceiptWorkerLog
 {
-    [LoggerMessage(EventId = 1501, Level = LogLevel.Error, Message = "Extract-receipt worker tick failed")]
+    [LoggerMessage(EventId = 1701, Level = LogLevel.Error, Message = "Extract-receipt worker tick failed")]
     public static partial void TickFailed(this ILogger logger, Exception exception);
 
-    [LoggerMessage(EventId = 1502, Level = LogLevel.Warning,
+    [LoggerMessage(EventId = 1702, Level = LogLevel.Warning,
         Message = "Job {JobId} was already reclaimed by another worker; not retrying")]
     public static partial void JobAlreadyReclaimed(this ILogger logger, Guid jobId);
 
-    [LoggerMessage(EventId = 1503, Level = LogLevel.Warning,
+    [LoggerMessage(EventId = 1703, Level = LogLevel.Warning,
         Message = "SucceedAsync failed for job {JobId} after its outcome was already handed on")]
     public static partial void SucceedAfterHandOffFailed(this ILogger logger, Exception exception, Guid jobId);
 
-    [LoggerMessage(EventId = 1504, Level = LogLevel.Warning,
+    [LoggerMessage(EventId = 1704, Level = LogLevel.Warning,
         Message = "Failed to edit Telegram message {MessageId} for transaction {TransactionId}")]
     public static partial void EditFailed(this ILogger logger, Exception exception, int messageId, Guid transactionId);
 
-    [LoggerMessage(EventId = 1505, Level = LogLevel.Warning,
+    [LoggerMessage(EventId = 1705, Level = LogLevel.Warning,
         Message = "Account-level model failure on job {JobId} ({Message}); pausing new claims for {Cooldown}")]
     public static partial void AccountLevelFailure(this ILogger logger, Guid jobId, string message, TimeSpan cooldown);
 
-    [LoggerMessage(EventId = 1506, Level = LogLevel.Information,
+    [LoggerMessage(EventId = 1706, Level = LogLevel.Information,
         Message = "Transaction {TransactionId} already has a receipt; not re-extracting a replayed job")]
     public static partial void LogReceiptAlreadyExtracted(this ILogger logger, Guid transactionId);
 

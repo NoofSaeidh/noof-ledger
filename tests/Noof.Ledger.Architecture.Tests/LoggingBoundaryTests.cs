@@ -22,6 +22,14 @@ public class LoggingBoundaryTests
         @"\.Log(?:Trace|Debug|Information|Warning|Error|Critical)\s*\(",
         RegexOptions.Compiled);
 
+    static readonly Regex EventIdAssignment = new(
+        @"\bEventId\s*=\s*(?<value>TransactionStages\.\w+|\d+)",
+        RegexOptions.Compiled);
+
+    static readonly Regex TransactionStageConst = new(
+        @"public\s+const\s+int\s+(?<name>\w+)\s*=\s*(?<value>\d+)\s*;",
+        RegexOptions.Compiled);
+
     [Fact]
     public void Only_Noof_Ledger_Host_references_Serilog()
     {
@@ -69,6 +77,59 @@ public class LoggingBoundaryTests
         offenders.Should().BeEmpty(
             "every log call goes through a source-generated [LoggerMessage] method, never logger.LogXxx(...) directly");
     }
+
+    // M-2 (Phase 6 final review): before Phase 6, every [LoggerMessage] EventId was unique. The
+    // TransactionStages ids (5001-5010) are the one deliberate exception - the same trace stage is
+    // written by more than one worker (Categorized by both CategorizationWorker and
+    // ReceiptCategorizationWorker, for instance), and EfTransactionTrace reads those rows back by
+    // id, so sharing is the point, not a bug. A plain numeric EventId reused anywhere else means the
+    // same wire id now names two unrelated events, which makes filtering /diagnostics/logs by id
+    // ambiguous - that already happened twice in Phase 6 (ExtractReceiptWorkerLog vs
+    // ReceiptCategorizerLog, ReceiptCategorizationWorkerLog vs TranscriptionWorkerLog).
+    [Fact]
+    public void Every_LoggerMessage_EventId_is_unique_outside_the_shared_trace_stages()
+    {
+        var stageIds = TransactionStageEventIds();
+
+        var usages = SourceFiles("*.cs")
+            .SelectMany(file => LoggerMessageEventIds(file, stageIds))
+            .ToArray();
+
+        var collisions = usages
+            .GroupBy(usage => usage.Value)
+            .Where(group => group.Count() > 1 && !group.All(usage => usage.IsTransactionStage))
+            .Select(group => $"EventId {group.Key}: {string.Join(", ", group.Select(usage => $"{usage.File}:{usage.Line}"))}")
+            .ToArray();
+
+        collisions.Should().BeEmpty(
+            "every [LoggerMessage] EventId must be unique, except the TransactionStages ids (5001-5010) " +
+            "that multiple stage writers deliberately share");
+        usages.Should().HaveCountGreaterThan(1, "the scan must actually find [LoggerMessage] attributes, or this proves nothing");
+    }
+
+    static Dictionary<string, int> TransactionStageEventIds()
+    {
+        var file = Path.Combine(
+            RepoRoot.Find().FullName, "src", "Noof.Ledger.Application", "Diagnostics", "TransactionStages.cs");
+
+        return TransactionStageConst.Matches(File.ReadAllText(file))
+            .ToDictionary(match => match.Groups["name"].Value, match => int.Parse(match.Groups["value"].Value));
+    }
+
+    static IEnumerable<EventIdUsage> LoggerMessageEventIds(string file, IReadOnlyDictionary<string, int> stageIds)
+    {
+        var text = File.ReadAllText(file);
+        foreach (Match match in EventIdAssignment.Matches(text))
+        {
+            var raw = match.Groups["value"].Value;
+            var isStage = raw.StartsWith("TransactionStages.", StringComparison.Ordinal);
+            var value = isStage ? stageIds[raw["TransactionStages.".Length..]] : int.Parse(raw);
+            var line = text[..match.Index].Count(c => c == '\n') + 1;
+            yield return new EventIdUsage(Relative(file), line, value, isStage);
+        }
+    }
+
+    readonly record struct EventIdUsage(string File, int Line, int Value, bool IsTransactionStage);
 
     static IEnumerable<string> SourceFiles(string pattern) =>
         Directory.EnumerateFiles(SrcRoot, pattern, SearchOption.AllDirectories)
