@@ -188,6 +188,19 @@ public class RecordEchoTests
         echo.Actions.Should().BeEmpty();
     }
 
+    // R2-3 follow-up: a Captured photo has no transcript to acknowledge - it is a receipt still
+    // being read, so it gets the same "Reading the receipt…" wording ComposeReceipt and the initial
+    // capture acknowledgement (TelegramUpdateRouter) already give this state, not the generic
+    // text/voice "Recording…".
+    [Fact]
+    public void A_captured_photo_still_being_read_says_so_not_Recording()
+    {
+        var echo = Echo.Compose(Record(TransactionStatus.Captured, lines: []) with { CaptureKind = CaptureKind.Photo });
+
+        echo.Text.Should().Be(Echo.ReadingReceipt);
+        echo.Actions.Should().BeEmpty();
+    }
+
     [Fact]
     public void A_failed_correction_says_so_above_the_unchanged_record()
     {
@@ -197,6 +210,18 @@ public class RecordEchoTests
             "Could not apply that correction — the record is unchanged.\n\n"
             + "Recorded — Cash · balance 0.00 RSD\n• кофе — 250.00 RSD · Food & Drink\n\nTotal: 250.00 RSD");
         echo.Actions.Should().Equal(RecordAction.Cancel, RecordAction.Edit);
+    }
+
+    // R2-3 (Phase 6 second re-review): a deferred correction that exhausts its attempts on a Captured
+    // photo used to call ComposeCorrectionFailure, which falls through to Compose - rendering
+    // "…the record is unchanged.\n\nRecording…" for a receipt that was never being "recorded" in the
+    // text/voice sense at all.
+    [Fact]
+    public void A_failed_correction_on_a_captured_photo_says_so_above_reading_the_receipt_not_recording()
+    {
+        var echo = Echo.ComposeCorrectionFailure(Record(TransactionStatus.Captured, lines: []) with { CaptureKind = CaptureKind.Photo });
+
+        echo.Text.Should().Be($"Could not apply that correction — the record is unchanged.\n\n{Echo.ReadingReceipt}");
     }
 
     [Fact]

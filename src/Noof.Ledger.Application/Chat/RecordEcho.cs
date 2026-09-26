@@ -181,8 +181,15 @@ internal sealed class RecordEcho : IRecordEcho
         }
     }
 
-    string Waiting(CategorizationSubject record) =>
-        record is { CaptureKind: CaptureKind.Voice, RawText.Length: 0 } ? Transcribing : Acknowledgement;
+    // R2-3 follow-up: a Captured photo is a receipt still being read, not a transcript being
+    // recorded - it gets the same "Reading the receipt…" wording ComposeReceipt and the initial
+    // capture acknowledgement (TelegramUpdateRouter) already give this state.
+    string Waiting(CategorizationSubject record) => record switch
+    {
+        { CaptureKind: CaptureKind.Voice, RawText.Length: 0 } => Transcribing,
+        { CaptureKind: CaptureKind.Photo } => ReadingReceipt,
+        _ => Acknowledgement,
+    };
 
     // A voice record's echo opens with what was heard (V5), so a misheard word is told apart from a misread one.
     static EchoMessage WithWhatWasHeard(CategorizationSubject record, EchoMessage echo) =>
