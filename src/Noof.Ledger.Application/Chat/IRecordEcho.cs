@@ -23,6 +23,11 @@ public interface IRecordEcho
     EchoMessage ReceiptReadFailure { get; }
     EchoMessage ReceiptVisionNotConfigured { get; }
 
+    // N-2 (Phase 6 re-review): editing a link-capture message into a DIFFERENT fiscal receipt link is
+    // a new receipt, not a correction of this one - CorrectionHandler answers with this instead of
+    // reaching Reinterpret, and nothing about the existing record changes.
+    EchoMessage NewReceiptLinkMustBeSentSeparately { get; }
+
     EchoMessage Compose(CategorizationSubject record);
     EchoMessage ComposeCorrectionFailure(CategorizationSubject record);
     EchoMessage ComposeHeardNothing(CategorizationSubject record);

@@ -33,9 +33,11 @@ public class TelegramUpdateRouterTests
         var store = Substitute.For<ICategorizationStore>();
         var receiptStore = Substitute.For<IReceiptStore>();
         receiptStore.GetByTransactionAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((ReceiptView?)null);
+        receiptStore.GetVerificationUrlAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((string?)null);
         var logger = new CapturingLogger<TelegramUpdateRouter>();
         var router = new TelegramUpdateRouter(captureStore, chatNotifier, new TelegramOwnerGate(secretStore),
-            new RecordActionHandler(editor, store, chatNotifier, Echo, receiptStore), new CorrectionHandler(editor, chatNotifier, Echo), Echo,
+            new RecordActionHandler(editor, store, chatNotifier, Echo, receiptStore),
+            new CorrectionHandler(editor, chatNotifier, Echo, receiptStore), Echo,
             Substitute.For<ISystemHealth>(), logger);
 
         return new Harness(router, captureStore, chatNotifier, editor, store, logger, receiptStore);
@@ -52,10 +54,12 @@ public class TelegramUpdateRouterTests
         var store = Substitute.For<ICategorizationStore>();
         var receiptStore = Substitute.For<IReceiptStore>();
         receiptStore.GetByTransactionAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((ReceiptView?)null);
+        receiptStore.GetVerificationUrlAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((string?)null);
         var systemHealth = Substitute.For<ISystemHealth>();
         var logger = new CapturingLogger<TelegramUpdateRouter>();
         var router = new TelegramUpdateRouter(captureStore, chatNotifier, new TelegramOwnerGate(secretStore),
-            new RecordActionHandler(editor, store, chatNotifier, Echo, receiptStore), new CorrectionHandler(editor, chatNotifier, Echo), Echo,
+            new RecordActionHandler(editor, store, chatNotifier, Echo, receiptStore),
+            new CorrectionHandler(editor, chatNotifier, Echo, receiptStore), Echo,
             systemHealth, logger);
 
         return (router, chatNotifier, systemHealth, secretStore);
@@ -416,6 +420,57 @@ public class TelegramUpdateRouterTests
 
         await editor.Received(1).ReplaceRawTextAsync(transactionId, "кофе 300", Arg.Any<CancellationToken>());
         await chatNotifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(echo => echo.Text == Echo.Correcting), Arg.Any<CancellationToken>());
+    }
+
+    // N-2 (Phase 6 re-review): editing a receipt link-capture's own message into a DIFFERENT fiscal
+    // link is a new receipt, not a correction - the record must be left exactly as it was, and the
+    // echo must say so, rather than reaching Reinterpret's record_transaction re-read.
+    [Fact]
+    public async Task Editing_a_link_captures_message_into_a_different_receipt_link_changes_nothing_and_says_so()
+    {
+        var (router, _, chatNotifier, editor, _, _, receiptStore) = CreateRouter(ownerChatId: 111L);
+        var transactionId = Guid.NewGuid();
+        editor.FindByUserMessageAsync(111L, 5, Arg.Any<CancellationToken>()).Returns(new EchoTarget(transactionId, 42));
+        receiptStore.GetVerificationUrlAsync(transactionId, Arg.Any<CancellationToken>())
+            .Returns("https://suf.purs.gov.rs/v/?vl=original");
+        var update = new Update
+        {
+            Id = 907,
+            EditedMessage = new Message
+            {
+                Id = 5, Chat = new Chat { Id = 111L }, Text = "https://suf.purs.gov.rs/v/?vl=adifferentone",
+            },
+        };
+
+        await router.HandleAsync(update, "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await editor.DidNotReceiveWithAnyArgs().ReplaceRawTextAsync(default, default!, Arg.Any<CancellationToken>());
+        await chatNotifier.Received(1).EditAsync(
+            111L, 42, Arg.Is<EchoMessage>(m => m.Text == Echo.NewReceiptLinkMustBeSentSeparately.Text), Arg.Any<CancellationToken>());
+    }
+
+    // Resending the SAME link (no change at all), or any other edit text, is an ordinary edit -
+    // CategorizationWorker's own claim-time routing (ruling F-2) decides from there whether it belongs
+    // to the receipt.
+    [Fact]
+    public async Task Editing_a_link_captures_message_into_an_ordinary_correction_still_reaches_ReplaceRawTextAsync()
+    {
+        var (router, _, chatNotifier, editor, _, _, receiptStore) = CreateRouter(ownerChatId: 111L);
+        var transactionId = Guid.NewGuid();
+        editor.FindByUserMessageAsync(111L, 5, Arg.Any<CancellationToken>()).Returns(new EchoTarget(transactionId, 42));
+        editor.ReplaceRawTextAsync(transactionId, "actually put this under groceries", Arg.Any<CancellationToken>()).Returns(true);
+        receiptStore.GetVerificationUrlAsync(transactionId, Arg.Any<CancellationToken>())
+            .Returns("https://suf.purs.gov.rs/v/?vl=original");
+        var update = new Update
+        {
+            Id = 908,
+            EditedMessage = new Message { Id = 5, Chat = new Chat { Id = 111L }, Text = "actually put this under groceries" },
+        };
+
+        await router.HandleAsync(update, "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await editor.Received(1).ReplaceRawTextAsync(transactionId, "actually put this under groceries", Arg.Any<CancellationToken>());
+        await chatNotifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(m => m.Text == Echo.Correcting), Arg.Any<CancellationToken>());
     }
 
     [Fact]
