@@ -19,26 +19,14 @@
 else
 {
     @* The database level changes what gets recorded, not what is shown, so it sits with the page
-       title as a setting rather than among the filters. *@
+       title as a setting rather than among the filters. Changed on the Log settings screen only -
+       decision (b), 2026-09-26 - never on this page. *@
     <div class="noof-page-header">
         <MudText HtmlTag="h1" Typo="Typo.h4">Logs</MudText>
-        <div class="noof-filter-field noof-setting">
-            <MudText HtmlTag="label" for="logs-database-level" Typo="Typo.caption" Class="mud-text-secondary">Record to database from</MudText>
-            <select id="logs-database-level" @bind="databaseLevel" @bind:after="SaveDatabaseLevelAsync" class="noof-native-select">
-                @foreach (var level in DatabaseLogLevel.Choices)
-                {
-                    <option value="@level">@level</option>
-                }
-            </select>
-        </div>
+        <MudLink id="logs-settings-link" Href="/diagnostics/logs/settings">
+            Log settings (database: @CurrentDatabaseLevelText())
+        </MudLink>
     </div>
-
-    @if (databaseLevelError)
-    {
-        <MudAlert id="logs-database-level-error" Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-4">
-            Could not save the database log level. Try again.
-        </MudAlert>
-    }
 
     <div class="noof-filter-bar">
         <div class="noof-filter-field">
@@ -176,8 +164,6 @@ else
     string? transactionIdText;
     QuickRange quickRange = QuickRange.All;
     long expandedRowId = -1;
-    LogSeverity databaseLevel;
-    bool databaseLevelError;
 
     protected override void OnInitialized()
     {
@@ -192,23 +178,9 @@ else
 
         if (Enum.TryParse<LogSeverity>(Level, ignoreCase: true, out var level))
             filter.MinLevel = level;
-
-        databaseLevel = DatabaseLogLevel.Current;
     }
 
-    async Task SaveDatabaseLevelAsync()
-    {
-        try
-        {
-            await DatabaseLogLevel.SetAsync(databaseLevel, CancellationToken.None);
-            databaseLevelError = false;
-        }
-        catch (Exception)
-        {
-            databaseLevel = DatabaseLogLevel.Current;
-            databaseLevelError = true;
-        }
-    }
+    string CurrentDatabaseLevelText() => DatabaseLogLevel.Current?.ToString() ?? "Off";
 
     // A filter change tears the old QuickGrid down and mounts a new one (see ReloadAsync's comment),
     // but the old instance's own in-flight ProvideRowsAsync call is not itself cancelled by that -

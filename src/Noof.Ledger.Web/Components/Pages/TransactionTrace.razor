@@ -5,6 +5,7 @@
 @attribute [Authorize]
 @inject ITransactionTrace TransactionTraceReader
 @inject IDatabaseGate Gate
+@inject IDatabaseLogLevel DatabaseLogLevel
 @inject TimeZoneInfo CaptureTimeZone
 
 <PageTitle>Transaction trace</PageTitle>
@@ -75,6 +76,14 @@ else
                 }
             </tbody>
         </MudSimpleTable>
+    }
+
+    @if (DatabaseLogLevel.Current is null || DatabaseLogLevel.Current > LogSeverity.Information)
+    {
+        <MudAlert id="trace-log-level-notice" Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-4">
+            The database log level is @(DatabaseLogLevel.Current?.ToString() ?? "Off") — stage events are not
+            recorded above Information. <MudLink Href="/diagnostics/logs/settings">Log settings</MudLink>
+        </MudAlert>
     }
 
     <div class="noof-section-header">

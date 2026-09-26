@@ -7,6 +7,9 @@ public class DiagnosticsPageSourceTests
     static string SourceText(string fileName) => File.ReadAllText(Path.Combine(
         RepoRoot.Find().FullName, "src", "Noof.Ledger.Web", "Components", "Pages", fileName));
 
+    static string SettingsSourceText(string fileName) => File.ReadAllText(Path.Combine(
+        RepoRoot.Find().FullName, "src", "Noof.Ledger.Web", "Components", "Pages", "Settings", fileName));
+
     [Fact]
     public void Diagnostics_page_is_routable_and_authorised_and_reads_ISystemHealth_only()
     {
@@ -57,9 +60,11 @@ public class DiagnosticsPageSourceTests
         source.Should().Contain("[SupplyParameterFromQuery]",
             "/diagnostics's per-check Logs link navigates to /diagnostics/logs?source=<name> - this page must read that query parameter to seed the filter");
         source.Should().Contain("IDatabaseLogLevel");
-        source.Should().Contain("id=\"logs-database-level\"");
-        source.Should().Contain("Record to database from");
-        source.Should().Contain("id=\"logs-database-level-error\"");
+        source.Should().Contain("id=\"logs-settings-link\"");
+        source.Should().Contain("/diagnostics/logs/settings",
+            "decision (b), 2026-09-26: the database level and retention are changed on their own Save-button screen, not inline on this page");
+        source.Should().NotContain("id=\"logs-database-level\"",
+            "the inline auto-save select was replaced by the Log settings link (decision (b))");
         source.Should().Contain("public Guid? TransactionId");
         source.Should().Contain("public string? Level");
         source.Should().NotContain("Virtualize",
@@ -87,6 +92,36 @@ public class DiagnosticsPageSourceTests
         source.Should().Contain("id=\"trace-history\"");
         source.Should().Contain("id=\"trace-logs-link\"");
         source.Should().Contain("/diagnostics/logs?transactionId=");
+        source.Should().Contain("id=\"trace-log-level-notice\"",
+            "operator decision (a), 2026-09-26: above Information (or Off) the database sink drops stage events, so the trace page must say so");
+        source.Should().Contain("/diagnostics/logs/settings");
+        source.Should().NotContain("MudSelect");
+        source.Should().NotContain("MudDatePicker");
+        source.Should().NotContain("MudAutocomplete");
+        source.Should().NotContain("MudMenu");
+        source.Should().NotContain("MudTooltip");
+        source.Should().NotContain("MudDialog");
+        source.Should().NotContain("MudSnackbar");
+    }
+
+    [Fact]
+    public void Log_settings_page_is_routable_authorised_and_saves_only_on_a_Save_button()
+    {
+        var source = SettingsSourceText("LogSettings.razor");
+
+        source.Should().Contain("@page \"/diagnostics/logs/settings\"");
+        source.Should().Contain("[Authorize]");
+        source.Should().Contain("IDatabaseLogLevel");
+        source.Should().Contain("ILogRetentionSettings");
+        source.Should().Contain("IFileLogSinkInfo");
+        source.Should().Contain("id=\"log-settings-level\"");
+        source.Should().Contain("id=\"log-settings-save\"");
+        source.Should().Contain("id=\"log-settings-feedback\"");
+        source.Should().Contain("RetentionInputId",
+            "one input per LogSeverity value, ided from the enum rather than six hand-written ids");
+        source.Should().Contain("Enum.GetValues<LogSeverity>()");
+        source.Should().Contain("Off",
+            "decision (a): the database log level must offer Off, not just the six real severities");
         source.Should().NotContain("MudSelect");
         source.Should().NotContain("MudDatePicker");
         source.Should().NotContain("MudAutocomplete");

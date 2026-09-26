@@ -296,6 +296,100 @@ public sealed class TransactionTraceTests(CookieModeHostFixture fixture) : PageT
     }
 
     [Fact]
+    public async Task With_the_database_level_at_Information_the_notice_is_not_shown()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var transactionId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var walletId = await SeedWalletAsync();
+
+        await using (var db = OpenDb())
+        {
+            db.Transactions.Add(new Transaction
+            {
+                Id = transactionId,
+                WalletId = walletId,
+                RawText = "notice-free trace transaction",
+                CaptureKind = CaptureKind.Manual,
+                Kind = TransactionKind.Expense,
+                Status = TransactionStatus.Completed,
+                TimeZoneId = "Europe/Belgrade",
+                OccurredAt = now,
+                OccurredOn = ZonedClock.LocalDate(now, "Europe/Belgrade"),
+                TelegramChatId = null,
+                TelegramMessageId = null,
+                CreatedAt = now,
+            });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync($"{fixture.BaseUrl}/transactions/{transactionId}/trace");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        await Expect(Page.Locator("#trace-log-level-notice")).Not.ToBeVisibleAsync();
+    }
+
+    [Fact]
+    public async Task A_database_level_above_Information_shows_the_notice_with_a_link_to_log_settings()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var transactionId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var walletId = await SeedWalletAsync();
+
+        await using (var db = OpenDb())
+        {
+            db.Transactions.Add(new Transaction
+            {
+                Id = transactionId,
+                WalletId = walletId,
+                RawText = "notice trace transaction",
+                CaptureKind = CaptureKind.Manual,
+                Kind = TransactionKind.Expense,
+                Status = TransactionStatus.Completed,
+                TimeZoneId = "Europe/Belgrade",
+                OccurredAt = now,
+                OccurredOn = ZonedClock.LocalDate(now, "Europe/Belgrade"),
+                TelegramChatId = null,
+                TelegramMessageId = null,
+                CreatedAt = now,
+            });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SignInAsync();
+
+        try
+        {
+            await Page.GotoAsync($"{fixture.BaseUrl}/diagnostics/logs/settings");
+            await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+            await Page.SelectOptionAsync("#log-settings-level", "Warning");
+            await Page.Locator("#log-settings-save").ClickAsync();
+            await Expect(Page.Locator("#log-settings-feedback")).ToContainTextAsync("Saved");
+
+            await Page.GotoAsync($"{fixture.BaseUrl}/transactions/{transactionId}/trace");
+            await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+            var notice = Page.Locator("#trace-log-level-notice");
+            await Expect(notice).ToBeVisibleAsync();
+            await Expect(notice).ToContainTextAsync("Warning");
+            await Expect(notice.GetByRole(AriaRole.Link, new() { Name = "Log settings" })).ToBeVisibleAsync();
+        }
+        finally
+        {
+            await Page.GotoAsync($"{fixture.BaseUrl}/diagnostics/logs/settings");
+            await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+            await Page.SelectOptionAsync("#log-settings-level", "Information");
+            await Page.Locator("#log-settings-save").ClickAsync();
+        }
+    }
+
+    [Fact]
     public async Task An_unknown_transaction_id_shows_a_not_found_state()
     {
         if (fixture.DatabaseUnavailable)

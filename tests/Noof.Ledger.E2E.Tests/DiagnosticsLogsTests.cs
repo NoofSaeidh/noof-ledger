@@ -227,7 +227,7 @@ public sealed class DiagnosticsLogsTests(CookieModeHostFixture fixture) : PageTe
     }
 
     [Fact]
-    public async Task The_database_level_choice_survives_a_reload()
+    public async Task The_page_header_links_to_log_settings_and_names_the_current_database_level()
     {
         if (fixture.DatabaseUnavailable)
             Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
@@ -236,21 +236,13 @@ public sealed class DiagnosticsLogsTests(CookieModeHostFixture fixture) : PageTe
         await Page.GotoAsync(fixture.BaseUrl + "/diagnostics/logs");
         await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
-        try
-        {
-            await Page.SelectOptionAsync("#logs-database-level", "Debug");
-            await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        var link = Page.Locator("#logs-settings-link");
+        await Expect(link).ToBeVisibleAsync();
+        await Expect(link).ToContainTextAsync("Log settings");
+        await Expect(link).ToContainTextAsync("Information");
 
-            await Page.ReloadAsync();
-            await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-
-            await Expect(Page.Locator("#logs-database-level")).ToHaveValueAsync("Debug");
-        }
-        finally
-        {
-            await Page.SelectOptionAsync("#logs-database-level", "Information");
-            await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-        }
+        await link.ClickAsync();
+        await Page.WaitForURLAsync("**/diagnostics/logs/settings");
     }
 
     static AppLogEntry NewRow(
