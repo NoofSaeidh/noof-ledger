@@ -36,7 +36,7 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
 > `%LOCALAPPDATA%\NoofLedger\backups`, the newest 14 kept, every run logged to `backup_runs` — and
 > `ops/restore-check.ps1` proves a dump restores to the same balances, checked so far against a
 > template clone; the one check against the live ledger itself is the operator's to run
-> (`ops/RUNBOOK.md`). **1280 solution tests — 1269 passing, 11 live-only tests skipped, none failing** —
+> (`ops/RUNBOOK.md`). **1305 solution tests — 1294 passing, 11 live-only tests skipped, none failing** —
 > the Playwright browser tests are in the solution now, so `dotnet test --solution` runs them too and
 > needs Chromium present. Live suites stay skipped unless `NOOF_LEDGER_LIVE_ANTHROPIC_KEY` /
 > `NOOF_LEDGER_LIVE_GROQ_KEY` + `NOOF_LEDGER_LIVE_VOICE_FILE` are set; `ops/publish.ps1` produces a
