@@ -139,6 +139,35 @@ public class EfRecordEditorTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task A_correction_on_a_receipt_transaction_is_routed_to_the_receipt_categorizer_not_record_transaction()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = await SeedAsync(db);
+        db.Receipts.Add(new Receipt
+        {
+            Id = Guid.NewGuid(),
+            TransactionId = transaction.Id,
+            Source = ReceiptSource.FiscalQr,
+            Total = new Money(500m, CurrencyCode.Rsd),
+            Kind = ReceiptKind.Sale,
+            CreatedAt = Clock.GetUtcNow(),
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+        var editor = new EfRecordEditor(db, Clock);
+
+        (await editor.RequestCorrectionAsync(transaction.Id, "that was cash, not card", 8, Clock.GetUtcNow(), TestContext.Current.CancellationToken))
+            .Should().BeTrue();
+
+        db.ChangeTracker.Clear();
+        var job = await db.CategorizationJobs.SingleAsync(TestContext.Current.CancellationToken);
+        job.Kind.Should().Be(JobKind.CategorizeReceipt, "a receipt's amounts never come from record_transaction");
+        job.Instruction.Should().Be("that was cash, not card");
+        job.SourceMessageId.Should().Be(8);
+    }
+
+    [Fact]
     public async Task A_correction_is_queued_once_even_when_telegram_delivers_the_reply_twice()
     {
         await using var db = await fixture.CreateContextAsync();

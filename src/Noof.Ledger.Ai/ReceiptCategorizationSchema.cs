@@ -30,7 +30,7 @@ internal static class ReceiptCategorizationSchema
         {
             ["type"] = "object",
             ["additionalProperties"] = false,
-            ["required"] = new JsonArray("lines", "merchant_name", "wallet_id"),
+            ["required"] = new JsonArray("lines", "merchant_name", "wallet_id", "amount_change_declined"),
             ["properties"] = new JsonObject
             {
                 ["lines"] = new JsonObject
@@ -50,6 +50,14 @@ internal static class ReceiptCategorizationSchema
                 ["wallet_id"] = wallets.Count > 0
                     ? NullableEnum.String(wallets.Select(wallet => wallet.Id.ToString()), WalletIdDescription)
                     : new JsonObject { ["type"] = "null", ["description"] = WalletIdDescription },
+                ["amount_change_declined"] = new JsonObject
+                {
+                    ["type"] = "boolean",
+                    ["description"] =
+                        "true only when a correction asked for a different amount than the receipt already "
+                        + "shows - you cannot change amounts, so answer the rest of the correction as usual and "
+                        + "set this to true; false otherwise, including when there is no correction.",
+                },
             },
         };
 

@@ -34,13 +34,14 @@ public class ReceiptCategorizationWorkerTests
     static readonly WalletOption NamedInCaption = new(
         Guid.Parse("00000000-0000-0000-0000-000000000004"), "Wise", CurrencyCode.Rsd, [], IsDefaultForCurrency: false);
 
-    static CategorizationJob Job() => new()
+    static CategorizationJob Job(string? instruction = null) => new()
     {
         Id = JobId,
         TransactionId = TransactionId,
         Status = JobStatus.Claimed,
         AttemptCount = 1,
         Kind = JobKind.CategorizeReceipt,
+        Instruction = instruction,
         RunAfter = DateTimeOffset.UtcNow,
         CreatedAt = DateTimeOffset.UtcNow,
         UpdatedAt = DateTimeOffset.UtcNow,
@@ -67,9 +68,10 @@ public class ReceiptCategorizationWorkerTests
             ]);
 
     static AppReceipts.ReceiptCategorization Categorization(
-        Guid? walletId = null, string? merchantCanonicalName = null, IReadOnlyList<AppReceipts.ReceiptLineCategory>? lines = null) =>
+        Guid? walletId = null, string? merchantCanonicalName = null, IReadOnlyList<AppReceipts.ReceiptLineCategory>? lines = null,
+        bool amountChangeDeclined = false) =>
         new(lines ?? [new AppReceipts.ReceiptLineCategory(1, "groceries"), new AppReceipts.ReceiptLineCategory(2, "groceries")],
-            merchantCanonicalName, walletId);
+            merchantCanonicalName, walletId, amountChangeDeclined);
 
     static IServiceScopeFactory ScopeFactoryFor(
         IJobQueue jobQueue, IModelProvider modelProvider, ICategorizationStore? store = null,
@@ -407,6 +409,46 @@ public class ReceiptCategorizationWorkerTests
                 && outcome.Items.Any(item => item.Ordinal == 2 && item.Amount == new Money(250m, CurrencyCode.Rsd))
                 && outcome.Items.All(item => item.ReceiptLineId != null)),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_correction_instruction_reaches_the_categorizer_and_amounts_and_ordinals_still_come_from_the_receipt()
+    {
+        var categorizer = DefaultCategorizer();
+        var store = DefaultStore();
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job("that was cash, not card")), KeyPresent(), store, categorizer: categorizer), Time());
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await categorizer.Received(1).CategorizeAsync(
+            Arg.Is<AppReceipts.ReceiptCategorizationRequest>(request => request.Correction == "that was cash, not card"),
+            Arg.Any<CancellationToken>());
+        await store.Received(1).ApplyAsync(
+            TransactionId,
+            Arg.Is<CategorizationOutcome>(outcome =>
+                outcome.Kind == JobKind.CategorizeReceipt
+                && outcome.Instruction == "that was cash, not card"
+                && outcome.Items.All(item => item.ReceiptLineId != null)
+                && outcome.Items.Any(item => item.Ordinal == 1 && item.Amount == new Money(123.4567m, CurrencyCode.Rsd))
+                && outcome.Items.Any(item => item.Ordinal == 2 && item.Amount == new Money(250m, CurrencyCode.Rsd))),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_categorizers_declined_amount_change_reaches_the_echo()
+    {
+        var categorizer = DefaultCategorizer();
+        categorizer.CategorizeAsync(Arg.Any<AppReceipts.ReceiptCategorizationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(Categorization(merchantCanonicalName: "Test Market", amountChangeDeclined: true));
+        var notifier = Substitute.For<IChatNotifier>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job("make it 1000")), KeyPresent(), categorizer: categorizer, notifier: notifier), Time());
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await notifier.Received(1).EditAsync(
+            111L, 42, Arg.Is<EchoMessage>(echo => echo.Text.StartsWith("Amounts come from the receipt")), Arg.Any<CancellationToken>());
     }
 
     [Fact]

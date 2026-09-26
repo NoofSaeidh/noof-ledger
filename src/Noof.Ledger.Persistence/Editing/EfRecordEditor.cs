@@ -23,12 +23,22 @@ internal sealed class EfRecordEditor(LedgerDbContext db, TimeProvider timeProvid
             .Select(t => new EchoTarget(t.Id, t.BotMessageId))
             .SingleOrDefaultAsync(cancellationToken);
 
+    // I-2 (Phase 6 final review): a transaction with a receipt never runs record_transaction again -
+    // its amounts are the receipt's own and must stay that way. A correction on one is routed to
+    // CategorizeReceipt instead of Correct, so ReceiptCategorizationWorker re-runs categorize_receipt
+    // (categories/merchant/wallet only) and rebuilds the line items from receipt_lines, never from a
+    // model's own reading of the raw text.
     public async Task<bool> RequestCorrectionAsync(
         Guid transactionId, string instruction, int sourceMessageId, DateTimeOffset sentAt, CancellationToken cancellationToken) =>
         await TryQueueAsync(
-            NewJob(transactionId, JobKind.Correct, instruction, sourceMessageId,
-                await InstructionDayAsync(transactionId, sentAt, cancellationToken)),
+            await HasReceiptAsync(transactionId, cancellationToken)
+                ? NewJob(transactionId, JobKind.CategorizeReceipt, instruction, sourceMessageId, instructionDay: null)
+                : NewJob(transactionId, JobKind.Correct, instruction, sourceMessageId,
+                    await InstructionDayAsync(transactionId, sentAt, cancellationToken)),
             cancellationToken);
+
+    Task<bool> HasReceiptAsync(Guid transactionId, CancellationToken cancellationToken) =>
+        db.Receipts.AsNoTracking().AnyAsync(r => r.TransactionId == transactionId, cancellationToken);
 
     public async Task<bool> RequestVoiceCorrectionAsync(
         Guid transactionId, string voiceFileId, int sourceMessageId, DateTimeOffset sentAt, CancellationToken cancellationToken) =>

@@ -140,18 +140,22 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
 
         await db.SaveChangesAsync(cancellationToken);
         await LedgerPostings.RewriteAsync(db, transaction, outcome.StatedBalance, cancellationToken);
-        await RevisionLog.AppendAsync(db, transaction, RevisionKindFor(outcome.Kind), outcome.Instruction,
+        await RevisionLog.AppendAsync(db, transaction, RevisionKindFor(outcome), outcome.Instruction,
             statusBefore, timeProvider.GetUtcNow(), cancellationToken);
         await tx.CommitAsync(cancellationToken);
     }
 
-    static RevisionKind RevisionKindFor(JobKind kind) => kind switch
+    // CategorizeReceipt runs twice for the same receipt (I-2, Phase 6 final review): once from
+    // ExtractReceiptWorker's own hand-off (no Instruction - the first, Initial reading) and again from
+    // a receipt correction routed here instead of record_transaction (always carries the operator's
+    // Instruction) - the two are told apart the same way Correct already is, by whether one is present.
+    static RevisionKind RevisionKindFor(CategorizationOutcome outcome) => outcome.Kind switch
     {
         JobKind.Categorize => RevisionKind.Initial,
-        JobKind.CategorizeReceipt => RevisionKind.Initial,
+        JobKind.CategorizeReceipt => outcome.Instruction is null ? RevisionKind.Initial : RevisionKind.Correction,
         JobKind.Correct => RevisionKind.Correction,
         JobKind.Reinterpret => RevisionKind.Edit,
-        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "No revision kind for this job kind."),
+        _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome.Kind, "No revision kind for this job kind."),
     };
 
     public Task MarkFailedAsync(Guid transactionId, CancellationToken cancellationToken) =>

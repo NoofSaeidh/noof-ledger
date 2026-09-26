@@ -88,6 +88,28 @@ public class ChatReceiptCategorizerOverAnthropicTests
     }
 
     [Fact]
+    public async Task A_correction_reaches_the_wire_and_a_declined_amount_change_is_mapped_back()
+    {
+        var (categorizer, handler) = Build();
+        handler.Enqueue(HttpStatusCode.OK, """
+            {"id":"msg_11","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
+             "content":[{"type":"tool_use","id":"toolu_11","name":"categorize_receipt","input":{"lines":[{"ordinal":1,"category_slug":"groceries"},{"ordinal":2,"category_slug":"groceries"}],"merchant_name":"Maxi","wallet_id":null,"amount_change_declined":true}}],
+             "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":150,"output_tokens":20}}
+            """);
+
+        var request = Request() with { Correction = "actually it was 200, not 180.50" };
+        var result = await categorizer.CategorizeAsync(request, TestContext.Current.CancellationToken);
+
+        result.AmountChangeDeclined.Should().BeTrue();
+        handler.Requests[0].Body.Should().Contain("actually it was 200, not 180.50");
+
+        var schema = JsonDocument.Parse(handler.Requests[0].Body).RootElement
+            .GetProperty("tools")[0].GetProperty("input_schema");
+        schema.GetProperty("required").EnumerateArray().Select(e => e.GetString())
+            .Should().Contain("amount_change_declined");
+    }
+
+    [Fact]
     public async Task A_named_wallet_is_offered_and_returned()
     {
         var walletId = Guid.Parse("33333333-3333-3333-3333-333333333333");

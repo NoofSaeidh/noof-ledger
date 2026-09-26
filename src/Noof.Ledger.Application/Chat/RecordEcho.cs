@@ -86,10 +86,15 @@ internal sealed class RecordEcho : IRecordEcho
     // characters without a second, length-dependent pass over the same text.
     const int MaxDetailedReceiptLines = 40;
 
-    public EchoMessage ComposeReceipt(CategorizationSubject record, ReceiptView receipt) =>
-        new(
-            $"Recorded — {ShopHeader(receipt)} · {record.WalletName} · balance {Balances(record)}\n{ReceiptBody(record, receipt)}",
+    const string AmountChangeDeclinedNote = "Amounts come from the receipt and cannot be changed here — press Cancel if this record is wrong.";
+
+    public EchoMessage ComposeReceipt(CategorizationSubject record, ReceiptView receipt, bool amountChangeDeclined = false)
+    {
+        var text = $"Recorded — {ShopHeader(receipt)} · {record.WalletName} · balance {Balances(record)}\n{ReceiptBody(record, receipt)}";
+        return new(
+            amountChangeDeclined ? $"{AmountChangeDeclinedNote}\n\n{text}" : text,
             [RecordAction.Cancel, RecordAction.Edit]);
+    }
 
     public EchoMessage ComposeReceiptNotRecorded(Receipts.ReceiptKind kind) =>
         new($"This receipt is a {kind.ToString().ToLowerInvariant()} — not recorded", [RecordAction.Edit]);

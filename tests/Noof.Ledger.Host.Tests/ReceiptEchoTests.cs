@@ -118,6 +118,21 @@ public class ReceiptEchoTests
         echo.Text.Should().Contain("Groceries: 200.00 RSD");
     }
 
+    [Fact]
+    public void A_declined_amount_change_is_noted_ahead_of_the_receipt_body()
+    {
+        var echo = Echo.ComposeReceipt(Record(), Receipt(), amountChangeDeclined: true);
+
+        echo.Text.Should().StartWith("Amounts come from the receipt and cannot be changed here — press Cancel if this record is wrong.\n\n");
+        echo.Text.Should().Contain("Recorded — Test Market — Test Market - Centre · Cash · balance 0.00 RSD");
+    }
+
+    [Fact]
+    public void No_declined_amount_change_carries_no_note()
+    {
+        Echo.ComposeReceipt(Record(), Receipt(), amountChangeDeclined: false).Text.Should().NotContain("cannot be changed here");
+    }
+
     [Theory]
     [InlineData(AppReceipts.ReceiptKind.Copy, "copy")]
     [InlineData(AppReceipts.ReceiptKind.Training, "training")]

@@ -96,13 +96,14 @@ internal sealed class ChatReceiptCategorizer(
             logger.ExtraOrdinalIgnored(extraOrdinal);
 
         var walletId = string.IsNullOrEmpty(payload.WalletId) ? (Guid?)null : Guid.Parse(payload.WalletId);
-        return new ReceiptCategorization(lines, payload.MerchantName, walletId);
+        return new ReceiptCategorization(lines, payload.MerchantName, walletId, payload.AmountChangeDeclined);
     }
 
     sealed record CategorizeReceiptPayload(
         [property: JsonPropertyName("lines")] IReadOnlyList<CategorizeReceiptLineDto> Lines,
         [property: JsonPropertyName("merchant_name")] string? MerchantName,
-        [property: JsonPropertyName("wallet_id")] string? WalletId);
+        [property: JsonPropertyName("wallet_id")] string? WalletId,
+        [property: JsonPropertyName("amount_change_declined")] bool AmountChangeDeclined = false);
 
     sealed record CategorizeReceiptLineDto(
         [property: JsonPropertyName("ordinal")] int Ordinal,

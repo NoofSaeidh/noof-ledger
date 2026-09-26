@@ -92,19 +92,25 @@ public interface IReceiptVision
 
 public sealed record ReceiptLineToCategorize(int Ordinal, string Name, decimal Quantity, decimal Total);
 
+// Correction is the operator's own words about a receipt already recorded (I-2, Phase 6 final
+// review) - a reply to the receipt echo's Edit prompt, or an edited caption. It can steer categories,
+// merchant and wallet only; amounts stay the receipt's own regardless of what it asks (categorize_receipt
+// has no amount field to answer with), and AmountChangeDeclined tells the echo when it asked anyway.
 public sealed record ReceiptCategorizationRequest(
     IReadOnlyList<ReceiptLineToCategorize> Lines,
     string? SellerName,
     string? SellerTaxId,
     bool MerchantKnown,
-    string? Caption);
+    string? Caption,
+    string? Correction = null);
 
 public sealed record ReceiptLineCategory(int Ordinal, string CategorySlug);
 
 public sealed record ReceiptCategorization(
     IReadOnlyList<ReceiptLineCategory> Lines,
     string? MerchantCanonicalName,
-    Guid? WalletId);
+    Guid? WalletId,
+    bool AmountChangeDeclined = false);
 
 public interface IReceiptCategorizer
 {

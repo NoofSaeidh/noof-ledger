@@ -36,6 +36,17 @@ public class ReceiptCategorizationSchemaTests
     }
 
     [Fact]
+    public void Amount_change_declined_is_a_required_boolean()
+    {
+        var schema = ReceiptCategorizationSchema.BuildCategorizeReceipt(Categories, NoWallets);
+
+        schema.GetProperty("properties").GetProperty("amount_change_declined").GetProperty("type").GetString()
+            .Should().Be("boolean");
+        schema.GetProperty("required").EnumerateArray().Select(e => e.GetString())
+            .Should().Contain("amount_change_declined");
+    }
+
+    [Fact]
     public void Wallet_id_can_only_be_null_when_no_wallets_are_offered()
     {
         var schema = ReceiptCategorizationSchema.BuildCategorizeReceipt(Categories, NoWallets);

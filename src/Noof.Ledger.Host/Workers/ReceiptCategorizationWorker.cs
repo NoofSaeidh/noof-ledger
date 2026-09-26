@@ -135,7 +135,7 @@ internal sealed class ReceiptCategorizationWorker(
 
             var request = new ReceiptCategorizationRequest(
                 [.. receipt.Lines.Select(line => new ReceiptLineToCategorize(line.Ordinal, line.Name, line.Quantity, line.Total))],
-                receipt.SellerName, receipt.SellerTaxId, merchantKnown, sub.RawText);
+                receipt.SellerName, receipt.SellerTaxId, merchantKnown, sub.RawText, job.Instruction);
 
             var categorization = await receiptCategorizer.CategorizeAsync(request, cancellationToken);
 
@@ -174,14 +174,14 @@ internal sealed class ReceiptCategorizationWorker(
             logger.LogCategorized(TransactionStages.Categorized, transactionKind, walletId,
                 $"{items.Count} receipt line(s), total {receipt.Total} {receipt.Currency}");
 
-            var outcome = new CategorizationOutcome(items, occurredOn, JobKind.CategorizeReceipt, null, transactionKind, walletId);
+            var outcome = new CategorizationOutcome(items, occurredOn, JobKind.CategorizeReceipt, job.Instruction, transactionKind, walletId);
             currentStage = TransactionStages.Persisted;
             await store.ApplyAsync(job.TransactionId, outcome, cancellationToken);
             logger.LogPersisted(TransactionStages.Persisted, transactionKind);
 
             // From here on, as in CategorizationWorker: the line items and status are already
             // committed, so nothing past this line may be treated as a job failure.
-            await EchoAsync(store, receiptStore, notifier, job, cancellationToken);
+            await EchoAsync(store, receiptStore, notifier, job, categorization.AmountChangeDeclined, cancellationToken);
 
             try
             {
@@ -281,7 +281,7 @@ internal sealed class ReceiptCategorizationWorker(
 
     async Task EchoAsync(
         ICategorizationStore store, IReceiptStore receiptStore, IChatNotifier notifier, CategorizationJob job,
-        CancellationToken cancellationToken)
+        bool amountChangeDeclined, CancellationToken cancellationToken)
     {
         try
         {
@@ -292,7 +292,8 @@ internal sealed class ReceiptCategorizationWorker(
             if (await receiptStore.GetByTransactionAsync(job.TransactionId, cancellationToken) is not { } receipt)
                 return;
 
-            await notifier.EditAsync(record.TelegramChatId, messageId, recordEcho.ComposeReceipt(record, receipt), cancellationToken);
+            await notifier.EditAsync(
+                record.TelegramChatId, messageId, recordEcho.ComposeReceipt(record, receipt, amountChangeDeclined), cancellationToken);
             logger.LogReplied(TransactionStages.Replied, messageId);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

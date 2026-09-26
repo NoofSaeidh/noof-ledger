@@ -23,6 +23,12 @@ internal static class ReceiptCategorizationPrompt
         You may also be told a caption - what the person who sent the photo wrote alongside it. When
         it names one of the offered wallets, answer wallet_id with that wallet's id; otherwise answer
         wallet_id as null.
+
+        You may also be told a correction - something the person said after already seeing this
+        receipt recorded, asking you to fix it. Apply it to the categories, the merchant name and the
+        wallet only. You cannot change amounts, no matter what the correction asks: if it asks for a
+        different amount, ignore that part, still answer everything else it asks for, and answer
+        amount_change_declined as true. Otherwise answer amount_change_declined as false.
         """;
 
     public static string RenderCategories(IReadOnlyList<CategoryOption> categories) =>
@@ -43,6 +49,7 @@ internal static class ReceiptCategorizationPrompt
         Seller: {request.SellerName ?? "unknown"}{RenderTaxId(request.SellerTaxId)}
         Merchant already known: {(request.MerchantKnown ? "yes" : "no")}
         Caption: {(string.IsNullOrWhiteSpace(request.Caption) ? "(none)" : request.Caption)}
+        Correction: {(string.IsNullOrWhiteSpace(request.Correction) ? "(none)" : request.Correction)}
 
         Categories:
         {RenderCategories(categories)}
