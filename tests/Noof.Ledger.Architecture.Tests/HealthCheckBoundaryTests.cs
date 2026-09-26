@@ -39,4 +39,32 @@ public class HealthCheckBoundaryTests
             .Should().Contain(file => file.StartsWith("Noof.Ledger.Ai" + Path.DirectorySeparatorChar, StringComparison.Ordinal),
                 "AiKeysHealthCheck must still be found under src/Noof.Ledger.Ai/");
     }
+
+    // Host is Sdk.Web and still gets Microsoft.Extensions.Diagnostics.HealthChecks's types through
+    // the ASP.NET shared framework, so a compile-time reference is not what proves this - a text
+    // scan of what src actually names and depends on is.
+    [Fact]
+    public void Nothing_in_src_uses_Microsoft_health_checks()
+    {
+        var repoRoot = RepoRoot.Find().FullName;
+        var candidates = Directory.EnumerateFiles(SrcRoot, "*.cs", SearchOption.AllDirectories)
+            .Concat(Directory.EnumerateFiles(SrcRoot, "*.csproj", SearchOption.AllDirectories))
+            .Append(Path.Combine(repoRoot, "Directory.Packages.props"))
+            .ToArray();
+
+        var ihealthCheck = new Regex(@"\bIHealthCheck\b", RegexOptions.Compiled);
+
+        var offenders = candidates
+            .Where(file =>
+            {
+                var text = File.ReadAllText(file);
+                return text.Contains("Microsoft.Extensions.Diagnostics.HealthChecks", StringComparison.Ordinal)
+                    || text.Contains("AddHealthChecks(", StringComparison.Ordinal)
+                    || ihealthCheck.IsMatch(text);
+            })
+            .Select(file => Path.GetRelativePath(repoRoot, file))
+            .ToArray();
+
+        offenders.Should().BeEmpty();
+    }
 }

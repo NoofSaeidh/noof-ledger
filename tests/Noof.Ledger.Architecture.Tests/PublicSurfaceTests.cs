@@ -69,7 +69,7 @@ public class PublicSurfaceTests
             "ILogSinkStatus",
             "HealthLevel", "HealthItem", "SystemHealthReport", "ISystemHealth",
             "ISystemHealthCheck", "HealthOutcome",
-            "PollFailure", "IPollingHeartbeat", "HealthCheckNames", "HealthCheckLogCategories",
+            "PollFailure", "IPollingHeartbeat",
         ],
         ["Noof.Ledger.Persistence"] = ["LedgerConnectionString", "PersistenceRegistration"],
         ["Noof.Ledger.Ai"] = ["AiRegistration"],

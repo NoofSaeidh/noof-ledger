@@ -72,8 +72,7 @@ public class ProjectReferenceTests
         Packages("Noof.Ledger.Telegram").Should().BeEquivalentTo(
             "Telegram.Bot",
             "Microsoft.Extensions.Http",
-            "Microsoft.Extensions.Hosting.Abstractions",
-            "Microsoft.Extensions.Diagnostics.HealthChecks");
+            "Microsoft.Extensions.Hosting.Abstractions");
     }
 
     [Fact]
