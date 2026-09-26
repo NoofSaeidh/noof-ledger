@@ -14,6 +14,7 @@
 
   <ItemGroup>
     <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
     <PackageReference Include="NSubstitute" />
     <PackageReference Include="xunit.v3.mtp-v2" />
     <PackageReference Include="ZXing.Net.Bindings.SkiaSharp" />
@@ -23,6 +24,7 @@
     <ProjectReference Include="..\..\src\Noof.Ledger.Receipts\Noof.Ledger.Receipts.csproj" />
     <ProjectReference Include="..\..\src\Noof.Ledger.Application\Noof.Ledger.Application.csproj" />
     <ProjectReference Include="..\..\src\Noof.Ledger.Domain\Noof.Ledger.Domain.csproj" />
+    <ProjectReference Include="..\Noof.Ledger.TestKit\Noof.Ledger.TestKit.csproj" />
   </ItemGroup>
 
 </Project>

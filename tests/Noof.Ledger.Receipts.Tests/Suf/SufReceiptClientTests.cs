@@ -1,8 +1,11 @@
 using System.Net;
 using AwesomeAssertions;
+using Microsoft.Extensions.Time.Testing;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Receipts.Suf;
+using Noof.Ledger.TestKit;
 
 namespace Noof.Ledger.Receipts.Tests.Suf;
 
@@ -63,7 +66,10 @@ public class SufReceiptClientTests
         return new DateTimeOffset(local, belgrade.GetUtcOffset(local));
     }
 
-    static SufReceiptClient ClientFor(HttpMessageHandler handler) => new(new HttpClient(handler));
+    static SufReceiptClient ClientFor(HttpMessageHandler handler, IOperationTimer? timer = null, Microsoft.Extensions.Logging.ILogger<SufReceiptClient>? logger = null) =>
+        new(new HttpClient(handler), timer ?? NoopTimer, logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<SufReceiptClient>.Instance);
+
+    static readonly IOperationTimer NoopTimer = new OperationTimer(TimeProvider.System, new SlowOperationOptions());
 
     [Fact]
     public async Task Fetches_and_parses_the_happy_path()
@@ -194,12 +200,30 @@ public class SufReceiptClientTests
     {
         var handler = StubHttpMessageHandler.NeverResponding();
         using var httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(50) };
-        var client = new SufReceiptClient(httpClient);
+        var client = new SufReceiptClient(httpClient, NoopTimer, Microsoft.Extensions.Logging.Abstractions.NullLogger<SufReceiptClient>.Instance);
 
         var result = await client.FetchAsync(Payload, CancellationToken.None);
 
         result.Receipt.Should().BeNull();
         result.Failure.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task A_scripted_response_that_advances_the_clock_gives_one_receipt_fiscalFetch_timing()
+    {
+        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var timer = new OperationTimer(clock, new SlowOperationOptions());
+        var logger = new CapturingLogger<SufReceiptClient>();
+        var handler = new StubHttpMessageHandler((_, _) =>
+        {
+            clock.Advance(TimeSpan.FromMilliseconds(10));
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonBody(Journal)) });
+        });
+        var client = ClientFor(handler, timer, logger);
+
+        await client.FetchAsync(Payload, CancellationToken.None);
+
+        logger.Entries.Should().ContainSingle(entry => (string)entry.Properties["Operation"] == "receipt.fiscalFetch");
     }
 
     [Fact]

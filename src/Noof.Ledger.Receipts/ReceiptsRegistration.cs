@@ -1,5 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Receipts.FiscalQr;
 using Noof.Ledger.Receipts.Qr;
@@ -24,8 +26,9 @@ public static class ReceiptsRegistration
 
         services.AddSingleton<IFiscalQrDecoder, FiscalQrDecoder>();
         services.AddSingleton<IQrReader, ZxingQrReader>();
-        services.AddScoped<IFiscalReceiptClient>(sp =>
-            new SufReceiptClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient(HttpClientName)));
+        services.AddScoped<IFiscalReceiptClient>(sp => new SufReceiptClient(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient(HttpClientName),
+            sp.GetRequiredService<IOperationTimer>(), sp.GetRequiredService<ILogger<SufReceiptClient>>()));
 
         return services;
     }

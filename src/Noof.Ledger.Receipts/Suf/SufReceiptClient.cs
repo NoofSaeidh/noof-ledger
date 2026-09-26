@@ -2,19 +2,24 @@ using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Receipts.Journal;
 
 namespace Noof.Ledger.Receipts.Suf;
 
-internal sealed partial class SufReceiptClient(HttpClient httpClient) : IFiscalReceiptClient
+internal sealed partial class SufReceiptClient(
+    HttpClient httpClient, IOperationTimer timer, ILogger<SufReceiptClient> logger) : IFiscalReceiptClient
 {
     static readonly string UserAgent =
         $"noof-ledger/{typeof(SufReceiptClient).Assembly.GetName().Version?.ToString(3) ?? "0.0.0"} (personal receipt lookup)";
 
     public async Task<FiscalFetchResult> FetchAsync(FiscalQrPayload payload, CancellationToken cancellationToken)
     {
+        using var timing = timer.Start(logger, TimedOperations.ReceiptFiscalFetch);
+
         HttpResponseMessage response;
         try
         {
