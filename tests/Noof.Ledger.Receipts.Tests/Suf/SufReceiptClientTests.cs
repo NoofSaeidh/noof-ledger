@@ -129,6 +129,43 @@ public class SufReceiptClientTests
     }
 
     [Fact]
+    public async Task Reports_a_failure_when_the_response_body_cannot_be_read_instead_of_throwing()
+    {
+        // M-9 (2026-09-25 final review): a body that fails mid-read (IOException, wrapped by
+        // HttpContent as HttpRequestException) must never throw out of FetchAsync. With the default
+        // HttpCompletionOption this client uses, HttpClient already buffers the body during SendAsync,
+        // so this is caught by the SendAsync try's own HttpRequestException handler either way - the
+        // ReadAsStringAsync/Deserialize try below now also catches it directly, in case that ever
+        // changes (e.g. HttpCompletionOption.ResponseHeadersRead). This test guards the contract, not
+        // one specific catch clause.
+        var handler = new StubHttpMessageHandler((_, _) => Task.FromResult(
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new BrokenBodyContent() }));
+        var client = ClientFor(handler);
+
+        FiscalFetchResult? result = null;
+        var act = async () => result = await client.FetchAsync(Payload, CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+        result!.Receipt.Should().BeNull();
+        result.Failure.Should().NotBeNull();
+    }
+
+    sealed class BrokenBodyContent : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, System.Net.TransportContext? context) =>
+            throw new IOException("connection reset while reading the response body");
+
+        protected override Task SerializeToStreamAsync(Stream stream, System.Net.TransportContext? context, CancellationToken cancellationToken) =>
+            throw new IOException("connection reset while reading the response body");
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
+    }
+
+    [Fact]
     public async Task Reports_a_failure_on_garbage_json()
     {
         var handler = StubHttpMessageHandler.Returning(HttpStatusCode.OK, "not json at all {{{");

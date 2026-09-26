@@ -47,6 +47,20 @@ internal sealed partial class SufReceiptClient(HttpClient httpClient) : IFiscalR
             {
                 return Failure("The Tax Administration's response was not valid JSON.", (int)response.StatusCode);
             }
+            // M-9 (2026-09-25 final review): the body read used to sit outside any catch that covers
+            // it, contrary to this method's "never throw except OperationCanceledException" contract -
+            // a connection dropped mid-body surfaces as IOException, which HttpContent wraps as
+            // HttpRequestException. Under the default HttpCompletionOption this client uses, that
+            // already fails inside the SendAsync call above (caught there); this is defence in depth
+            // against ever reading the body separately (e.g. HttpCompletionOption.ResponseHeadersRead).
+            catch (HttpRequestException exception)
+            {
+                return Failure($"The Tax Administration's response body could not be read: {exception.Message}", (int)response.StatusCode);
+            }
+            catch (IOException exception)
+            {
+                return Failure($"The Tax Administration's response body could not be read: {exception.Message}", (int)response.StatusCode);
+            }
 
             if (parsed?.Journal is null)
                 return Failure("The Tax Administration's response had no journal.", (int)response.StatusCode);
