@@ -1,5 +1,5 @@
 using AwesomeAssertions;
-using Noof.Ledger.Application.Receipts;
+using Noof.Ledger.Domain;
 using Noof.Ledger.Receipts.Journal;
 
 namespace Noof.Ledger.Receipts.Tests.Journal;

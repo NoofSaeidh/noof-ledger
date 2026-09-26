@@ -80,7 +80,7 @@ internal sealed class ChatReceiptVision(IChatClientFactory clientFactory) : IRec
             .ToList();
 
         return new ExtractedReceipt(
-            Application.Receipts.ReceiptSource.Vision,
+            ReceiptSource.Vision,
             VerificationUrl: null,
             payload.SellerTaxId,
             payload.SellerName,
@@ -90,7 +90,7 @@ internal sealed class ChatReceiptVision(IChatClientFactory clientFactory) : IRec
             ParseIssuedAt(payload.IssuedAt),
             payload.Total,
             new CurrencyCode(payload.Currency),
-            payload.Kind == "refund" ? Application.Receipts.ReceiptKind.Refund : Application.Receipts.ReceiptKind.Sale,
+            payload.Kind == "refund" ? ReceiptKind.Refund : ReceiptKind.Sale,
             MapPaymentMethod(payload.PaymentMethod),
             qrTotal,
             lines);
@@ -112,14 +112,14 @@ internal sealed class ChatReceiptVision(IChatClientFactory clientFactory) : IRec
         return new DateTimeOffset(DateTime.SpecifyKind(local, DateTimeKind.Unspecified), Belgrade.GetUtcOffset(local));
     }
 
-    static Application.Receipts.PaymentMethod? MapPaymentMethod(string? method) => method switch
+    static PaymentMethod? MapPaymentMethod(string? method) => method switch
     {
-        "card" => Application.Receipts.PaymentMethod.Card,
-        "cash" => Application.Receipts.PaymentMethod.Cash,
-        "transfer" => Application.Receipts.PaymentMethod.Transfer,
-        "voucher" => Application.Receipts.PaymentMethod.Voucher,
-        "other" => Application.Receipts.PaymentMethod.Other,
-        "mixed" => Application.Receipts.PaymentMethod.Mixed,
+        "card" => PaymentMethod.Card,
+        "cash" => PaymentMethod.Cash,
+        "transfer" => PaymentMethod.Transfer,
+        "voucher" => PaymentMethod.Voucher,
+        "other" => PaymentMethod.Other,
+        "mixed" => PaymentMethod.Mixed,
         _ => null,
     };
 

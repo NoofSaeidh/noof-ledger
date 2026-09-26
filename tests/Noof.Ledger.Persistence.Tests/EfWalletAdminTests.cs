@@ -6,7 +6,6 @@ using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Revisions;
 using Noof.Ledger.Persistence.Wallets;
-using PaymentMethod = Noof.Ledger.Application.Receipts.PaymentMethod;
 
 namespace Noof.Ledger.Persistence.Tests;
 

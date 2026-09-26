@@ -2,7 +2,6 @@ using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
-using AppReceipts = Noof.Ledger.Application.Receipts;
 
 namespace Noof.Ledger.Persistence.Wallets;
 
@@ -20,12 +19,12 @@ internal sealed class EfWalletDirectory(LedgerDbContext db) : IWalletDirectory
             wallet.Id, wallet.Name, wallet.Currency, wallet.Aliases, wallet.IsDefaultForCurrency))];
     }
 
-    public async Task<Guid?> DefaultForPaymentAsync(AppReceipts.PaymentMethod method, CancellationToken cancellationToken)
+    public async Task<Guid?> DefaultForPaymentAsync(PaymentMethod method, CancellationToken cancellationToken)
     {
         var domainMethod = method switch
         {
-            AppReceipts.PaymentMethod.Card => WalletPaymentDefault.Card,
-            AppReceipts.PaymentMethod.Cash => WalletPaymentDefault.Cash,
+            PaymentMethod.Card => WalletPaymentDefault.Card,
+            PaymentMethod.Cash => WalletPaymentDefault.Cash,
             _ => (WalletPaymentDefault?)null,
         };
 

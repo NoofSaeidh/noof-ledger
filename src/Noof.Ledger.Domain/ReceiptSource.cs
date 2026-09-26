@@ -1,8 +1,9 @@
 namespace Noof.Ledger.Domain;
 
-// Mirrors Noof.Ledger.Application.Receipts.ReceiptSource value for value: Domain has zero NuGet
-// references and cannot depend on Application, so the two enums are kept in lockstep by
-// ReceiptEnumTests rather than by a shared type.
+// The single definition (M-5, Phase 6 final review): Application.Receipts.ReceiptContracts's
+// contract records (ExtractedReceipt, ReceiptView, ...) use this type directly rather than keeping
+// a lockstep mirror - Domain has zero NuGet references, but Application already depends on Domain,
+// so there was never a reason for Application to own a second copy.
 public enum ReceiptSource
 {
     FiscalQr = 0,

@@ -42,11 +42,10 @@ public class MoneyModelEnumTests
             "a wallet is never the default for Transfer, Voucher, Other or Mixed (R-3)");
     }
 
-    // Domain cannot reference Application.Receipts (zero NuGet, no upward dependency), so these
-    // three enums are hand-kept in lockstep with their Application namesakes. A mismatch here would
-    // silently mis-map an ExtractedReceipt into the wrong Receipt row.
+    // These three enums are stored as smallint (M-5, Phase 6 final review: Application no longer
+    // keeps its own copy). A value moving here would silently renumber every persisted receipt row.
     [Fact]
-    public void Receipt_source_mirrors_the_application_contract()
+    public void Receipt_source_values_never_move()
     {
         ((int)ReceiptSource.FiscalQr).Should().Be(0);
         ((int)ReceiptSource.Vision).Should().Be(1);
@@ -54,7 +53,7 @@ public class MoneyModelEnumTests
     }
 
     [Fact]
-    public void Receipt_kind_mirrors_the_application_contract()
+    public void Receipt_kind_values_never_move()
     {
         ((int)ReceiptKind.Sale).Should().Be(0);
         ((int)ReceiptKind.Refund).Should().Be(1);
@@ -65,7 +64,7 @@ public class MoneyModelEnumTests
     }
 
     [Fact]
-    public void Payment_method_mirrors_the_application_contract()
+    public void Payment_method_values_never_move()
     {
         ((int)PaymentMethod.Card).Should().Be(0);
         ((int)PaymentMethod.Cash).Should().Be(1);

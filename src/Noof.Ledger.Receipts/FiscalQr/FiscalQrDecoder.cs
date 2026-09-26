@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Noof.Ledger.Application.Receipts;
+using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Receipts.FiscalQr;
 

@@ -67,7 +67,7 @@ public class PublicSurfaceTests
             "IDatabaseLogLevelStore", "DatabaseLogLevelSetting",
             "ILogRetentionSettings", "LogRetentionDays", "IFileLogSinkInfo",
             "IDatabaseGate", "DatabaseState",
-            "ReceiptSource", "ReceiptKind", "PaymentMethod", "ExtractedReceiptLine", "ExtractedReceipt",
+            "ExtractedReceiptLine", "ExtractedReceipt",
             "FiscalQrPayload", "FiscalQrDecodeResult", "FiscalFetchFailure", "FiscalFetchResult", "IQrReader",
             "IFiscalQrDecoder", "IFiscalReceiptClient", "IReceiptVision", "ReceiptLineToCategorize",
             "ReceiptCategorizationRequest", "ReceiptLineCategory", "ReceiptCategorization", "IReceiptCategorizer",

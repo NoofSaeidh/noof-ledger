@@ -19,12 +19,12 @@ public class ReceiptEchoTests
             lines ?? [Bread, Milk], CaptureKind.Photo, TransactionKind.Expense, CurrencyCode.Rsd, [new Money(0m, CurrencyCode.Rsd)]);
 
     static AppReceipts.ReceiptView Receipt(
-        AppReceipts.ReceiptSource source = AppReceipts.ReceiptSource.FiscalQr, decimal? qrTotal = 373.4567m, decimal total = 373.4567m,
+        ReceiptSource source = ReceiptSource.FiscalQr, decimal? qrTotal = 373.4567m, decimal total = 373.4567m,
         string? sellerName = "Test Market", string? locationName = "Test Market - Centre",
         IReadOnlyList<AppReceipts.ReceiptLineView>? lines = null) =>
         new(Guid.NewGuid(), source, "SYN-100000001", sellerName, "1 Test Street", locationName, "SYN-1",
-            new DateTimeOffset(2026, 9, 25, 9, 30, 0, TimeSpan.Zero), total, CurrencyCode.Rsd, AppReceipts.ReceiptKind.Sale,
-            AppReceipts.PaymentMethod.Card, qrTotal, "https://suf.purs.gov.rs/v/?vl=synthetic",
+            new DateTimeOffset(2026, 9, 25, 9, 30, 0, TimeSpan.Zero), total, CurrencyCode.Rsd, ReceiptKind.Sale,
+            PaymentMethod.Card, qrTotal, "https://suf.purs.gov.rs/v/?vl=synthetic",
             lines ?? [
                 new AppReceipts.ReceiptLineView(Guid.NewGuid(), 1, "Bread", 1m, "kom", 123.4567m, 123.4567m, null),
                 new AppReceipts.ReceiptLineView(Guid.NewGuid(), 2, "Milk", 2m, "kom", 125m, 250m, null),
@@ -80,7 +80,7 @@ public class ReceiptEchoTests
     [Fact]
     public void Vision_with_a_qr_total_warns_that_the_tax_administration_was_unavailable()
     {
-        var echo = Echo.ComposeReceipt(Record(), Receipt(source: AppReceipts.ReceiptSource.Vision, qrTotal: 373.4567m));
+        var echo = Echo.ComposeReceipt(Record(), Receipt(source: ReceiptSource.Vision, qrTotal: 373.4567m));
 
         echo.Text.Should().Contain("⚠️ Tax Administration unavailable — lines read from the photo");
     }
@@ -88,7 +88,7 @@ public class ReceiptEchoTests
     [Fact]
     public void Vision_with_no_qr_total_warns_it_was_read_from_the_photo_with_no_fiscal_qr()
     {
-        var echo = Echo.ComposeReceipt(Record(), Receipt(source: AppReceipts.ReceiptSource.Vision, qrTotal: null));
+        var echo = Echo.ComposeReceipt(Record(), Receipt(source: ReceiptSource.Vision, qrTotal: null));
 
         echo.Text.Should().Contain("⚠️ Read from the photo (no fiscal QR)");
         echo.Text.Should().NotContain("Tax Administration unavailable");
@@ -97,7 +97,7 @@ public class ReceiptEchoTests
     [Fact]
     public void A_fiscal_qr_receipt_with_a_matching_qr_total_carries_no_photo_warning()
     {
-        var echo = Echo.ComposeReceipt(Record(), Receipt(source: AppReceipts.ReceiptSource.FiscalQr, qrTotal: 373.4567m));
+        var echo = Echo.ComposeReceipt(Record(), Receipt(source: ReceiptSource.FiscalQr, qrTotal: 373.4567m));
 
         echo.Text.Should().NotContain("⚠️");
     }
@@ -166,11 +166,11 @@ public class ReceiptEchoTests
     }
 
     [Theory]
-    [InlineData(AppReceipts.ReceiptKind.Copy, "copy")]
-    [InlineData(AppReceipts.ReceiptKind.Training, "training")]
-    [InlineData(AppReceipts.ReceiptKind.Proforma, "proforma")]
-    [InlineData(AppReceipts.ReceiptKind.Advance, "advance")]
-    public void A_non_money_receipt_kind_is_reported_as_not_recorded_with_an_edit_action(AppReceipts.ReceiptKind kind, string word)
+    [InlineData(ReceiptKind.Copy, "copy")]
+    [InlineData(ReceiptKind.Training, "training")]
+    [InlineData(ReceiptKind.Proforma, "proforma")]
+    [InlineData(ReceiptKind.Advance, "advance")]
+    public void A_non_money_receipt_kind_is_reported_as_not_recorded_with_an_edit_action(ReceiptKind kind, string word)
     {
         var echo = Echo.ComposeReceiptNotRecorded(kind);
 

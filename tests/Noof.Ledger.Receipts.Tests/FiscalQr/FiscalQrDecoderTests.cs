@@ -1,5 +1,5 @@
 using AwesomeAssertions;
-using Noof.Ledger.Application.Receipts;
+using Noof.Ledger.Domain;
 using Noof.Ledger.Receipts.FiscalQr;
 
 namespace Noof.Ledger.Receipts.Tests.FiscalQr;

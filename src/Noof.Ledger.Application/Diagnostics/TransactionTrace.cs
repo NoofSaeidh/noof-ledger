@@ -1,6 +1,4 @@
 using Noof.Ledger.Domain;
-using PaymentMethod = Noof.Ledger.Application.Receipts.PaymentMethod;
-using ReceiptSource = Noof.Ledger.Application.Receipts.ReceiptSource;
 
 namespace Noof.Ledger.Application.Diagnostics;
 

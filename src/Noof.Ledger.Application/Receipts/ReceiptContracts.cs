@@ -2,32 +2,6 @@ using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Application.Receipts;
 
-public enum ReceiptSource
-{
-    FiscalQr = 0,
-    Vision = 1,
-}
-
-public enum ReceiptKind
-{
-    Sale = 0,
-    Refund = 1,
-    Copy = 2,
-    Training = 3,
-    Proforma = 4,
-    Advance = 5,
-}
-
-public enum PaymentMethod
-{
-    Card = 0,
-    Cash = 1,
-    Transfer = 2,
-    Voucher = 3,
-    Other = 4,
-    Mixed = 5,
-}
-
 public sealed record ExtractedReceiptLine(
     int Ordinal,
     string Name,

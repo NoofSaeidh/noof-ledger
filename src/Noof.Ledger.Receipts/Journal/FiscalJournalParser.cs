@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 using Noof.Ledger.Application.Receipts;
+using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Receipts.Journal;
 

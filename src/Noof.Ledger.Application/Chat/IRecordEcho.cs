@@ -43,5 +43,5 @@ public interface IRecordEcho
     // purchase, so nothing was posted - the transaction is Cancelled, a deliberate non-post rather
     // than a processing failure (M-4, Phase 6 final review), and Edit still lets the person record it
     // by hand as an ordinary text correction.
-    EchoMessage ComposeReceiptNotRecorded(Receipts.ReceiptKind kind);
+    EchoMessage ComposeReceiptNotRecorded(ReceiptKind kind);
 }

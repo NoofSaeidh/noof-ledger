@@ -1,4 +1,5 @@
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Host.Workers.ExtractReceiptLogging;
 
@@ -51,7 +52,7 @@ internal static partial class ExtractReceiptWorkerLog
     [LoggerMessage(EventId = TransactionStages.ExtractedEventId, EventName = TransactionStages.Extracted, Level = LogLevel.Information,
         Message = "{Stage}: {Source}, {Lines} lines, total {Total}, qrTotal {QrTotal}, mismatch {Mismatch}, fetchFailed {FetchFailed}")]
     public static partial void LogExtracted(
-        this ILogger logger, string stage, Application.Receipts.ReceiptSource source, int lines, decimal total,
+        this ILogger logger, string stage, ReceiptSource source, int lines, decimal total,
         decimal? qrTotal, bool mismatch, bool fetchFailed);
 
     [LoggerMessage(EventId = TransactionStages.StageFailedEventId, EventName = TransactionStages.StageFailed, Level = LogLevel.Error,

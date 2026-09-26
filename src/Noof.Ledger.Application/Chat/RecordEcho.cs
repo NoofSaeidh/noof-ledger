@@ -105,7 +105,7 @@ internal sealed class RecordEcho : IRecordEcho
         return new(amountChangeDeclined ? $"{AmountChangeDeclinedNote}\n\n{text}" : text, [RecordAction.Cancel, RecordAction.Edit]);
     }
 
-    public EchoMessage ComposeReceiptNotRecorded(Receipts.ReceiptKind kind) =>
+    public EchoMessage ComposeReceiptNotRecorded(ReceiptKind kind) =>
         new($"This receipt is a {kind.ToString().ToLowerInvariant()} — not recorded", [RecordAction.Edit]);
 
     static string ShopHeader(ReceiptView receipt)
@@ -141,9 +141,9 @@ internal sealed class RecordEcho : IRecordEcho
 
     static IEnumerable<string> ReceiptWarnings(IReadOnlyList<RecordedLine> lines, ReceiptView receipt)
     {
-        if (receipt is { Source: Receipts.ReceiptSource.Vision, QrTotal: not null })
+        if (receipt is { Source: ReceiptSource.Vision, QrTotal: not null })
             yield return "⚠️ Tax Administration unavailable — lines read from the photo";
-        else if (receipt is { Source: Receipts.ReceiptSource.Vision, QrTotal: null })
+        else if (receipt is { Source: ReceiptSource.Vision, QrTotal: null })
             yield return "⚠️ Read from the photo (no fiscal QR)";
 
         var sum = lines.Sum(line => line.Amount.Amount);

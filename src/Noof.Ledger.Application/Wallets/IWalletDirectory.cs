@@ -1,5 +1,5 @@
 using Noof.Ledger.Application.Categorization;
-using Noof.Ledger.Application.Receipts;
+using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Application.Wallets;
 

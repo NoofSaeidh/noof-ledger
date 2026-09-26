@@ -5,6 +5,7 @@ using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Application.Wallets;
+using Noof.Ledger.Domain;
 using NSubstitute;
 
 namespace Noof.Ledger.Ai.Tests;

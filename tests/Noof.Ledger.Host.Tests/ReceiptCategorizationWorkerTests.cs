@@ -55,13 +55,13 @@ public class ReceiptCategorizationWorkerTests
             CaptureKind.Photo, TransactionKind.Expense, CurrencyCode.Rsd, WalletId: RsdDefault.Id);
 
     static AppReceipts.ReceiptView Receipt(
-        AppReceipts.ReceiptKind kind = AppReceipts.ReceiptKind.Sale,
+        ReceiptKind kind = ReceiptKind.Sale,
         string? sellerTaxId = "SYN-100000001",
         string? sellerName = "Test Market",
-        AppReceipts.PaymentMethod? paymentMethod = AppReceipts.PaymentMethod.Card,
+        PaymentMethod? paymentMethod = PaymentMethod.Card,
         decimal total = 373.4567m,
         IReadOnlyList<AppReceipts.ReceiptLineView>? lines = null) =>
-        new(ReceiptId, AppReceipts.ReceiptSource.FiscalQr, sellerTaxId, sellerName, "1 Test Street", null, "SYN-1",
+        new(ReceiptId, ReceiptSource.FiscalQr, sellerTaxId, sellerName, "1 Test Street", null, "SYN-1",
             new DateTimeOffset(2026, 9, 25, 9, 30, 0, TimeSpan.Zero), total, CurrencyCode.Rsd, kind, paymentMethod, total, "https://suf.purs.gov.rs/v/?vl=synthetic",
             lines ?? [
                 new AppReceipts.ReceiptLineView(Guid.NewGuid(), 1, "Bread", 1m, "kom", 123.4567m, 123.4567m, null),
@@ -156,7 +156,7 @@ public class ReceiptCategorizationWorkerTests
         var directory = Substitute.For<IWalletDirectory>();
         IReadOnlyList<WalletOption> active = [RsdDefault, EurDefault, CashWallet, NamedInCaption];
         directory.ActiveAsync(Arg.Any<CancellationToken>()).Returns(active);
-        directory.DefaultForPaymentAsync(Arg.Any<AppReceipts.PaymentMethod>(), Arg.Any<CancellationToken>()).Returns((Guid?)null);
+        directory.DefaultForPaymentAsync(Arg.Any<PaymentMethod>(), Arg.Any<CancellationToken>()).Returns((Guid?)null);
         return directory;
     }
 
@@ -261,7 +261,7 @@ public class ReceiptCategorizationWorkerTests
         categorizer.CategorizeAsync(Arg.Any<AppReceipts.ReceiptCategorizationRequest>(), Arg.Any<CancellationToken>())
             .Returns(Categorization(walletId: NamedInCaption.Id, merchantCanonicalName: "Test Market"));
         var walletDirectory = DefaultWalletDirectory();
-        walletDirectory.DefaultForPaymentAsync(AppReceipts.PaymentMethod.Card, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
+        walletDirectory.DefaultForPaymentAsync(PaymentMethod.Card, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
         var store = DefaultStore();
         var worker = CreateWorker(
             ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, categorizer: categorizer, walletDirectory: walletDirectory), Time());
@@ -279,7 +279,7 @@ public class ReceiptCategorizationWorkerTests
         categorizer.CategorizeAsync(Arg.Any<AppReceipts.ReceiptCategorizationRequest>(), Arg.Any<CancellationToken>())
             .Returns(Categorization(walletId: Guid.NewGuid(), merchantCanonicalName: "Test Market"));
         var walletDirectory = DefaultWalletDirectory();
-        walletDirectory.DefaultForPaymentAsync(AppReceipts.PaymentMethod.Card, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
+        walletDirectory.DefaultForPaymentAsync(PaymentMethod.Card, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
         var store = DefaultStore();
         var worker = CreateWorker(
             ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, categorizer: categorizer, walletDirectory: walletDirectory), Time());
@@ -294,7 +294,7 @@ public class ReceiptCategorizationWorkerTests
     public async Task With_no_caption_wallet_a_card_payment_uses_the_wallet_marked_default_for_card()
     {
         var walletDirectory = DefaultWalletDirectory();
-        walletDirectory.DefaultForPaymentAsync(AppReceipts.PaymentMethod.Card, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
+        walletDirectory.DefaultForPaymentAsync(PaymentMethod.Card, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
         var store = DefaultStore();
         var worker = CreateWorker(
             ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, walletDirectory: walletDirectory), Time());
@@ -309,10 +309,10 @@ public class ReceiptCategorizationWorkerTests
     public async Task With_no_caption_wallet_a_cash_payment_uses_the_wallet_marked_default_for_cash()
     {
         var walletDirectory = DefaultWalletDirectory();
-        walletDirectory.DefaultForPaymentAsync(AppReceipts.PaymentMethod.Cash, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
+        walletDirectory.DefaultForPaymentAsync(PaymentMethod.Cash, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
         var receiptStore = DefaultReceiptStore();
         receiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>())
-            .Returns(Receipt(paymentMethod: AppReceipts.PaymentMethod.Cash));
+            .Returns(Receipt(paymentMethod: PaymentMethod.Cash));
         var store = DefaultStore();
         var worker = CreateWorker(
             ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, receiptStore: receiptStore, walletDirectory: walletDirectory), Time());
@@ -328,7 +328,7 @@ public class ReceiptCategorizationWorkerTests
     {
         var receiptStore = DefaultReceiptStore();
         receiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>())
-            .Returns(Receipt(paymentMethod: AppReceipts.PaymentMethod.Transfer));
+            .Returns(Receipt(paymentMethod: PaymentMethod.Transfer));
         var store = DefaultStore();
         var worker = CreateWorker(ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, receiptStore: receiptStore), Time());
 
@@ -342,7 +342,7 @@ public class ReceiptCategorizationWorkerTests
     public async Task A_refund_is_recorded_as_income()
     {
         var receiptStore = DefaultReceiptStore();
-        receiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Receipt(kind: AppReceipts.ReceiptKind.Refund));
+        receiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Receipt(kind: ReceiptKind.Refund));
         var store = DefaultStore();
         var worker = CreateWorker(ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, receiptStore: receiptStore), Time());
 
@@ -360,12 +360,12 @@ public class ReceiptCategorizationWorkerTests
     // a revision, and StageFailed at Categorized (with a FailedStage) gives the trace page a row to
     // explain the gap instead of showing Extracted-then-nothing.
     [Theory]
-    [InlineData(AppReceipts.ReceiptKind.Copy, "copy")]
-    [InlineData(AppReceipts.ReceiptKind.Training, "training")]
-    [InlineData(AppReceipts.ReceiptKind.Proforma, "proforma")]
-    [InlineData(AppReceipts.ReceiptKind.Advance, "advance")]
+    [InlineData(ReceiptKind.Copy, "copy")]
+    [InlineData(ReceiptKind.Training, "training")]
+    [InlineData(ReceiptKind.Proforma, "proforma")]
+    [InlineData(ReceiptKind.Advance, "advance")]
     public async Task A_non_money_receipt_kind_is_not_posted_and_the_transaction_is_cancelled_with_a_traceable_reason(
-        AppReceipts.ReceiptKind kind, string word)
+        ReceiptKind kind, string word)
     {
         var receiptStore = DefaultReceiptStore();
         receiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Receipt(kind: kind));

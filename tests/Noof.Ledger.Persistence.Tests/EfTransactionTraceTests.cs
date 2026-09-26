@@ -4,7 +4,6 @@ using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Diagnostics;
 using Noof.Ledger.Persistence.Revisions;
-using AppReceipts = Noof.Ledger.Application.Receipts;
 
 namespace Noof.Ledger.Persistence.Tests;
 
@@ -270,13 +269,13 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
         var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
 
         trace.Receipt.Should().NotBeNull();
-        trace.Receipt!.Source.Should().Be(AppReceipts.ReceiptSource.Vision);
+        trace.Receipt!.Source.Should().Be(ReceiptSource.Vision);
         trace.Receipt.SellerName.Should().Be("Maxi");
         trace.Receipt.LocationName.Should().Be("Maxi Vračar");
         trace.Receipt.SellerAddress.Should().Be("Bulevar 1");
         trace.Receipt.SellerTaxId.Should().Be("123456789");
         trace.Receipt.FiscalNumber.Should().Be("FN-1");
-        trace.Receipt.PaymentMethod.Should().Be(AppReceipts.PaymentMethod.Card);
+        trace.Receipt.PaymentMethod.Should().Be(PaymentMethod.Card);
         trace.Receipt.Total.Should().Be(300m);
         trace.Receipt.Currency.Should().Be(CurrencyCode.Rsd);
         trace.Receipt.QrTotal.Should().Be(305m);

@@ -3,7 +3,6 @@ using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Wallets;
 using Npgsql;
-using AppReceipts = Noof.Ledger.Application.Receipts;
 
 namespace Noof.Ledger.Persistence.Tests;
 
@@ -63,7 +62,7 @@ public class EfWalletDirectoryTests(PostgresFixture fixture)
         db.ChangeTracker.Clear();
 
         var walletId = await new EfWalletDirectory(db)
-            .DefaultForPaymentAsync(AppReceipts.PaymentMethod.Card, TestContext.Current.CancellationToken);
+            .DefaultForPaymentAsync(PaymentMethod.Card, TestContext.Current.CancellationToken);
 
         walletId.Should().Be(cardWallet.Id);
     }
@@ -75,18 +74,18 @@ public class EfWalletDirectoryTests(PostgresFixture fixture)
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
 
         var walletId = await new EfWalletDirectory(db)
-            .DefaultForPaymentAsync(AppReceipts.PaymentMethod.Cash, TestContext.Current.CancellationToken);
+            .DefaultForPaymentAsync(PaymentMethod.Cash, TestContext.Current.CancellationToken);
 
         walletId.Should().BeNull();
     }
 
     [Theory]
-    [InlineData(AppReceipts.PaymentMethod.Transfer)]
-    [InlineData(AppReceipts.PaymentMethod.Voucher)]
-    [InlineData(AppReceipts.PaymentMethod.Other)]
-    [InlineData(AppReceipts.PaymentMethod.Mixed)]
+    [InlineData(PaymentMethod.Transfer)]
+    [InlineData(PaymentMethod.Voucher)]
+    [InlineData(PaymentMethod.Other)]
+    [InlineData(PaymentMethod.Mixed)]
     public async Task DefaultForPaymentAsync_answers_null_without_a_query_for_every_method_but_card_and_cash(
-        AppReceipts.PaymentMethod method)
+        PaymentMethod method)
     {
         await using var db = await fixture.CreateContextAsync();
 

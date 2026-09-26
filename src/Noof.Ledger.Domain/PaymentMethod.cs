@@ -1,6 +1,5 @@
 namespace Noof.Ledger.Domain;
 
-// Mirrors Noof.Ledger.Application.Receipts.PaymentMethod value for value - see ReceiptSource.
 public enum PaymentMethod
 {
     Card = 0,

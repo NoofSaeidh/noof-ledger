@@ -7,8 +7,6 @@ using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Host.Workers.ReceiptCategorizationLogging;
-using AppReceiptKind = Noof.Ledger.Application.Receipts.ReceiptKind;
-using AppPaymentMethod = Noof.Ledger.Application.Receipts.PaymentMethod;
 
 namespace Noof.Ledger.Host.Workers;
 
@@ -168,7 +166,7 @@ internal sealed class ReceiptCategorizationWorker(
                     line.Name, new Money(line.Total, receipt.Currency), categoryId, merchantId, line.Ordinal, line.Id));
             }
 
-            var transactionKind = receipt.Kind == AppReceiptKind.Refund ? TransactionKind.Income : TransactionKind.Expense;
+            var transactionKind = receipt.Kind == ReceiptKind.Refund ? TransactionKind.Income : TransactionKind.Expense;
             var occurredOn = receipt.IssuedAt is { } issuedAt
                 ? DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(issuedAt, captureTimeZone).DateTime)
                 : sub.OccurredOn;
@@ -212,8 +210,8 @@ internal sealed class ReceiptCategorizationWorker(
         }
     }
 
-    static bool IsNonMoneyKind(AppReceiptKind kind) =>
-        kind is AppReceiptKind.Copy or AppReceiptKind.Training or AppReceiptKind.Proforma or AppReceiptKind.Advance;
+    static bool IsNonMoneyKind(ReceiptKind kind) =>
+        kind is ReceiptKind.Copy or ReceiptKind.Training or ReceiptKind.Proforma or ReceiptKind.Advance;
 
     static async Task<Guid?> KnownMerchantIdAsync(
         IMerchantDirectory merchantDirectory, Dictionary<string, MerchantAliasEntry> aliasByFolded, ReceiptView receipt,
@@ -248,7 +246,7 @@ internal sealed class ReceiptCategorizationWorker(
         if (categorization.WalletId is { } named && wallets.Any(wallet => wallet.Id == named))
             return named;
 
-        if (receipt.PaymentMethod is AppPaymentMethod.Card or AppPaymentMethod.Cash
+        if (receipt.PaymentMethod is PaymentMethod.Card or PaymentMethod.Cash
             && await walletDirectory.DefaultForPaymentAsync(receipt.PaymentMethod.Value, cancellationToken) is { } forPayment)
             return forPayment;
 
@@ -267,7 +265,7 @@ internal sealed class ReceiptCategorizationWorker(
     // show instead of Extracted-then-silence.
     async Task ReportNotRecordedAsync(
         IRecordEditor recordEditor, IChatNotifier notifier, CategorizationJob job, CategorizationSubject subject,
-        AppReceiptKind kind, CancellationToken cancellationToken)
+        ReceiptKind kind, CancellationToken cancellationToken)
     {
         logger.ReceiptNotRecorded(kind.ToString(), job.TransactionId);
         logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Categorized,

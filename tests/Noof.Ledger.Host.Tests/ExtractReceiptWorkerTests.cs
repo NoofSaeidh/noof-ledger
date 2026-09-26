@@ -13,9 +13,6 @@ using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Host.Workers;
 using Noof.Ledger.TestKit;
-using PaymentMethod = Noof.Ledger.Application.Receipts.PaymentMethod;
-using ReceiptKind = Noof.Ledger.Application.Receipts.ReceiptKind;
-using ReceiptSource = Noof.Ledger.Application.Receipts.ReceiptSource;
 
 namespace Noof.Ledger.Host.Tests;
 

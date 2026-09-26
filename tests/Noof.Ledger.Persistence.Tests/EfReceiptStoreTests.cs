@@ -48,7 +48,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     };
 
     static AppReceipts.ExtractedReceipt NewExtractedReceipt(string? sellerTaxId = "SYN-100000001", string? fiscalNumber = "SYN-1") => new(
-        AppReceipts.ReceiptSource.FiscalQr,
+        ReceiptSource.FiscalQr,
         VerificationUrl: "https://suf.purs.gov.rs/v/?vl=synthetic",
         SellerTaxId: sellerTaxId,
         SellerName: "Test Market",
@@ -58,8 +58,8 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
         IssuedAt: Now,
         Total: 373.4567m,
         Currency: CurrencyCode.Rsd,
-        Kind: AppReceipts.ReceiptKind.Sale,
-        PaymentMethod: AppReceipts.PaymentMethod.Card,
+        Kind: ReceiptKind.Sale,
+        PaymentMethod: PaymentMethod.Card,
         QrTotal: 373.4567m,
         Lines:
         [
@@ -87,13 +87,13 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
         var view = await store.GetByTransactionAsync(transaction.Id, TestContext.Current.CancellationToken);
         view.Should().NotBeNull();
         view!.Id.Should().Be(result.ReceiptId!.Value);
-        view.Source.Should().Be(AppReceipts.ReceiptSource.FiscalQr);
+        view.Source.Should().Be(ReceiptSource.FiscalQr);
         view.SellerTaxId.Should().Be(receipt.SellerTaxId);
         view.SellerName.Should().Be(receipt.SellerName);
         view.Total.Should().Be(373.4567m);
         view.Currency.Should().Be(CurrencyCode.Rsd);
-        view.Kind.Should().Be(AppReceipts.ReceiptKind.Sale);
-        view.PaymentMethod.Should().Be(AppReceipts.PaymentMethod.Card);
+        view.Kind.Should().Be(ReceiptKind.Sale);
+        view.PaymentMethod.Should().Be(PaymentMethod.Card);
         view.QrTotal.Should().Be(373.4567m);
         view.VerificationUrl.Should().Be(receipt.VerificationUrl);
         view.Lines.Should().HaveCount(2);
@@ -159,7 +159,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         db.ChangeTracker.Clear();
         var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
-        var receipt = NewExtractedReceipt(sellerTaxId: null, fiscalNumber: null) with { Source = AppReceipts.ReceiptSource.Vision };
+        var receipt = NewExtractedReceipt(sellerTaxId: null, fiscalNumber: null) with { Source = ReceiptSource.Vision };
 
         var first = await store.SaveExtractedAsync(transaction.Id, receipt, "photo-file-1", TestContext.Current.CancellationToken);
         var replay = await store.SaveExtractedAsync(transaction.Id, receipt, "photo-file-1", TestContext.Current.CancellationToken);

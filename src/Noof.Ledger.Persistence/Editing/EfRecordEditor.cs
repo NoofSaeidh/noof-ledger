@@ -57,8 +57,7 @@ internal sealed class EfRecordEditor(LedgerDbContext db, TimeProvider timeProvid
         return kind is { } present && !IsNonMoneyKind(present);
     }
 
-    // Mirrors ReceiptCategorizationWorker.IsNonMoneyKind value for value (Domain.ReceiptKind here,
-    // Application.Receipts.ReceiptKind there - see ReceiptKind.cs).
+    // Mirrors ReceiptCategorizationWorker.IsNonMoneyKind value for value.
     static bool IsNonMoneyKind(ReceiptKind kind) =>
         kind is ReceiptKind.Copy or ReceiptKind.Training or ReceiptKind.Proforma or ReceiptKind.Advance;
 

@@ -14,7 +14,7 @@ public class SufReceiptClientTests
         IssuedAt: new DateTimeOffset(2026, 9, 25, 12, 30, 0, TimeSpan.Zero),
         RequestedBy: "REQ12345",
         SignedBy: "SIG54321",
-        Kind: Noof.Ledger.Application.Receipts.ReceiptKind.Sale,
+        Kind: ReceiptKind.Sale,
         TotalCounter: 42,
         TransactionTypeCounter: 7);
 
@@ -75,7 +75,7 @@ public class SufReceiptClientTests
 
         result.Failure.Should().BeNull();
         result.Receipt.Should().NotBeNull();
-        result.Receipt!.Source.Should().Be(Noof.Ledger.Application.Receipts.ReceiptSource.FiscalQr);
+        result.Receipt!.Source.Should().Be(ReceiptSource.FiscalQr);
         result.Receipt.Currency.Should().Be(CurrencyCode.Rsd);
         result.Receipt.QrTotal.Should().Be(Payload.Total);
         result.Receipt.VerificationUrl.Should().Be(Payload.VerificationUrl);

@@ -2,7 +2,6 @@ using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Revisions;
-using AppReceipts = Noof.Ledger.Application.Receipts;
 
 namespace Noof.Ledger.Persistence.Wallets;
 
@@ -118,7 +117,7 @@ internal sealed class EfWalletAdmin(LedgerDbContext db, TimeProvider timeProvide
         await tx.CommitAsync(cancellationToken);
     }
 
-    public async Task SetPaymentDefaultAsync(Guid walletId, AppReceipts.PaymentMethod? method, CancellationToken cancellationToken)
+    public async Task SetPaymentDefaultAsync(Guid walletId, PaymentMethod? method, CancellationToken cancellationToken)
     {
         var domainMethod = ToDomain(method);
 
@@ -171,20 +170,20 @@ internal sealed class EfWalletAdmin(LedgerDbContext db, TimeProvider timeProvide
     static string RequireName(string name) =>
         name.Trim() is { Length: > 0 } trimmed ? trimmed : throw new ArgumentException("A wallet needs a name.", nameof(name));
 
-    static WalletPaymentDefault? ToDomain(AppReceipts.PaymentMethod? method) => method switch
+    static WalletPaymentDefault? ToDomain(PaymentMethod? method) => method switch
     {
         null => null,
-        AppReceipts.PaymentMethod.Card => WalletPaymentDefault.Card,
-        AppReceipts.PaymentMethod.Cash => WalletPaymentDefault.Cash,
+        PaymentMethod.Card => WalletPaymentDefault.Card,
+        PaymentMethod.Cash => WalletPaymentDefault.Cash,
         _ => throw new ArgumentOutOfRangeException(
             nameof(method), method, "Only Card, Cash or null can be a wallet's payment default."),
     };
 
-    static AppReceipts.PaymentMethod? ToContract(WalletPaymentDefault? method) => method switch
+    static PaymentMethod? ToContract(WalletPaymentDefault? method) => method switch
     {
         null => null,
-        WalletPaymentDefault.Card => AppReceipts.PaymentMethod.Card,
-        WalletPaymentDefault.Cash => AppReceipts.PaymentMethod.Cash,
+        WalletPaymentDefault.Card => PaymentMethod.Card,
+        WalletPaymentDefault.Cash => PaymentMethod.Cash,
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unknown wallet payment default."),
     };
 

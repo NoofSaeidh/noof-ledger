@@ -1,5 +1,4 @@
 using Noof.Ledger.Domain;
-using PaymentMethod = Noof.Ledger.Application.Receipts.PaymentMethod;
 
 namespace Noof.Ledger.Application.Wallets;
 

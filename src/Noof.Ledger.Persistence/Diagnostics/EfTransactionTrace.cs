@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Diagnostics;
-using AppReceipts = Noof.Ledger.Application.Receipts;
 
 namespace Noof.Ledger.Persistence.Diagnostics;
 
@@ -109,14 +108,14 @@ internal sealed class EfTransactionTrace(LedgerDbContext db) : ITransactionTrace
             .ToList();
 
         return new ReceiptTraceView(
-            (AppReceipts.ReceiptSource)receipt.Source,
+            receipt.Source,
             receipt.SellerName,
             receipt.LocationName,
             receipt.SellerAddress,
             receipt.SellerTaxId,
             receipt.FiscalNumber,
             receipt.IssuedAt,
-            (AppReceipts.PaymentMethod?)receipt.PaymentMethod,
+            receipt.PaymentMethod,
             receipt.Total.Amount,
             receipt.Total.Currency,
             receipt.QrTotal,

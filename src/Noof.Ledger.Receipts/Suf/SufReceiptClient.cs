@@ -70,7 +70,7 @@ internal sealed partial class SufReceiptClient(HttpClient httpClient) : IFiscalR
                 return Failure("The journal had no recognisable line items.", (int)response.StatusCode);
 
             var receipt = new ExtractedReceipt(
-                Source: Noof.Ledger.Application.Receipts.ReceiptSource.FiscalQr,
+                Source: ReceiptSource.FiscalQr,
                 VerificationUrl: payload.VerificationUrl,
                 SellerTaxId: parsed.InvoiceRequest?.TaxId ?? journal.SellerTaxId,
                 SellerName: parsed.InvoiceRequest?.BusinessName ?? journal.SellerName,

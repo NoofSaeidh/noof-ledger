@@ -6,9 +6,6 @@ using AppReceipts = Noof.Ledger.Application.Receipts;
 
 namespace Noof.Ledger.Persistence.Receipts;
 
-// Application.Receipts and Domain each declare their own ReceiptSource/ReceiptKind/PaymentMethod
-// (Domain has zero NuGet references and cannot depend on Application - see ReceiptSource.cs), kept
-// in step by ReceiptEnumTests. This class is the one place that casts between them.
 internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvider) : AppReceipts.IReceiptStore
 {
     public async Task<AppReceipts.ReceiptSaveResult> SaveExtractedAsync(
@@ -20,7 +17,7 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
         {
             Id = receiptId,
             TransactionId = transactionId,
-            Source = (ReceiptSource)receipt.Source,
+            Source = receipt.Source,
             VerificationUrl = receipt.VerificationUrl,
             SellerTaxId = receipt.SellerTaxId,
             SellerName = receipt.SellerName,
@@ -29,8 +26,8 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
             FiscalNumber = receipt.FiscalNumber,
             IssuedAt = receipt.IssuedAt,
             Total = new Money(receipt.Total, receipt.Currency),
-            Kind = (ReceiptKind)receipt.Kind,
-            PaymentMethod = (PaymentMethod?)receipt.PaymentMethod,
+            Kind = receipt.Kind,
+            PaymentMethod = receipt.PaymentMethod,
             QrTotal = receipt.QrTotal,
             TelegramFileId = telegramFileId,
             CreatedAt = timeProvider.GetUtcNow(),
@@ -121,7 +118,7 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
 
         return new AppReceipts.ReceiptView(
             receipt.Id,
-            (AppReceipts.ReceiptSource)receipt.Source,
+            receipt.Source,
             receipt.SellerTaxId,
             receipt.SellerName,
             receipt.SellerAddress,
@@ -130,8 +127,8 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
             receipt.IssuedAt,
             receipt.Total.Amount,
             receipt.Total.Currency,
-            (AppReceipts.ReceiptKind)receipt.Kind,
-            (AppReceipts.PaymentMethod?)receipt.PaymentMethod,
+            receipt.Kind,
+            receipt.PaymentMethod,
             receipt.QrTotal,
             receipt.VerificationUrl,
             lines);

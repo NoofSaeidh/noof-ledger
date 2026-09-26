@@ -279,9 +279,9 @@ public class TelegramUpdateRouterTests
     }
 
     static ReceiptView ReceiptFor() => new(
-        Guid.NewGuid(), Noof.Ledger.Application.Receipts.ReceiptSource.FiscalQr, "SYN-100000001", "Test Market", null, null, "SYN-1",
+        Guid.NewGuid(), ReceiptSource.FiscalQr, "SYN-100000001", "Test Market", null, null, "SYN-1",
         new DateTimeOffset(2026, 9, 22, 9, 30, 0, TimeSpan.Zero), 250m, CurrencyCode.Rsd,
-        Noof.Ledger.Application.Receipts.ReceiptKind.Sale, Noof.Ledger.Application.Receipts.PaymentMethod.Card,
+        ReceiptKind.Sale, PaymentMethod.Card,
         250m, "https://suf.purs.gov.rs/v/?vl=synthetic",
         [new ReceiptLineView(Guid.NewGuid(), 1, "кофе", 1m, null, 250m, 250m, null)]);
 
