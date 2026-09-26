@@ -227,8 +227,8 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
             Id = receiptId,
             TransactionId = TransactionId,
             Source = ReceiptSource.Vision,
-            SellerName = "Maxi",
-            LocationName = "Maxi Vračar",
+            SellerName = "Test Market",
+            LocationName = "Test Market Nova 12",
             SellerAddress = "Bulevar 1",
             SellerTaxId = "123456789",
             FiscalNumber = "FN-1",
@@ -270,8 +270,8 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
 
         trace.Receipt.Should().NotBeNull();
         trace.Receipt!.Source.Should().Be(ReceiptSource.Vision);
-        trace.Receipt.SellerName.Should().Be("Maxi");
-        trace.Receipt.LocationName.Should().Be("Maxi Vračar");
+        trace.Receipt.SellerName.Should().Be("Test Market");
+        trace.Receipt.LocationName.Should().Be("Test Market Nova 12");
         trace.Receipt.SellerAddress.Should().Be("Bulevar 1");
         trace.Receipt.SellerTaxId.Should().Be("123456789");
         trace.Receipt.FiscalNumber.Should().Be("FN-1");

@@ -417,7 +417,7 @@ public sealed class TransactionTraceTests(CookieModeHostFixture fixture) : PageT
                 Id = receiptId,
                 TransactionId = transactionId,
                 Source = ReceiptSource.Vision,
-                SellerName = "Maxi Petlovo Brdo",
+                SellerName = "Test Market Nova 12",
                 SellerAddress = "Bulevar 1",
                 SellerTaxId = "123456789",
                 FiscalNumber = "FN-9",
@@ -447,7 +447,7 @@ public sealed class TransactionTraceTests(CookieModeHostFixture fixture) : PageT
         await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
         var receiptSection = Page.Locator("#trace-receipt");
-        await Expect(receiptSection).ToContainTextAsync("Maxi Petlovo Brdo");
+        await Expect(receiptSection).ToContainTextAsync("Test Market Nova 12");
         await Expect(receiptSection).ToContainTextAsync("123456789");
         await Expect(receiptSection).ToContainTextAsync("FN-9");
         await Expect(receiptSection).ToContainTextAsync("Read from the photo");
