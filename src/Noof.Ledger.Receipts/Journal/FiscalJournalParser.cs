@@ -105,6 +105,14 @@ internal static partial class FiscalJournalParser
             if (line.Length == 0)
                 continue;
 
+            // Real journals print a column-header row (Назив Цена Кол. Укупно / Naziv Cena Kol.
+            // Ukupno) as the first line of the items section, between the `====` delimiter and the
+            // first article - the upstream parser this was ported from skips it explicitly (I-1,
+            // 2026-09-25 final review). Left in, it never matches AmountLine below, so it joins the
+            // name buffer and gets glued onto line 1's name on every real receipt.
+            if (ItemsHeaderRow().IsMatch(line))
+                continue;
+
             var match = AmountLine().Match(line);
             if (!match.Success)
             {
@@ -238,4 +246,7 @@ internal static partial class FiscalJournalParser
 
     [GeneratedRegex(@"^\d+-(?<name>.+)$")]
     private static partial Regex LocationLine();
+
+    [GeneratedRegex(@"^(Назив|Naziv)\s+(Цена|Cena)\s+(Кол\.|Kol\.)\s+(Укупно|Ukupno)$")]
+    private static partial Regex ItemsHeaderRow();
 }

@@ -15,6 +15,7 @@ public class FiscalJournalParserTests
         Кнез Михаилова 1
         Београд
         ========================================
+        Назив   Цена         Кол.      Укупно
         Хлеб/kom(Ђ)
               120,00               2       240,00
         Млеко(Е)
@@ -44,6 +45,7 @@ public class FiscalJournalParserTests
         Bulevar Oslobođenja 10
         Novi Sad
         ========================================
+        Naziv   Cena         Kol.      Ukupno
         Mleko/kom(Đ)
                99,00               1        99,00
         Hleb(E)
@@ -127,6 +129,7 @@ public class FiscalJournalParserTests
             Адреса 1
             Град
             ========================================
+            Назив   Цена         Кол.      Укупно
             Артикал(Ђ)
                    10,00               3        99,00
             ----------------------------------------
