@@ -47,14 +47,21 @@ public class SufReceiptClientTests
         ======== КРАЈ ФИСКАЛНОГ РАЧУНА =========
         """;
 
-    static string JsonBody(string journal) =>
+    static string JsonBody(string journal, string sdcTime = "2026-09-25T12:30:00") =>
         $$"""
         {
             "invoiceRequest": { "businessName": "Test DOO", "taxId": "123456789", "address": "Knez Mihailova 1", "locationName": "001-Center" },
-            "invoiceResult": { "invoiceNumber": "JID123-ABC456-78", "totalAmount": 329.90, "sdcTime": "2026-09-25T12:30:00" },
+            "invoiceResult": { "invoiceNumber": "JID123-ABC456-78", "totalAmount": 329.90, "sdcTime": "{{sdcTime}}" },
             "journal": {{System.Text.Json.JsonSerializer.Serialize(journal)}}
         }
         """;
+
+    static DateTimeOffset BelgradeTime(int year, int month, int day, int hour, int minute, int second)
+    {
+        var belgrade = TimeZoneInfo.FindSystemTimeZoneById("Europe/Belgrade");
+        var local = new DateTime(year, month, day, hour, minute, second, DateTimeKind.Unspecified);
+        return new DateTimeOffset(local, belgrade.GetUtcOffset(local));
+    }
 
     static SufReceiptClient ClientFor(HttpMessageHandler handler) => new(new HttpClient(handler));
 
@@ -75,6 +82,23 @@ public class SufReceiptClientTests
         result.Receipt.SellerTaxId.Should().Be("123456789");
         result.Receipt.Total.Should().Be(329.90m);
         result.Receipt.Lines.Should().HaveCount(2);
+        result.Receipt.IssuedAt.Should().Be(BelgradeTime(2026, 9, 25, 12, 30, 0),
+            "the journal's own ПФР време is unambiguous and preferred over sdcTime");
+    }
+
+    [Fact]
+    public async Task Falls_back_to_sdcTime_parsed_as_belgrade_local_and_keeps_a_late_evening_receipts_date()
+    {
+        var journalWithNoPfrTime = Journal.Replace("ПФР време: 25.09.2026. 12:30:00", "", StringComparison.Ordinal);
+        var handler = StubHttpMessageHandler.Returning(HttpStatusCode.OK, JsonBody(journalWithNoPfrTime, sdcTime: "2026-09-25T23:30:00"));
+        var client = ClientFor(handler);
+
+        var result = await client.FetchAsync(Payload, CancellationToken.None);
+
+        result.Receipt.Should().NotBeNull();
+        result.Receipt!.IssuedAt.Should().Be(BelgradeTime(2026, 9, 25, 23, 30, 0),
+            "sdcTime carries no offset and must be read as Belgrade local time, not UTC - a receipt " +
+            "issued 23:30 local must not land on the next day");
     }
 
     [Fact]

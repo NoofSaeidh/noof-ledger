@@ -1,13 +1,14 @@
 using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Receipts.Journal;
 
 namespace Noof.Ledger.Receipts.Suf;
 
-internal sealed class SufReceiptClient(HttpClient httpClient) : IFiscalReceiptClient
+internal sealed partial class SufReceiptClient(HttpClient httpClient) : IFiscalReceiptClient
 {
     static readonly string UserAgent =
         $"noof-ledger/{typeof(SufReceiptClient).Assembly.GetName().Version?.ToString(3) ?? "0.0.0"} (personal receipt lookup)";
@@ -62,7 +63,12 @@ internal sealed class SufReceiptClient(HttpClient httpClient) : IFiscalReceiptCl
                 SellerAddress: parsed.InvoiceRequest?.Address ?? journal.SellerAddress,
                 LocationName: parsed.InvoiceRequest?.LocationName ?? journal.LocationName,
                 FiscalNumber: parsed.InvoiceResult?.InvoiceNumber ?? journal.FiscalNumber,
-                IssuedAt: ParseSdcTime(parsed.InvoiceResult?.SdcTime) ?? journal.IssuedAt,
+                // I-4 (2026-09-25 final review): sdcTime carries no UTC offset ("2026-09-25T12:30:00"),
+                // and it is Belgrade local time, not UTC - the journal's own ПФР време for the same
+                // receipt names the same wall-clock hour. The journal is parsed as Belgrade local
+                // already (FiscalJournalParser.ParseBelgradeTime) and unambiguous, so it wins whenever
+                // present; sdcTime is only the fallback, and then it is read the same way, never as UTC.
+                IssuedAt: journal.IssuedAt ?? ParseSdcTime(parsed.InvoiceResult?.SdcTime),
                 Total: parsed.InvoiceResult?.TotalAmount ?? journal.Total,
                 Currency: CurrencyCode.Rsd,
                 Kind: payload.Kind,
@@ -74,10 +80,27 @@ internal sealed class SufReceiptClient(HttpClient httpClient) : IFiscalReceiptCl
         }
     }
 
-    static DateTimeOffset? ParseSdcTime(string? raw) =>
-        !string.IsNullOrWhiteSpace(raw) && DateTimeOffset.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed)
-            ? parsed
-            : null;
+    static DateTimeOffset? ParseSdcTime(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return null;
+
+        var trimmed = raw.Trim();
+        if (trimmed.EndsWith('Z') || ExplicitOffsetSuffix().IsMatch(trimmed))
+            return DateTimeOffset.TryParse(trimmed, CultureInfo.InvariantCulture, DateTimeStyles.None, out var withOffset)
+                ? withOffset
+                : null;
+
+        if (!DateTime.TryParse(trimmed, CultureInfo.InvariantCulture, DateTimeStyles.NoCurrentDateDefault, out var local))
+            return null;
+
+        var belgrade = TimeZoneInfo.FindSystemTimeZoneById("Europe/Belgrade");
+        var unspecified = DateTime.SpecifyKind(local, DateTimeKind.Unspecified);
+        return new DateTimeOffset(unspecified, belgrade.GetUtcOffset(unspecified));
+    }
 
     static FiscalFetchResult Failure(string reason, int? statusCode) => new(null, new FiscalFetchFailure(reason, statusCode));
+
+    [GeneratedRegex(@"[+-]\d{2}:?\d{2}$")]
+    private static partial Regex ExplicitOffsetSuffix();
 }
