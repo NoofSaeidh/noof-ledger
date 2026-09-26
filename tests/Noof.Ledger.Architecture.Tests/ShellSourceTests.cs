@@ -14,6 +14,8 @@ public class ShellSourceTests
 
     static string LayoutSource() => Read("Components", "Layout", "MainLayout.razor");
 
+    static string WalletsSource() => Read("Components", "Pages", "Wallets.razor");
+
     [Fact]
     public void The_document_loads_the_component_library_stylesheet()
     {
@@ -75,5 +77,17 @@ public class ShellSourceTests
         css.Should().MatchRegex(
             @"\.trace-row-warning\s*\{[^}]*var\(--mud-palette-warning[^}]*\}",
             "a warning row must take its color from the theme, the same way .noof-level-warning does");
+    }
+
+    // Every other filter/field caption on Transactions, DiagnosticsLogs and Wallets itself
+    // (Name/Aliases) is a real <label for>, not just styled text - a bare <MudText> caption reads
+    // fine but is not reachable from the control it describes. Wallets' payment-default caption
+    // (Phase 6) was the one exception.
+    [Fact]
+    public void The_wallet_payment_default_caption_is_a_real_label_for_the_select()
+    {
+        WalletsSource().Should().Contain(
+            "HtmlTag=\"label\" for=\"@($\"wallet-payment-default-{wallet.Id}\")\"",
+            "every other caption beside a filter or form control in this app is a <label for>, not bare text");
     }
 }

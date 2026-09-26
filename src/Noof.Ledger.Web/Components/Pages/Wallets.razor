@@ -62,7 +62,7 @@ else
             </MudButton>
         </div>
         <div class="noof-wallet-row mt-4">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">Default for</MudText>
+            <MudText HtmlTag="label" for="@($"wallet-payment-default-{wallet.Id}")" Typo="Typo.caption" Class="mud-text-secondary">Default for</MudText>
             <select id="@($"wallet-payment-default-{wallet.Id}")" @bind="wallet.PendingPaymentDefault"
                     @bind:after="@(() => SetPaymentDefaultAsync(wallet))" class="noof-native-select">
                 <option value="">None</option>
