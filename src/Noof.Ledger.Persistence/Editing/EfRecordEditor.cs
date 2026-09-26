@@ -28,17 +28,39 @@ internal sealed class EfRecordEditor(LedgerDbContext db, TimeProvider timeProvid
     // CategorizeReceipt instead of Correct, so ReceiptCategorizationWorker re-runs categorize_receipt
     // (categories/merchant/wallet only) and rebuilds the line items from receipt_lines, never from a
     // model's own reading of the raw text.
+    //
+    // Fix round 1 (Phase 6 final review): that only holds for a money-bearing receipt. A
+    // copy/training/proforma/advance slip is Cancelled by ReceiptCategorizationWorker's own
+    // IsNonMoneyKind check (M-4) and carries no receipt_lines worth re-categorizing, so routing its
+    // correction to CategorizeReceipt would only re-run that same check and discard the instruction
+    // (job.Instruction is read nowhere on that branch). Excluding those kinds here sends the
+    // correction down the ordinary Correct path instead - IRecordEcho.ComposeReceiptNotRecorded's own
+    // doc comment already promises "Edit still lets the person record it by hand as an ordinary text
+    // correction", and EfCategorizationStore.ApplyAsync already knows to leave a Cancelled transaction
+    // Cancelled after applying a correction to it.
     public async Task<bool> RequestCorrectionAsync(
         Guid transactionId, string instruction, int sourceMessageId, DateTimeOffset sentAt, CancellationToken cancellationToken) =>
         await TryQueueAsync(
-            await HasReceiptAsync(transactionId, cancellationToken)
+            await HasMoneyReceiptAsync(transactionId, cancellationToken)
                 ? NewJob(transactionId, JobKind.CategorizeReceipt, instruction, sourceMessageId, instructionDay: null)
                 : NewJob(transactionId, JobKind.Correct, instruction, sourceMessageId,
                     await InstructionDayAsync(transactionId, sentAt, cancellationToken)),
             cancellationToken);
 
-    Task<bool> HasReceiptAsync(Guid transactionId, CancellationToken cancellationToken) =>
-        db.Receipts.AsNoTracking().AnyAsync(r => r.TransactionId == transactionId, cancellationToken);
+    async Task<bool> HasMoneyReceiptAsync(Guid transactionId, CancellationToken cancellationToken)
+    {
+        var kind = await db.Receipts.AsNoTracking()
+            .Where(r => r.TransactionId == transactionId)
+            .Select(r => (ReceiptKind?)r.Kind)
+            .SingleOrDefaultAsync(cancellationToken);
+
+        return kind is { } present && !IsNonMoneyKind(present);
+    }
+
+    // Mirrors ReceiptCategorizationWorker.IsNonMoneyKind value for value (Domain.ReceiptKind here,
+    // Application.Receipts.ReceiptKind there - see ReceiptKind.cs).
+    static bool IsNonMoneyKind(ReceiptKind kind) =>
+        kind is ReceiptKind.Copy or ReceiptKind.Training or ReceiptKind.Proforma or ReceiptKind.Advance;
 
     public async Task<bool> RequestVoiceCorrectionAsync(
         Guid transactionId, string voiceFileId, int sourceMessageId, DateTimeOffset sentAt, CancellationToken cancellationToken) =>

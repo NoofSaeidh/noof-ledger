@@ -167,6 +167,44 @@ public class EfRecordEditorTests(PostgresFixture fixture)
         job.SourceMessageId.Should().Be(8);
     }
 
+    // Fix round 1 (reviewer finding, Phase 6 final review): a copy/training/proforma/advance receipt
+    // is Cancelled by ReportNotRecordedAsync (M-4) and never carries real money, so a correction reply
+    // on it must fall back to the ordinary Correct/record_transaction path - the same path a plain
+    // text capture uses - rather than CategorizeReceipt, which would only re-run IsNonMoneyKind on
+    // the same stored Kind and silently discard the operator's instruction.
+    [Theory]
+    [InlineData(ReceiptKind.Copy)]
+    [InlineData(ReceiptKind.Training)]
+    [InlineData(ReceiptKind.Proforma)]
+    [InlineData(ReceiptKind.Advance)]
+    public async Task A_correction_on_a_non_money_receipt_falls_back_to_record_transaction(ReceiptKind kind)
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = await SeedAsync(db);
+        db.Receipts.Add(new Receipt
+        {
+            Id = Guid.NewGuid(),
+            TransactionId = transaction.Id,
+            Source = ReceiptSource.FiscalQr,
+            Total = new Money(500m, CurrencyCode.Rsd),
+            Kind = kind,
+            CreatedAt = Clock.GetUtcNow(),
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+        var editor = new EfRecordEditor(db, Clock);
+
+        (await editor.RequestCorrectionAsync(transaction.Id, "actually record 500 as an advance", 8, Clock.GetUtcNow(), TestContext.Current.CancellationToken))
+            .Should().BeTrue();
+
+        db.ChangeTracker.Clear();
+        var job = await db.CategorizationJobs.SingleAsync(TestContext.Current.CancellationToken);
+        job.Kind.Should().Be(JobKind.Correct, "a non-money receipt kind carries no amounts to re-categorize from receipt_lines");
+        job.Instruction.Should().Be("actually record 500 as an advance");
+        job.SourceMessageId.Should().Be(8);
+    }
+
     [Fact]
     public async Task A_correction_is_queued_once_even_when_telegram_delivers_the_reply_twice()
     {
