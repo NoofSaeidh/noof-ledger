@@ -106,8 +106,12 @@ internal sealed class RecordEcho : IRecordEcho
         // Persisted - Captured (Restore before ApplyAsync ever ran) or Failed. Neither is
         // "Recorded … Total: " for a record with no line items; both defer to the same rendering the
         // ordinary, non-receipt echo already gives that status.
+        // R2-4 (Phase 6 second re-review): a non-money slip (Copy/Training/Proforma/Advance) Captured
+        // with no job pending - the same M-4/M-11 paths above - rendered "Recording…" forever with no
+        // [Edit], a dead end promising work nobody will do. It gets the honest not-recorded rendering
+        // instead; an ordinary receipt still waiting on extraction gets the receipt-specific wording.
         if (record.Status == TransactionStatus.Captured)
-            return new(Waiting(record), []);
+            return receipt.Kind.IsNonMoneyKind() ? ComposeReceiptNotRecorded(receipt.Kind) : new(ReadingReceipt, []);
 
         if (record.Status == TransactionStatus.Failed)
             return Failure;

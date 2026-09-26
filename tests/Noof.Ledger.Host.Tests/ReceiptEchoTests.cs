@@ -153,6 +153,20 @@ public class ReceiptEchoTests
         echo.Actions.Should().BeEmpty();
     }
 
+    // R2-4 (Phase 6 second re-review): a Copy/Training/Proforma/Advance slip Captured with no job
+    // pending (M-4's Cancel then a Restore) used to fall into Waiting(record) - "Recording…", no
+    // actions - a dead end promising work nobody will do, with no [Edit] to record it by hand.
+    [Fact]
+    public void A_captured_non_money_receipt_renders_the_not_recorded_text_with_an_edit_action()
+    {
+        var record = Record() with { Status = TransactionStatus.Captured };
+
+        var echo = Echo.ComposeReceipt(record, Receipt() with { Kind = ReceiptKind.Copy });
+
+        echo.Text.Should().Be(Echo.ComposeReceiptNotRecorded(ReceiptKind.Copy).Text);
+        echo.Actions.Should().Equal(RecordAction.Edit);
+    }
+
     [Fact]
     public void A_failed_receipt_record_renders_the_ordinary_failure_message()
     {
