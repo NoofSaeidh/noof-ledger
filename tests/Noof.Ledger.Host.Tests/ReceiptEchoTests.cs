@@ -31,6 +31,26 @@ public class ReceiptEchoTests
             ]);
 
     [Fact]
+    public void A_duplicate_of_a_live_receipt_names_the_original_but_says_nothing_about_restoring_it()
+    {
+        var echo = Echo.ComposeReceiptDuplicate(new DateOnly(2026, 9, 20), 500m, CurrencyCode.Rsd, originalCancelled: false);
+
+        echo.Text.Should().Be("Already recorded — this receipt was sent before (20.09.2026, 500.00 RSD).");
+    }
+
+    // M-11 (Phase 6 final review): the duplicate index does not care about status, so without this the
+    // operator has no way to know Restore (not resending the photo) is how to bring the receipt back.
+    [Fact]
+    public void A_duplicate_of_a_cancelled_receipt_says_so_and_points_at_Restore()
+    {
+        var echo = Echo.ComposeReceiptDuplicate(new DateOnly(2026, 9, 20), 500m, CurrencyCode.Rsd, originalCancelled: true);
+
+        echo.Text.Should().Be(
+            "Already recorded — this receipt was sent before (20.09.2026, 500.00 RSD) and cancelled. "
+            + "Press Restore on that message to bring it back.");
+    }
+
+    [Fact]
     public void The_receipt_echo_names_the_shop_location_date_wallet_lines_and_total()
     {
         var echo = Echo.ComposeReceipt(Record(), Receipt());

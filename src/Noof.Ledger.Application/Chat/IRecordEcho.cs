@@ -27,7 +27,10 @@ public interface IRecordEcho
     EchoMessage ComposeCorrectionFailure(CategorizationSubject record);
     EchoMessage ComposeHeardNothing(CategorizationSubject record);
     string ComposeCategorisingReceipt(int lineCount);
-    EchoMessage ComposeReceiptDuplicate(DateOnly? occurredOn, decimal total, CurrencyCode currency);
+    // originalCancelled (M-11, Phase 6 final review): the duplicate index ignores status, so a
+    // receipt whose earlier transaction was Cancelled is rejected forever unless this says Restore
+    // is the way back - the operator has no other way to discover it.
+    EchoMessage ComposeReceiptDuplicate(DateOnly? occurredOn, decimal total, CurrencyCode currency, bool originalCancelled = false);
 
     // Read back from the database exactly as Compose is (D4): record.Lines already carries the
     // categories the worker just wrote. receipt supplies what a plain capture has no equivalent of -

@@ -218,8 +218,13 @@ internal sealed class ExtractReceiptWorker(
                 var duplicateDate = duplicateReceipt?.IssuedAt is { } issuedAt
                     ? DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(issuedAt, captureTimeZone).DateTime)
                     : (DateOnly?)null;
+                // M-11 (Phase 6 final review): the duplicate index ignores status, so the earlier
+                // transaction may itself be Cancelled - the only way back is Restore on that message,
+                // which the operator cannot otherwise discover.
+                var duplicateSubject = await store.GetSubjectAsync(duplicateId, cancellationToken);
                 var echo = recordEcho.ComposeReceiptDuplicate(
-                    duplicateDate, duplicateReceipt?.Total ?? 0m, duplicateReceipt?.Currency ?? CurrencyCode.Rsd);
+                    duplicateDate, duplicateReceipt?.Total ?? 0m, duplicateReceipt?.Currency ?? CurrencyCode.Rsd,
+                    duplicateSubject?.Status == TransactionStatus.Cancelled);
                 await EditQuietlyAsync(notifier, record, echo, cancellationToken);
                 await SucceedQuietlyAsync(jobQueue, job, cancellationToken);
                 return;

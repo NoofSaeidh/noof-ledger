@@ -72,13 +72,16 @@ internal sealed class RecordEcho : IRecordEcho
     public string ComposeCategorisingReceipt(int lineCount) =>
         $"Categorising {lineCount} line{(lineCount == 1 ? "" : "s")}…";
 
-    public EchoMessage ComposeReceiptDuplicate(DateOnly? occurredOn, decimal total, CurrencyCode currency)
+    public EchoMessage ComposeReceiptDuplicate(DateOnly? occurredOn, decimal total, CurrencyCode currency, bool originalCancelled = false)
     {
         var reference = occurredOn is { } date
             ? $"{date.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)}, {FormatAmount(total)} {currency}"
             : $"{FormatAmount(total)} {currency}";
 
-        return new($"Already recorded — this receipt was sent before ({reference}).", []);
+        return originalCancelled
+            ? new($"Already recorded — this receipt was sent before ({reference}) and cancelled. "
+                + "Press Restore on that message to bring it back.", [])
+            : new($"Already recorded — this receipt was sent before ({reference}).", []);
     }
 
     // Telegram's own hard limit (R-2, R-7). Kept well clear of it rather than measured live: 40

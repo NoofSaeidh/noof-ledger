@@ -332,6 +332,33 @@ public class ExtractReceiptWorkerTests
         logger.Entries.Should().Contain(e => e.EventId.Id == 5014);
     }
 
+    // M-11 (Phase 6 final review): the duplicate index does not care about status, so a receipt whose
+    // earlier transaction was Cancelled is rejected forever unless the operator knows to press
+    // Restore on that earlier message - say so in the echo instead of leaving it to be discovered.
+    [Fact]
+    public async Task A_duplicate_of_a_cancelled_receipt_says_so_and_points_at_Restore()
+    {
+        var harness = Setup(ExtractJob());
+        var duplicateId = Guid.NewGuid();
+        harness.ReceiptStore.SaveExtractedAsync(Arg.Any<Guid>(), Arg.Any<ExtractedReceipt>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(new ReceiptSaveResult(null, duplicateId));
+        harness.ReceiptStore.GetByTransactionAsync(duplicateId, Arg.Any<CancellationToken>()).Returns(new ReceiptView(
+            Guid.NewGuid(), ReceiptSource.FiscalQr, "SYN-1", "Test Market", null, null, "SYN-F1",
+            DateTimeOffset.Parse("2026-09-20T09:00:00Z"), 500m, CurrencyCode.Rsd, ReceiptKind.Sale, PaymentMethod.Card, 500m,
+            "https://suf.purs.gov.rs/v/?vl=abc", []));
+        harness.Store.GetSubjectAsync(duplicateId, Arg.Any<CancellationToken>())
+            .Returns(WaitingReceipt() with { Status = TransactionStatus.Cancelled });
+
+        await CreateWorker(harness.ScopeFactory()).RunTickAsync(TestContext.Current.CancellationToken);
+
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m =>
+                m.Text.StartsWith("Already recorded", StringComparison.Ordinal)
+                && m.Text.Contains("cancelled", StringComparison.Ordinal)
+                && m.Text.Contains("Restore", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task The_duplicate_echo_computes_the_date_in_the_capture_time_zone_not_UTC()
     {
