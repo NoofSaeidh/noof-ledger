@@ -40,6 +40,30 @@ public class ChatReceiptVisionTests
     }
 
     [Fact]
+    public async Task A_non_ISO_issued_at_is_read_as_a_missing_date_instead_of_throwing()
+    {
+        var answer = new FunctionCallContent(
+            "call_1", "read_receipt",
+            new Dictionary<string, object?>
+            {
+                ["seller_name"] = "Maxi",
+                ["seller_tax_id"] = "123456789",
+                ["issued_at"] = "25.09.2026 12:30",
+                ["currency"] = "RSD",
+                ["total"] = 100,
+                ["payment_method"] = null,
+                ["kind"] = "sale",
+                ["lines"] = Array.Empty<object>(),
+            });
+        var provider = new ScriptedChatClient().Answer(answer);
+        var vision = new ChatReceiptVision(new FixedChatClientFactory(provider));
+
+        var receipt = await vision.ReadAsync(TinyImage, "image/jpeg", null, TestContext.Current.CancellationToken);
+
+        receipt.IssuedAt.Should().BeNull("a date the model read but could not phrase in ISO form must not fault the extraction");
+    }
+
+    [Fact]
     public async Task An_oversized_image_never_reaches_the_provider()
     {
         var provider = new ScriptedChatClient();

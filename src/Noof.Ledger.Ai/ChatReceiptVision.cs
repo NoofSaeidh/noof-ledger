@@ -96,12 +96,19 @@ internal sealed class ChatReceiptVision(IChatClientFactory clientFactory) : IRec
             lines);
     }
 
+    // M-1 (2026-09-25 final review): the model is strict on schema shape, not on content - a date it
+    // could not phrase in ISO form must read as "no date", never throw. A FormatException here was
+    // being read by the worker as Transient (ExtractReceiptWorker's generic catch), burning up to
+    // MaxAttempts more vision calls for one unparseable string before failing a receipt the model did
+    // read correctly.
     static DateTimeOffset? ParseIssuedAt(string? issuedAt)
     {
         if (string.IsNullOrWhiteSpace(issuedAt))
             return null;
 
-        var local = DateTime.Parse(issuedAt, CultureInfo.InvariantCulture, DateTimeStyles.None | DateTimeStyles.NoCurrentDateDefault);
+        if (!DateTime.TryParse(issuedAt, CultureInfo.InvariantCulture, DateTimeStyles.None | DateTimeStyles.NoCurrentDateDefault, out var local))
+            return null;
+
         return new DateTimeOffset(DateTime.SpecifyKind(local, DateTimeKind.Unspecified), Belgrade.GetUtcOffset(local));
     }
 
