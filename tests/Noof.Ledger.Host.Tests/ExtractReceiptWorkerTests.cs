@@ -351,6 +351,25 @@ public class ExtractReceiptWorkerTests
     }
 
     [Fact]
+    public async Task Vision_returning_zero_lines_is_a_failed_extraction_not_an_empty_record()
+    {
+        // M-8 (2026-09-25 final review): ReceiptVisionSchema allows an empty lines array (the model's
+        // honest "I could not read this"), but applying zero items used to succeed the job and render
+        // "Total: " with a mismatch warning instead of a clear failure.
+        var harness = Setup(ExtractJob());
+        harness.Vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), Arg.Any<decimal?>(), Arg.Any<CancellationToken>())
+            .Returns(Extracted(ReceiptSource.Vision) with { Lines = [] });
+
+        await TickAsync(harness);
+
+        await harness.ReceiptStore.DidNotReceiveWithAnyArgs().SaveExtractedAsync(default, default!, default, Arg.Any<CancellationToken>());
+        await harness.Queue.Received(1).FailAsync(JobId, WorkerId, Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await harness.Store.Received(1).MarkFailedAsync(TransactionId, Arg.Any<CancellationToken>());
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text == Echo.ReceiptReadFailure.Text), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task A_terminal_vision_failure_fails_the_record_and_reports_it()
     {
         var harness = Setup(ExtractJob());

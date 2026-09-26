@@ -249,7 +249,17 @@ internal sealed class ExtractReceiptWorker(
         IServiceScope scope, ReceiptPhoto photo, decimal? qrTotal, CancellationToken cancellationToken)
     {
         var vision = scope.ServiceProvider.GetRequiredService<IReceiptVision>();
-        return await vision.ReadAsync(photo.Bytes, photo.MediaType, qrTotal, cancellationToken);
+        var extracted = await vision.ReadAsync(photo.Bytes, photo.MediaType, qrTotal, cancellationToken);
+
+        // M-8 (2026-09-25 final review): ReceiptVisionSchema allows an empty lines array - the model's
+        // honest "I could not read this" - but applying zero items rendered "Total: " and a mismatch
+        // warning as if the receipt had been recorded. Caught here, before SaveExtractedAsync, so it
+        // takes the same Terminal path (fail the job, mark the transaction Failed, ReceiptReadFailure
+        // echo) as every other unreadable receipt.
+        if (extracted.Lines.Count == 0)
+            throw new ModelCallException(ModelFailureKind.Terminal, "read_receipt returned no line items.");
+
+        return extracted;
     }
 
     async Task FailWithEchoAsync(
