@@ -14,7 +14,15 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
 > banner until the database gate is `Ready`, Serilog logs to a rolling file and to the `app_log` table
 > with secrets redacted before every sink, a transaction's whole path from message to echo (and its
 > revision history) is visible on one trace page, and system health is on a dashboard tile, on
-> `/diagnostics` and behind the bot's owner-only `/health` command. Transactions carry a `Kind`
+> `/diagnostics` and behind the bot's owner-only `/health` command. Health checks are now our own
+> `ISystemHealthCheck` seam (no `Microsoft.Extensions.Diagnostics.HealthChecks`), each owned and
+> registered by the assembly that owns what it checks, run one at a time under a 5 s cooperative
+> timeout; a check that throws or times out shows only its exception type. Every model, speech,
+> Telegram, worker and health-check call is timed through `IOperationTimer`, logged as Debug or, over
+> its own slow threshold (`Logging:SlowOperationMs`), a Warning. The database log sink's minimum level
+> is runtime state — Verbose/Debug/Information, switched on the Logs page, persisted in `app_setting`,
+> never above Information — while the file floor stays `Serilog:MinimumLevel:Default`; a transaction's
+> trace page links straight into the Logs page at Debug for that transaction. Transactions carry a `Kind`
 > (`Expense`/`Income`/`BalanceCheck`); expense and income transactions own signed double-entry-lite
 > `entries`; a balance statement is a `balance_checks` checkpoint; a wallet's balance is computed by the
 > `wallet_balances` SQL view and read back by `IBalanceReadModel`, never stored. The model's answer tool
@@ -24,7 +32,7 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
 > `%LOCALAPPDATA%\NoofLedger\backups`, the newest 14 kept, every run logged to `backup_runs` — and
 > `ops/restore-check.ps1` proves a dump restores to the same balances, checked so far against a
 > template clone; the one check against the live ledger itself is the operator's to run
-> (`ops/RUNBOOK.md`). **1121 solution tests — 1110 passing, 11 live-only tests skipped, none failing** —
+> (`ops/RUNBOOK.md`). **1241 solution tests — 1230 passing, 11 live-only tests skipped, none failing** —
 > the Playwright browser tests are in the solution now, so `dotnet test --solution` runs them too and
 > needs Chromium present. Live suites stay skipped unless `NOOF_LEDGER_LIVE_ANTHROPIC_KEY` /
 > `NOOF_LEDGER_LIVE_GROQ_KEY` + `NOOF_LEDGER_LIVE_VOICE_FILE` are set; `ops/publish.ps1` produces a
@@ -176,6 +184,18 @@ register it into) — named because they are exceptions, not a licence to invent
   class** — a nested class does not compile here (`CS1109`/`CS0260`).
 - Every log event gets a stable, pinned `EventId`. A `[LoggerMessage]` with no id is a gap the next
   person has to notice by hand.
+- **Timing an operation goes through `IOperationTimer`** with a name from `TimedOperations`:
+  `using var timing = timer.Start(logger, TimedOperations.X, expectedWait: ...)`, with an explicit
+  `Stop(onlyIfSlow: ...)` on the success path so an idle call logs nothing; thresholds live in
+  `Logging:SlowOperationMs`. Never `Stopwatch`, never a `GetUtcNow()` subtraction — `TimeProvider`'s
+  `GetTimestamp`/`GetElapsedTime` end to end.
+- **The database sink's minimum level is runtime state**, set from the Logs page, persisted in
+  `app_setting`, and capped at Information (Warning+ would empty the trace page, which reads
+  Information-level stage events). `Serilog:MinimumLevel:Default` is the file sink's own floor, and
+  the root level is `min(file floor, database level)`. A per-sink floor is `restrictedToMinimumLevel`
+  or a `levelSwitch` on the `WriteTo` call — and any inner `LoggerConfiguration` used as a
+  `WriteTo.Sink` target needs its own `.MinimumLevel.Verbose()`, because it *does* enforce its own
+  default Information floor (verified by test, not assumed).
 
 **Testing**
 - TDD: a failing test first, for all behaviour. Exempt: migrations, DTOs, `Program.cs` wiring.

@@ -89,11 +89,16 @@ still the durable copy.
 
 `/diagnostics` lists every health check (database, pending migrations, Telegram, the AI keys, the
 daily backup, disk space, the log sink) with a link into `/diagnostics/logs` — a paged, filterable
-view over `app_log`, falling back to a tail of the log file when the database sink is unavailable.
-Every Telegram message that becomes a transaction gets a trace page at `/transactions/{id}/trace`:
-its path from received to replied, with timings, and its full edit history. The dashboard carries a
-one-line health tile with a link to `/diagnostics`; the operator alone can also ask the bot directly
-by sending `/health`.
+view over `app_log`; while the database itself is unavailable this page shows the same waiting banner
+as the rest of the app, and the file log is the one to read instead. A check that throws or times out
+shows only the exception's type, never its message. The database only records Information and above
+by default; the Logs page can switch it to Debug or Verbose on demand — the choice is saved and
+survives a restart — to see the timing of every model call, Telegram round trip and worker step, kept
+for a day before it is pruned. Every Telegram message that becomes a transaction gets a trace page at
+`/transactions/{id}/trace`: its path from received to replied, with timings, its full edit history,
+and a link into the Logs page pre-filtered to that transaction's own Debug detail. The dashboard
+carries a one-line health tile with a link to `/diagnostics`; the operator alone can also ask the bot
+directly by sending `/health`.
 
 If PostgreSQL is stopped, the host does not exit — the sign-in page and every other page show a
 "Waiting for the database…" banner, the log file records every retry, and the app resumes on its own

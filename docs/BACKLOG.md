@@ -866,6 +866,43 @@ the router accepts `/health@anyname`, not just `/health@<this bot's own username
 single-owner DM bot where nothing else is listening, so left as is rather than plumbing the bot's own
 username through for a check that changes nothing observable.
 
+**Paths deliberately left untimed (Phase 5, task V12).** `IOperationTimer` covers the model, speech,
+Telegram, worker and health paths named in the verbose logging design, but not: `EfCaptureStore`
+(the initial message-received write); the Cancel/Edit/Restore button path (`RecordActionHandler`,
+`CorrectionHandler`, `EfRecordEditor`); a separate timing for the revision-append inside
+`RevisionLog.AppendAsync` (it is covered only as part of whichever timing wraps its caller); and
+model token usage (`IOperationTimer` measures wall-clock time, not tokens — a separate metric).
+Add any of these if a slow path shows up that the existing timings do not explain.
+
+**Timing rows inside the trace timeline itself were considered and rejected for Phase 5.** Timing
+events carry a `TransactionId` but no `Stage`, and `/transactions/{id}/trace` is built only from
+Stage rows (`EfTransactionTrace`) — mixing timing rows into that view would clutter the one page meant
+to answer "what happened to this message" at a glance, and timing rows only exist at all once the
+database log level is at Debug. Instead the trace page links to `/diagnostics/logs` pre-filtered to
+the transaction at Debug ("Timings and debug log"). Revisit only if the linked-page detour turns out
+to be a real friction point in practice.
+
+**`GroqHttpClientLoggingTests` does not exist.** `AnthropicHttpClientLoggingTests` and
+`TelegramHttpClientLoggingTests` each prove `RemoveAllLoggers()` keeps that provider's `HttpClient`
+from leaking request/response bodies (which could carry secrets) into the log pipeline; Groq's speech
+`HttpClient` has no equivalent test, even though `GroqRegistration` applies the same
+`RemoveAllLoggers()` call. Low risk today (nothing in the Groq request path carries an app secret),
+but the gap is real and cheap to close whenever `Noof.Ledger.Ai/Groq` is next touched.
+
+**Phase-6 merge fix-ups, to land in the next phase-5 → phase-6 merge commit, not before:**
+- Convert phase-6's `ReceiptsHealthCheck` from `IHealthCheck` to `ISystemHealthCheck` (Order 80, Name
+  `Receipts`, LogCategory `Noof.Ledger.Host.Workers.ExtractReceiptWorker`) and extend
+  `HealthCheckCompositionTests` to eight (Name, LogCategory) pairs.
+- Renumber phase-6's duplicate `[LoggerMessage]` EventIds, which `LoggerMessageEventIdTests` (V1)
+  will reject on that branch: `ReceiptCategorizationWorkerLog` reuses 1301–1306 from
+  `TranscriptionWorkerLog`, and `ReceiptCategorizerLog`/`ExtractReceiptWorkerLog` both use 1501–1502.
+- Re-scaffold or hand-merge `LedgerDbContextModelSnapshot` so this branch's `AddAppSetting` migration
+  follows phase-6's `AddReceipts` in the migration history, rather than conflicting with it.
+- The **shared** `noof_ledger_test_template` (as opposed to this integration's private
+  `noof_ledger_test_template_p5l`) still lacks the `AddAppSetting` migration until that merge runs
+  `.\run.ps1 update-test-template` against it — any phase-6 worktree cloning the shared template before
+  then is working against a stale schema for this feature.
+
 **FX freshness check arrives with the FX phase.** The observability spec named this out of scope
 because there is no FX rate source yet (`docs/OPEN-QUESTIONS.md` Q4) — nothing to check the freshness
 of. Add it alongside whichever phase builds currency conversion.

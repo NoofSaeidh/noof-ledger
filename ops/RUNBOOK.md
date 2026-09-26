@@ -259,6 +259,32 @@ aged out under retention the trace strip says so but the revision history still 
 table is never pruned. Retention is per level, in `appsettings.json` under
 `Logging:Retention:Days` (defaults: Verbose and Debug 1 day, Information 90, Warning and above 730).
 
+### Verbose logging
+
+By default the database sink only records Information and above (per-level retention:
+Verbose/Debug 1 day, Information 90, Warning/Error/Fatal 730 — `appsettings.json` under
+`Logging:Retention:Days`). To see Debug detail — model/Telegram/worker timings, per-statement SQL —
+temporarily:
+
+1. Open `/diagnostics/logs` (the **Logs** tab) and set **Record to database from** to `Debug` (or
+   `Verbose`). The choice is saved immediately, survives a restart, and is kept for however many days
+   `Logging:Retention:Days:Debug` says (1 by default) — turn it back to `Information` when you are
+   done, or let it age out.
+2. Every Telegram message, model call and worker tick logs a Debug timing line
+   (`{Operation} took {ElapsedMs} ms`) once the database level allows it; a call over its own slow
+   threshold logs a Warning instead (`Logging:SlowOperationMs:<operation>`, e.g.
+   `Logging__SlowOperationMs__model=45000` as an environment variable) and is recorded regardless of
+   the database level. A Telegram long poll is judged against `Telegram:PollingSeconds` **plus** the
+   `telegram` threshold, so raising the poll interval never turns an idle poll into a Warning.
+3. To also see per-statement SQL in the file log, raise the file floor with
+   `Serilog__MinimumLevel__Default=Debug` (it already is, in the checked-in `appsettings.json`) and
+   add `Serilog__MinimumLevel__Override__Microsoft.EntityFrameworkCore.Database.Command=Debug`.
+4. From a transaction's own trace page (`/transactions/{id}/trace`), the **Timings and debug log**
+   link opens `/diagnostics/logs` pre-filtered to that transaction at Debug — the quickest way to see
+   everything that happened to one message without hunting through the whole table.
+
+Leave `appsettings.Development.json` alone — `.\run.ps1 start` always runs Production.
+
 **Setting the PostgreSQL service to start automatically is the operator's decision, not the app's.**
 The host waits indefinitely for PostgreSQL and needs no help to recover once it is up — but if you
 want PostgreSQL itself to come back after a reboot without you starting it by hand, that is a Windows
