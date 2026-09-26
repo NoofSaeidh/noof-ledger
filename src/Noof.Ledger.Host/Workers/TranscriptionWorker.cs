@@ -85,7 +85,8 @@ internal sealed class TranscriptionWorker(
         CategorizationSubject? record = null;
 
         using var logScope = TransactionLogScope.Begin(logger, job.TransactionId);
-        timer.Record(logger, TimedOperations.JobQueueWait, (job.ClaimedAt ?? timeProvider.GetUtcNow()) - job.RunAfter);
+        // job.CreatedAt, not job.RunAfter: see CategorizationWorker's ProcessClaimedJobAsync (O-13).
+        timer.Record(logger, TimedOperations.JobQueueWait, (job.ClaimedAt ?? timeProvider.GetUtcNow()) - job.CreatedAt);
         using var jobTiming = timer.Start(logger, TimedOperations.JobTranscribe);
 
         try

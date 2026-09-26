@@ -101,7 +101,8 @@ public class CategorizationWorkerTests
     }
 
     static CategorizationJob Job(
-        int attemptCount = 1, JobKind kind = JobKind.Categorize, string? instruction = null, DateOnly? instructionDay = null) => new()
+        int attemptCount = 1, JobKind kind = JobKind.Categorize, string? instruction = null, DateOnly? instructionDay = null,
+        DateTimeOffset? createdAt = null) => new()
     {
         Id = JobId,
         TransactionId = TransactionId,
@@ -111,7 +112,7 @@ public class CategorizationWorkerTests
         Instruction = instruction,
         InstructionDay = instructionDay,
         RunAfter = DateTimeOffset.UtcNow,
-        CreatedAt = DateTimeOffset.UtcNow,
+        CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
         UpdatedAt = DateTimeOffset.UtcNow,
     };
 
@@ -1431,8 +1432,7 @@ public class CategorizationWorkerTests
     public async Task A_claimed_job_logs_claim_queueWait_loadContext_applyCategorization_completeJob_and_job_categorize()
     {
         var claimedAt = new DateTimeOffset(2026, 9, 22, 9, 0, 0, TimeSpan.Zero);
-        var job = Job();
-        job.RunAfter = claimedAt - TimeSpan.FromSeconds(7);
+        var job = Job(createdAt: claimedAt - TimeSpan.FromSeconds(7));
         job.ClaimedAt = claimedAt;
         var store = Substitute.For<ICategorizationStore>();
         store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());

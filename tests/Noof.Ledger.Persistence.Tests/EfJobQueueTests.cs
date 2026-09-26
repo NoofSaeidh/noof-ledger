@@ -517,4 +517,40 @@ public class EfJobQueueTests(PostgresFixture fixture)
         claimed!.Kind.Should().Be(JobKind.Transcribe);
         claimed.VoiceFileId.Should().Be("voice-file-1");
     }
+
+    [Fact]
+    public async Task A_reclaim_after_the_lease_expires_leaves_CreatedAt_untouched()
+    {
+        // O-13 (final review, major): CategorizationWorker/TranscriptionWorker compute job.queueWait
+        // from ClaimedAt minus CreatedAt precisely because ClaimAsync's own UPDATE rewrites run_after
+        // to the lease deadline as part of claiming - RunAfter would make the wait negative on every
+        // job, re-claimed or not. This proves the invariant the fix relies on: CreatedAt survives a
+        // release-and-reclaim cycle, so ClaimedAt - CreatedAt stays non-negative even then.
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var queue = new EfJobQueue(db, time, maxAttempts: 8);
+        var transactionId = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
+        var originalCreatedAt = time.GetUtcNow().AddMinutes(-1);
+        var job = NewJob(transactionId, originalCreatedAt, createdAt: originalCreatedAt);
+        db.CategorizationJobs.Add(job);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await queue.ClaimAsync("worker-a", AnyKind, TimeSpan.FromMinutes(1), TestContext.Current.CancellationToken);
+        time.Advance(TimeSpan.FromMinutes(2));
+        await queue.ReleaseExpiredLeasesAsync(time.GetUtcNow(), TestContext.Current.CancellationToken);
+        time.Advance(TimeSpan.FromMinutes(3));
+
+        var reclaimed = await queue.ClaimAsync("worker-b", AnyKind, TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
+
+        reclaimed.Should().NotBeNull();
+        // BeCloseTo, not Be: timestamptz keeps microseconds, a .NET tick is 100ns, and
+        // originalCreatedAt is seeded from a live DateTimeOffset.UtcNow, not a fixed literal
+        // (CLAUDE.md, "Never seed a test with DateTimeOffset.UtcNow and then assert exact equality...").
+        reclaimed!.CreatedAt.Should().BeCloseTo(originalCreatedAt, TimeSpan.FromMilliseconds(1),
+            "created_at is stamped once at enqueue and never rewritten by a claim");
+        reclaimed.RunAfter.Should().NotBe(originalCreatedAt, "run_after was rewritten to the lease deadline, which is the trap O-13 names");
+        (reclaimed.ClaimedAt!.Value - reclaimed.CreatedAt).Should().BePositive(
+            "job.queueWait must never go negative, on a first claim or a re-claim");
+    }
 }

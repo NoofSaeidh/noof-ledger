@@ -46,11 +46,11 @@ public class TranscriptionWorkerTests
         }
     }
 
-    static CategorizationJob CaptureJob(int attemptCount = 1) => new()
+    static CategorizationJob CaptureJob(int attemptCount = 1, DateTimeOffset? createdAt = null) => new()
     {
         Id = JobId, TransactionId = TransactionId, Kind = JobKind.Transcribe, VoiceFileId = "voice-file-1",
         Status = JobStatus.Claimed, AttemptCount = attemptCount,
-        RunAfter = DateTimeOffset.UnixEpoch, CreatedAt = DateTimeOffset.UnixEpoch, UpdatedAt = DateTimeOffset.UnixEpoch,
+        RunAfter = DateTimeOffset.UnixEpoch, CreatedAt = createdAt ?? DateTimeOffset.UnixEpoch, UpdatedAt = DateTimeOffset.UnixEpoch,
     };
 
     static CategorizationJob CorrectionJob(int attemptCount = 1) => new()
@@ -428,8 +428,7 @@ public class TranscriptionWorkerTests
     public async Task A_processed_job_logs_downloadFile_transcribe_completeTranscription_job_transcribe_and_queueWait()
     {
         var claimedAt = new DateTimeOffset(2026, 9, 24, 9, 0, 0, TimeSpan.Zero);
-        var job = CaptureJob();
-        job.RunAfter = claimedAt - TimeSpan.FromSeconds(4);
+        var job = CaptureJob(createdAt: claimedAt - TimeSpan.FromSeconds(4));
         job.ClaimedAt = claimedAt;
         var harness = Setup(job);
         var time = new FakeTimeProvider(claimedAt);

@@ -102,7 +102,11 @@ internal sealed class CategorizationWorker(
         var currentStage = TransactionStages.Categorized;
 
         using var logScope = TransactionLogScope.Begin(logger, job.TransactionId);
-        timer.Record(logger, TimedOperations.JobQueueWait, (job.ClaimedAt ?? timeProvider.GetUtcNow()) - job.RunAfter);
+        // job.CreatedAt, not job.RunAfter: EfJobQueue.ClaimAsync rewrites run_after to the lease
+        // expiry as part of claiming, so it is never the time the job became due - created_at is
+        // stamped once at enqueue and never touched again, so this stays non-negative on every
+        // attempt, first or re-claimed (docs/OPEN-QUESTIONS.md O-13).
+        timer.Record(logger, TimedOperations.JobQueueWait, (job.ClaimedAt ?? timeProvider.GetUtcNow()) - job.CreatedAt);
         using var jobTiming = timer.Start(logger, TimedOperations.JobCategorize);
 
         try
