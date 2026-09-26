@@ -170,8 +170,25 @@ internal static class LoggingSetup
         // not after it has already been disposed. levelSwitch: switches.Database sits in front of the
         // buffer sink itself, so an event below the database's runtime level never reaches - and
         // never fills - the buffer's 10,000-event pre-Ready capacity.
+        // DatabaseLogLevelReadySignal, not DatabaseLogLevel, is what gets resolved here - Configure()
+        // runs as part of building the ILoggerFactory singleton itself (this is the UseSerilog
+        // reconfigure callback), so resolving anything whose own construction needs ILogger<T>
+        // (DatabaseLogLevel included) re-enters ILoggerFactory's not-yet-cached construction on the
+        // same thread and recurses until the process runs out of stack - confirmed against this DI
+        // container by a hung WebApplicationFactory test whose memory dump showed exactly that
+        // recursion, not a lock; it is not merely theoretical, and not safe at any timing, eager or
+        // deferred. The signal has no dependencies of its own; DatabaseLogLevelLoader (a real
+        // IHostedService, decoupled from this call graph, so safe) marks it once the stored level has
+        // actually been applied to switches.Database, and ReadyGatedBufferSink's flush waits for that.
+        var levelReady = services.GetRequiredService<DatabaseLogLevelReadySignal>();
+
         var destinations = new LoggerConfiguration()
-            .WriteTo.Sink(new ReadyGatedBufferSink(postgresLogger, gate, consoleAndFileLogger), levelSwitch: switches.Database)
+            .WriteTo.Sink(
+                new ReadyGatedBufferSink(
+                    postgresLogger, gate, consoleAndFileLogger,
+                    loadDatabaseLevelAsync: levelReady.WaitForLoadAsync,
+                    levelSwitch: switches.Database),
+                levelSwitch: switches.Database)
             .WriteTo.Sink(consoleAndFileLogger);
 
         var builtDestinations = destinations.CreateLogger();
@@ -224,7 +241,7 @@ internal static class LoggingSetup
     }
 
     static LogEventLevel ParseLevel(string value, string key) =>
-        Enum.TryParse<LogEventLevel>(value, ignoreCase: true, out var level)
+        Enum.TryParse<LogEventLevel>(value, ignoreCase: true, out var level) && Enum.IsDefined(level)
             ? level
             : throw new InvalidOperationException($"{key} '{value}' is not a valid Serilog log level.");
 }

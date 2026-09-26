@@ -125,6 +125,31 @@ public class LogLevelConfigurationTests
     }
 
     [Fact]
+    public void A_numeric_File_MinimumLevel_value_fails_with_a_clear_error()
+    {
+        var logDirectory = Directory.CreateTempSubdirectory("noof-logging-setup-test-").FullName;
+        try
+        {
+            var hostConfiguration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Logging:File:MinimumLevel"] = "6",
+                })
+                .Build();
+
+            var act = () => LoggingSetup.Configure(
+                new LoggerConfiguration(), hostConfiguration, logDirectory, UnreachableConnectionString, BuildFakeServices());
+
+            act.Should().Throw<InvalidOperationException>().WithMessage("*Logging:File:MinimumLevel*6*",
+                "a numeric value outside Serilog's defined levels (here, the internal Off sentinel) must fail fast, not silently turn the sink off");
+        }
+        finally
+        {
+            DeleteWithRetry(new DirectoryInfo(logDirectory));
+        }
+    }
+
+    [Fact]
     public void An_invalid_Console_MinimumLevel_value_fails_with_a_clear_error()
     {
         var logDirectory = Directory.CreateTempSubdirectory("noof-logging-setup-test-").FullName;
@@ -408,6 +433,7 @@ public class LogLevelConfigurationTests
         services.AddSingleton<Noof.Ledger.Host.Diagnostics.ISecretValueSource>(new NoSecrets());
         services.AddSingleton<Noof.Ledger.Host.Diagnostics.SecretRedactor>();
         services.AddSingleton<LogLevelSwitches>();
+        services.AddSingleton<DatabaseLogLevelReadySignal>();
         return services.BuildServiceProvider();
     }
 

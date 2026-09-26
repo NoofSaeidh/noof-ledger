@@ -146,6 +146,58 @@ public sealed class DatabaseLogLevelDbTests
         }
     }
 
+    // Major finding, Phase 5 final review: a stored Off did not govern anything logged before
+    // DatabaseLogLevelLoader.LoadAsync completed, because ReadyGatedBufferSink flushed its buffer as
+    // soon as the gate turned Ready without waiting for (or re-checking against) the loaded level -
+    // so every restart still wrote the startup burst to app_log even with Off stored. This proves
+    // the fix end to end: store Off, restart the host, and confirm the second host's own startup
+    // burst never reaches app_log at all.
+    [Fact]
+    public async Task A_stored_Off_level_drops_the_next_hosts_own_startup_burst_instead_of_writing_it_to_app_log()
+    {
+        if (!await DatabaseIsReachableAsync(TestContext.Current.CancellationToken))
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var databaseName = $"noof_db_log_level_{Guid.NewGuid():N}";
+        await CreateCloneAsync(databaseName, TestContext.Current.CancellationToken);
+        var connectionString = ConnectionStringFor(databaseName);
+
+        try
+        {
+            await using (var factory = BuildFactory(connectionString))
+            {
+                using var client = factory.CreateClient();
+                var gate = factory.Services.GetRequiredService<IDatabaseGate>();
+                await gate.WaitUntilReadyAsync(TestContext.Current.CancellationToken);
+
+                await factory.Services.GetRequiredService<IDatabaseLogLevel>()
+                    .SetAsync(null, TestContext.Current.CancellationToken);
+            }
+
+            await using var restarted = BuildFactory(connectionString);
+            using var restartedClient = restarted.CreateClient();
+            var restartedGate = restarted.Services.GetRequiredService<IDatabaseGate>();
+            await restartedGate.WaitUntilReadyAsync(TestContext.Current.CancellationToken);
+
+            // No positive marker to poll for here - Off means nothing should ever arrive - so this
+            // waits out the Postgres sink's own 1s batching period several times over before
+            // asserting absence, the same shape DatabaseLogLevelDbTests' other absence check uses.
+            await Task.Delay(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
+
+            using var scope = restarted.Services.CreateScope();
+            var query = scope.ServiceProvider.GetRequiredService<ILogQuery>();
+            var page = await query.QueryAsync(new LogFilter { MinLevel = LogSeverity.Verbose }, 0, 200, TestContext.Current.CancellationToken);
+
+            page.Rows.Should().BeEmpty(
+                "the stored Off level must be loaded and applied to the buffer before its flush, " +
+                "so the second host's own startup burst never reaches app_log");
+        }
+        finally
+        {
+            await DropCloneAsync(databaseName);
+        }
+    }
+
     // V9 finding (operator question 7): checked once, deliberately not kept as a test. At the
     // Debug database level, after a DbContext round trip (ILogQuery.QueryAsync) followed by a
     // Warning flush barrier, zero app_log rows had a source starting with "Npgsql" - so Npgsql does

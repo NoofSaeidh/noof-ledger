@@ -3,7 +3,8 @@ using Noof.Ledger.Application.Diagnostics;
 namespace Noof.Ledger.Host.Logging;
 
 internal sealed class DatabaseLogLevelLoader(
-    IDatabaseGate gate, DatabaseLogLevel logLevel, TimeProvider timeProvider, ILogger<DatabaseLogLevelLoader> logger)
+    IDatabaseGate gate, DatabaseLogLevel logLevel, DatabaseLogLevelReadySignal readySignal,
+    TimeProvider timeProvider, ILogger<DatabaseLogLevelLoader> logger)
     : BackgroundService
 {
     static readonly TimeSpan RetryDelay = TimeSpan.FromMinutes(1);
@@ -17,6 +18,7 @@ internal sealed class DatabaseLogLevelLoader(
             try
             {
                 await logLevel.LoadAsync(stoppingToken);
+                readySignal.MarkLoaded();
                 return;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)

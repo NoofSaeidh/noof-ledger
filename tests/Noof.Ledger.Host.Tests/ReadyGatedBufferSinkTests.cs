@@ -1,6 +1,7 @@
 using AwesomeAssertions;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Host.Logging;
+using Serilog.Core;
 using Serilog.Events;
 using Serilog.Parsing;
 
@@ -119,6 +120,51 @@ public class ReadyGatedBufferSinkTests
     }
 
     [Fact]
+    public async Task A_level_loaded_during_the_Ready_transition_re_filters_events_already_buffered_under_the_earlier_default()
+    {
+        var gate = new FakeGate();
+        var inner = new CollectingSink();
+        var levelSwitch = new LoggingLevelSwitch(LogEventLevel.Information);
+        var sink = new ReadyGatedBufferSink(
+            inner, gate,
+            loadDatabaseLevelAsync: _ =>
+            {
+                levelSwitch.MinimumLevel = LogEventLevel.Warning;
+                return Task.CompletedTask;
+            },
+            levelSwitch: levelSwitch);
+
+        sink.Emit(Event("info", LogEventLevel.Information));
+        sink.Emit(Event("warn", LogEventLevel.Warning));
+
+        gate.State = DatabaseState.Ready;
+
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (inner.Events.Count == 0 && DateTime.UtcNow < deadline)
+            await Task.Delay(10, TestContext.Current.CancellationToken);
+
+        inner.Events.Select(e => e.MessageTemplate.Text).Should().Equal(["warn"],
+            "the level loaded while the gate turned Ready must apply retroactively to events " +
+            "buffered earlier under the higher-admitting compiled-in default");
+    }
+
+    [Fact]
+    public async Task A_load_that_never_completes_leaves_the_buffer_unflushed()
+    {
+        var gate = new FakeGate();
+        var inner = new CollectingSink();
+        var neverCompletes = new TaskCompletionSource();
+        var sink = new ReadyGatedBufferSink(inner, gate, loadDatabaseLevelAsync: _ => neverCompletes.Task);
+
+        sink.Emit(Event("one"));
+        gate.State = DatabaseState.Ready;
+
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        inner.Events.Should().BeEmpty("the flush must wait for the level load to finish before releasing anything");
+    }
+
+    [Fact]
     public async Task Concurrent_emits_across_the_Ready_transition_never_throw_or_lose_events()
     {
         var gate = new FakeGate();
@@ -140,8 +186,8 @@ public class ReadyGatedBufferSinkTests
         inner.Events.Select(e => e.MessageTemplate.Text).Should().Contain("final");
     }
 
-    static LogEvent Event(string message) => new(
-        DateTimeOffset.UtcNow, LogEventLevel.Information, null,
+    static LogEvent Event(string message, LogEventLevel level = LogEventLevel.Information) => new(
+        DateTimeOffset.UtcNow, level, null,
         new MessageTemplateParser().Parse(message), []);
 
     sealed class FakeGate : IDatabaseGate
