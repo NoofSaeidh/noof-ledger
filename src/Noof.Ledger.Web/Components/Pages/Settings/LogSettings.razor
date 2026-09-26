@@ -44,7 +44,7 @@ else
 
     <MudPaper Outlined="true" Elevation="0" Class="pa-5 mb-4">
         <MudText Typo="Typo.subtitle1" Class="mb-3">Database retention (days per level)</MudText>
-        <div class="noof-filter-bar mb-0">
+        <div class="noof-retention-grid">
             @foreach (var row in retentionRows)
             {
                 <div class="noof-filter-field">
@@ -125,9 +125,14 @@ else
             ? (LogSeverity?)null
             : parsedLevel;
 
+        // Retention saves first: it has no visible side effect of its own, unlike SetAsync below,
+        // which flips the live switch the moment it succeeds. Saving in this order means a failure
+        // here always leaves both the level and the switch untouched, and the two try blocks (rather
+        // than one covering both calls) let the message name which half actually failed - Save is
+        // supposed to be the one moment the whole form applies (decision (b)), so a partial failure
+        // must say so rather than report one flat "could not save" for either half.
         try
         {
-            await DatabaseLogLevel.SetAsync(level, CancellationToken.None);
             await RetentionSettings.SaveAsync(new LogRetentionDays(
                 Verbose: parsedDays[LogSeverity.Verbose],
                 Debug: parsedDays[LogSeverity.Debug],
@@ -136,15 +141,27 @@ else
                 Error: parsedDays[LogSeverity.Error],
                 Fatal: parsedDays[LogSeverity.Fatal]),
                 CancellationToken.None);
-
-            feedback = "Saved.";
-            feedbackIsError = false;
         }
         catch (Exception)
         {
-            feedback = "Could not save the log settings. Try again.";
+            feedback = "Could not save the retention settings. The database log level was left unchanged. Try again.";
             feedbackIsError = true;
+            return;
         }
+
+        try
+        {
+            await DatabaseLogLevel.SetAsync(level, CancellationToken.None);
+        }
+        catch (Exception)
+        {
+            feedback = "Retention settings were saved, but the database log level could not be changed. Try again.";
+            feedbackIsError = true;
+            return;
+        }
+
+        feedback = "Saved.";
+        feedbackIsError = false;
     }
 
     static string RetentionInputId(LogSeverity level) => $"retention-{level.ToString().ToLowerInvariant()}";
