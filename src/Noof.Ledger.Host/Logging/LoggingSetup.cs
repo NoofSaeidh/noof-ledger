@@ -88,6 +88,7 @@ internal static class LoggingSetup
         var sinkStatus = services.GetRequiredService<ILogSinkStatus>();
         var timeProvider = services.GetRequiredService<TimeProvider>();
         var redactor = services.GetRequiredService<SecretRedactor>();
+        var switches = services.GetRequiredService<LogLevelSwitches>();
 
         SelfLog.Enable(_ => sinkStatus.RecordFailure(timeProvider.GetUtcNow()));
 
@@ -106,40 +107,62 @@ internal static class LoggingSetup
         // period: 1s, not the sink's own (much longer) default - an operator reading /diagnostics/logs
         // right after something happened should see it there, not wonder why a real event is
         // missing for the length of an unconfigured batching window.
+        // .MinimumLevel.Verbose() (V8 finding): a Logger used as a WriteTo.Sink target dispatches to
+        // ILogEventSink.Emit without checking its own MinimumLevel - only the levelSwitch on the
+        // outer WriteTo.Sink call actually restricts what reaches it. Without this, this inner
+        // Logger's own default Information floor would silently re-filter Debug events the switch
+        // already let through.
         var postgresLogger = new LoggerConfiguration()
+            .MinimumLevel.Verbose()
             .WriteTo.PostgreSQL(connectionString, "app_log", columnOptions, period: TimeSpan.FromSeconds(1), needAutoCreateTable: false)
             .CreateLogger();
+
+        var levels = ReadMinimumLevels(hostConfiguration);
+        switches.SetFileLevel(levels.Default);
 
         // consoleAndFileLogger is built once and referenced twice: as `destinations`' own sink, and
         // as ReadyGatedBufferSink's fallback (M-9, Phase 5 final review) - the one place it can still
         // report to when it is disposed with events that never reached the database, since there is
-        // no app_log connection to write to at that point.
+        // no app_log connection to write to at that point. .MinimumLevel.Verbose() (V8 finding): see
+        // postgresLogger above - each restrictedToMinimumLevel call below is what actually narrows
+        // what reaches Console and File, not this inner Logger's own floor.
         var consoleAndFileLogger = new LoggerConfiguration()
-            .WriteTo.Console(restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Information)
+            .MinimumLevel.Verbose()
+            .WriteTo.Console(restrictedToMinimumLevel: Max(LogEventLevel.Information, levels.Default))
             .WriteTo.File(
                 Path.Combine(logDirectory, "noof-ledger-.log"),
                 rollingInterval: RollingInterval.Day,
                 retainedFileCountLimit: ResolveRetainedFileCountLimit(hostConfiguration),
                 fileSizeLimitBytes: ResolveFileSizeLimitBytes(hostConfiguration),
-                rollOnFileSizeLimit: true)
+                rollOnFileSizeLimit: true,
+                restrictedToMinimumLevel: levels.Default)
             .CreateLogger();
 
         // ReadyGatedBufferSink's sink is added before consoleAndFileLogger's so that, on dispose,
         // Serilog tears sinks down in the order they were added - the buffer sink's own Dispose (it
         // may still need to Emit its fallback warning) runs while consoleAndFileLogger is still live,
-        // not after it has already been disposed.
+        // not after it has already been disposed. levelSwitch: switches.Database sits in front of the
+        // buffer sink itself, so an event below the database's runtime level never reaches - and
+        // never fills - the buffer's 10,000-event pre-Ready capacity.
         var destinations = new LoggerConfiguration()
-            .WriteTo.Sink(new ReadyGatedBufferSink(postgresLogger, gate, consoleAndFileLogger))
+            .WriteTo.Sink(new ReadyGatedBufferSink(postgresLogger, gate, consoleAndFileLogger), levelSwitch: switches.Database)
             .WriteTo.Sink(consoleAndFileLogger);
 
         var builtDestinations = destinations.CreateLogger();
 
-        ApplyMinimumLevel(configuration, hostConfiguration);
+        // Root: controlled by switches.Root, always min(file, database) - see LogLevelSwitches. An
+        // override still quiets a namespace for every sink, unchanged; below a sink's own floor an
+        // override now stops reaching that sink too (see LogLevelSwitches' doc comment for why).
+        configuration.MinimumLevel.ControlledBy(switches.Root);
+        foreach (var over in levels.Overrides)
+            configuration.MinimumLevel.Override(over.Key, over.Value);
 
         configuration
             .Enrich.FromLogContext()
             .WriteTo.Sink(new RedactingSink(builtDestinations, redactor));
     }
+
+    static LogEventLevel Max(LogEventLevel a, LogEventLevel b) => a > b ? a : b;
 
     // I-1 (Phase 5 final review): ReadFrom.Configuration handed the whole "Serilog" section to
     // Serilog.Settings.Configuration, which honours WriteTo/AuditTo/Enrich/Filter/Destructure too -
@@ -149,17 +172,18 @@ internal static class LoggingSetup
     // it received every LogEvent unredacted. Reading exactly the two keys the brief names removes
     // that whole class of sink injection - only MinimumLevel:Default and MinimumLevel:Override:* are
     // ever read from configuration; every sink stays hard-coded in this file.
-    static void ApplyMinimumLevel(LoggerConfiguration configuration, IConfiguration hostConfiguration)
+    static (LogEventLevel Default, IReadOnlyDictionary<string, LogEventLevel> Overrides) ReadMinimumLevels(IConfiguration hostConfiguration)
     {
         var levels = hostConfiguration.GetSection("Serilog:MinimumLevel");
 
         var defaultLevel = levels["Default"] is { } defaultValue
             ? ParseLevel(defaultValue, "Serilog:MinimumLevel:Default")
             : LogEventLevel.Information;
-        configuration.MinimumLevel.Is(defaultLevel);
 
-        foreach (var over in levels.GetSection("Override").GetChildren())
-            configuration.MinimumLevel.Override(over.Key, ParseLevel(over.Value!, $"Serilog:MinimumLevel:Override:{over.Key}"));
+        var overrides = levels.GetSection("Override").GetChildren()
+            .ToDictionary(over => over.Key, over => ParseLevel(over.Value!, $"Serilog:MinimumLevel:Override:{over.Key}"));
+
+        return (defaultLevel, overrides);
     }
 
     static LogEventLevel ParseLevel(string value, string key) =>

@@ -1,4 +1,5 @@
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Host.Logging;
 
 namespace Noof.Ledger.Host.Diagnostics;
 
@@ -8,6 +9,7 @@ internal static class HostDiagnosticsRegistration
     {
         var databasePassword = DatabasePassword.From(connectionString);
 
+        services.AddSingleton<LogLevelSwitches>();
         services.AddSingleton<LogSinkStatus>();
         services.AddSingleton<ILogSinkStatus>(sp => sp.GetRequiredService<LogSinkStatus>());
         services.AddSingleton(sp => new SecretSnapshot(sp.GetRequiredService<IServiceScopeFactory>(), databasePassword));
