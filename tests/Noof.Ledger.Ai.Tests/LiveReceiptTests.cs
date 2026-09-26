@@ -2,6 +2,7 @@ using AwesomeAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Noof.Ledger.Ai.Anthropic;
 using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Application.Wallets;
@@ -24,7 +25,8 @@ public sealed class LiveReceiptTests
         "0EoAAFbUAw037MyjAAAAAElFTkSuQmCC");
 
     static AnthropicChatClientFactory CreateFactory(string apiKey) =>
-        new(new FixedSecretStore(apiKey), new HttpClient(), new AnthropicOptions());
+        new(new FixedSecretStore(apiKey), new HttpClient(), new AnthropicOptions(),
+            new OperationTimer(TimeProvider.System, new SlowOperationOptions()), NullLogger<AnthropicChatClientFactory>.Instance);
 
     [Fact]
     public async Task Read_receipt_round_trips_against_the_real_API_for_a_synthetic_image()

@@ -3,6 +3,7 @@ using System.Text.Json;
 using AwesomeAssertions;
 using Noof.Ledger.Ai.Anthropic;
 using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Application.Wallets;
@@ -29,7 +30,9 @@ public class ChatReceiptCategorizerOverAnthropicTests
         var httpClient = new HttpClient(handler);
         var secretStore = new StubSecretStore(SecretState.Present, "sk-ant-test-key-do-not-log-me");
         var options = new AnthropicOptions { Model = "claude-haiku-4-5-20251001", MaxTokens = 2048, Timeout = TimeSpan.FromSeconds(90) };
-        var clientFactory = new AnthropicChatClientFactory(secretStore, httpClient, options);
+        var clientFactory = new AnthropicChatClientFactory(
+            secretStore, httpClient, options, new OperationTimer(TimeProvider.System, new SlowOperationOptions()),
+            NullLogger<AnthropicChatClientFactory>.Instance);
 
         var categoryCatalog = Substitute.For<ICategoryCatalog>();
         categoryCatalog.ActiveAsync(Arg.Any<CancellationToken>()).Returns(Categories);
