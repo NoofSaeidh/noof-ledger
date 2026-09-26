@@ -517,3 +517,9 @@ is still the unoverridden .NET default `StopHost` (Phase 5's C-1 finding confirm
 that specific failure mode would still take the whole host down. The original suggestion — drive
 `IChatNotifier.EditAsync` into a real timeout and see what type comes out — is still the way to settle
 it, and is still not done.
+
+### P5-2 — Phase 5 follow-ups (2026-09-26)
+
+| # | Decision | Reasoning |
+|---|---|---|
+| O-8 | Health checks are our own `ISystemHealthCheck`, not `Microsoft.Extensions.Diagnostics.HealthChecks`. The assembly that owns what is checked implements and registers its checks, scoped; AI keys now lives in `Noof.Ledger.Ai`. One DI scope per run, so the checks run one at a time — today's `HealthCheckService` used a scope per check and ran them in parallel; this is a choice, reversible inside `SystemHealth`. A 5 s cooperative per-check timeout; Disk reads free space off-thread so it can be abandoned. Summaries show the exception type, never its message. A composition test on the real host replaces the central name and category lists | Operator's PR #1 decision: health checks are our own seam. Sharing one scope keeps the checks as plain constructor-injected classes at the cost of running them sequentially instead of in parallel; a repo that is public should never echo a raw exception message to `/diagnostics`, the dashboard tile or Telegram `/health` |
