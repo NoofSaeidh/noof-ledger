@@ -14,9 +14,9 @@ public sealed class OperationTiming : IDisposable
 
     TimeSpan? elapsed;
 
-    internal OperationTiming(IOperationTimer timer, TimeProvider clock, ILogger logger, string operation, TimeSpan expectedWait)
+    internal OperationTiming(OperationTimer timer, TimeProvider clock, ILogger logger, string operation, TimeSpan expectedWait)
     {
-        this.timer = (OperationTimer)timer;
+        this.timer = timer;
         this.clock = clock;
         this.logger = logger;
         this.operation = operation;

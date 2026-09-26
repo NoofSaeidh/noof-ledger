@@ -263,8 +263,7 @@ table is never pruned. Retention is per level, in `appsettings.json` under
 
 By default the database sink only records Information and above (per-level retention:
 Verbose/Debug 1 day, Information 90, Warning/Error/Fatal 730 — `appsettings.json` under
-`Logging:Retention:Days`). To see Debug detail — model/Telegram/worker timings, per-statement SQL —
-temporarily:
+`Logging:Retention:Days`). To see Debug detail — model/Telegram/worker/health timings — temporarily:
 
 1. Open `/diagnostics/logs` (the **Logs** tab) and set **Record to database from** to `Debug` (or
    `Verbose`). The choice is saved immediately, survives a restart, and is kept for however many days
@@ -276,9 +275,13 @@ temporarily:
    `Logging__SlowOperationMs__model=45000` as an environment variable) and is recorded regardless of
    the database level. A Telegram long poll is judged against `Telegram:PollingSeconds` **plus** the
    `telegram` threshold, so raising the poll interval never turns an idle poll into a Warning.
-3. To also see per-statement SQL in the file log, raise the file floor with
-   `Serilog__MinimumLevel__Default=Debug` (it already is, in the checked-in `appsettings.json`) and
-   add `Serilog__MinimumLevel__Override__Microsoft.EntityFrameworkCore.Database.Command=Debug`.
+3. Per-statement SQL is **not** part of step 1: the checked-in
+   `Serilog:MinimumLevel:Override:Microsoft.EntityFrameworkCore` is `Information`, and an override
+   applies at the root logger, before any sink sees the event. To get SQL, set
+   `Serilog__MinimumLevel__Override__Microsoft.EntityFrameworkCore.Database.Command=Debug` and
+   restart. It then reaches the file (whose floor is `Serilog:MinimumLevel:Default`, `Debug` as checked
+   in) **and** `app_log` whenever step 1's level is `Debug` or lower — every query of every page and
+   worker, so expect a large table for that day; remove the variable when done.
 4. From a transaction's own trace page (`/transactions/{id}/trace`), the **Timings and debug log**
    link opens `/diagnostics/logs` pre-filtered to that transaction at Debug — the quickest way to see
    everything that happened to one message without hunting through the whole table.
