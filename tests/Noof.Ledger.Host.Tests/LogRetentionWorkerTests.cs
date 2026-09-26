@@ -31,6 +31,31 @@ public class LogRetentionWorkerTests
     }
 
     [Fact]
+    public async Task A_prune_logs_logs_prune()
+    {
+        var retention = Substitute.For<ILogRetention>();
+        retention.PruneAsync(Arg.Any<CancellationToken>()).Returns(0);
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 25, 0, 0, 0, TimeSpan.Zero));
+        var logger = new CapturingLogger<LogRetentionWorker>();
+        var worker = new LogRetentionWorker(
+            ScopeFactoryFor(retention), ReadyGate(), time, new OperationTimer(time, new SlowOperationOptions()), logger);
+
+        await worker.StartAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
+            time.Advance(TimeSpan.FromSeconds(60));
+            await Task.Delay(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            await worker.StopAsync(TestContext.Current.CancellationToken);
+        }
+
+        logger.Entries.Should().Contain(entry => entry.Properties.GetValueOrDefault("Operation") as string == "logs.prune");
+    }
+
+    [Fact]
     public async Task The_worker_waits_for_the_gate_before_its_first_prune()
     {
         var retention = Substitute.For<ILogRetention>();
@@ -39,7 +64,7 @@ public class LogRetentionWorkerTests
         var gateReady = new TaskCompletionSource();
         gate.WaitUntilReadyAsync(Arg.Any<CancellationToken>()).Returns(gateReady.Task);
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 25, 0, 0, 0, TimeSpan.Zero));
-        var worker = new LogRetentionWorker(ScopeFactoryFor(retention), gate, time, NullLogger<LogRetentionWorker>.Instance);
+        var worker = new LogRetentionWorker(ScopeFactoryFor(retention), gate, time, new OperationTimer(time, new SlowOperationOptions()), NullLogger<LogRetentionWorker>.Instance);
 
         await worker.StartAsync(TestContext.Current.CancellationToken);
         try
@@ -64,7 +89,7 @@ public class LogRetentionWorkerTests
         var retention = Substitute.For<ILogRetention>();
         retention.PruneAsync(Arg.Any<CancellationToken>()).Returns(0);
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 25, 0, 0, 0, TimeSpan.Zero));
-        var worker = new LogRetentionWorker(ScopeFactoryFor(retention), ReadyGate(), time, NullLogger<LogRetentionWorker>.Instance);
+        var worker = new LogRetentionWorker(ScopeFactoryFor(retention), ReadyGate(), time, new OperationTimer(time, new SlowOperationOptions()), NullLogger<LogRetentionWorker>.Instance);
 
         await worker.StartAsync(TestContext.Current.CancellationToken);
         try
@@ -92,7 +117,7 @@ public class LogRetentionWorkerTests
         var retention = Substitute.For<ILogRetention>();
         retention.PruneAsync(Arg.Any<CancellationToken>()).Returns(0);
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 25, 0, 0, 0, TimeSpan.Zero));
-        var worker = new LogRetentionWorker(ScopeFactoryFor(retention), ReadyGate(), time, NullLogger<LogRetentionWorker>.Instance);
+        var worker = new LogRetentionWorker(ScopeFactoryFor(retention), ReadyGate(), time, new OperationTimer(time, new SlowOperationOptions()), NullLogger<LogRetentionWorker>.Instance);
 
         await worker.StartAsync(TestContext.Current.CancellationToken);
         try
@@ -124,7 +149,7 @@ public class LogRetentionWorkerTests
             .Returns(_ => 0, _ => throw new InvalidOperationException("database unreachable"));
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 25, 0, 0, 0, TimeSpan.Zero));
         var logger = new CapturingLogger<LogRetentionWorker>();
-        var worker = new LogRetentionWorker(ScopeFactoryFor(retention), ReadyGate(), time, logger);
+        var worker = new LogRetentionWorker(ScopeFactoryFor(retention), ReadyGate(), time, new OperationTimer(time, new SlowOperationOptions()), logger);
 
         await worker.StartAsync(TestContext.Current.CancellationToken);
         try
@@ -144,8 +169,10 @@ public class LogRetentionWorkerTests
         // M-7 (Phase 5 final review): explicit, pinned ids in the 52xx block - the same convention
         // every other [LoggerMessage] on the branch follows (DatabaseStartupService's 5101/5102,
         // BackupWorker's 1101/1102, ...) - not whatever the source generator assigns implicitly by
-        // declaration order, which drifts the moment a method is added, removed or reordered.
-        logger.Entries.Select(entry => entry.EventId.Id).Should().BeEquivalentTo([5201, 5202]);
+        // declaration order, which drifts the moment a method is added, removed or reordered. The
+        // logs.prune timing (5301/5302) shares this logger too, so this filters to the worker's
+        // own outcome ids rather than asserting the exact entry count.
+        logger.Entries.Select(entry => entry.EventId.Id).Where(id => id is 5201 or 5202).Should().BeEquivalentTo([5201, 5202]);
     }
 
     [Fact]
@@ -155,7 +182,7 @@ public class LogRetentionWorkerTests
         retention.PruneAsync(Arg.Any<CancellationToken>())
             .ThrowsAsync(new InvalidOperationException("database unreachable"));
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 25, 0, 0, 0, TimeSpan.Zero));
-        var worker = new LogRetentionWorker(ScopeFactoryFor(retention), ReadyGate(), time, NullLogger<LogRetentionWorker>.Instance);
+        var worker = new LogRetentionWorker(ScopeFactoryFor(retention), ReadyGate(), time, new OperationTimer(time, new SlowOperationOptions()), NullLogger<LogRetentionWorker>.Instance);
 
         await worker.StartAsync(TestContext.Current.CancellationToken);
         try

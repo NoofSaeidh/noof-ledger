@@ -101,9 +101,12 @@ public class TranscriptionWorkerTests
 
     static TranscriptionWorker CreateWorker(
         IServiceScopeFactory scopeFactory, FakeTimeProvider? time = null, IDatabaseGate? gate = null,
-        CapturingLogger<TranscriptionWorker>? logger = null) =>
-        new(scopeFactory, time ?? new FakeTimeProvider(new DateTimeOffset(2026, 9, 24, 9, 0, 0, TimeSpan.Zero)),
-            new CategorizationWorkerOptions(), WorkerId, Echo, gate ?? ReadyGate(), logger ?? new CapturingLogger<TranscriptionWorker>());
+        CapturingLogger<TranscriptionWorker>? logger = null, IOperationTimer? timer = null)
+    {
+        var resolvedTime = time ?? new FakeTimeProvider(new DateTimeOffset(2026, 9, 24, 9, 0, 0, TimeSpan.Zero));
+        return new(scopeFactory, resolvedTime, new CategorizationWorkerOptions(), WorkerId, Echo, gate ?? ReadyGate(),
+            timer ?? new OperationTimer(resolvedTime, new SlowOperationOptions()), logger ?? new CapturingLogger<TranscriptionWorker>());
+    }
 
     static IDatabaseGate ReadyGate()
     {
@@ -419,5 +422,34 @@ public class TranscriptionWorkerTests
         await queue.Received().ReleaseExpiredLeasesAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
 
         await worker.StopAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task A_processed_job_logs_downloadFile_transcribe_completeTranscription_job_transcribe_and_queueWait()
+    {
+        var claimedAt = new DateTimeOffset(2026, 9, 24, 9, 0, 0, TimeSpan.Zero);
+        var job = CaptureJob();
+        job.RunAfter = claimedAt - TimeSpan.FromSeconds(4);
+        job.ClaimedAt = claimedAt;
+        var harness = Setup(job);
+        var time = new FakeTimeProvider(claimedAt);
+        var logger = new CapturingLogger<TranscriptionWorker>();
+        var worker = CreateWorker(harness.ScopeFactory(), time, logger: logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        var operations = logger.Entries
+            .Select(entry => entry.Properties.GetValueOrDefault("Operation") as string)
+            .Where(operation => operation is not null)
+            .ToList();
+        operations.Should().Contain("telegram.downloadFile");
+        operations.Should().Contain("speech.transcribe");
+        operations.Should().Contain("db.completeTranscription");
+        operations.Should().Contain("job.transcribe");
+        operations.Should().Contain("job.queueWait");
+
+        var queueWait = logger.Entries.Should()
+            .ContainSingle(entry => entry.Properties.GetValueOrDefault("Operation") as string == "job.queueWait").Subject;
+        queueWait.Properties["ElapsedMs"].Should().Be(4000L);
     }
 }

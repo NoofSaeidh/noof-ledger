@@ -3,7 +3,8 @@ using Noof.Ledger.Application.Diagnostics;
 namespace Noof.Ledger.Host.Workers;
 
 internal sealed partial class LogRetentionWorker(
-    IServiceScopeFactory scopeFactory, IDatabaseGate gate, TimeProvider timeProvider, ILogger<LogRetentionWorker> logger)
+    IServiceScopeFactory scopeFactory, IDatabaseGate gate, TimeProvider timeProvider, IOperationTimer timer,
+    ILogger<LogRetentionWorker> logger)
     : BackgroundService
 {
     static readonly TimeSpan FirstRunDelay = TimeSpan.FromSeconds(60);
@@ -27,6 +28,7 @@ internal sealed partial class LogRetentionWorker(
         {
             using var scope = scopeFactory.CreateScope();
             var retention = scope.ServiceProvider.GetRequiredService<ILogRetention>();
+            using var pruning = timer.Start(logger, TimedOperations.LogsPrune);
             var pruned = await retention.PruneAsync(cancellationToken);
             LogPruned(pruned);
         }

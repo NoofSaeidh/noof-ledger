@@ -19,6 +19,7 @@ internal sealed class CategorizationWorker(
     IMerchantScan merchantScan,
     IRecordEcho recordEcho,
     IDatabaseGate gate,
+    IOperationTimer timer,
     ILogger<CategorizationWorker> logger)
     : BackgroundService
 {
@@ -54,7 +55,9 @@ internal sealed class CategorizationWorker(
             var modelProvider = scope.ServiceProvider.GetRequiredService<IModelProvider>();
 
             var now = timeProvider.GetUtcNow();
-            await jobQueue.ReleaseExpiredLeasesAsync(now, cancellationToken);
+            using var release = timer.Start(logger, TimedOperations.DbReleaseExpiredLeases);
+            var released = await jobQueue.ReleaseExpiredLeasesAsync(now, cancellationToken);
+            release.Stop(onlyIfSlow: released == 0);
 
             // Checked BEFORE claiming, deliberately out of the order the plan's flow diagram shows.
             // ClaimAsync increments attempt_count as part of the same UPDATE that claims the row, and
@@ -69,7 +72,9 @@ internal sealed class CategorizationWorker(
             if (now < accountCooldownUntil)
                 return CategorizationTickResult.Idle;
 
+            using var claim = timer.Start(logger, TimedOperations.DbClaimJob);
             var job = await jobQueue.ClaimAsync(workerId, ClaimableKinds, options.Lease, cancellationToken);
+            claim.Stop(onlyIfSlow: job is null);
             if (job is null)
                 return CategorizationTickResult.Idle;
 
@@ -97,12 +102,17 @@ internal sealed class CategorizationWorker(
         var currentStage = TransactionStages.Categorized;
 
         using var logScope = TransactionLogScope.Begin(logger, job.TransactionId);
+        timer.Record(logger, TimedOperations.JobQueueWait, (job.ClaimedAt ?? timeProvider.GetUtcNow()) - job.RunAfter);
+        using var jobTiming = timer.Start(logger, TimedOperations.JobCategorize);
 
         try
         {
+            using var loading = timer.Start(logger, TimedOperations.DbLoadCategorizationContext);
+
             subject = await store.GetSubjectAsync(job.TransactionId, cancellationToken);
             if (subject is not { } sub)
             {
+                loading.Stop();
                 await FailTerminallyAsync(
                     jobQueue, store, notifier, job, null,
                     "the transaction this job points at no longer exists", currentStage, cancellationToken);
@@ -118,6 +128,7 @@ internal sealed class CategorizationWorker(
 
             var allMerchants = await merchantDirectory.MerchantsAsync(cancellationToken);
             var wallets = await walletDirectory.ActiveAsync(cancellationToken);
+            loading.Stop();
 
             var request = new CategorizationRequest(
                 sub.RawText,
@@ -194,7 +205,8 @@ internal sealed class CategorizationWorker(
             var outcome = new CategorizationOutcome(
                 categorizedItems, occurredOn, job.Kind, job.Instruction, mapped.Kind, mapped.WalletId, mapped.StatedBalance);
             currentStage = TransactionStages.Persisted;
-            await store.ApplyAsync(job.TransactionId, outcome, cancellationToken);
+            using (timer.Start(logger, TimedOperations.DbApplyCategorization))
+                await store.ApplyAsync(job.TransactionId, outcome, cancellationToken);
             logger.LogPersisted(TransactionStages.Persisted, outcome.TransactionKind);
 
             // From this line on, the transaction's line items and Completed status are already
@@ -211,6 +223,7 @@ internal sealed class CategorizationWorker(
 
             try
             {
+                using var completing = timer.Start(logger, TimedOperations.DbCompleteJob);
                 var succeedOutcome = await jobQueue.SucceedAsync(job.Id, workerId, cancellationToken);
                 if (succeedOutcome == JobCompletionOutcome.NotOwned)
                     logger.JobAlreadyReclaimed(job.Id);
