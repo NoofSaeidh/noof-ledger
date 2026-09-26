@@ -934,3 +934,13 @@ instrumenting the next time it is seen live rather than chasing from this descri
 - **Configuration-added Serilog sinks did not reproduce through `WebApplicationFactory`** while they did
   in an isolated logger (follow-up review I-1). `ReadFrom.Configuration` is gone, so the risk is closed,
   but the reason the hosted repro stayed silent was never found.
+
+### Cadence and timeout constants still in code — deferred 2026-09-26
+
+PR #1's review asked for hard-coded paths to move to `appsettings.json`; paths, file-log limits,
+per-level retention, every backup setting and the DataProtection key directory did. These stayed in
+C# on purpose, because they are how often or how long, not where or how much, and nobody has needed
+to change one: the worker poll intervals (`SecretSnapshotRefreshWorker`, `LogRetentionWorker`), the
+health checks' staleness windows (Disk, Backup, Log sink, Telegram), `TelegramBackoff`'s caps, the
+5 s per-check timeout in `SystemHealth`, and `pg_dump`'s `PGCONNECT_TIMEOUT`. Move one when a real
+reason to tune it appears, through the options pattern the rest already use.
