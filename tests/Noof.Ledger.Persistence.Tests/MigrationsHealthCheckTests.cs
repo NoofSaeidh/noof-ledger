@@ -1,6 +1,5 @@
 using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Diagnostics.HealthChecks;
 using NSubstitute;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Persistence.Diagnostics;
@@ -18,19 +17,30 @@ public class MigrationsHealthCheckTests(PostgresFixture fixture)
     }
 
     [Fact]
-    public async Task Reports_degraded_without_touching_the_database_when_the_gate_is_not_ready()
+    public async Task Reports_its_name_order_and_log_category()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        var check = new MigrationsHealthCheck(db, GateWith(DatabaseState.Ready));
+
+        check.Name.Should().Be("Migrations");
+        check.Order.Should().Be(20);
+        check.LogCategory.Should().Be(DbLoggerCategory.Migrations.Name);
+    }
+
+    [Fact]
+    public async Task Reports_a_warning_without_touching_the_database_when_the_gate_is_not_ready()
     {
         await using var db = await fixture.CreateContextAsync();
         var check = new MigrationsHealthCheck(db, GateWith(DatabaseState.Waiting));
 
-        var result = await check.CheckHealthAsync(new HealthCheckContext(), TestContext.Current.CancellationToken);
+        var result = await check.CheckAsync(TestContext.Current.CancellationToken);
 
-        result.Status.Should().Be(HealthStatus.Degraded);
-        result.Description.Should().Be("Waiting for the database");
+        result.Level.Should().Be(HealthLevel.Warning);
+        result.Summary.Should().Be("Waiting for the database");
     }
 
     [Fact]
-    public async Task A_fully_migrated_clone_reports_healthy()
+    public async Task A_fully_migrated_clone_reports_ok()
     {
         await using var connection = await fixture.CreateDatabaseAsync();
         var options = new DbContextOptionsBuilder<LedgerDbContext>()
@@ -38,20 +48,20 @@ public class MigrationsHealthCheckTests(PostgresFixture fixture)
         await using var db = new LedgerDbContext(options);
         var check = new MigrationsHealthCheck(db, GateWith(DatabaseState.Ready));
 
-        var result = await check.CheckHealthAsync(new HealthCheckContext(), TestContext.Current.CancellationToken);
+        var result = await check.CheckAsync(TestContext.Current.CancellationToken);
 
-        result.Status.Should().Be(HealthStatus.Healthy);
+        result.Level.Should().Be(HealthLevel.Ok);
     }
 
     [Fact]
-    public async Task An_unmigrated_database_reports_unhealthy_naming_the_pending_count()
+    public async Task An_unmigrated_database_reports_failing_naming_the_pending_count()
     {
         await using var db = await fixture.CreateContextAsync();
         var check = new MigrationsHealthCheck(db, GateWith(DatabaseState.Ready));
 
-        var result = await check.CheckHealthAsync(new HealthCheckContext(), TestContext.Current.CancellationToken);
+        var result = await check.CheckAsync(TestContext.Current.CancellationToken);
 
-        result.Status.Should().Be(HealthStatus.Unhealthy);
-        result.Description.Should().MatchRegex(@"^\d+ migration\(s\) pending$");
+        result.Level.Should().Be(HealthLevel.Failing);
+        result.Summary.Should().MatchRegex(@"^\d+ migration\(s\) pending$");
     }
 }

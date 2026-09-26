@@ -1,11 +1,12 @@
-using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Noof.Ledger.Application.Diagnostics;
 
 namespace Noof.Ledger.Host.Diagnostics;
 
-internal sealed class SystemHealth(HealthCheckService healthCheckService, TimeProvider timeProvider) : ISystemHealth
+internal sealed class SystemHealth(
+    IServiceScopeFactory scopeFactory, TimeProvider timeProvider, ILoggerFactory loggerFactory) : ISystemHealth
 {
     static readonly TimeSpan CacheDuration = TimeSpan.FromSeconds(30);
+    internal static readonly TimeSpan CheckTimeout = TimeSpan.FromSeconds(5);
 
     readonly Lock gate = new();
     SystemHealthReport? cached;
@@ -33,30 +34,46 @@ internal sealed class SystemHealth(HealthCheckService healthCheckService, TimePr
         return report;
     }
 
+    // The checks share this one scope's LedgerDbContext, which refuses a second concurrent
+    // operation - hence one at a time.
     async Task<SystemHealthReport> RunAsync(CancellationToken cancellationToken)
     {
-        var raw = await healthCheckService.CheckHealthAsync(cancellationToken);
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var checks = scope.ServiceProvider.GetServices<ISystemHealthCheck>()
+            .OrderBy(check => check.Order).ThenBy(check => check.Name, StringComparer.Ordinal);
+
+        List<(ISystemHealthCheck Check, HealthOutcome Outcome)> results = [];
+        foreach (var check in checks)
+            results.Add((check, await OutcomeOfAsync(check, cancellationToken)));
+
         var now = timeProvider.GetUtcNow();
+        HealthItem[] items = [.. results.Select(
+            r => new HealthItem(r.Check.Name, r.Outcome.Level, r.Outcome.Summary, now, r.Check.LogCategory))];
 
-        HealthItem[] items = [.. HealthCheckNames.Ordered.Select(name =>
-        {
-            var logCategory = HealthCheckLogCategories.ByCheckName.GetValueOrDefault(name, string.Empty);
-            return raw.Entries.TryGetValue(name, out var entry)
-                ? new HealthItem(name, Map(entry.Status), entry.Description ?? string.Empty, now, logCategory)
-                : new HealthItem(name, HealthLevel.Failing, "Check not registered", now, logCategory);
-        })];
-
-        // Overall is the worst of the items exactly as displayed, so a check missing from
-        // registration - shown as Failing, "Check not registered" - counts toward it the same way.
         var overall = items.Length == 0 ? HealthLevel.Ok : items.Max(item => item.Level);
 
         return new SystemHealthReport(overall, items);
     }
 
-    static HealthLevel Map(HealthStatus status) => status switch
+    async Task<HealthOutcome> OutcomeOfAsync(ISystemHealthCheck check, CancellationToken cancellationToken)
     {
-        HealthStatus.Healthy => HealthLevel.Ok,
-        HealthStatus.Degraded => HealthLevel.Warning,
-        _ => HealthLevel.Failing,
-    };
+        using var timeout = new CancellationTokenSource(CheckTimeout, timeProvider);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
+        var logger = loggerFactory.CreateLogger(check.LogCategory);
+
+        try
+        {
+            return await check.CheckAsync(linked.Token);
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            logger.HealthCheckTimedOut(check.Name, (int)CheckTimeout.TotalSeconds);
+            return HealthOutcome.Failing($"No answer within {(int)CheckTimeout.TotalSeconds} s");
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.HealthCheckFailed(check.Name, exception);
+            return HealthOutcome.Failing($"Check failed ({exception.GetType().Name}) — see logs");
+        }
+    }
 }

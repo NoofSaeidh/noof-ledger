@@ -1,21 +1,25 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Noof.Ledger.Application.Diagnostics;
 
 namespace Noof.Ledger.Persistence.Diagnostics;
 
-internal sealed class MigrationsHealthCheck(LedgerDbContext db, IDatabaseGate gate) : IHealthCheck
+internal sealed class MigrationsHealthCheck(LedgerDbContext db, IDatabaseGate gate) : ISystemHealthCheck
 {
-    public async Task<HealthCheckResult> CheckHealthAsync(
-        HealthCheckContext context, CancellationToken cancellationToken = default)
+    public string Name => "Migrations";
+
+    public int Order => 20;
+
+    public string LogCategory => DbLoggerCategory.Migrations.Name;
+
+    public async Task<HealthOutcome> CheckAsync(CancellationToken cancellationToken)
     {
         if (gate.State is not DatabaseState.Ready)
-            return HealthCheckResult.Degraded("Waiting for the database");
+            return HealthOutcome.Warning("Waiting for the database");
 
         var pending = (await db.Database.GetPendingMigrationsAsync(cancellationToken)).ToArray();
 
         return pending.Length == 0
-            ? HealthCheckResult.Healthy("Up to date")
-            : HealthCheckResult.Unhealthy($"{pending.Length} migration(s) pending");
+            ? HealthOutcome.Ok("Up to date")
+            : HealthOutcome.Failing($"{pending.Length} migration(s) pending");
     }
 }

@@ -33,7 +33,7 @@ public static class TelegramRegistration
         services.AddScoped<ITelegramUpdateRouter, TelegramUpdateRouter>();
         services.AddHostedService<TelegramPollingService>();
 
-        services.AddHealthChecks().AddCheck<TelegramHealthCheck>(HealthCheckNames.Telegram);
+        services.AddScoped<ISystemHealthCheck, TelegramHealthCheck>();
 
         return services;
     }
