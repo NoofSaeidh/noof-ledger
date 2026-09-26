@@ -246,7 +246,10 @@ they are still in the file itself, just never copied to the table.
 
 **Reading `/diagnostics` and the trace page.** `/diagnostics` lists every health check — Database,
 Migrations, Telegram, AI keys, Backup, Disk, Log sink — each with a "Logs" link that opens
-`/diagnostics/logs` pre-filtered to that check's own log category. `/diagnostics/logs` is a paged,
+`/diagnostics/logs` pre-filtered to that check's own log category. A check that throws or times out
+shows only the exception type ("Check failed (ExceptionType) — see logs" or "No answer within 5 s"),
+never the exception's message; the full exception is logged under the check's own category, which is
+exactly what its "Logs" link opens. `/diagnostics/logs` is a paged,
 filterable grid (level, time range, free text, source, transaction id) over `app_log`, reached from
 the **Logs** tab; while the database is unavailable it shows the waiting banner like every other
 page — read the file log with `.\run.ps1 logs` instead. Every transaction has its own page at

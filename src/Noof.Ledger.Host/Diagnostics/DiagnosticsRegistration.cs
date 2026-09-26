@@ -10,12 +10,10 @@ internal static class DiagnosticsRegistration
         services.AddSingleton<IFreeSpaceProvider, DriveFreeSpaceProvider>();
         services.AddSingleton<ISystemHealth, SystemHealth>();
 
-        services.AddHealthChecks()
-            .AddCheck<DatabaseHealthCheck>(HealthCheckNames.Database)
-            .AddCheck<AiKeysHealthCheck>(HealthCheckNames.AiKeys)
-            .AddCheck<BackupHealthCheck>(HealthCheckNames.Backup)
-            .AddCheck<DiskHealthCheck>(HealthCheckNames.Disk)
-            .AddCheck<LogSinkHealthCheck>(HealthCheckNames.LogSink);
+        services.AddScoped<ISystemHealthCheck, DatabaseHealthCheck>();
+        services.AddScoped<ISystemHealthCheck, BackupHealthCheck>();
+        services.AddScoped<ISystemHealthCheck, DiskHealthCheck>();
+        services.AddScoped<ISystemHealthCheck, LogSinkHealthCheck>();
 
         return services;
     }

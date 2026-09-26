@@ -76,7 +76,7 @@ public static class PersistenceRegistration
         services.AddScoped<ILogRetention, EfLogRetention>();
         services.AddScoped<ITransactionTrace, EfTransactionTrace>();
 
-        services.AddHealthChecks().AddCheck<MigrationsHealthCheck>(HealthCheckNames.Migrations);
+        services.AddScoped<ISystemHealthCheck, MigrationsHealthCheck>();
 
         return services;
     }

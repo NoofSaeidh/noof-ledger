@@ -853,7 +853,8 @@ and all live under `Noof.Ledger.Host/Diagnostics`. Harmless today; collapsing th
 **M-10 — the Database health check reads the gate, not PostgreSQL, so it can say "Ready" while
 PostgreSQL is down.** `DatabaseHealthCheck` reports whatever `IDatabaseGate.State` was when it last
 changed; once `Ready`, it never re-probes, so an outage that starts *after* startup shows "Database —
-Ready" in green next to Migrations, Backup and Telegram failing with raw Npgsql text underneath.
+Ready" in green next to Migrations, Backup and Telegram failing with "Check failed (NpgsqlException)
+— see logs" underneath.
 Spec-conformant (the design says gate `Ready` → Ok) but confusing to read. A live `SELECT 1` with a
 short timeout on every check would be better and is cheap; not built because the gate's own workers
 already recover on their own, so nothing operationally depends on this check being live.

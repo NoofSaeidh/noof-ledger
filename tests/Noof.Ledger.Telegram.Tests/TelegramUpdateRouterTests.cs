@@ -495,7 +495,7 @@ public class TelegramUpdateRouterTests
     {
         var (router, chatNotifier, systemHealth, _) = CreateHealthHarness(new SecretResult(SecretState.Present, "111"));
         var report = new SystemHealthReport(HealthLevel.Ok,
-            [new HealthItem("Database", HealthLevel.Ok, "ready", DateTimeOffset.Parse("2026-09-25T10:00:00Z"))]);
+            [new HealthItem("Database", HealthLevel.Ok, "ready", DateTimeOffset.Parse("2026-09-25T10:00:00Z"), "Noof.Ledger.Host.Startup.DatabaseStartupService")]);
         systemHealth.GetAsync(true, Arg.Any<CancellationToken>()).Returns(report);
 
         await router.HandleAsync(TextMessage(111L, 5, "/health", DateTime.UtcNow), "Europe/Belgrade", TestContext.Current.CancellationToken);
