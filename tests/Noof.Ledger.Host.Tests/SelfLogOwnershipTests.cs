@@ -104,6 +104,49 @@ public class SelfLogOwnershipTests
             "a failure that names no specific connection keeps defaulting to whoever is current, exactly as before");
     }
 
+    // R2-1 (Phase 6 second re-review): Npgsql's message names the RESOLVED endpoint it dialled, never
+    // the configured host name - "Host=localhost" fails as "Failed to connect to 127.0.0.1:<port>" (and
+    // on a dual-stack machine, "[::1]:<port>" too), so comparing the raw connection-string Host verbatim
+    // against that message can never match, and every real outage on a host-name connection string went
+    // unnoticed. The fix resolves the configured Host the same way Npgsql renders what it tried.
+    [Fact]
+    public void A_claim_for_a_host_name_recognises_the_loopback_endpoint_it_resolves_to()
+    {
+        var status = new LogSinkStatus();
+        using var registration = SelfLogOwnership.Claim(
+            status, TimeProvider.System, "Host=localhost;Port=40010;Database=never_dialled;Username=none;Timeout=2");
+
+        SelfLog.WriteLine("Npgsql.NpgsqlException (0x80004005): Failed to connect to 127.0.0.1:40010");
+
+        status.LastFailureAt.Should().NotBeNull(
+            "localhost resolves to 127.0.0.1, which is exactly the endpoint Npgsql's own message names");
+    }
+
+    [Fact]
+    public void A_claim_for_an_ipv6_literal_host_recognises_its_bracketed_form()
+    {
+        var status = new LogSinkStatus();
+        using var registration = SelfLogOwnership.Claim(
+            status, TimeProvider.System, "Host=::1;Port=40011;Database=never_dialled;Username=none;Timeout=2");
+
+        SelfLog.WriteLine("Npgsql.NpgsqlException (0x80004005): Failed to connect to [::1]:40011");
+
+        status.LastFailureAt.Should().NotBeNull("Npgsql brackets an IPv6 endpoint - the identity must match that exact form");
+    }
+
+    [Fact]
+    public void A_claim_for_a_host_name_still_rejects_a_foreign_endpoint()
+    {
+        var status = new LogSinkStatus();
+        using var registration = SelfLogOwnership.Claim(
+            status, TimeProvider.System, "Host=localhost;Port=40012;Database=never_dialled;Username=none;Timeout=2");
+
+        SelfLog.WriteLine("Npgsql.NpgsqlException (0x80004005): Failed to connect to 10.0.0.5:40012");
+
+        status.LastFailureAt.Should().BeNull(
+            "10.0.0.5 is not an address localhost resolves to, so this failure belongs to a different connection");
+    }
+
     // The end-to-end shape of the actual flake: LoggingSetup.Configure called for one host, that
     // host's logger disposed (as WebApplicationFactory disposes a host on shutdown), then Configure
     // called again for a second host - mirroring LogLevelConfigurationTests' own pattern of driving

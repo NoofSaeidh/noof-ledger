@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Sockets;
 using Noof.Ledger.Application.Diagnostics;
 using Npgsql;
 using Serilog.Debugging;
@@ -31,19 +33,23 @@ internal static class SelfLogOwnership
     static object? currentOwner;
     static ILogSinkStatus? currentStatus;
     static TimeProvider? currentTimeProvider;
-    static string? currentIdentity;
+    static IReadOnlyCollection<string> currentIdentities = [];
     static bool hookInstalled;
 
     public static IDisposable Claim(ILogSinkStatus sinkStatus, TimeProvider timeProvider, string connectionString)
     {
         var owner = new object();
 
+        // Resolved once, here, rather than on every SelfLog callback: DNS resolution belongs to the
+        // claim, not to each message it might later need to judge.
+        var identities = IdentitiesOf(connectionString);
+
         lock (Gate)
         {
             currentOwner = owner;
             currentStatus = sinkStatus;
             currentTimeProvider = timeProvider;
-            currentIdentity = HostPortOf(connectionString);
+            currentIdentities = identities;
             EnsureHookInstalledLocked();
         }
 
@@ -59,15 +65,15 @@ internal static class SelfLogOwnership
         {
             ILogSinkStatus? status;
             TimeProvider? time;
-            string? identity;
+            IReadOnlyCollection<string> identities;
             lock (Gate)
             {
                 status = currentStatus;
                 time = currentTimeProvider;
-                identity = currentIdentity;
+                identities = currentIdentities;
             }
 
-            if (identity is not null && NamesADifferentConnection(message, identity))
+            if (identities.Count > 0 && NamesADifferentConnection(message, identities))
                 return;
 
             status?.RecordFailure((time ?? TimeProvider.System).GetUtcNow());
@@ -76,14 +82,36 @@ internal static class SelfLogOwnership
         hookInstalled = true;
     }
 
-    static bool NamesADifferentConnection(string message, string currentIdentity) =>
+    static bool NamesADifferentConnection(string message, IReadOnlyCollection<string> identities) =>
         message.Contains("Failed to connect to ", StringComparison.Ordinal)
-        && !message.Contains(currentIdentity, StringComparison.Ordinal);
+        && !identities.Any(identity => message.Contains(identity, StringComparison.Ordinal));
 
-    static string HostPortOf(string connectionString)
+    // Npgsql's own connection-failure message names the RESOLVED endpoint it dialled, formatted exactly
+    // as IPEndPoint.ToString() renders it ("127.0.0.1:5432", "[::1]:5432") - never the configured host
+    // name (verified against Npgsql 10.0.3: "Host=localhost" fails as "Failed to connect to
+    // 127.0.0.1:<port>"). An IP literal (v4 or v6) is used as-is; a host name is resolved through DNS so
+    // every address it could dial is in the identity set. A Unix-socket path (starts with "/") or a
+    // failed resolution names no TCP endpoint at all, so it carries no identity - the claim then falls
+    // back to defaulting every failure to itself, exactly as when the message names no connection.
+    static IReadOnlyCollection<string> IdentitiesOf(string connectionString)
     {
         var builder = new NpgsqlConnectionStringBuilder(connectionString);
-        return $"{builder.Host}:{builder.Port}";
+        var host = builder.Host;
+
+        if (string.IsNullOrEmpty(host) || host.StartsWith('/'))
+            return [];
+
+        if (IPAddress.TryParse(host, out var literal))
+            return [new IPEndPoint(literal, builder.Port).ToString()];
+
+        try
+        {
+            return [.. Dns.GetHostAddresses(host).Select(address => new IPEndPoint(address, builder.Port).ToString())];
+        }
+        catch (SocketException)
+        {
+            return [];
+        }
     }
 
     sealed class Registration(object owner) : IDisposable
@@ -98,7 +126,7 @@ internal static class SelfLogOwnership
                 currentOwner = null;
                 currentStatus = null;
                 currentTimeProvider = null;
-                currentIdentity = null;
+                currentIdentities = [];
             }
         }
     }

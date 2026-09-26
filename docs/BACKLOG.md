@@ -845,19 +845,17 @@ failure (naming no host:port at all) still defaults to attributing to whoever is
 to the PostgreSQL sink's own failure listener if `Serilog.Sinks.Postgresql.Alternative` exposes one,
 otherwise filter `SelfLog` text by that sink's type name before recording a failure.
 
-**New from the same fix (Phase 6 re-review, R2-1) — `SelfLogOwnership`'s host:port comparison is wrong
-for any connection string that names a host rather than an IP literal.** `HostPortOf` builds the
-identity from `NpgsqlConnectionStringBuilder.Host`+`Port` verbatim (`localhost:5432`), but Npgsql's own
-failure message always names the *resolved* IP endpoint (`Failed to connect to 127.0.0.1:5432`), never
-the configured host name — verified directly against Npgsql 10.0.3. So `Host=localhost` (or any
-hostname, or an IPv6 literal) never matches its own claim, `NamesADifferentConnection` always says
-"different", and the outage the check exists to catch goes unreported for as long as it lasts. The
-operator's own `db.connection` uses `Host=127.0.0.1` and is unaffected; anyone typing the more natural
-`localhost` is not. Fix: resolve the identity the way Npgsql renders it (`IPAddress.TryParse` first, an
-IPv6 literal renders as `[::1]:port`; otherwise `Dns.GetHostAddresses` at claim time and keep every
-resulting `IPEndPoint`, or the cheaper alternative of comparing only the port). No test in the suite
-uses a host name today — every fixture and both SelfLog test classes use `127.0.0.1`, which is exactly
-why this went unnoticed.
+**Fixed (Phase 6 second re-review, R2-1) — `SelfLogOwnership`'s host:port comparison was wrong for any
+connection string that named a host rather than an IP literal.** The old `HostPortOf` built the identity
+from `NpgsqlConnectionStringBuilder.Host`+`Port` verbatim (`localhost:5432`), but Npgsql's own failure
+message always names the *resolved* IP endpoint (`Failed to connect to 127.0.0.1:5432`), never the
+configured host name — verified directly against Npgsql 10.0.3. `IdentitiesOf` now resolves the identity
+the way Npgsql renders it: an IP literal (v4 or v6, `IPAddress.TryParse`) is used as-is — an IPv6 literal
+renders bracketed, `[::1]:5432` — and any other host is resolved once per claim through
+`Dns.GetHostAddresses`, keeping every resulting `IPEndPoint`; a Unix-socket path or a failed resolution
+carries no identity and falls back to defaulting every failure to the current claim, same as a message
+naming no connection at all. `SelfLogOwnershipTests` covers a host name resolving to loopback, an IPv6
+literal host, and a foreign endpoint still being rejected.
 
 **M-3 — three near-identical registration entry points for one folder.**
 `DiagnosticsRegistration.AddNoofDiagnostics`, `DiagnosticsHostRegistration.AddNoofDiagnosticsHost` and
