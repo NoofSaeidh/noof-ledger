@@ -73,7 +73,9 @@ loopback-only site, documented in `ops/RUNBOOK.md`, not a secret.
 
 **Mock data** (`MockData.cs`, fixed values — the same every run, so screenshots are stable):
 
-- Dated in one fixed past window (2026-09-01 to 2026-09-20), with fixed ids.
+- Dated in the current month (fixed days 1–20), with fixed ids. *(Changed during implementation from a
+  fixed September 2026 window: the dashboard's "This month" follows the real calendar, and fixed dates
+  would have emptied its charts from October on.)*
 - Wallets: Wise (EUR), Raiffeisen (RSD, taking the RSD default from the migration-seeded Main Wallet),
   Cash (USD), Tinkoff (RUB), Kaspi (KZT), each with an opening balance; Old Revolut (EUR), archived.
   Main Wallet stays at zero — as on a fresh install.

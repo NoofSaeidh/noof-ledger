@@ -983,3 +983,13 @@ other two as not mattering in real use:
   creates is a valid member of the same DPAPI-protected ring, so the running app is unaffected. The
   fix mirrors the log directory: apply `TestHostDataProtection` everywhere and add an architecture
   guard like `TestHostLogDirectoryTests`.
+
+## Demo: what was cut from the first design — 2026-09-26
+
+The operator cut the demo back to a database with mock data and screenshots
+(`docs/superpowers/specs/2026-09-26-demo-database-and-screenshots-design.md`). Not built, so nobody
+re-proposes it as new: a live fake Telegram chat driving the real bot through a fake Bot API; a
+rule-based fake model so the demo could categorise messages; seeding by replaying a conversation
+through the app instead of writing mock rows; labelled before/after screenshot runs (git history does
+that now); pixel-diff regression tests (`Verify.Playwright`). Voice notes and receipt photos have no
+pictures yet — receipts once Phase 6 lands.

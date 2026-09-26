@@ -171,6 +171,11 @@ the code that builds the echo text.
 - Run `dotnet test` before claiming anything works. State the actual result; never assert success without having seen it.
 - Prefer deterministic C# over an LLM call wherever both would work.
 - When a decision is expensive to reverse (schema, storage encoding, a seam), stop and flag it rather than choosing quietly.
+- **Screenshots stay current** *(settled 2026-09-26)*. A change to anything the operator sees — a
+  page, or a message the bot sends — adds mock data for anything new (`tools/Noof.Ledger.Demo`), runs
+  `.\run.ps1 screenshots`, commits the changed images in `docs/screenshots/` with the change, and sends
+  them to the operator (the command lists them; phone-sized copies are in `artifacts/screenshots/`).
+  A new page or bot reply gets a screen or a scene added. Never from `noof_ledger`.
 
 ## 6. Closing a phase *(settled)*
 
