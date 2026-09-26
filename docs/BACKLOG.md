@@ -830,13 +830,19 @@ a message when a check's state changes. Named out of scope by the observability 
 scope"); it would want a debounce (a flapping check should not spam) and a decision about which
 checks are worth a push at all.
 
-**M-1 — `SelfLog.Enable` attributes every Serilog self-log line to the database sink, process-wide.**
-`LoggingSetup.cs` records *any* Serilog internal error (a locked log file, a console write failure, not
-only a PostgreSQL batch failure) as a Log sink failure, so the check can say "logs are in the file
-only" for the wrong reason. `SelfLog` is also a process-global listener while `Configure` runs per
-host, so two in-process hosts (as in some tests) overwrite each other's listener. Fix: attach to the
-PostgreSQL sink's own failure listener if `Serilog.Sinks.Postgresql.Alternative` exposes one, otherwise
-filter `SelfLog` text by that sink's type name before recording a failure.
+**M-1 — `SelfLog.Enable` attributes every non-connection Serilog self-log line to the database sink.**
+`LoggingSetup.cs` still records *any* Serilog internal error that doesn't name a specific host:port (a
+locked log file, a console write failure, not only a PostgreSQL batch failure) as a Log sink failure,
+so the check can say "logs are in the file only" for the wrong reason. The other half of this item -
+`SelfLog` being a process-global listener while `Configure` runs per host, so an orphaned host (the
+throwaway one `WebApplicationFactory`'s `HostFactoryResolver` builds and never disposes) could feed a
+later, unrelated host's `ILogSinkStatus` - is fixed: `SelfLogOwnership` (Phase 6 final tidy-up, item 3)
+tracks the current claim and drops any "Failed to connect to `<host:port>`" message that names a
+*different* connection than the current claim's own, closing the cross-host case
+`SelfLogSinkFailureTests` flaked on. What remains is purely the message-type gap: a non-connection
+failure (naming no host:port at all) still defaults to attributing to whoever is current. Fix: attach
+to the PostgreSQL sink's own failure listener if `Serilog.Sinks.Postgresql.Alternative` exposes one,
+otherwise filter `SelfLog` text by that sink's type name before recording a failure.
 
 **M-3 — three near-identical registration entry points for one folder.**
 `DiagnosticsRegistration.AddNoofDiagnostics`, `DiagnosticsHostRegistration.AddNoofDiagnosticsHost` and
