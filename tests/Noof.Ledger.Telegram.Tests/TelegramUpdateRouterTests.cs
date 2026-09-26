@@ -672,7 +672,7 @@ public class TelegramUpdateRouterTests
         // image/jpeg for anything it did not recognise - so a HEIC upload passed the router, SkiaSharp
         // could not decode it, and vision received bytes mislabelled as JPEG. The router now only
         // accepts the types TelegramReceiptPhotoSource.MediaTypeFor can correctly derive.
-        var (router, captureStore, chatNotifier, _, _, _) = CreateRouter(ownerChatId: 111L);
+        var (router, captureStore, chatNotifier, _, _, _, _) = CreateRouter(ownerChatId: 111L);
 
         await router.HandleAsync(DocumentMessage(111L, 6, "doc-1", mimeType), "Europe/Belgrade", TestContext.Current.CancellationToken);
 
@@ -687,7 +687,7 @@ public class TelegramUpdateRouterTests
     [InlineData("image/gif")]
     public async Task A_document_in_a_media_type_the_photo_source_can_decode_is_captured(string mimeType)
     {
-        var (router, captureStore, chatNotifier, _, _, _) = CreateRouter(ownerChatId: 111L);
+        var (router, captureStore, chatNotifier, _, _, _, _) = CreateRouter(ownerChatId: 111L);
         var transactionId = Guid.NewGuid();
         captureStore.CaptureReceiptAsync(Arg.Any<CapturedReceipt>(), "Europe/Belgrade", Arg.Any<CancellationToken>()).Returns(transactionId);
 
