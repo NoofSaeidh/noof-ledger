@@ -1,8 +1,12 @@
 using System.Net;
 using AwesomeAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Noof.Ledger.Ai.Groq;
 using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Secrets;
+using Noof.Ledger.TestKit;
 
 namespace Noof.Ledger.Ai.Tests.Groq;
 
@@ -11,7 +15,8 @@ public class GroqSpeechToTextClientFactoryTests
     const string ApiKey = "gsk-VERY-SECRET-DO-NOT-LEAK-abc123";
 
     static GroqSpeechToTextClientFactory Factory(ISecretStore secretStore, HttpMessageHandler? handler = null) =>
-        new(secretStore, new HttpClient(handler ?? new StubHttpMessageHandler()), new GroqOptions());
+        new(secretStore, new HttpClient(handler ?? new StubHttpMessageHandler()), new GroqOptions(),
+            new OperationTimer(TimeProvider.System, new SlowOperationOptions()), NullLogger<GroqSpeechToTextClientFactory>.Instance);
 
     sealed class ThrowingHttpMessageHandler(Exception exception) : HttpMessageHandler
     {
@@ -78,6 +83,22 @@ public class GroqSpeechToTextClientFactoryTests
 
         result.Ok.Should().BeFalse();
         handler.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_failing_probe_still_logs_a_speech_probe_timing()
+    {
+        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var timer = new OperationTimer(clock, new SlowOperationOptions());
+        var logger = new CapturingLogger<GroqSpeechToTextClientFactory>();
+        var handler = new ThrowingHttpMessageHandler(new InvalidOperationException("boom"));
+        var factory = new GroqSpeechToTextClientFactory(
+            new StubSecretStore(SecretState.Present, ApiKey), new HttpClient(handler), new GroqOptions(), timer, logger);
+
+        var result = await factory.ProbeAsync(TestContext.Current.CancellationToken);
+
+        result.Ok.Should().BeFalse();
+        logger.Entries.Should().ContainSingle(entry => (string)entry.Properties["Operation"] == "speech.probe");
     }
 
     [Fact]

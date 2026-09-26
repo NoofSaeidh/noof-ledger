@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Secrets;
 
 namespace Noof.Ledger.Ai.Anthropic;
@@ -27,7 +29,9 @@ internal static class AnthropicRegistration
         services.AddScoped(sp => new AnthropicChatClientFactory(
             sp.GetRequiredService<ISecretStore>(),
             sp.GetRequiredService<IHttpClientFactory>().CreateClient(HttpClientName),
-            sp.GetRequiredService<AnthropicOptions>()));
+            sp.GetRequiredService<AnthropicOptions>(),
+            sp.GetRequiredService<IOperationTimer>(),
+            sp.GetRequiredService<ILogger<AnthropicChatClientFactory>>()));
 
         services.AddScoped<IChatClientFactory>(sp => sp.GetRequiredService<AnthropicChatClientFactory>());
         services.AddScoped<IModelProvider>(sp => sp.GetRequiredService<AnthropicChatClientFactory>());

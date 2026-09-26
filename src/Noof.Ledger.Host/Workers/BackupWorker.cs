@@ -15,6 +15,7 @@ internal sealed class BackupWorker(
     TimeProvider timeProvider,
     BackupWorkerOptions options,
     IDatabaseGate gate,
+    IOperationTimer timer,
     ILogger<BackupWorker> logger)
     : BackgroundService
 {
@@ -93,6 +94,7 @@ internal sealed class BackupWorker(
         DumpResult result;
         try
         {
+            using var dumping = timer.Start(logger, TimedOperations.BackupDump);
             result = await dumper.DumpAsync(tempPath, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

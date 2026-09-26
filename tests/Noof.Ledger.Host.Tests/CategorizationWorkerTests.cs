@@ -127,9 +127,10 @@ public class CategorizationWorkerTests
 
     static CategorizationWorker CreateWorker(
         IServiceScopeFactory scopeFactory, FakeTimeProvider time, CategorizationWorkerOptions? options = null,
-        IDatabaseGate? gate = null, CapturingLogger<CategorizationWorker>? logger = null) =>
+        IDatabaseGate? gate = null, CapturingLogger<CategorizationWorker>? logger = null, IOperationTimer? timer = null) =>
         new(scopeFactory, time, options ?? new CategorizationWorkerOptions(), WorkerId,
-            Mapper, Scan, Echo, gate ?? ReadyGate(), logger ?? new CapturingLogger<CategorizationWorker>());
+            Mapper, Scan, Echo, gate ?? ReadyGate(), timer ?? new OperationTimer(time, new SlowOperationOptions()),
+            logger ?? new CapturingLogger<CategorizationWorker>());
 
     static IDatabaseGate ReadyGate()
     {
@@ -1402,5 +1403,72 @@ public class CategorizationWorkerTests
         await jobQueue.Received().ReleaseExpiredLeasesAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
 
         await worker.StopAsync(TestContext.Current.CancellationToken);
+    }
+
+    static IJobQueue IdleQueue()
+    {
+        var jobQueue = Substitute.For<IJobQueue>();
+        jobQueue.ReleaseExpiredLeasesAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(0);
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns((CategorizationJob?)null);
+        return jobQueue;
+    }
+
+    static string? OperationOf(CapturedLogEntry entry) => entry.Properties.GetValueOrDefault("Operation") as string;
+
+    [Fact]
+    public async Task An_idle_tick_logs_no_timing_event()
+    {
+        var logger = new CapturingLogger<CategorizationWorker>();
+        var worker = CreateWorker(ScopeFactoryFor(IdleQueue(), KeyPresent()), new FakeTimeProvider(), logger: logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        logger.Entries.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_claimed_job_logs_claim_queueWait_loadContext_applyCategorization_completeJob_and_job_categorize()
+    {
+        var claimedAt = new DateTimeOffset(2026, 9, 22, 9, 0, 0, TimeSpan.Zero);
+        var job = Job();
+        job.RunAfter = claimedAt - TimeSpan.FromSeconds(7);
+        job.ClaimedAt = claimedAt;
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine());
+        var logger = new CapturingLogger<CategorizationWorker>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(job), KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(claimedAt), logger: logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        var operations = logger.Entries.Select(OperationOf).Where(operation => operation is not null).ToList();
+        operations.Should().Contain("db.claimJob");
+        operations.Should().Contain("job.queueWait");
+        operations.Should().Contain("db.loadCategorizationContext");
+        operations.Should().Contain("db.applyCategorization");
+        operations.Should().Contain("db.completeJob");
+        operations.Should().Contain("job.categorize");
+
+        var queueWait = logger.Entries.Should().ContainSingle(entry => OperationOf(entry) == "job.queueWait").Subject;
+        queueWait.Properties["ElapsedMs"].Should().Be(7000L);
+    }
+
+    [Fact]
+    public async Task A_ReleaseExpiredLeasesAsync_that_throws_still_logs_db_releaseExpiredLeases()
+    {
+        var jobQueue = Substitute.For<IJobQueue>();
+        jobQueue.ReleaseExpiredLeasesAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns<int>(_ => throw new InvalidOperationException("boom"));
+        var logger = new CapturingLogger<CategorizationWorker>();
+        var worker = CreateWorker(ScopeFactoryFor(jobQueue, KeyPresent()), new FakeTimeProvider(), logger: logger);
+
+        var result = await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        result.Should().Be(CategorizationTickResult.Failed);
+        logger.Entries.Should().Contain(entry => OperationOf(entry) == "db.releaseExpiredLeases");
     }
 }

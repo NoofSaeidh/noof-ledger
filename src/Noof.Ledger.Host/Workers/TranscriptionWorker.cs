@@ -17,6 +17,7 @@ internal sealed class TranscriptionWorker(
     string workerId,
     IRecordEcho recordEcho,
     IDatabaseGate gate,
+    IOperationTimer timer,
     ILogger<TranscriptionWorker> logger)
     : BackgroundService
 {
@@ -48,7 +49,9 @@ internal sealed class TranscriptionWorker(
             var speechProvider = scope.ServiceProvider.GetRequiredService<ISpeechProvider>();
 
             var now = timeProvider.GetUtcNow();
-            await jobQueue.ReleaseExpiredLeasesAsync(now, cancellationToken);
+            using var release = timer.Start(logger, TimedOperations.DbReleaseExpiredLeases);
+            var released = await jobQueue.ReleaseExpiredLeasesAsync(now, cancellationToken);
+            release.Stop(onlyIfSlow: released == 0);
 
             // Both checked before claiming, for CategorizationWorker's reason: a claim spends an attempt and nothing
             // gives it back.
@@ -58,7 +61,9 @@ internal sealed class TranscriptionWorker(
             if (now < accountCooldownUntil)
                 return CategorizationTickResult.Idle;
 
+            using var claim = timer.Start(logger, TimedOperations.DbClaimJob);
             var job = await jobQueue.ClaimAsync(workerId, ClaimableKinds, options.Lease, cancellationToken);
+            claim.Stop(onlyIfSlow: job is null);
             if (job is null)
                 return CategorizationTickResult.Idle;
 
@@ -80,6 +85,8 @@ internal sealed class TranscriptionWorker(
         CategorizationSubject? record = null;
 
         using var logScope = TransactionLogScope.Begin(logger, job.TransactionId);
+        timer.Record(logger, TimedOperations.JobQueueWait, (job.ClaimedAt ?? timeProvider.GetUtcNow()) - job.RunAfter);
+        using var jobTiming = timer.Start(logger, TimedOperations.JobTranscribe);
 
         try
         {
@@ -96,10 +103,14 @@ internal sealed class TranscriptionWorker(
             var transcriber = scope.ServiceProvider.GetRequiredService<ITranscriber>();
 
             // A check constraint holds voice_file_id on every Transcribe job.
-            await using var audio = await voiceFiles.DownloadAsync(job.VoiceFileId!, cancellationToken);
-            var transcriptionStartedAt = timeProvider.GetUtcNow();
+            Stream audio;
+            using (timer.Start(logger, TimedOperations.TelegramDownloadFile))
+                audio = await voiceFiles.DownloadAsync(job.VoiceFileId!, cancellationToken);
+            await using var audioDisposable = audio;
+
+            using var transcribing = timer.Start(logger, TimedOperations.SpeechTranscribe);
             var transcript = await transcriber.TranscribeAsync(audio, cancellationToken);
-            var transcriptionDuration = timeProvider.GetUtcNow() - transcriptionStartedAt;
+            var transcriptionDuration = transcribing.Stop();
 
             if (transcript.Length == 0)
             {
@@ -112,10 +123,14 @@ internal sealed class TranscriptionWorker(
             logger.LogTranscribed(TransactionStages.Transcribed, transcriptionDuration.TotalSeconds, transcript.Length);
 
             var transcriptionStore = scope.ServiceProvider.GetRequiredService<ITranscriptionStore>();
-            var handedOn = job.SourceMessageId is { } sourceMessageId
-                ? await transcriptionStore.CompleteCorrectionAsync(
-                    job.TransactionId, transcript, sourceMessageId, job.InstructionDay, cancellationToken)
-                : await transcriptionStore.CompleteCaptureAsync(job.TransactionId, transcript, cancellationToken);
+            bool handedOn;
+            using (timer.Start(logger, TimedOperations.DbCompleteTranscription))
+            {
+                handedOn = job.SourceMessageId is { } sourceMessageId
+                    ? await transcriptionStore.CompleteCorrectionAsync(
+                        job.TransactionId, transcript, sourceMessageId, job.InstructionDay, cancellationToken)
+                    : await transcriptionStore.CompleteCaptureAsync(job.TransactionId, transcript, cancellationToken);
+            }
 
             if (!handedOn)
                 logger.TranscriptAlreadyHandedOn(job.Id);
@@ -222,6 +237,7 @@ internal sealed class TranscriptionWorker(
     {
         try
         {
+            using var completing = timer.Start(logger, TimedOperations.DbCompleteJob);
             if (await jobQueue.SucceedAsync(job.Id, workerId, cancellationToken) == JobCompletionOutcome.NotOwned)
                 logger.JobAlreadyReclaimed(job.Id);
         }

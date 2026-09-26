@@ -23,6 +23,7 @@ internal sealed class TelegramPollingService(
     TimeProvider timeProvider,
     IDatabaseGate gate,
     IPollingHeartbeat heartbeat,
+    IOperationTimer timer,
     ILogger<TelegramPollingService> logger)
     : BackgroundService
 {
@@ -90,11 +91,13 @@ internal sealed class TelegramPollingService(
             // and that branch is guaranteed to have run at least once by this point: activeToken
             // starts null and secret.State is Present here, so the very first successful tick sets it
             // before this line is ever reached.
+            using var polling = timer.Start(logger, TimedOperations.TelegramGetUpdates, TimeSpan.FromSeconds(pollingSeconds));
             var updates = await clientHandle.Current!.GetUpdates(
                 offset: offset,
                 timeout: pollingSeconds,
                 allowedUpdates: [UpdateType.Message, UpdateType.EditedMessage, UpdateType.CallbackQuery],
                 cancellationToken: cancellationToken);
+            polling.Stop(onlyIfSlow: updates.Length == 0);
 
             heartbeat.RecordSuccess(timeProvider.GetUtcNow());
 
@@ -107,6 +110,7 @@ internal sealed class TelegramPollingService(
                 {
                     try
                     {
+                        using var handling = timer.Start(logger, TimedOperations.TelegramHandleUpdate);
                         await router.HandleAsync(update, timeZoneId, cancellationToken);
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)

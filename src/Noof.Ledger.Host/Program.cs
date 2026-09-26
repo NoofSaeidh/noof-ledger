@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Hosting.Server.Features;
 using Noof.Ledger.Ai;
 using Noof.Ledger.Application;
 using Noof.Ledger.Application.Auth;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Host.Auth;
 using Noof.Ledger.Host.Cli;
 using Noof.Ledger.Host.Diagnostics;
@@ -73,7 +74,9 @@ try
 
     builder.Services.AddNoofWeb();
 
-    builder.Services.AddNoofApplication();
+    var slowOperations = new SlowOperationOptions();
+    builder.Configuration.GetSection(SlowOperationOptions.ConfigurationSection).Bind(slowOperations.ThresholdMs);
+    builder.Services.AddNoofApplication(slowOperations);
 
     builder.Services.AddSingleton(TimeProvider.System);
     builder.Services.AddSingleton(CaptureTimeZoneGuard.Resolve(

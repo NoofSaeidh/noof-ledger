@@ -1,6 +1,8 @@
 ﻿using AwesomeAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
 using Noof.Ledger.Ai.Anthropic;
 using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Domain;
 
@@ -30,9 +32,11 @@ public sealed class LiveModelTests
     // the factory is what reads the key through ISecretStore and applies MaxRetries = 0. Building a
     // client here instead would test a client configured differently from the one that actually runs.
     static AnthropicChatClientFactory CreateFactory(string apiKey) =>
-        new(new FixedSecretStore(apiKey), new HttpClient(), new AnthropicOptions());
+        new(new FixedSecretStore(apiKey), new HttpClient(), new AnthropicOptions(),
+            new OperationTimer(TimeProvider.System, new SlowOperationOptions()), NullLogger<AnthropicChatClientFactory>.Instance);
 
-    static ChatCategorizer CreateCategorizer(string apiKey) => new(CreateFactory(apiKey));
+    static ChatCategorizer CreateCategorizer(string apiKey) => new(
+        CreateFactory(apiKey), new OperationTimer(TimeProvider.System, new SlowOperationOptions()), NullLogger<ChatCategorizer>.Instance);
 
     static CategorizationRequest Request(string rawText, IReadOnlyList<CategoryOption>? categories = null) =>
         new(rawText, DateOnly.FromDateTime(DateTime.Today), categories ?? OfferedCategories, [], []);

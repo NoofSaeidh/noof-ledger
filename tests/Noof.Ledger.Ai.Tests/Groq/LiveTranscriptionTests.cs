@@ -1,5 +1,7 @@
 using AwesomeAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
 using Noof.Ledger.Ai.Groq;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Secrets;
 
 namespace Noof.Ledger.Ai.Tests.Groq;
@@ -15,7 +17,8 @@ public class LiveTranscriptionTests
             Assert.Skip(LiveTranscriptionGate.SkipMessage);
 
         var factory = new GroqSpeechToTextClientFactory(
-            new StubSecretStore(SecretState.Present, apiKey), new HttpClient { Timeout = TimeSpan.FromSeconds(60) }, new GroqOptions());
+            new StubSecretStore(SecretState.Present, apiKey), new HttpClient { Timeout = TimeSpan.FromSeconds(60) }, new GroqOptions(),
+            new OperationTimer(TimeProvider.System, new SlowOperationOptions()), NullLogger<GroqSpeechToTextClientFactory>.Instance);
         var transcriber = new SpeechTranscriber(factory);
 
         await using var audio = File.OpenRead(voiceFile);

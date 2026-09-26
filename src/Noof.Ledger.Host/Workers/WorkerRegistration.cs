@@ -21,6 +21,7 @@ internal static class WorkerRegistration
             sp.GetRequiredService<IMerchantScan>(),
             sp.GetRequiredService<IRecordEcho>(),
             sp.GetRequiredService<IDatabaseGate>(),
+            sp.GetRequiredService<IOperationTimer>(),
             sp.GetRequiredService<ILogger<CategorizationWorker>>()));
 
         services.AddHostedService(sp => new TranscriptionWorker(
@@ -30,6 +31,7 @@ internal static class WorkerRegistration
             CategorizationWorker.CreateWorkerId(),
             sp.GetRequiredService<IRecordEcho>(),
             sp.GetRequiredService<IDatabaseGate>(),
+            sp.GetRequiredService<IOperationTimer>(),
             sp.GetRequiredService<ILogger<TranscriptionWorker>>()));
 
         if (backupOptions.Enabled)
@@ -39,6 +41,7 @@ internal static class WorkerRegistration
                 sp.GetRequiredService<TimeProvider>(),
                 backupOptions,
                 sp.GetRequiredService<IDatabaseGate>(),
+                sp.GetRequiredService<IOperationTimer>(),
                 sp.GetRequiredService<ILogger<BackupWorker>>()));
         }
 
@@ -46,6 +49,7 @@ internal static class WorkerRegistration
             sp.GetRequiredService<IServiceScopeFactory>(),
             sp.GetRequiredService<IDatabaseGate>(),
             sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<IOperationTimer>(),
             sp.GetRequiredService<ILogger<LogRetentionWorker>>()));
 
         return services;

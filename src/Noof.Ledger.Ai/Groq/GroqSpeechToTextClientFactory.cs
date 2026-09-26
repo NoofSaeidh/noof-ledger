@@ -1,13 +1,17 @@
 using System.Net;
 using System.Net.Http.Headers;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Application.Transcription;
 
 namespace Noof.Ledger.Ai.Groq;
 
-internal sealed class GroqSpeechToTextClientFactory(ISecretStore secretStore, HttpClient httpClient, GroqOptions options)
+internal sealed class GroqSpeechToTextClientFactory(
+    ISecretStore secretStore, HttpClient httpClient, GroqOptions options,
+    IOperationTimer timer, ILogger<GroqSpeechToTextClientFactory> logger)
     : ISpeechToTextClientFactory, ISpeechProvider
 {
     // Data Protection's purpose is derived from this string: renaming it orphans the operator's stored key.
@@ -26,6 +30,7 @@ internal sealed class GroqSpeechToTextClientFactory(ISecretStore secretStore, Ht
     // GET /models costs nothing and proves the key without transcribing anything.
     public async Task<ProbeResult> ProbeAsync(CancellationToken cancellationToken)
     {
+        using var timing = timer.Start(logger, TimedOperations.SpeechProbe);
         try
         {
             var apiKey = await ReadKeyAsync(cancellationToken);
