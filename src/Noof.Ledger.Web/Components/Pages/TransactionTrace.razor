@@ -81,8 +81,15 @@ else
     @if (DatabaseLogLevel.Current is null || DatabaseLogLevel.Current > LogSeverity.Information)
     {
         <MudAlert id="trace-log-level-notice" Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-4">
-            The database log level is @(DatabaseLogLevel.Current?.ToString() ?? "Off") — stage events are not
-            recorded above Information. <MudLink Href="/diagnostics/logs/settings">Log settings</MudLink>
+            @if (DatabaseLogLevel.Current is null)
+            {
+                @:The database log level is Off — nothing is recorded to app_log, so this trace will stay empty.
+            }
+            else
+            {
+                @:The database log level is @DatabaseLogLevel.Current — stage events are not recorded above Information.
+            }
+            <MudLink Href="/diagnostics/logs/settings">Log settings</MudLink>
         </MudAlert>
     }
 
