@@ -1474,6 +1474,24 @@ public class CategorizationWorkerTests
     }
 
     [Fact]
+    public async Task The_subject_load_and_the_options_load_are_timed_under_distinct_names()
+    {
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine());
+        var logger = new CapturingLogger<CategorizationWorker>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(), logger: logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        logger.Entries.Should().ContainSingle(entry => OperationOf(entry) == "db.loadCategorizationContext");
+        logger.Entries.Should().ContainSingle(entry => OperationOf(entry) == "db.loadCategorizationOptions");
+    }
+
+    [Fact]
     public async Task A_ReleaseExpiredLeasesAsync_that_throws_still_logs_db_releaseExpiredLeases()
     {
         var jobQueue = Substitute.For<IJobQueue>();

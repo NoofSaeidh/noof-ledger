@@ -24,6 +24,7 @@ public static class TimedOperations
     public const string DbReleaseExpiredLeases = "db.releaseExpiredLeases";
     public const string DbClaimJob = "db.claimJob";
     public const string DbLoadCategorizationContext = "db.loadCategorizationContext";
+    public const string DbLoadCategorizationOptions = "db.loadCategorizationOptions";
     public const string DbApplyCategorization = "db.applyCategorization";
     public const string DbCompleteTranscription = "db.completeTranscription";
     public const string DbCompleteJob = "db.completeJob";
