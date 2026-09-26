@@ -6,7 +6,7 @@ Capture spending through a Telegram bot — typed, spoken, or photographed — l
 each line item, and see where the money went on a local Blazor dashboard that understands multiple
 wallets and currencies.
 
-> **Status: capture, balances and a checked backup all work end to end.** A message typed to the
+> **Status: capture, balances, backup and observability all work end to end.** A message typed to the
 > Telegram bot becomes a categorised expense, income, or balance statement on the dashboard — say it
 > the way you would say it, and the model reads the amount, the date, the kind and which wallet from
 > how you speak it. Every wallet's balance — opening balance, minus spending, plus income, corrected
@@ -17,7 +17,18 @@ wallets and currencies.
 > database and compares every wallet's balance and row count against the source — proven so far
 > against a template clone; the one restore check against the live ledger itself is the operator's
 > to run (see `ops/RUNBOOK.md`).
-> 852 tests, all green — browser tests included.
+>
+> The app now watches itself. Stop PostgreSQL and the host keeps running — the sign-in page and every
+> other page show "Waiting for the database…" instead of crashing or erroring, and it comes back up
+> by itself the moment PostgreSQL does. Every log line goes to a rolling file and, while the database
+> is reachable, to an `app_log` table too, with every known secret redacted before either sink sees
+> it. A message's whole journey — received, transcribed, categorised, persisted, replied — and its
+> later edits are on one trace page. System health (database, migrations, Telegram, the AI keys,
+> backups, disk space, the log sink itself) shows as a tile on the dashboard, in full on
+> `/diagnostics`, and to the operator alone via `/health` in the bot.
+>
+> 1054 tests — 1043 passing, 11 skipped (they call a live model or a live voice provider and need
+> keys), none failing. Browser tests included.
 >
 > Still missing: **receipt photos** and **currency exchange** (a spend in a currency other than its
 > wallet's own is recorded as-is, in its own currency, not converted).
@@ -68,6 +79,31 @@ Ledger.Host.exe user set-password <name>
 is the only way a user is ever created. There is no registration page — a password in any settings
 file is one commit from being permanent in a public repository.
 
+## Observability
+
+Logs live under `%LOCALAPPDATA%\NoofLedger\logs` by default — a daily rolling file, 14 kept, 50 MB
+cap each — configurable through `Logging:File:Directory` in `appsettings.json`. While PostgreSQL is
+reachable the same events also go into the `app_log` table, with every known secret redacted before
+either sink sees a line; if the database is down or the table sink itself is failing, the file is
+still the durable copy.
+
+`/diagnostics` lists every health check (database, pending migrations, Telegram, the AI keys, the
+daily backup, disk space, the log sink) with a link into `/diagnostics/logs` — a paged, filterable
+view over `app_log`; while the database itself is unavailable this page shows the same waiting banner
+as the rest of the app, and the file log is the one to read instead. A check that throws or times out
+shows only the exception's type, never its message. The database only records Information and above
+by default; the Logs page can switch it to Debug or Verbose on demand — the choice is saved and
+survives a restart — to see the timing of every model call, Telegram round trip and worker step, kept
+for a day before it is pruned. Every Telegram message that becomes a transaction gets a trace page at
+`/transactions/{id}/trace`: its path from received to replied, with timings, its full edit history,
+and a link into the Logs page pre-filtered to that transaction's own Debug detail. The dashboard
+carries a one-line health tile with a link to `/diagnostics`; the operator alone can also ask the bot
+directly by sending `/health`.
+
+If PostgreSQL is stopped, the host does not exit — the sign-in page and every other page show a
+"Waiting for the database…" banner, the log file records every retry, and the app resumes on its own
+the moment PostgreSQL is reachable again. See `ops/RUNBOOK.md` for the manual check.
+
 ## The interface
 
 MudBlazor, in a dark theme defined in one C# file. The component library is not cosmetics: a
@@ -88,14 +124,16 @@ tooltip or menu. Feedback is an inline alert. An inert provider is worse than an
 
 Requires .NET 10 SDK and PostgreSQL 18.
 
-```bash
-ops/reset-database-auth.ps1        # one-time: creates databases, writes a credential outside the repo
-dotnet test --solution NoofLedger.slnx
-ops/publish.ps1                    # builds, tests, and publishes to publish/
+```powershell
+.\run.ps1 db-auth-reset             # one-time: creates databases, writes a credential outside the repo
+.\run.ps1 test all                  # or `.\run.ps1 test fast` for the quick, no-database subset
+.\run.ps1 start                     # dotnet run, in Production - the same behaviour as the published exe
 ```
 
-`ops/publish.ps1` refuses to publish if the suite did not actually run — an exit code alone once
-let a zero-test run look like a pass.
+`run.ps1` in the repo root is the one entry point for launching and operating the app — run
+`.\run.ps1` or `.\run.ps1 help` for the full command table, and `.\run.ps1 help <command>` for any
+one command's detail. `.\run.ps1 publish` refuses to publish if the suite did not actually run — an
+exit code alone once let a zero-test run look like a pass.
 
 Tests run against a real PostgreSQL database, never an in-memory provider. The offline suite proves
 the DDL is right; only a real database proves precision, collation and constraints behave.

@@ -1,0 +1,235 @@
+@page "/transactions"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@implements IDisposable
+@using System.Globalization
+@using Microsoft.AspNetCore.Components.QuickGrid
+@using Noof.Ledger.Application.Categorization
+@using Noof.Ledger.Application.Diagnostics
+@using Noof.Ledger.Application.Reporting
+@using Noof.Ledger.Application.Wallets
+@using Noof.Ledger.Domain
+@inject ITransactionList TransactionList
+@inject IWalletDirectory WalletDirectory
+@inject IDatabaseGate Gate
+@inject TimeProvider TimeProvider
+@inject TimeZoneInfo CaptureTimeZone
+
+<PageTitle>Transactions</PageTitle>
+
+<MudText HtmlTag="h1" Typo="Typo.h4" Class="mb-6">Transactions</MudText>
+
+@if (Gate.State != DatabaseState.Ready)
+{
+    <DatabaseGateBanner />
+}
+else if (!walletsLoaded)
+{
+    <MudText Typo="Typo.body1">Loading…</MudText>
+}
+else
+{
+    <div id="transactions-filters" class="noof-filter-bar">
+        <div class="noof-filter-quick-ranges">
+            @foreach (var (range, label) in QuickRanges)
+            {
+                <MudButton Variant="Variant.Text" Size="Size.Small" Class="noof-quick-range"
+                           aria-pressed="@(activeRange == range ? "true" : "false")"
+                           OnClick="@(() => SetQuickRangeAsync(range))">@label</MudButton>
+            }
+        </div>
+        <div class="noof-filter-field">
+            <MudText HtmlTag="label" for="transactions-filter-from" Typo="Typo.caption" Class="mud-text-secondary">From</MudText>
+            <input type="date" id="transactions-filter-from" class="noof-input" @bind="filter.From" @bind:event="oninput" @bind:after="DatesEditedAsync" />
+        </div>
+        <div class="noof-filter-field">
+            <MudText HtmlTag="label" for="transactions-filter-to" Typo="Typo.caption" Class="mud-text-secondary">To</MudText>
+            <input type="date" id="transactions-filter-to" class="noof-input" @bind="filter.To" @bind:event="oninput" @bind:after="DatesEditedAsync" />
+        </div>
+        <div class="noof-filter-field">
+            <MudText HtmlTag="label" for="transactions-filter-wallet" Typo="Typo.caption" Class="mud-text-secondary">Wallet</MudText>
+            <select id="transactions-filter-wallet" @bind="filter.WalletId" @bind:after="ReloadAsync" class="noof-native-select">
+                <option value="">All wallets</option>
+                @foreach (var wallet in wallets)
+                {
+                    <option value="@wallet.Id">@wallet.Name</option>
+                }
+            </select>
+        </div>
+        <div class="noof-filter-field">
+            <MudText HtmlTag="label" for="transactions-filter-kind" Typo="Typo.caption" Class="mud-text-secondary">Kind</MudText>
+            <select id="transactions-filter-kind" @bind="filter.Kind" @bind:after="ReloadAsync" class="noof-native-select">
+                <option value="">All kinds</option>
+                @foreach (var kind in Enum.GetValues<TransactionKind>())
+                {
+                    <option value="@kind">@kind</option>
+                }
+            </select>
+        </div>
+        <div class="noof-filter-field">
+            <MudText HtmlTag="label" for="transactions-filter-status" Typo="Typo.caption" Class="mud-text-secondary">Status</MudText>
+            <select id="transactions-filter-status" @bind="filter.Status" @bind:after="ReloadAsync" class="noof-native-select">
+                <option value="">All statuses</option>
+                @foreach (var status in Enum.GetValues<TransactionStatus>())
+                {
+                    <option value="@status">@status</option>
+                }
+            </select>
+        </div>
+        <div class="noof-filter-field">
+            <MudText HtmlTag="label" for="transactions-filter-text" Typo="Typo.caption" Class="mud-text-secondary">Text</MudText>
+            <input id="transactions-filter-text" class="noof-input" type="search" placeholder="Search messages" @bind="filter.Text" @bind:event="oninput" @bind:after="ReloadAsync" />
+        </div>
+    </div>
+
+    <div class="noof-grid-frame" data-empty="No transactions match these filters.">
+        <QuickGrid @key="reloadGeneration" TGridItem="TransactionListRow" id="transactions-grid" ItemsProvider="ProvideRowsAsync" Pagination="pagination" Class="noof-grid noof-grid-stack">
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Date" Class="noof-col-nowrap noof-cell-lead" Context="row">
+                <MudLink Href="@($"/transactions/{row.Id}/trace")">@FormatOccurred(row)</MudLink>
+            </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Wallet" Class="noof-col-nowrap noof-cell-meta" Context="row">
+                @(string.IsNullOrEmpty(row.WalletName) ? "—" : row.WalletName)
+            </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
+            <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="TransactionListRow" TProp="TransactionKind" Property="@(row => row.Kind)" Title="Kind" Class="noof-col-nowrap noof-cell-meta noof-cell-meta-joined" />
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Status" Class="noof-col-nowrap noof-cell-meta noof-cell-meta-first" Context="row">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@StatusColor(row.Status)">@row.Status</MudChip>
+            </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Text" Class="noof-cell-main" Context="row">
+                <span class="noof-truncate" title="@row.RawText">@row.RawText</span>
+            </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Amounts" Class="noof-col-amounts noof-cell-trail" Context="row">
+                @FormatAmounts(row.Amounts)
+            </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Categories" Class="noof-cell-meta noof-cell-meta-joined" Context="row">
+                @string.Join(", ", row.Categories)
+            </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
+        </QuickGrid>
+    </div>
+    <Paginator State="pagination" />
+}
+
+@code {
+    enum QuickRange { Today, Last7Days, ThisMonth, All }
+
+    static readonly (QuickRange Range, string Label)[] QuickRanges =
+    [
+        (QuickRange.Today, "Today"),
+        (QuickRange.Last7Days, "7 days"),
+        (QuickRange.ThisMonth, "This month"),
+        (QuickRange.All, "All"),
+    ];
+
+    QuickRange? activeRange = QuickRange.All;
+
+    sealed class TransactionFilterEdit
+    {
+        public DateOnly? From { get; set; }
+        public DateOnly? To { get; set; }
+        public Guid? WalletId { get; set; }
+        public TransactionKind? Kind { get; set; }
+        public TransactionStatus? Status { get; set; }
+        public string? Text { get; set; }
+    }
+
+    readonly TransactionFilterEdit filter = new();
+    readonly SemaphoreSlim queryGate = new(1, 1);
+    PaginationState pagination = new() { ItemsPerPage = 50 };
+    int reloadGeneration;
+    IReadOnlyList<WalletOption> wallets = [];
+    bool walletsLoaded;
+
+    // Blazor Server renders once, synchronously, before this method's own await completes - so a
+    // QuickGrid with no guard around it would already be mounted and calling its ItemsProvider
+    // (a second, concurrent read against the same circuit-scoped DbContext) while this call is
+    // still in flight. walletsLoaded keeps the grid out of the tree until this finishes, the same
+    // way the "loading" state elsewhere in this app keeps a component from touching the database
+    // before its own first read returns.
+    protected override async Task OnInitializedAsync()
+    {
+        if (Gate.State != DatabaseState.Ready)
+            return;
+
+        wallets = await WalletDirectory.ActiveAsync(CancellationToken.None);
+        walletsLoaded = true;
+    }
+
+    // I-2 (Phase 5 final review): serialised the same way DiagnosticsLogs.razor's ProvideRowsAsync
+    // is - see that method's comment for the full race. Left unserialised, a filter change fired
+    // while the previous ProvideRowsAsync call is still in flight races a second query against this
+    // circuit's one scoped LedgerDbContext, which EF Core forbids ("a second operation was started
+    // on this context instance").
+    async ValueTask<GridItemsProviderResult<TransactionListRow>> ProvideRowsAsync(GridItemsProviderRequest<TransactionListRow> request)
+    {
+        await queryGate.WaitAsync(request.CancellationToken);
+        try
+        {
+            var page = await TransactionList.QueryAsync(
+                ToFilter(), request.StartIndex / pagination.ItemsPerPage, pagination.ItemsPerPage, request.CancellationToken);
+            return GridItemsProviderResult.From([.. page.Rows], page.TotalCount);
+        }
+        finally
+        {
+            queryGate.Release();
+        }
+    }
+
+    TransactionListFilter ToFilter() => new(filter.From, filter.To, filter.WalletId, filter.Kind, filter.Status, filter.Text);
+
+    // M-4 (Phase 5 final review): OccurredOn is a local date in the capture zone (Capture:TimeZone,
+    // default Europe/Belgrade), not the server's own zone - the server's current-day clock property
+    // used both the wrong zone and bypassed TimeProvider, which DiagnosticsLogs.razor's equivalent
+    // quick ranges already use.
+    Task SetQuickRangeAsync(QuickRange range)
+    {
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(TimeProvider.GetUtcNow(), CaptureTimeZone).DateTime);
+        (filter.From, filter.To) = range switch
+        {
+            QuickRange.Today => (today, today),
+            QuickRange.Last7Days => (today.AddDays(-6), today),
+            QuickRange.ThisMonth => (new DateOnly(today.Year, today.Month, 1), today),
+            _ => ((DateOnly?)null, (DateOnly?)null),
+        };
+        activeRange = range;
+        return ReloadAsync();
+    }
+
+    Task DatesEditedAsync()
+    {
+        activeRange = null;
+        return ReloadAsync();
+    }
+
+    Task ReloadAsync()
+    {
+        // Same reasoning as DiagnosticsLogs.razor.ReloadAsync: incrementing @key tears down the old
+        // QuickGrid instance and mounts a new one, but a fresh PaginationState - not
+        // SetCurrentPageIndexAsync(0) on the old one - is what makes that safe. Notifying the old
+        // PaginationState races the new @key-remounted grid's own first fetch, both against the same
+        // scoped DbContext, and crashes the circuit with EF's "a second operation was started on this
+        // context instance". A new PaginationState already starts at page 0 and has no old
+        // subscriber to notify.
+        reloadGeneration++;
+        pagination = new PaginationState { ItemsPerPage = pagination.ItemsPerPage };
+        return Task.CompletedTask;
+    }
+
+    static string FormatOccurred(TransactionListRow row)
+    {
+        var day = row.OccurredOn.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        return row.OccurredAt is { } time ? $"{day} {time.ToString("HH:mm", CultureInfo.InvariantCulture)}" : day;
+    }
+
+    static string FormatAmounts(IReadOnlyList<Money> amounts) =>
+        amounts.Count == 0 ? "—" : string.Join(", ", amounts.Select(FormatMoney));
+
+    static string FormatMoney(Money money) => $"{money.Amount.ToString("N2", CultureInfo.InvariantCulture)} {money.Currency}";
+
+    static Color StatusColor(TransactionStatus status) => status switch
+    {
+        TransactionStatus.Failed => Color.Error,
+        TransactionStatus.Completed => Color.Success,
+        _ => Color.Default,
+    };
+
+    public void Dispose() => queryGate.Dispose();
+}

@@ -2,7 +2,9 @@ using AwesomeAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Noof.Ledger.Application;
 using Noof.Ledger.Application.Chat;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Application.Transcription;
 using NSubstitute;
@@ -22,11 +24,20 @@ public class TelegramRegistrationTests
         // constructs the service, so without this the test fails on a missing dependency rather
         // than on the behaviour under test.
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddSingleton(_ =>
+        {
+            var gate = Substitute.For<IDatabaseGate>();
+            gate.WaitUntilReadyAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+            return gate;
+        });
+        services.AddSingleton(_ => Substitute.For<IPollingHeartbeat>());
+        services.AddNoofApplication(new SlowOperationOptions());
         services.AddScoped(_ => Substitute.For<ISecretStore>());
         services.AddScoped(_ => Substitute.For<Application.Capture.ICaptureStore>());
         services.AddScoped(_ => Substitute.For<Application.Editing.IRecordEditor>());
         services.AddScoped(_ => Substitute.For<Application.Categorization.ICategorizationStore>());
         services.AddScoped(_ => Substitute.For<IRecordEcho>());
+        services.AddScoped(_ => Substitute.For<ISystemHealth>());
         services.AddNoofTelegram();
 
         using var provider = services.BuildServiceProvider();
@@ -35,7 +46,6 @@ public class TelegramRegistrationTests
         scope.ServiceProvider.GetRequiredService<IChatNotifier>().Should().BeOfType<TelegramChatNotifier>();
         scope.ServiceProvider.GetRequiredService<ITelegramUpdateRouter>().Should().BeOfType<TelegramUpdateRouter>();
         scope.ServiceProvider.GetRequiredService<IVoiceFileSource>().Should().BeOfType<TelegramVoiceFileSource>();
-        provider.GetServices<IHostedService>().Should().ContainSingle()
-            .Which.Should().BeOfType<TelegramPollingService>();
+        provider.GetServices<IHostedService>().OfType<TelegramPollingService>().Should().ContainSingle();
     }
 }

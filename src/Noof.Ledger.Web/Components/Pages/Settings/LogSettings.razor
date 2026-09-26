@@ -1,0 +1,172 @@
+@page "/diagnostics/logs/settings"
+@attribute [Authorize]
+@using Noof.Ledger.Application.Diagnostics
+@inject IDatabaseLogLevel DatabaseLogLevel
+@inject ILogRetentionSettings RetentionSettings
+@inject IFileLogSinkInfo FileLogSinkInfo
+@inject IDatabaseGate Gate
+@* Prerendering would apply for InteractiveServerRenderMode-only reasons found elsewhere in this
+   codebase; here it is simpler and consistent with Secrets.razor to keep the same rendering shape
+   as the rest of the settings surface. *@
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+
+<PageTitle>Log settings</PageTitle>
+
+<MudLink Href="/diagnostics/logs" Class="mb-3" Style="display:inline-block;">&larr; Logs</MudLink>
+<MudText HtmlTag="h1" Typo="Typo.h4" Class="mb-1">Log settings</MudText>
+<MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">
+    Nothing below takes effect until Save.
+</MudText>
+
+@if (Gate.State != DatabaseState.Ready)
+{
+    <DatabaseGateBanner />
+}
+else
+{
+    <MudPaper Outlined="true" Elevation="0" Class="pa-5 mb-4">
+        <MudText Typo="Typo.subtitle1" Class="mb-3">Database log level</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">
+            Off writes nothing to app_log. Above Information, a transaction's trace page stops recording
+            its stage events (still shown there as a notice).
+        </MudText>
+        <div class="noof-filter-field">
+            <MudText HtmlTag="label" for="log-settings-level" Typo="Typo.caption" Class="mud-text-secondary">Record to database from</MudText>
+            <select id="log-settings-level" @bind="pendingLevelText" class="noof-native-select">
+                <option value="@OffOptionValue">Off</option>
+                @foreach (var level in DatabaseLogLevel.Choices)
+                {
+                    <option value="@level">@level</option>
+                }
+            </select>
+        </div>
+    </MudPaper>
+
+    <MudPaper Outlined="true" Elevation="0" Class="pa-5 mb-4">
+        <MudText Typo="Typo.subtitle1" Class="mb-3">Database retention (days per level)</MudText>
+        <div class="noof-retention-grid">
+            @foreach (var row in retentionRows)
+            {
+                <div class="noof-filter-field">
+                    <MudText HtmlTag="label" for="@RetentionInputId(row.Level)" Typo="Typo.caption" Class="mud-text-secondary">@row.Level</MudText>
+                    <input id="@RetentionInputId(row.Level)" class="noof-input" type="number" min="1" max="@MaxRetentionDays"
+                           value="@row.DaysText" @oninput="@(e => row.DaysText = e.Value?.ToString() ?? string.Empty)" />
+                </div>
+            }
+        </div>
+    </MudPaper>
+
+    <MudPaper Outlined="true" Elevation="0" Class="pa-5 mb-4">
+        <MudText Typo="Typo.subtitle1" Class="mb-3">File sink</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+            Level @FileLogSinkInfo.MinimumLevel &middot; @FileLogSinkInfo.RetainedFileCountLimit files kept &middot;
+            up to @FormatSize(FileLogSinkInfo.FileSizeLimitBytes) each. Set in appsettings.json under
+            <span class="noof-mono">Logging:File</span>; retention there is by file count only, never by days.
+        </MudText>
+    </MudPaper>
+
+    @if (feedback is not null)
+    {
+        <MudAlert id="log-settings-feedback"
+                  Severity="@(feedbackIsError ? Severity.Warning : Severity.Success)"
+                  Variant="Variant.Outlined" Dense="true" Class="mb-4">
+            @feedback
+        </MudAlert>
+    }
+
+    <MudButton id="log-settings-save" Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync">
+        Save
+    </MudButton>
+}
+
+@code {
+    const string OffOptionValue = "Off";
+    const int MaxRetentionDays = 3650;
+
+    sealed class RetentionRow
+    {
+        public required LogSeverity Level { get; init; }
+        public string DaysText { get; set; } = string.Empty;
+    }
+
+    string pendingLevelText = OffOptionValue;
+    List<RetentionRow> retentionRows = [];
+    string? feedback;
+    bool feedbackIsError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Gate.State != DatabaseState.Ready)
+            return;
+
+        pendingLevelText = DatabaseLogLevel.Current?.ToString() ?? OffOptionValue;
+
+        var days = await RetentionSettings.GetAsync(CancellationToken.None);
+        retentionRows = [.. Enum.GetValues<LogSeverity>()
+            .Select(level => new RetentionRow { Level = level, DaysText = days.For(level).ToString() })];
+    }
+
+    async Task SaveAsync()
+    {
+        var parsedDays = new Dictionary<LogSeverity, int>();
+        foreach (var row in retentionRows)
+        {
+            if (!int.TryParse(row.DaysText, out var value) || value < 1 || value > MaxRetentionDays)
+            {
+                feedback = $"{row.Level} retention must be a whole number of days between 1 and {MaxRetentionDays}.";
+                feedbackIsError = true;
+                return;
+            }
+
+            parsedDays[row.Level] = value;
+        }
+
+        var level = pendingLevelText == OffOptionValue || !Enum.TryParse<LogSeverity>(pendingLevelText, out var parsedLevel)
+            ? (LogSeverity?)null
+            : parsedLevel;
+
+        // Retention saves first: it has no visible side effect of its own, unlike SetAsync below,
+        // which flips the live switch the moment it succeeds. Saving in this order means a failure
+        // here always leaves both the level and the switch untouched, and the two try blocks (rather
+        // than one covering both calls) let the message name which half actually failed - Save is
+        // supposed to be the one moment the whole form applies (decision (b)), so a partial failure
+        // must say so rather than report one flat "could not save" for either half.
+        try
+        {
+            await RetentionSettings.SaveAsync(new LogRetentionDays(
+                Verbose: parsedDays[LogSeverity.Verbose],
+                Debug: parsedDays[LogSeverity.Debug],
+                Information: parsedDays[LogSeverity.Information],
+                Warning: parsedDays[LogSeverity.Warning],
+                Error: parsedDays[LogSeverity.Error],
+                Fatal: parsedDays[LogSeverity.Fatal]),
+                CancellationToken.None);
+        }
+        catch (Exception)
+        {
+            feedback = "Could not save the retention settings. The database log level was left unchanged. Try again.";
+            feedbackIsError = true;
+            return;
+        }
+
+        try
+        {
+            await DatabaseLogLevel.SetAsync(level, CancellationToken.None);
+        }
+        catch (Exception)
+        {
+            feedback = "Retention settings were saved, but the database log level could not be changed. Try again.";
+            feedbackIsError = true;
+            return;
+        }
+
+        feedback = "Saved.";
+        feedbackIsError = false;
+    }
+
+    static string RetentionInputId(LogSeverity level) => $"retention-{level.ToString().ToLowerInvariant()}";
+
+    static string FormatSize(long bytes) => bytes >= 1024 * 1024
+        ? $"{bytes / (1024 * 1024)} MB"
+        : $"{bytes / 1024} KB";
+}

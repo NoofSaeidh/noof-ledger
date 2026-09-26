@@ -1,8 +1,10 @@
 ﻿using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Jobs;
 using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
+using Noof.Ledger.Host.Workers.CategorizationLogging;
 
 namespace Noof.Ledger.Host.Workers;
 
@@ -16,6 +18,8 @@ internal sealed class CategorizationWorker(
     IProposalMapper proposalMapper,
     IMerchantScan merchantScan,
     IRecordEcho recordEcho,
+    IDatabaseGate gate,
+    IOperationTimer timer,
     ILogger<CategorizationWorker> logger)
     : BackgroundService
 {
@@ -30,6 +34,8 @@ internal sealed class CategorizationWorker(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        await gate.WaitUntilReadyAsync(stoppingToken);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             var result = await RunTickAsync(stoppingToken);
@@ -49,7 +55,9 @@ internal sealed class CategorizationWorker(
             var modelProvider = scope.ServiceProvider.GetRequiredService<IModelProvider>();
 
             var now = timeProvider.GetUtcNow();
-            await jobQueue.ReleaseExpiredLeasesAsync(now, cancellationToken);
+            using var release = timer.Start(logger, TimedOperations.DbReleaseExpiredLeases);
+            var released = await jobQueue.ReleaseExpiredLeasesAsync(now, cancellationToken);
+            release.Stop(onlyIfSlow: released == 0);
 
             // Checked BEFORE claiming, deliberately out of the order the plan's flow diagram shows.
             // ClaimAsync increments attempt_count as part of the same UPDATE that claims the row, and
@@ -64,7 +72,9 @@ internal sealed class CategorizationWorker(
             if (now < accountCooldownUntil)
                 return CategorizationTickResult.Idle;
 
+            using var claim = timer.Start(logger, TimedOperations.DbClaimJob);
             var job = await jobQueue.ClaimAsync(workerId, ClaimableKinds, options.Lease, cancellationToken);
+            claim.Stop(onlyIfSlow: job is null);
             if (job is null)
                 return CategorizationTickResult.Idle;
 
@@ -73,7 +83,7 @@ internal sealed class CategorizationWorker(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogError(ex, "Categorization worker tick failed");
+            logger.TickFailed(ex);
             return CategorizationTickResult.Failed;
         }
     }
@@ -89,15 +99,27 @@ internal sealed class CategorizationWorker(
         var walletDirectory = scope.ServiceProvider.GetRequiredService<IWalletDirectory>();
 
         CategorizationSubject? subject = null;
+        var currentStage = TransactionStages.Categorized;
+
+        using var logScope = TransactionLogScope.Begin(logger, job.TransactionId);
+        // job.CreatedAt, not job.RunAfter: EfJobQueue.ClaimAsync rewrites run_after to the lease
+        // expiry as part of claiming, so it is never the time the job became due - created_at is
+        // stamped once at enqueue and never touched again, so this stays non-negative on every
+        // attempt, first or re-claimed (docs/OPEN-QUESTIONS.md O-13).
+        timer.Record(logger, TimedOperations.JobQueueWait, (job.ClaimedAt ?? timeProvider.GetUtcNow()) - job.CreatedAt);
+        using var jobTiming = timer.Start(logger, TimedOperations.JobCategorize);
 
         try
         {
+            using var loading = timer.Start(logger, TimedOperations.DbLoadCategorizationContext);
+
             subject = await store.GetSubjectAsync(job.TransactionId, cancellationToken);
             if (subject is not { } sub)
             {
+                loading.Stop();
                 await FailTerminallyAsync(
                     jobQueue, store, notifier, job, null,
-                    "the transaction this job points at no longer exists", cancellationToken);
+                    "the transaction this job points at no longer exists", currentStage, cancellationToken);
                 return;
             }
 
@@ -110,6 +132,7 @@ internal sealed class CategorizationWorker(
 
             var allMerchants = await merchantDirectory.MerchantsAsync(cancellationToken);
             var wallets = await walletDirectory.ActiveAsync(cancellationToken);
+            loading.Stop();
 
             var request = new CategorizationRequest(
                 sub.RawText,
@@ -134,9 +157,11 @@ internal sealed class CategorizationWorker(
                 KeepingTheRecordsWallet(job, sub, proposal, wallets), offeredSlugs, offeredMerchantIds, wallets,
                 options.DefaultCurrency, out var mapped, out var failure))
             {
-                await FailTerminallyAsync(jobQueue, store, notifier, job, subject, failure, cancellationToken);
+                await FailTerminallyAsync(jobQueue, store, notifier, job, subject, failure, currentStage, cancellationToken);
                 return;
             }
+
+            logger.LogCategorized(TransactionStages.Categorized, mapped.Kind, mapped.WalletId, BuildSummary(mapped));
 
             var aliasByFolded = aliases.ToDictionary(alias => alias.Folded, alias => alias);
             var canonicalizations = 0;
@@ -172,9 +197,7 @@ internal sealed class CategorizationWorker(
                         // Past the cap the line keeps its amount and category and simply has no
                         // merchant. Failing the job instead would throw away a correctly extracted
                         // bill over a field that is decoration, and the alias table stays clean.
-                        logger.LogInformation(
-                            "Job {JobId} reached the canonicalization cap of {Cap}; '{MerchantText}' was left unlinked",
-                            job.Id, options.MaxCanonicalizationsPerJob, merchantText);
+                        logger.CanonicalizationCapReached(job.Id, options.MaxCanonicalizationsPerJob, merchantText);
                     }
                 }
 
@@ -183,11 +206,12 @@ internal sealed class CategorizationWorker(
             }
 
             var occurredOn = mapped.OccurredOn ?? DefaultDay(job, sub);
-            await store.ApplyAsync(
-                job.TransactionId,
-                new CategorizationOutcome(
-                    categorizedItems, occurredOn, job.Kind, job.Instruction, mapped.Kind, mapped.WalletId, mapped.StatedBalance),
-                cancellationToken);
+            var outcome = new CategorizationOutcome(
+                categorizedItems, occurredOn, job.Kind, job.Instruction, mapped.Kind, mapped.WalletId, mapped.StatedBalance);
+            currentStage = TransactionStages.Persisted;
+            using (timer.Start(logger, TimedOperations.DbApplyCategorization))
+                await store.ApplyAsync(job.TransactionId, outcome, cancellationToken);
+            logger.LogPersisted(TransactionStages.Persisted, outcome.TransactionKind);
 
             // From this line on, the transaction's line items and Completed status are already
             // committed. Nothing past here may ever be treated as a job failure - that would run
@@ -203,15 +227,14 @@ internal sealed class CategorizationWorker(
 
             try
             {
+                using var completing = timer.Start(logger, TimedOperations.DbCompleteJob);
                 var succeedOutcome = await jobQueue.SucceedAsync(job.Id, workerId, cancellationToken);
                 if (succeedOutcome == JobCompletionOutcome.NotOwned)
-                    logger.LogWarning("Job {JobId} was already reclaimed by another worker; not retrying", job.Id);
+                    logger.JobAlreadyReclaimed(job.Id);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                logger.LogWarning(ex,
-                    "SucceedAsync failed for job {JobId} after its line items were already committed; the transaction is left as Completed",
-                    job.Id);
+                logger.SucceedAfterCommitFailed(ex, job.Id);
             }
         }
         catch (ModelCallException ex) when (ex.IsAccountLevel())
@@ -222,21 +245,19 @@ internal sealed class CategorizationWorker(
             // permanently fail the job it happened to land on, and claiming pauses for a cooldown
             // so the rest of the backlog is not burned through while the key stays bad.
             accountCooldownUntil = timeProvider.GetUtcNow() + options.AccountCooldown;
-            logger.LogWarning(
-                "Account-level model provider failure on job {JobId} ({Message}); pausing new claims for {Cooldown}",
-                job.Id, ex.Message, options.AccountCooldown);
-            await HandleModelFailureAsync(jobQueue, store, notifier, job, subject, ModelFailureKind.Transient, ex.Message, cancellationToken);
+            logger.AccountLevelFailure(job.Id, ex.Message, options.AccountCooldown);
+            await HandleModelFailureAsync(jobQueue, store, notifier, job, subject, ModelFailureKind.Transient, ex.Message, currentStage, cancellationToken, ex);
         }
         catch (ModelCallException ex)
         {
-            await HandleModelFailureAsync(jobQueue, store, notifier, job, subject, ex.Kind, ex.Message, cancellationToken);
+            await HandleModelFailureAsync(jobQueue, store, notifier, job, subject, ex.Kind, ex.Message, currentStage, cancellationToken, ex);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Anything unmodeled here - a bug, an unexpected EF failure - is treated as Transient. The
             // attempt cap already bounds the damage: a persistent failure converges to Failed after
             // MaxAttempts instead of leaving the job Claimed for a full lease duration for no reason.
-            await HandleModelFailureAsync(jobQueue, store, notifier, job, subject, ModelFailureKind.Transient, ex.Message, cancellationToken);
+            await HandleModelFailureAsync(jobQueue, store, notifier, job, subject, ModelFailureKind.Transient, ex.Message, currentStage, cancellationToken, ex);
         }
     }
 
@@ -269,6 +290,13 @@ internal sealed class CategorizationWorker(
             ? proposal with { WalletId = current }
             : proposal;
 
+    static string BuildSummary(MappedProposal mapped) =>
+        mapped.Items.Count > 0
+            ? string.Join("; ", mapped.Items.Select(item => $"{item.Amount} {item.CategorySlug}"))
+            : mapped.StatedBalance is { } stated
+                ? $"balance {stated}"
+                : "no line items";
+
     async Task EchoAsync(ICategorizationStore store, IChatNotifier notifier, CategorizationJob job, CancellationToken cancellationToken)
     {
         try
@@ -278,24 +306,30 @@ internal sealed class CategorizationWorker(
                 return;
 
             await notifier.EditAsync(record.TelegramChatId, messageId, recordEcho.Compose(record), cancellationToken);
+            logger.LogReplied(TransactionStages.Replied, messageId);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogWarning(ex,
-                "Failed to echo job {JobId}'s result to Telegram; the categorization itself already succeeded", job.Id);
+            logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Replied, ex);
+            logger.EchoFailed(ex, job.Id);
         }
     }
 
     async Task HandleModelFailureAsync(
         IJobQueue jobQueue, ICategorizationStore store, IChatNotifier notifier,
-        CategorizationJob job, CategorizationSubject? subject, ModelFailureKind kind, string error,
-        CancellationToken cancellationToken)
+        CategorizationJob job, CategorizationSubject? subject, ModelFailureKind kind, string error, string failedStage,
+        CancellationToken cancellationToken, Exception? exception = null)
     {
         if (kind == ModelFailureKind.Terminal)
         {
-            await FailTerminallyAsync(jobQueue, store, notifier, job, subject, error, cancellationToken);
+            await FailTerminallyAsync(jobQueue, store, notifier, job, subject, error, failedStage, cancellationToken, exception);
             return;
         }
+
+        // M-6 (Phase 5 final review): the real exception when the catch block that called here had
+        // one (a bug, an unexpected EF failure) - only a mapping/lookup failure with no exception of
+        // its own falls back to a synthetic one, so the trace page still shows something.
+        logger.LogStageFailed(TransactionStages.StageFailed, failedStage, exception ?? new InvalidOperationException(error));
 
         // The same predicate EfJobQueue.RetryAsync evaluates server-side - see decision 10. This only
         // stays correct because Program.cs feeds EfJobQueue the same CategorizationWorkerOptions.MaxAttempts.
@@ -309,8 +343,11 @@ internal sealed class CategorizationWorker(
 
     async Task FailTerminallyAsync(
         IJobQueue jobQueue, ICategorizationStore store, IChatNotifier notifier,
-        CategorizationJob job, CategorizationSubject? subject, string error, CancellationToken cancellationToken)
+        CategorizationJob job, CategorizationSubject? subject, string error, string failedStage, CancellationToken cancellationToken,
+        Exception? exception = null)
     {
+        logger.LogStageFailed(TransactionStages.StageFailed, failedStage, exception ?? new InvalidOperationException(error));
+
         var outcome = await jobQueue.FailAsync(job.Id, workerId, error, cancellationToken);
         if (outcome == JobCompletionOutcome.Applied)
             await NotifyFailureAsync(store, notifier, subject, job, cancellationToken);
@@ -337,9 +374,7 @@ internal sealed class CategorizationWorker(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogWarning(ex,
-                "Failed to edit Telegram message {MessageId} to report a failed job for transaction {TransactionId}",
-                messageId, job.TransactionId);
+            logger.FailureEditFailed(ex, messageId, job.TransactionId);
         }
     }
 

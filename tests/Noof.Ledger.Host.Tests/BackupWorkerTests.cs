@@ -1,11 +1,14 @@
 using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Noof.Ledger.Application.Backup;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Host.Workers;
+using Noof.Ledger.TestKit;
 
 namespace Noof.Ledger.Host.Tests;
 
@@ -48,8 +51,18 @@ public class BackupWorkerTests : IDisposable
         return log;
     }
 
-    static BackupWorker CreateWorker(IServiceScopeFactory scopeFactory, FakeTimeProvider time, BackupWorkerOptions options) =>
-        new(scopeFactory, time, options, NullLogger<BackupWorker>.Instance);
+    static BackupWorker CreateWorker(
+        IServiceScopeFactory scopeFactory, FakeTimeProvider time, BackupWorkerOptions options, IDatabaseGate? gate = null,
+        IOperationTimer? timer = null, ILogger<BackupWorker>? logger = null) =>
+        new(scopeFactory, time, options, gate ?? ReadyGate(), timer ?? new OperationTimer(time, new SlowOperationOptions()),
+            logger ?? NullLogger<BackupWorker>.Instance);
+
+    static IDatabaseGate ReadyGate()
+    {
+        var gate = Substitute.For<IDatabaseGate>();
+        gate.WaitUntilReadyAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        return gate;
+    }
 
     [Fact]
     public async Task A_backup_that_never_ran_before_is_taken_immediately()
@@ -71,6 +84,23 @@ public class BackupWorkerTests : IDisposable
         await log.Received(1).RecordAsync(
             Arg.Is<BackupRunRecord>(r => r.Succeeded && r.FileName == "noof_ledger-20260924-030000.dump" && r.SizeBytes > 0),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_backup_run_logs_backup_dump()
+    {
+        var now = new DateTimeOffset(2026, 9, 24, 3, 0, 0, TimeSpan.Zero);
+        var time = new FakeTimeProvider(now);
+        var log = LogWithStatus(new BackupStatus(null, false, null));
+        var dumper = Substitute.For<IDatabaseDumper>();
+        dumper.DumpAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(ci => WriteFakeDumpAsync(ci.Arg<string>(), new DumpResult(true, null)));
+        var logger = new CapturingLogger<BackupWorker>();
+        var worker = CreateWorker(ScopeFactoryFor(log, dumper), time, Options(), logger: logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        logger.Entries.Should().Contain(entry => entry.Properties.GetValueOrDefault("Operation") as string == "backup.dump");
     }
 
     [Fact]
@@ -292,5 +322,26 @@ public class BackupWorkerTests : IDisposable
         if (result.Succeeded)
             File.WriteAllText(targetPath, "fake dump contents");
         return Task.FromResult(result);
+    }
+
+    [Fact]
+    public async Task The_loop_waits_for_the_database_gate_before_its_first_tick()
+    {
+        var log = LogWithStatus(new BackupStatus(null, false, null));
+        var dumper = Substitute.For<IDatabaseDumper>();
+        var gateSource = new TaskCompletionSource();
+        var gate = Substitute.For<IDatabaseGate>();
+        gate.WaitUntilReadyAsync(Arg.Any<CancellationToken>()).Returns(gateSource.Task);
+        var worker = CreateWorker(ScopeFactoryFor(log, dumper), new FakeTimeProvider(), Options(), gate);
+
+        await worker.StartAsync(TestContext.Current.CancellationToken);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        await log.DidNotReceive().StatusAsync(Arg.Any<CancellationToken>());
+
+        gateSource.SetResult();
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        await log.Received().StatusAsync(Arg.Any<CancellationToken>());
+
+        await worker.StopAsync(TestContext.Current.CancellationToken);
     }
 }

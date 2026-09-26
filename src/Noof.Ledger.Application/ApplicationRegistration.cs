@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.DependencyInjection;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
+using Noof.Ledger.Application.Diagnostics;
 
 namespace Noof.Ledger.Application;
 
@@ -11,11 +12,14 @@ namespace Noof.Ledger.Application;
         + "Telegram can register them without naming an implementation type.")]
 public static class ApplicationRegistration
 {
-    public static IServiceCollection AddNoofApplication(this IServiceCollection services)
+    public static IServiceCollection AddNoofApplication(this IServiceCollection services, SlowOperationOptions slowOperations)
     {
         services.AddSingleton<IProposalMapper, ProposalMapper>();
         services.AddSingleton<IMerchantScan, MerchantScan>();
         services.AddSingleton<IRecordEcho, RecordEcho>();
+
+        services.AddSingleton(slowOperations);
+        services.AddSingleton<IOperationTimer, OperationTimer>();
 
         return services;
     }

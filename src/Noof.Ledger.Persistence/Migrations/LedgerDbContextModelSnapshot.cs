@@ -531,6 +531,60 @@ namespace Noof.Ledger.Persistence.Migrations
                     b.ToTable("backup_runs", "public");
                 });
 
+            modelBuilder.Entity("Noof.Ledger.Persistence.Diagnostics.AppLogEntry", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Exception")
+                        .HasColumnType("text")
+                        .HasColumnName("exception");
+
+                    b.Property<short>("Level")
+                        .HasColumnType("smallint")
+                        .HasColumnName("level");
+
+                    b.Property<DateTimeOffset>("LoggedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("logged_at");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("message");
+
+                    b.Property<string>("PropertiesJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("properties");
+
+                    b.Property<string>("Source")
+                        .HasColumnType("text")
+                        .HasColumnName("source");
+
+                    b.Property<string>("Template")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("template");
+
+                    b.Property<Guid?>("TransactionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("transaction_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LoggedAt");
+
+                    b.HasIndex("TransactionId");
+
+                    b.HasIndex("Level", "LoggedAt");
+
+                    b.ToTable("app_log", "public");
+                });
+
             modelBuilder.Entity("Noof.Ledger.Persistence.Revisions.TransactionRevision", b =>
                 {
                     b.Property<Guid>("Id")
@@ -597,6 +651,26 @@ namespace Noof.Ledger.Persistence.Migrations
                     b.HasKey("Key");
 
                     b.ToTable("app_secret", "public");
+                });
+
+            modelBuilder.Entity("Noof.Ledger.Persistence.Settings.AppSetting", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasColumnType("text")
+                        .HasColumnName("key");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("value");
+
+                    b.HasKey("Key");
+
+                    b.ToTable("app_setting", "public");
                 });
 
             modelBuilder.Entity("Noof.Ledger.Domain.BalanceCheck", b =>

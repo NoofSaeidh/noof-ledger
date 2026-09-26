@@ -23,13 +23,25 @@ internal static class NoofTheme
     // the theme, because MudBlazor's Typography has no slot that means "numbers in a table".
     public const string AmountFont = "noof-amount";
 
+    // Donut series take the theme's own accents first, so a category ring belongs to this palette
+    // rather than MudBlazor's default blue, teal and amber. Error red is left out on purpose: in a
+    // spending chart it would read as an alarm.
+    public static readonly string[] ChartPalette =
+        ["#7dd3a0", "#8ab4f8", "#c792ea", "#f0b429", "#5fc9d6", "#f6a878", "#b3bccb"];
+
     public static MudTheme Instance { get; } = new()
     {
         PaletteDark = new PaletteDark
         {
+            // Every fill here is a light colour on a dark page, so the text drawn on it has to be dark:
+            // MudBlazor's default contrast text is white, which on this green is 1.8:1 - a filled
+            // "Save" or "Completed" that fails WCAG AA. ServedStylesTests measures the served pairs.
             Primary = "#7dd3a0",
+            PrimaryContrastText = "#0b1f14",
             Secondary = "#8ab4f8",
+            SecondaryContrastText = "#0b1526",
             Tertiary = "#c792ea",
+            TertiaryContrastText = "#1d1027",
             Background = "#12151a",
             Surface = "#1a1f27",
             AppbarBackground = "#12151a",
@@ -41,11 +53,18 @@ internal static class NoofTheme
             Divider = "#2a313c",
             DividerLight = "#212832",
             LinesDefault = "#2a313c",
+            // The boundary of a text field or select must reach 3:1 against what it sits on (WCAG
+            // 1.4.11); the divider grey is 1.4:1, and MudBlazor's default (white at 30%) is 2.7:1.
+            LinesInputs = "#6b7482",
             TableLines = "#2a313c",
             Success = "#7dd3a0",
+            SuccessContrastText = "#0b1f14",
             Warning = "#f0b429",
+            WarningContrastText = "#1f1600",
             Error = "#f2645a",
+            ErrorContrastText = "#1f0706",
             Info = "#8ab4f8",
+            InfoContrastText = "#0b1526",
         },
         Typography = new Typography
         {

@@ -1,5 +1,7 @@
 @page "/account/login"
 @attribute [AllowAnonymous]
+@inject IDatabaseGate DatabaseGate
+@using Noof.Ledger.Application.Diagnostics
 
 <PageTitle>Sign in</PageTitle>
 
@@ -19,28 +21,35 @@
             </MudAlert>
         }
 
-        @* Native inputs inside MudBlazor chrome, deliberately. This POST is what calls SignInAsync,
-           which needs an HttpContext an interactive circuit does not have, so the page stays static
-           SSR - and a component that may or may not emit a name attribute is not worth the risk on
-           the one page whose entire job is a form POST. *@
-        <form method="post" action="/account/login/submit" class="noof-login-form">
-            <AntiforgeryToken />
+        @if (DatabaseGate.State != DatabaseState.Ready)
+        {
+            <DatabaseGateBanner />
+        }
+        else
+        {
+            @* Native inputs inside MudBlazor chrome, deliberately. This POST is what calls SignInAsync,
+               which needs an HttpContext an interactive circuit does not have, so the page stays static
+               SSR - and a component that may or may not emit a name attribute is not worth the risk on
+               the one page whose entire job is a form POST. *@
+            <form method="post" action="/account/login/submit" class="noof-login-form">
+                <AntiforgeryToken />
 
-            <label class="noof-field">
-                <span class="noof-field-label">Username</span>
-                <input name="username" autocomplete="username" class="noof-input" />
-            </label>
+                <label class="noof-field">
+                    <span class="noof-field-label">Username</span>
+                    <input name="username" autocomplete="username" class="noof-input" />
+                </label>
 
-            <label class="noof-field">
-                <span class="noof-field-label">Password</span>
-                <input name="password" type="password" autocomplete="current-password" class="noof-input" />
-            </label>
+                <label class="noof-field">
+                    <span class="noof-field-label">Password</span>
+                    <input name="password" type="password" autocomplete="current-password" class="noof-input" />
+                </label>
 
-            <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled"
-                       Color="Color.Primary" FullWidth="true" Class="mt-2">
-                Sign in
-            </MudButton>
-        </form>
+                <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled"
+                           Color="Color.Primary" FullWidth="true" Class="mt-2">
+                    Sign in
+                </MudButton>
+            </form>
+        }
     </MudPaper>
 </div>
 

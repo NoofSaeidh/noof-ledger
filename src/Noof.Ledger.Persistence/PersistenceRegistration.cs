@@ -1,11 +1,14 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Noof.Ledger.Application.Auth;
 using Noof.Ledger.Application.Backup;
 using Noof.Ledger.Application.Capture;
 using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Editing;
 using Noof.Ledger.Application.Jobs;
 using Noof.Ledger.Application.Reporting;
@@ -17,6 +20,7 @@ using Noof.Ledger.Persistence.Backup;
 using Noof.Ledger.Persistence.Balances;
 using Noof.Ledger.Persistence.Capture;
 using Noof.Ledger.Persistence.Categorization;
+using Noof.Ledger.Persistence.Diagnostics;
 using Noof.Ledger.Persistence.Editing;
 using Noof.Ledger.Persistence.Jobs;
 using Noof.Ledger.Persistence.Reporting;
@@ -34,12 +38,25 @@ public static class PersistenceRegistration
     // maxJobAttempts is a parameter rather than a configuration key of its own so that EfJobQueue's
     // server-side attempt limit and CategorizationWorker's "is this the last attempt" check can
     // never independently drift. The Host passes CategorizationWorkerOptions.MaxAttempts to both.
+    // Decision (c), 2026-09-26: database retention lives only on the Log settings screen now, never
+    // in appsettings.json - a leftover Logging:Retention key (an operator's environment variable
+    // from before this change) would otherwise silently stop doing anything, exactly the failure
+    // mode LoggingSetup's own legacy-Default check exists to prevent for Serilog:MinimumLevel:Default.
+    const string LegacyRetentionConfigKey = "Logging:Retention";
+
     public static IServiceCollection AddNoofPersistence(
         this IServiceCollection services, IConfiguration configuration, int maxJobAttempts)
     {
+        if (configuration.GetSection(LegacyRetentionConfigKey).Exists())
+            throw new InvalidOperationException(
+                $"{LegacyRetentionConfigKey} is no longer read. Database log retention is configured on the " +
+                "Log settings screen (/diagnostics/logs/settings), stored in app_setting.");
+
         var connectionString = LedgerConnectionString.Resolve(configuration.GetConnectionString("Ledger"));
 
-        services.AddDbContext<LedgerDbContext>(options => options.UseNpgsql(connectionString));
+        services.AddDbContext<LedgerDbContext>(options => options
+            .UseNpgsql(connectionString)
+            .ConfigureWarnings(w => w.Log((RelationalEventId.CommandExecuted, LogLevel.Debug))));
 
         services.AddScoped<IUserStore, EfUserStore>();
         services.AddScoped<ISecretStore, EfSecretStore>();
@@ -50,6 +67,7 @@ public static class PersistenceRegistration
         services.AddScoped<ICategoryCatalog, EfCategoryCatalog>();
         services.AddScoped<IMerchantDirectory, EfMerchantDirectory>();
         services.AddScoped<ISpendingReadModel, EfSpendingReadModel>();
+        services.AddScoped<ITransactionList, EfTransactionList>();
         services.AddScoped<IBalanceReadModel, EfBalanceReadModel>();
         services.AddScoped<IWalletDirectory, EfWalletDirectory>();
         services.AddScoped<IWalletAdmin, EfWalletAdmin>();
@@ -58,8 +76,16 @@ public static class PersistenceRegistration
             sp.GetRequiredService<TimeProvider>(),
             maxJobAttempts));
         services.AddScoped<IBackupLog, EfBackupLog>();
+        services.AddScoped<IDatabaseLogLevelStore, EfDatabaseLogLevelStore>();
         services.AddScoped<IDatabaseDumper>(_ => new PgDumpDatabaseDumper(
             connectionString, configuration["Backup:PgDumpPath"] ?? PgDumpDatabaseDumper.DefaultPath));
+
+        services.AddScoped<ILogQuery, EfLogQuery>();
+        services.AddScoped<ILogRetentionSettings, EfLogRetentionSettingsStore>();
+        services.AddScoped<ILogRetention, EfLogRetention>();
+        services.AddScoped<ITransactionTrace, EfTransactionTrace>();
+
+        services.AddScoped<ISystemHealthCheck, MigrationsHealthCheck>();
 
         return services;
     }
@@ -70,5 +96,18 @@ public static class PersistenceRegistration
         using var scope = services.CreateScope();
         await scope.ServiceProvider.GetRequiredService<LedgerDbContext>()
             .Database.MigrateAsync(cancellationToken);
+    }
+
+    // Opens the raw ADO.NET connection rather than Database.OpenConnectionAsync: that goes through
+    // EF's execution strategy, which wraps a connection failure in InvalidOperationException as a
+    // "consider enabling retry" hint - masking the NpgsqlException this startup probe needs to
+    // classify (connection-refused vs. everything else).
+    public static async Task OpenNoofDatabaseConnectionAsync(
+        this IServiceProvider services, CancellationToken cancellationToken = default)
+    {
+        using var scope = services.CreateScope();
+        var connection = scope.ServiceProvider.GetRequiredService<LedgerDbContext>().Database.GetDbConnection();
+        await connection.OpenAsync(cancellationToken);
+        await connection.CloseAsync();
     }
 }

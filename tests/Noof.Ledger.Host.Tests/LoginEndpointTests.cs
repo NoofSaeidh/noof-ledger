@@ -13,11 +13,16 @@ public class LoginEndpointTests
     static WebApplicationFactory<Program> CookieMode() =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.UseTempLogDirectory();
             builder.UseSetting("Database:MigrateOnStartup", "false");
             builder.UseSetting("Backup:Enabled", "false");
             builder.UseSetting("ConnectionStrings:Ledger",
                 "Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none;Timeout=2");
-            builder.ConfigureServices(FakeUserStore.Register);
+            builder.ConfigureServices(services =>
+            {
+                FakeUserStore.Register(services);
+                ReadyDatabaseGate.Register(services);
+            });
         });
 
     [Fact]
@@ -82,6 +87,7 @@ public class LoginEndpointTests
 
         using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.UseTempLogDirectory();
             builder.UseSetting("Database:MigrateOnStartup", "false");
             builder.UseSetting("Backup:Enabled", "false");
             builder.UseSetting("ConnectionStrings:Ledger",
@@ -89,6 +95,7 @@ public class LoginEndpointTests
             builder.ConfigureServices(services =>
             {
                 FakeUserStore.Register(services);
+                ReadyDatabaseGate.Register(services);
                 services.AddSingleton<IPasswordHasher>(counting);
             });
         });

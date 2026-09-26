@@ -1,0 +1,8 @@
+@inject IDatabaseGate DatabaseGate
+@using Noof.Ledger.Application.Diagnostics
+
+<MudAlert id="database-waiting" Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-6">
+    @(DatabaseGate.State == DatabaseState.Failed
+        ? "Database migration failed — see the log file."
+        : "Waiting for the database…")
+</MudAlert>

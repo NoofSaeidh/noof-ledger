@@ -1,14 +1,19 @@
 using System.Net;
 using AwesomeAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Noof.Ledger.Ai.Anthropic;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Secrets;
+using Noof.Ledger.TestKit;
 
 namespace Noof.Ledger.Ai.Tests.Anthropic;
 
 public class AnthropicChatClientFactoryTests
 {
     static AnthropicChatClientFactory Factory(ISecretStore secretStore, HttpMessageHandler? handler = null) =>
-        new(secretStore, new HttpClient(handler ?? new StubHttpMessageHandler()), new AnthropicOptions());
+        new(secretStore, new HttpClient(handler ?? new StubHttpMessageHandler()), new AnthropicOptions(),
+            new OperationTimer(TimeProvider.System, new SlowOperationOptions()), NullLogger<AnthropicChatClientFactory>.Instance);
 
     [Fact]
     public void Its_secret_is_the_one_the_operators_key_is_stored_under_byte_for_byte()
@@ -98,6 +103,22 @@ public class AnthropicChatClientFactoryTests
 
         result.Ok.Should().BeFalse();
         result.Message.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task A_failing_probe_still_logs_a_model_probe_timing()
+    {
+        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var timer = new OperationTimer(clock, new SlowOperationOptions());
+        var logger = new CapturingLogger<AnthropicChatClientFactory>();
+        var handler = new ThrowingHttpMessageHandler(() => new HttpRequestException("No route to host"));
+        var factory = new AnthropicChatClientFactory(
+            new StubSecretStore(SecretState.Present, "sk-ant-test"), new HttpClient(handler), new AnthropicOptions(), timer, logger);
+
+        var result = await factory.ProbeAsync(TestContext.Current.CancellationToken);
+
+        result.Ok.Should().BeFalse();
+        logger.Entries.Should().ContainSingle(entry => (string)entry.Properties["Operation"] == "model.probe");
     }
 
     [Fact]

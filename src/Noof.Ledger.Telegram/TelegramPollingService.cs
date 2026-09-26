@@ -1,10 +1,13 @@
+using System.Net.Sockets;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Noof.Ledger.Application.Chat;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Secrets;
 using Telegram.Bot;
+using Telegram.Bot.Exceptions;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 
@@ -18,6 +21,9 @@ internal sealed class TelegramPollingService(
     TelegramClientHandle clientHandle,
     IConfiguration configuration,
     TimeProvider timeProvider,
+    IDatabaseGate gate,
+    IPollingHeartbeat heartbeat,
+    IOperationTimer timer,
     ILogger<TelegramPollingService> logger)
     : BackgroundService
 {
@@ -35,6 +41,8 @@ internal sealed class TelegramPollingService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        await gate.WaitUntilReadyAsync(stoppingToken);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             var result = await RunTickAsync(stoppingToken);
@@ -70,6 +78,8 @@ internal sealed class TelegramPollingService(
                 clientHandle.Current = client;
                 activeToken = secret.Value;
 
+                await RegisterHealthCommandAsync(client, secretStore, cancellationToken);
+
                 var offsetStore = scope.ServiceProvider.GetRequiredService<TelegramUpdateOffsetStore>();
                 offset ??= await offsetStore.GetAsync(cancellationToken);
             }
@@ -81,11 +91,15 @@ internal sealed class TelegramPollingService(
             // and that branch is guaranteed to have run at least once by this point: activeToken
             // starts null and secret.State is Present here, so the very first successful tick sets it
             // before this line is ever reached.
+            using var polling = timer.Start(logger, TimedOperations.TelegramGetUpdates, TimeSpan.FromSeconds(pollingSeconds));
             var updates = await clientHandle.Current!.GetUpdates(
                 offset: offset,
                 timeout: pollingSeconds,
                 allowedUpdates: [UpdateType.Message, UpdateType.EditedMessage, UpdateType.CallbackQuery],
                 cancellationToken: cancellationToken);
+            polling.Stop(onlyIfSlow: updates.Length == 0);
+
+            heartbeat.RecordSuccess(timeProvider.GetUtcNow());
 
             if (updates.Length > 0)
             {
@@ -96,6 +110,7 @@ internal sealed class TelegramPollingService(
                 {
                     try
                     {
+                        using var handling = timer.Start(logger, TimedOperations.TelegramHandleUpdate);
                         await router.HandleAsync(update, timeZoneId, cancellationToken);
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
@@ -107,8 +122,7 @@ internal sealed class TelegramPollingService(
                         }
                         poisonUpdateAttempts++;
 
-                        logger.LogError(ex, "Telegram update {UpdateId} failed on attempt {Attempt}/{MaxAttempts}",
-                            update.Id, poisonUpdateAttempts, MaxUpdateAttempts);
+                        logger.UpdateFailed(ex, update.Id, poisonUpdateAttempts, MaxUpdateAttempts);
 
                         if (poisonUpdateAttempts < MaxUpdateAttempts)
                         {
@@ -119,9 +133,7 @@ internal sealed class TelegramPollingService(
                             return TelegramPollResult.Failed;
                         }
 
-                        logger.LogError(
-                            "Telegram update {UpdateId} failed {MaxAttempts} times; skipping it so later updates aren't blocked behind it",
-                            update.Id, MaxUpdateAttempts);
+                        logger.UpdateAbandoned(update.Id, MaxUpdateAttempts);
                         await NotifyOperatorOfSkippedUpdateAsync(scope, update, cancellationToken);
                         poisonUpdateId = null;
                         poisonUpdateAttempts = 0;
@@ -143,10 +155,40 @@ internal sealed class TelegramPollingService(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             consecutiveFailures++;
-            logger.LogError(ex, "Telegram poll tick failed; backing off and retrying");
+            heartbeat.RecordFailure(timeProvider.GetUtcNow(), ClassifyFailure(ex));
+            logger.PollTickFailed(ex);
             return TelegramPollResult.Failed;
         }
     }
+
+    async Task RegisterHealthCommandAsync(ITelegramBotClient client, ISecretStore secretStore, CancellationToken cancellationToken)
+    {
+        var owner = await secretStore.GetAsync(SecretKeys.TelegramOwnerChatId, cancellationToken);
+        if (owner.State is not SecretState.Present || !long.TryParse(owner.Value, out var ownerChatId))
+            return;
+
+        try
+        {
+            await client.SetMyCommands(
+                commands: [new BotCommand("health", "System health")],
+                scope: new BotCommandScopeChat { ChatId = ownerChatId },
+                cancellationToken: cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.HealthCommandRegistrationFailed(ex);
+        }
+    }
+
+    static PollFailure ClassifyFailure(Exception ex) => ex switch
+    {
+        ApiRequestException { ErrorCode: 401 } => PollFailure.Unauthorized,
+        HttpRequestException => PollFailure.Network,
+        SocketException => PollFailure.Network,
+        TimeoutException => PollFailure.Network,
+        TaskCanceledException => PollFailure.Network,
+        _ => PollFailure.Other,
+    };
 
     async Task NotifyOperatorOfSkippedUpdateAsync(IServiceScope scope, Update update, CancellationToken cancellationToken)
     {
@@ -160,7 +202,7 @@ internal sealed class TelegramPollingService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogError(ex, "Failed to notify the operator that Telegram update {UpdateId} was skipped", update.Id);
+            logger.SkippedUpdateNotificationFailed(ex, update.Id);
         }
     }
 }

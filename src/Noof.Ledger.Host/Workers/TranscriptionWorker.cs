@@ -1,8 +1,10 @@
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Jobs;
 using Noof.Ledger.Application.Transcription;
 using Noof.Ledger.Domain;
+using Noof.Ledger.Host.Workers.TranscriptionLogging;
 
 namespace Noof.Ledger.Host.Workers;
 
@@ -14,6 +16,8 @@ internal sealed class TranscriptionWorker(
     CategorizationWorkerOptions options,
     string workerId,
     IRecordEcho recordEcho,
+    IDatabaseGate gate,
+    IOperationTimer timer,
     ILogger<TranscriptionWorker> logger)
     : BackgroundService
 {
@@ -24,6 +28,8 @@ internal sealed class TranscriptionWorker(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        await gate.WaitUntilReadyAsync(stoppingToken);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             var result = await RunTickAsync(stoppingToken);
@@ -43,7 +49,9 @@ internal sealed class TranscriptionWorker(
             var speechProvider = scope.ServiceProvider.GetRequiredService<ISpeechProvider>();
 
             var now = timeProvider.GetUtcNow();
-            await jobQueue.ReleaseExpiredLeasesAsync(now, cancellationToken);
+            using var release = timer.Start(logger, TimedOperations.DbReleaseExpiredLeases);
+            var released = await jobQueue.ReleaseExpiredLeasesAsync(now, cancellationToken);
+            release.Stop(onlyIfSlow: released == 0);
 
             // Both checked before claiming, for CategorizationWorker's reason: a claim spends an attempt and nothing
             // gives it back.
@@ -53,7 +61,9 @@ internal sealed class TranscriptionWorker(
             if (now < accountCooldownUntil)
                 return CategorizationTickResult.Idle;
 
+            using var claim = timer.Start(logger, TimedOperations.DbClaimJob);
             var job = await jobQueue.ClaimAsync(workerId, ClaimableKinds, options.Lease, cancellationToken);
+            claim.Stop(onlyIfSlow: job is null);
             if (job is null)
                 return CategorizationTickResult.Idle;
 
@@ -62,7 +72,7 @@ internal sealed class TranscriptionWorker(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogError(ex, "Transcription worker tick failed");
+            logger.TickFailed(ex);
             return CategorizationTickResult.Failed;
         }
     }
@@ -74,11 +84,18 @@ internal sealed class TranscriptionWorker(
 
         CategorizationSubject? record = null;
 
+        using var logScope = TransactionLogScope.Begin(logger, job.TransactionId);
+        // job.CreatedAt, not job.RunAfter: see CategorizationWorker's ProcessClaimedJobAsync (O-13).
+        timer.Record(logger, TimedOperations.JobQueueWait, (job.ClaimedAt ?? timeProvider.GetUtcNow()) - job.CreatedAt);
+        using var jobTiming = timer.Start(logger, TimedOperations.JobTranscribe);
+
         try
         {
             record = await store.GetSubjectAsync(job.TransactionId, cancellationToken);
             if (record is null)
             {
+                logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Transcribed,
+                    new InvalidOperationException("the transaction this job points at no longer exists"));
                 await jobQueue.FailAsync(job.Id, workerId, "the transaction this job points at no longer exists", cancellationToken);
                 return;
             }
@@ -87,23 +104,37 @@ internal sealed class TranscriptionWorker(
             var transcriber = scope.ServiceProvider.GetRequiredService<ITranscriber>();
 
             // A check constraint holds voice_file_id on every Transcribe job.
-            await using var audio = await voiceFiles.DownloadAsync(job.VoiceFileId!, cancellationToken);
+            Stream audio;
+            using (timer.Start(logger, TimedOperations.TelegramDownloadFile))
+                audio = await voiceFiles.DownloadAsync(job.VoiceFileId!, cancellationToken);
+            await using var audioDisposable = audio;
+
+            using var transcribing = timer.Start(logger, TimedOperations.SpeechTranscribe);
             var transcript = await transcriber.TranscribeAsync(audio, cancellationToken);
+            var transcriptionDuration = transcribing.Stop();
 
             if (transcript.Length == 0)
             {
+                logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Transcribed,
+                    new InvalidOperationException("nothing was heard in the voice note"));
                 await ReportNothingHeardAsync(jobQueue, store, notifier, job, record, cancellationToken);
                 return;
             }
 
+            logger.LogTranscribed(TransactionStages.Transcribed, transcriptionDuration.TotalSeconds, transcript.Length);
+
             var transcriptionStore = scope.ServiceProvider.GetRequiredService<ITranscriptionStore>();
-            var handedOn = job.SourceMessageId is { } sourceMessageId
-                ? await transcriptionStore.CompleteCorrectionAsync(
-                    job.TransactionId, transcript, sourceMessageId, job.InstructionDay, cancellationToken)
-                : await transcriptionStore.CompleteCaptureAsync(job.TransactionId, transcript, cancellationToken);
+            bool handedOn;
+            using (timer.Start(logger, TimedOperations.DbCompleteTranscription))
+            {
+                handedOn = job.SourceMessageId is { } sourceMessageId
+                    ? await transcriptionStore.CompleteCorrectionAsync(
+                        job.TransactionId, transcript, sourceMessageId, job.InstructionDay, cancellationToken)
+                    : await transcriptionStore.CompleteCaptureAsync(job.TransactionId, transcript, cancellationToken);
+            }
 
             if (!handedOn)
-                logger.LogInformation("Job {JobId}'s transcript was already handed on by an earlier run", job.Id);
+                logger.TranscriptAlreadyHandedOn(job.Id);
 
             // The hand-off is committed. As in CategorizationWorker, nothing past this line may count as the job
             // failing: that would mark Failed a record whose reading is already queued.
@@ -113,19 +144,20 @@ internal sealed class TranscriptionWorker(
         {
             // 401/402/403: the key, not this note, is what is broken. Retried, never failed, and claiming pauses so the
             // backlog is not burned through while the key stays bad.
+            logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Transcribed, ex);
             accountCooldownUntil = timeProvider.GetUtcNow() + options.AccountCooldown;
-            logger.LogWarning(
-                "Account-level speech provider failure on job {JobId} ({Message}); pausing new claims for {Cooldown}",
-                job.Id, ex.Message, options.AccountCooldown);
+            logger.AccountLevelFailure(job.Id, ex.Message, options.AccountCooldown);
             await HandleFailureAsync(jobQueue, store, notifier, job, record, ModelFailureKind.Transient, ex.Message, cancellationToken);
         }
         catch (ModelCallException ex)
         {
+            logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Transcribed, ex);
             await HandleFailureAsync(jobQueue, store, notifier, job, record, ex.Kind, ex.Message, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // A failed download lands here and is worth another attempt (V9); the attempt cap bounds everything else.
+            logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Transcribed, ex);
             await HandleFailureAsync(jobQueue, store, notifier, job, record, ModelFailureKind.Transient, ex.Message, cancellationToken);
         }
     }
@@ -198,8 +230,7 @@ internal sealed class TranscriptionWorker(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogWarning(ex, "Failed to edit Telegram message {MessageId} for transaction {TransactionId}",
-                messageId, record.TransactionId);
+            logger.EditFailed(ex, messageId, record.TransactionId);
         }
     }
 
@@ -207,12 +238,13 @@ internal sealed class TranscriptionWorker(
     {
         try
         {
+            using var completing = timer.Start(logger, TimedOperations.DbCompleteJob);
             if (await jobQueue.SucceedAsync(job.Id, workerId, cancellationToken) == JobCompletionOutcome.NotOwned)
-                logger.LogWarning("Job {JobId} was already reclaimed by another worker; not retrying", job.Id);
+                logger.JobAlreadyReclaimed(job.Id);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogWarning(ex, "SucceedAsync failed for job {JobId} after its transcript was already handed on", job.Id);
+            logger.SucceedAfterHandOffFailed(ex, job.Id);
         }
     }
 }

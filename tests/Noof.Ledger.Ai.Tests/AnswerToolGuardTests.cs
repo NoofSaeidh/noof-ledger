@@ -1,12 +1,19 @@
 using System.Text.Json;
 using AwesomeAssertions;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging.Abstractions;
+using Noof.Ledger.Application.Diagnostics;
 using NSubstitute;
 
 namespace Noof.Ledger.Ai.Tests;
 
 public class AnswerToolGuardTests
 {
+    static readonly IOperationTimer Timer = new OperationTimer(TimeProvider.System, new SlowOperationOptions());
+
+    static AnswerToolGuard Guard(IChatClient inner, AIFunctionDeclaration answerTool) =>
+        new(inner, answerTool, Timer, NullLogger.Instance);
+
     static readonly JsonElement NoArguments = JsonDocument.Parse(
         """{"type":"object","additionalProperties":false,"properties":{},"required":[]}""").RootElement.Clone();
 
@@ -28,7 +35,7 @@ public class AnswerToolGuardTests
         var inner = new ScriptedChatClient().Answer(new TextContent("ok"));
         var options = new ChatOptions { Tools = [Lookup, Answer], ToolMode = ChatToolMode.RequireAny };
 
-        await new AnswerToolGuard(inner, Answer).GetResponseAsync([UserTurn], options, TestContext.Current.CancellationToken);
+        await Guard(inner, Answer).GetResponseAsync([UserTurn], options, TestContext.Current.CancellationToken);
 
         inner.Requests.Should().ContainSingle().Which.Options.Should().BeSameAs(options);
     }
@@ -41,7 +48,7 @@ public class AnswerToolGuardTests
         // already reset to null because it was a RequiredChatToolMode.
         var options = new ChatOptions { Tools = [Lookup, Answer] };
 
-        await new AnswerToolGuard(inner, Answer).GetResponseAsync(FollowUpHistory, options, TestContext.Current.CancellationToken);
+        await Guard(inner, Answer).GetResponseAsync(FollowUpHistory, options, TestContext.Current.CancellationToken);
 
         var sent = inner.Requests.Should().ContainSingle().Subject.Options!;
         sent.Tools.Should().ContainSingle().Which.Should().BeSameAs(Answer);
@@ -56,7 +63,7 @@ public class AnswerToolGuardTests
         // ToolMode, so what reaches the guard has no tools at all.
         var options = new ChatOptions { Instructions = "system prompt", MaxOutputTokens = 256 };
 
-        await new AnswerToolGuard(inner, Answer).GetResponseAsync(FollowUpHistory, options, TestContext.Current.CancellationToken);
+        await Guard(inner, Answer).GetResponseAsync(FollowUpHistory, options, TestContext.Current.CancellationToken);
 
         var sent = inner.Requests.Should().ContainSingle().Subject.Options!;
         sent.Tools.Should().ContainSingle().Which.Should().BeSameAs(Answer);
@@ -71,7 +78,7 @@ public class AnswerToolGuardTests
         var inner = new ScriptedChatClient().Answer(new TextContent("ok"));
         var options = new ChatOptions { Tools = [Lookup, Answer] };
 
-        await new AnswerToolGuard(inner, Answer).GetResponseAsync(FollowUpHistory, options, TestContext.Current.CancellationToken);
+        await Guard(inner, Answer).GetResponseAsync(FollowUpHistory, options, TestContext.Current.CancellationToken);
 
         options.Tools.Should().HaveCount(2);
         options.ToolMode.Should().BeNull();
@@ -82,7 +89,7 @@ public class AnswerToolGuardTests
     {
         var inner = Substitute.For<IChatClient>();
 
-        var act = () => new AnswerToolGuard(inner, Answer).GetStreamingResponseAsync([UserTurn]);
+        var act = () => Guard(inner, Answer).GetStreamingResponseAsync([UserTurn]);
 
         act.Should().Throw<NotSupportedException>();
         inner.DidNotReceive().GetStreamingResponseAsync(

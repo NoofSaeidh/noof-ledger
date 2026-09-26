@@ -1,5 +1,8 @@
+using Microsoft.Extensions.Logging;
 using Noof.Ledger.Application.Capture;
 using Noof.Ledger.Application.Chat;
+using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Domain;
 using Telegram.Bot.Types;
 
 namespace Noof.Ledger.Telegram;
@@ -10,7 +13,9 @@ internal sealed class TelegramUpdateRouter(
     TelegramOwnerGate ownerGate,
     RecordActionHandler actionHandler,
     CorrectionHandler correctionHandler,
-    IRecordEcho recordEcho)
+    IRecordEcho recordEcho,
+    ISystemHealth systemHealth,
+    ILogger<TelegramUpdateRouter> logger)
     : ITelegramUpdateRouter
 {
     public async Task HandleAsync(Update update, string timeZoneId, CancellationToken cancellationToken)
@@ -34,6 +39,16 @@ internal sealed class TelegramUpdateRouter(
 
     async Task HandleMessageAsync(Message message, string timeZoneId, CancellationToken cancellationToken)
     {
+        // /health is a fixed, known literal, not the free-form content the rule just below protects:
+        // recognising it costs a stranger nothing, and IsOwnerAsync never claims ownership or tells
+        // a non-owner anything back - unlike the capture path, which must not even look at the text
+        // of someone who might not be the owner.
+        if (message.Text is { Length: > 0 } possibleCommand && IsHealthCommand(possibleCommand))
+        {
+            await HandleHealthCommandAsync(message.Chat.Id, cancellationToken);
+            return;
+        }
+
         // Reject before reading Text: a stranger's content must never be inspected, not even to
         // decide whether it looks like a spend.
         if (!await ownerGate.IsAllowedAsync(message.Chat.Id, cancellationToken))
@@ -61,8 +76,10 @@ internal sealed class TelegramUpdateRouter(
         var captured = new CapturedMessage(message.Chat.Id, message.Id, text, sentAt);
         var transactionId = await captureStore.CaptureAsync(captured, timeZoneId, cancellationToken);
 
-        var botMessageId = await chatNotifier.SendAsync(message.Chat.Id, recordEcho.Acknowledgement, cancellationToken);
-        await captureStore.AttachBotMessageAsync(transactionId, botMessageId, cancellationToken);
+        using var scope = TransactionLogScope.Begin(logger, transactionId);
+        logger.LogReceived(TransactionStages.Received, CaptureKind.Text, message.Chat.Id);
+
+        await SendAcknowledgementAsync(message.Chat.Id, transactionId, recordEcho.Acknowledgement, cancellationToken);
     }
 
     async Task HandleVoiceAsync(Message message, Voice voice, string timeZoneId, CancellationToken cancellationToken)
@@ -75,7 +92,42 @@ internal sealed class TelegramUpdateRouter(
         var captured = new CapturedVoice(message.Chat.Id, message.Id, voice.FileId, voice.Duration, new DateTimeOffset(message.Date));
         var transactionId = await captureStore.CaptureVoiceAsync(captured, timeZoneId, cancellationToken);
 
-        var botMessageId = await chatNotifier.SendAsync(message.Chat.Id, recordEcho.Transcribing, cancellationToken);
-        await captureStore.AttachBotMessageAsync(transactionId, botMessageId, cancellationToken);
+        using var scope = TransactionLogScope.Begin(logger, transactionId);
+        logger.LogReceived(TransactionStages.Received, CaptureKind.Voice, message.Chat.Id);
+
+        await SendAcknowledgementAsync(message.Chat.Id, transactionId, recordEcho.Transcribing, cancellationToken);
+    }
+
+    async Task SendAcknowledgementAsync(long chatId, Guid transactionId, string text, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var botMessageId = await chatNotifier.SendAsync(chatId, text, cancellationToken);
+            await captureStore.AttachBotMessageAsync(transactionId, botMessageId, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Received, ex);
+            throw;
+        }
+    }
+
+    async Task HandleHealthCommandAsync(long chatId, CancellationToken cancellationToken)
+    {
+        if (!await ownerGate.IsOwnerAsync(chatId, cancellationToken))
+        {
+            logger.LogHealthCommandRejected();
+            return;
+        }
+
+        var report = await systemHealth.GetAsync(fresh: true, cancellationToken);
+        await chatNotifier.SendAsync(chatId, HealthReplyFormatter.Format(report), cancellationToken);
+    }
+
+    static bool IsHealthCommand(string text)
+    {
+        var trimmed = text.Trim();
+        return trimmed.Equals("/health", StringComparison.OrdinalIgnoreCase)
+            || trimmed.StartsWith("/health@", StringComparison.OrdinalIgnoreCase);
     }
 }

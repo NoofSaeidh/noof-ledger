@@ -374,6 +374,14 @@ it is an `OperationCanceledException`, the filter needs to distinguish our token
 `ex is OperationCanceledException && stoppingToken.IsCancellationRequested` rather than a bare type
 test.
 
+**Still open after Phase 5 (2026-09-25).** Phase 5 made every hosted loop catch non-cancellation
+exceptions per tick and await `IDatabaseGate` first (`CLAUDE.md` §4), but the filter itself is
+unchanged — still a bare `ex is not OperationCanceledException` — and
+`HostOptions.BackgroundServiceExceptionBehavior` is still the unoverridden .NET default `StopHost`
+(confirmed directly by Phase 5's C-1 finding, `docs/OPEN-QUESTIONS.md` P5-1). A dependency that raises
+`OperationCanceledException` for a reason other than the loop's own token would still stop the host.
+The verification step above is still not done.
+
 ## The read model's "current zone" is supplied by a registered singleton now — a test gap remains
 
 **Corrected 2026-09-22 by Phase 1C Task 2.** This entry originally said the zone is "never given a
@@ -813,3 +821,165 @@ between the check and the kill, `Kill` throws `InvalidOperationException`, which
 cancellation, and `BackupWorker` records an ordinary failed run. A microsecond window at host
 shutdown, no data lost — wrap the `Kill` in a `catch (InvalidOperationException)` when next in the
 file (Phase 4 fix-wave re-review).
+
+---
+
+## Loose ends from Phase 5 (observability)
+
+Recorded 2026-09-25 closing Phase 5. The critical and important findings from the Fable 5.1 closing
+review were fixed on-branch; these are the minors the operator chose to park rather than fix, plus
+two items the spec explicitly deferred.
+
+**Proactive Telegram alerts when a health check turns red.** Today the operator only learns of a
+failing check by opening the dashboard, `/diagnostics`, or asking the bot's `/health` — nothing pushes
+a message when a check's state changes. Named out of scope by the observability spec (§"Out of
+scope"); it would want a debounce (a flapping check should not spam) and a decision about which
+checks are worth a push at all.
+
+**M-1 — `SelfLog.Enable` attributes every Serilog self-log line to the database sink, process-wide.**
+`LoggingSetup.cs` records *any* Serilog internal error (a locked log file, a console write failure, not
+only a PostgreSQL batch failure) as a Log sink failure, so the check can say "logs are in the file
+only" for the wrong reason. `SelfLog` is also a process-global listener while `Configure` runs per
+host, so two in-process hosts (as in some tests) overwrite each other's listener. Fix: attach to the
+PostgreSQL sink's own failure listener if `Serilog.Sinks.Postgresql.Alternative` exposes one, otherwise
+filter `SelfLog` text by that sink's type name before recording a failure.
+
+**M-3 — three near-identical registration entry points for one folder.**
+`DiagnosticsRegistration.AddNoofDiagnostics`, `DiagnosticsHostRegistration.AddNoofDiagnosticsHost` and
+`HostDiagnosticsRegistration.AddNoofHostDiagnostics(connectionString)` are all called from `Program.cs`
+and all live under `Noof.Ledger.Host/Diagnostics`. Harmless today; collapsing them into one
+`AddNoofHostDiagnostics(connectionString)` is ordinary tidying whenever that folder is touched next.
+
+**M-10 — the Database health check reads the gate, not PostgreSQL, so it can say "Ready" while
+PostgreSQL is down.** `DatabaseHealthCheck` reports whatever `IDatabaseGate.State` was when it last
+changed; once `Ready`, it never re-probes, so an outage that starts *after* startup shows "Database —
+Ready" in green next to Migrations, Backup and Telegram failing with "Check failed (NpgsqlException)
+— see logs" underneath.
+Spec-conformant (the design says gate `Ready` → Ok) but confusing to read. A live `SELECT 1` with a
+short timeout on every check would be better and is cheap; not built because the gate's own workers
+already recover on their own, so nothing operationally depends on this check being live.
+
+**M-11 — `/health`'s command registration is not retried, and `/health@otherbot` is also accepted.**
+`setMyCommands` (which registers `/health` in the owner's chat) runs only when the bot token changes;
+a transient network failure at that moment is logged and never retried until the next restart. Separately,
+the router accepts `/health@anyname`, not just `/health@<this bot's own username>` — harmless for a
+single-owner DM bot where nothing else is listening, so left as is rather than plumbing the bot's own
+username through for a check that changes nothing observable.
+
+**Paths deliberately left untimed (Phase 5, task V12).** `IOperationTimer` covers the model, speech,
+Telegram, worker and health paths named in the verbose logging design, but not: `EfCaptureStore`
+(the initial message-received write); the Cancel/Edit/Restore button path (`RecordActionHandler`,
+`CorrectionHandler`, `EfRecordEditor`); a separate timing for the revision-append inside
+`RevisionLog.AppendAsync` (it is covered only as part of whichever timing wraps its caller); and
+model token usage (`IOperationTimer` measures wall-clock time, not tokens — a separate metric).
+Add any of these if a slow path shows up that the existing timings do not explain.
+
+**Timing rows inside the trace timeline itself were considered and rejected for Phase 5.** Timing
+events carry a `TransactionId` but no `Stage`, and `/transactions/{id}/trace` is built only from
+Stage rows (`EfTransactionTrace`) — mixing timing rows into that view would clutter the one page meant
+to answer "what happened to this message" at a glance, and timing rows only exist at all once the
+database log level is at Debug. Instead the trace page links to `/diagnostics/logs` pre-filtered to
+the transaction at Debug ("Timings and debug log"). Revisit only if the linked-page detour turns out
+to be a real friction point in practice.
+
+**`GroqHttpClientLoggingTests` does not exist.** `AnthropicHttpClientLoggingTests` and
+`TelegramHttpClientLoggingTests` each prove `RemoveAllLoggers()` keeps that provider's `HttpClient`
+from leaking request/response bodies (which could carry secrets) into the log pipeline; Groq's speech
+`HttpClient` has no equivalent test, even though `GroqRegistration` applies the same
+`RemoveAllLoggers()` call. Low risk today (nothing in the Groq request path carries an app secret),
+but the gap is real and cheap to close whenever `Noof.Ledger.Ai/Groq` is next touched.
+
+**Phase-6 merge fix-ups, to land in the next phase-5 → phase-6 merge commit, not before:**
+- Convert phase-6's `ReceiptsHealthCheck` from `IHealthCheck` to `ISystemHealthCheck` (Order 80, Name
+  `Receipts`, LogCategory `Noof.Ledger.Host.Workers.ExtractReceiptWorker`) and extend
+  `HealthCheckCompositionTests` to eight (Name, LogCategory) pairs.
+- Renumber phase-6's duplicate `[LoggerMessage]` EventIds, which `LoggerMessageEventIdTests` (V1)
+  will reject on that branch: `ReceiptCategorizationWorkerLog` reuses 1301–1306 from
+  `TranscriptionWorkerLog`, and `ReceiptCategorizerLog`/`ExtractReceiptWorkerLog` both use 1501–1502.
+- Re-scaffold or hand-merge `LedgerDbContextModelSnapshot` so this branch's `AddAppSetting` migration
+  follows phase-6's `AddReceipts` in the migration history, rather than conflicting with it.
+- The **shared** `noof_ledger_test_template` (as opposed to this integration's private
+  `noof_ledger_test_template_p5l`) still lacks the `AddAppSetting` migration until that merge runs
+  `.\run.ps1 update-test-template` against it — any phase-6 worktree cloning the shared template before
+  then is working against a stale schema for this feature.
+
+**FX freshness check arrives with the FX phase.** The observability spec named this out of scope
+because there is no FX rate source yet (`docs/OPEN-QUESTIONS.md` Q4) — nothing to check the freshness
+of. Add it alongside whichever phase builds currency conversion.
+
+**Playwright cannot drive a native `datetime-local` widget in headless Chromium**, so
+`/diagnostics/logs`'s From/To filter is verified through the query layer and the page's markup, not
+through a browser interaction test. `FillAsync` sets the DOM value but fires no event Blazor Server's
+`@bind:event="oninput"` receives — confirmed with a debug span that stayed empty across `oninput`,
+`onchange`, a plain `@bind`, and an explicit bubbling `dispatchEvent`. Coverage instead: `EfLogQueryTests`
+proves the SQL/EF filtering (inclusive both ends), and `DiagnosticsPageSourceTests` proves the page
+renders `#logs-filter-from`/`#logs-filter-to` and wires them into the query. Revisit if a future
+Playwright or Chromium release fixes native datetime input dispatch.
+
+**An intermittent Host auth-flow test flake**, seen twice across roughly six `Host.Tests` runs during
+the phase's closing fix pass, never reproduced on an immediate retry, and not connected to any finding
+fixed in this phase (a clean 292/292 pass bracketed each sighting). The failing test's own name was not
+captured — the run's tail buffer held only request-log noise by the time it was checked. Worth
+instrumenting the next time it is seen live rather than chasing from this description.
+
+### Test-infrastructure flakes seen at the Phase 5 close
+
+- **E2E fixture teardown timed out once** — `CookieModeHostFixture.DropCloneAsync` hit an Npgsql read
+  timeout in `DisposeAsync` during a full-solution run (1 of ~4 full runs); the rerun of all E2E tests
+  was green. Likely `DROP DATABASE ... WITH (FORCE)` waiting on the shared server under load. A longer
+  command timeout on the admin connection is the cheap fix if it recurs.
+- **`SecretRedactionSentinelTests` hits an `IOException` in its cleanup**, not its assertions:
+  `Directory.Delete(logDirectory)` in the `finally` runs while the host's file sink still holds
+  `noof-ledger-<date>.log`. Seen once at the Phase 5 close; on 2026-09-26 it reproduced 2 runs in 3
+  when the class ran together with `SecretRedactorTests` straight through the xUnit exe, and passed
+  alone and in every full `run.ps1 test all`. Parked by the operator as test-only (no effect on the
+  running app); the fix is to dispose the factory before deleting, or retry the delete briefly.
+- **Configuration-added Serilog sinks did not reproduce through `WebApplicationFactory`** while they did
+  in an isolated logger (follow-up review I-1). `ReadFrom.Configuration` is gone, so the risk is closed,
+  but the reason the hosted repro stayed silent was never found.
+
+### Cadence and timeout constants still in code — deferred 2026-09-26
+
+PR #1's review asked for hard-coded paths to move to `appsettings.json`; paths, file-log limits,
+per-level retention, every backup setting and the DataProtection key directory did. These stayed in
+C# on purpose, because they are how often or how long, not where or how much, and nobody has needed
+to change one: the worker poll intervals (`SecretSnapshotRefreshWorker`, `LogRetentionWorker`), the
+health checks' staleness windows (Disk, Backup, Log sink, Telegram), `TelegramBackoff`'s caps, the
+5 s per-check timeout in `SystemHealth`, and `pg_dump`'s `PGCONNECT_TIMEOUT`. Move one when a real
+reason to tune it appears, through the options pattern the rest already use.
+
+### `transaction_revisions` retention — deferred 2026-09-26 (decision (e))
+
+Log settings (`/diagnostics/logs/settings`) gives the operator per-level retention for `app_log`, but
+deliberately not for `transaction_revisions` — the append-only history a trace page's History section
+reads. That table has no retention at all today: every revision, forever. Doing this properly needs,
+first, the row-level trigger (`transaction_revisions_append_only_guard`, which refuses `UPDATE` and
+`DELETE`; a sibling `transaction_revisions_no_truncate` separately refuses `TRUNCATE`) relaxed to
+allow a retention job's own `DELETE`, which is a bigger decision than this feature's scope: it is the
+one guarantee that table currently makes, and loosening it for one more caller is not something to do
+as a side effect of a settings screen. Revisit alongside a real reason to prune old revisions (disk
+growth becomes a real problem, or a GDPR-shaped request to actually forget something).
+(The drift CLAUDE.md's Database rules warn about — a guard trigger added to an already-applied
+migration never taking effect on `noof_ledger` or the test template — was `merchant_aliases_no_truncate`
+in commit `01b4961`, a different table; that story does not apply to `transaction_revisions`, whose
+guards shipped in their own migration from the start.)
+
+### Copilot review items parked by the operator — 2026-09-26
+
+Copilot's second pass on PR #1 raised five items. The template-borne secret leak was fixed (a
+library logging an interpolated string puts the text in the message template itself;
+`SecretRedactor` now redacts the template too). Two described decisions the operator had already
+made (Debug retention of 1 day; no file-tail fallback on the Logs page). The operator parked the
+other two as not mattering in real use:
+
+- **Secrets shorter than 8 characters are never redacted** (`SecretSnapshot.MinimumSecretLength`).
+  Deliberate: a short value such as `1234` would be replaced everywhere it occurs in a log. The only
+  secret this can realistically hit is a short database password — keep that password at 8+
+  characters and the gap is closed. Lowering the cutoff just for the database password is the fix if
+  that is ever not an option.
+- **Most `WebApplicationFactory` fixtures still use the real DataProtection key ring**
+  (`%LOCALAPPDATA%\NoofLedger\dp-keys`); only three call `UseTempKeyRingDirectory()`. A fixture only
+  writes there when no valid default key exists — about once per 90-day key lifetime — and a key it
+  creates is a valid member of the same DPAPI-protected ring, so the running app is unaffected. The
+  fix mirrors the log directory: apply `TestHostDataProtection` everywhere and add an architecture
+  guard like `TestHostLogDirectoryTests`.

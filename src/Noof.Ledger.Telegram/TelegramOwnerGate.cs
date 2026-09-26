@@ -17,6 +17,17 @@ internal sealed class TelegramOwnerGate(ISecretStore secretStore)
         };
     }
 
+    // /health's authorisation check: a read of who owns the bot, never a claim. Distinct from
+    // IsAllowedAsync on purpose - a stranger typing /health before an owner exists must never
+    // become the owner just by asking about health.
+    public async Task<bool> IsOwnerAsync(long chatId, CancellationToken cancellationToken)
+    {
+        var owner = await secretStore.GetAsync(SecretKeys.TelegramOwnerChatId, cancellationToken);
+
+        return owner.State is SecretState.Present
+            && owner.Value == chatId.ToString(CultureInfo.InvariantCulture);
+    }
+
     async Task<bool> ClaimAsync(long chatId, CancellationToken cancellationToken)
     {
         var chatIdText = chatId.ToString(CultureInfo.InvariantCulture);

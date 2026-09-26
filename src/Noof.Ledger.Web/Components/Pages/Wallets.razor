@@ -2,17 +2,26 @@
 @attribute [Authorize]
 @implements IDisposable
 @using System.Globalization
+@using Noof.Ledger.Application.Diagnostics
 @using Noof.Ledger.Application.Wallets
 @using Noof.Ledger.Domain
 @inject IWalletAdmin WalletAdmin
+@inject IDatabaseGate Gate
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 
 <PageTitle>Wallets</PageTitle>
 
-<MudText HtmlTag="h1" Typo="Typo.h4" Class="mb-1">Wallets</MudText>
+<MudText HtmlTag="h1" Typo="Typo.h4" Class="mb-2">Wallets</MudText>
 <MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">
     Create, rename and archive wallets here. Income and balance statements are told to the bot.
 </MudText>
+
+@if (Gate.State != DatabaseState.Ready)
+{
+    <DatabaseGateBanner />
+}
+else
+{
 
 @if (error is not null)
 {
@@ -35,7 +44,7 @@
 @foreach (var wallet in wallets)
 {
     <MudPaper id="@($"wallet-{wallet.Id}")" Outlined="true" Elevation="0" Class="pa-5 mb-4">
-        <MudText Typo="Typo.caption" Class="mud-text-secondary">@wallet.Currency</MudText>
+        <MudText Typo="Typo.overline" Class="mud-text-secondary d-block mb-2">@wallet.Currency</MudText>
         <div class="noof-wallet-row">
             <MudTextField T="string" InputId="@($"wallet-name-{wallet.Id}")" @bind-Value="wallet.PendingName"
                           Variant="Variant.Outlined" Margin="Margin.Dense" Label="Name" />
@@ -44,7 +53,7 @@
                 Rename
             </MudButton>
         </div>
-        <div class="noof-wallet-row mt-2">
+        <div class="noof-wallet-row mt-4">
             <MudTextField T="string" InputId="@($"wallet-aliases-{wallet.Id}")" @bind-Value="wallet.PendingAliases"
                           Variant="Variant.Outlined" Margin="Margin.Dense" Label="Aliases (comma-separated)" />
             <MudButton id="@($"save-aliases-{wallet.Id}")" Variant="Variant.Outlined"
@@ -52,7 +61,7 @@
                 Save aliases
             </MudButton>
         </div>
-        <div class="noof-wallet-row mt-2">
+        <div class="noof-wallet-actions mt-4">
             @if (wallet.IsDefaultForCurrency)
             {
                 <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">
@@ -61,7 +70,7 @@
             }
             else
             {
-                <MudButton id="@($"make-default-{wallet.Id}")" Variant="Variant.Text"
+                <MudButton id="@($"make-default-{wallet.Id}")" Variant="Variant.Outlined" Size="Size.Small"
                            OnClick="@(() => MakeDefaultAsync(wallet))">
                     Make default for @wallet.Currency
                 </MudButton>
@@ -73,7 +82,7 @@
             }
             else
             {
-                <MudButton id="@($"archive-{wallet.Id}")" Variant="Variant.Text" Color="Color.Error"
+                <MudButton id="@($"archive-{wallet.Id}")" Variant="Variant.Outlined" Size="Size.Small" Color="Color.Error"
                            OnClick="@(() => ArchiveAsync(wallet))">
                     Archive
                 </MudButton>
@@ -83,37 +92,58 @@
 }
 
 <MudPaper Outlined="true" Elevation="0" Class="pa-5">
-    <MudText Typo="Typo.subtitle1" Class="mb-3">New wallet</MudText>
+    <MudText HtmlTag="h2" Typo="Typo.h6" Class="mb-4">New wallet</MudText>
 
-    <MudTextField T="string" InputId="new-wallet-name" @bind-Value="newName"
-                  Variant="Variant.Outlined" Margin="Margin.Dense" Label="Name" Class="mb-3" />
+    @* One label convention for the whole form: a caption above each control, which is the only one
+       the native currency <select> can share, so every field's bottom edge lines up in the row. *@
+    <div class="noof-form-grid">
+        <div class="noof-field">
+            <label class="noof-field-label" for="new-wallet-name">Name</label>
+            <MudTextField T="string" InputId="new-wallet-name" @bind-Value="newName"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </div>
 
-    <MudText Typo="Typo.caption" Class="mud-text-secondary">Currency</MudText>
-    <select id="new-wallet-currency" @bind="newCurrency" class="noof-native-select mb-3">
-        @foreach (var currency in CurrencyCode.Supported)
-        {
-            <option value="@currency.Value">@currency.Value</option>
-        }
-    </select>
+        <div class="noof-field">
+            <label class="noof-field-label" for="new-wallet-currency">Currency</label>
+            <select id="new-wallet-currency" @bind="newCurrency" class="noof-native-select">
+                @foreach (var currency in CurrencyCode.Supported)
+                {
+                    <option value="@currency.Value">@currency.Value</option>
+                }
+            </select>
+        </div>
 
-    <MudNumericField T="decimal" InputId="new-wallet-opening" @bind-Value="newOpeningBalance"
-                     Culture="@CultureInfo.InvariantCulture"
-                     Variant="Variant.Outlined" Margin="Margin.Dense" Label="Opening balance" Class="mb-3" />
+        <div class="noof-field">
+            <label class="noof-field-label" for="new-wallet-opening">Opening balance</label>
+            <MudNumericField T="decimal" InputId="new-wallet-opening" @bind-Value="newOpeningBalance"
+                             Culture="@CultureInfo.InvariantCulture" HideSpinButtons="true"
+                             Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </div>
 
-    <MudTextField T="DateOnly?" InputId="new-wallet-date" @bind-Value="newOpeningDate" InputType="InputType.Date"
-                  Culture="@CultureInfo.InvariantCulture" Format="yyyy-MM-dd"
-                  Variant="Variant.Outlined" Margin="Margin.Dense" Label="Opening date" Class="mb-3" />
+        <div class="noof-field">
+            <label class="noof-field-label" for="new-wallet-date">Opening date</label>
+            <MudTextField T="DateOnly?" InputId="new-wallet-date" @bind-Value="newOpeningDate" InputType="InputType.Date"
+                          Culture="@CultureInfo.InvariantCulture" Format="yyyy-MM-dd"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </div>
 
-    <MudTextField T="string" InputId="new-wallet-aliases" @bind-Value="newAliases"
-                  Variant="Variant.Outlined" Margin="Margin.Dense" Label="Aliases (comma-separated)" Class="mb-3" />
+        <div class="noof-field noof-field-full">
+            <label class="noof-field-label" for="new-wallet-aliases">Aliases (comma-separated)</label>
+            <MudTextField T="string" InputId="new-wallet-aliases" @bind-Value="newAliases"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </div>
+    </div>
 
-    <MudCheckBox T="bool" id="new-wallet-default" @bind-Value="newIsDefault"
-                Label="Default for its currency" Class="mb-3" />
-
-    <MudButton id="create-wallet" Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateAsync">
-        Create wallet
-    </MudButton>
+    <div class="noof-wallet-row">
+        <MudCheckBox T="bool" id="new-wallet-default" @bind-Value="newIsDefault"
+                    Label="Default for its currency" />
+        <MudSpacer />
+        <MudButton id="create-wallet" Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateAsync">
+            Create wallet
+        </MudButton>
+    </div>
 </MudPaper>
+}
 
 @code {
     sealed class Row
@@ -140,7 +170,11 @@
 
     readonly CancellationTokenSource cancellation = new();
 
-    protected override async Task OnInitializedAsync() => await ReloadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        if (Gate.State == DatabaseState.Ready)
+            await ReloadAsync();
+    }
 
     async Task ReloadAsync()
     {

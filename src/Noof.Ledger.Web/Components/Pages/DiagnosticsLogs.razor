@@ -1,0 +1,272 @@
+@page "/diagnostics/logs"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@implements IDisposable
+@using Microsoft.AspNetCore.Components.QuickGrid
+@using Noof.Ledger.Application.Diagnostics
+@inject ILogQuery LogQuery
+@inject IDatabaseGate Gate
+@inject TimeProvider TimeProvider
+@inject IDatabaseLogLevel DatabaseLogLevel
+
+<PageTitle>Logs</PageTitle>
+
+@if (Gate.State != DatabaseState.Ready)
+{
+    <MudText HtmlTag="h1" Typo="Typo.h4" Class="mb-6">Logs</MudText>
+    <DatabaseGateBanner />
+}
+else
+{
+    @* The database level changes what gets recorded, not what is shown, so it sits with the page
+       title as a setting rather than among the filters. Changed on the Log settings screen only -
+       decision (b), 2026-09-26 - never on this page. *@
+    <div class="noof-page-header">
+        <MudText HtmlTag="h1" Typo="Typo.h4">Logs</MudText>
+        <MudLink id="logs-settings-link" Href="/diagnostics/logs/settings">
+            Log settings (database: @CurrentDatabaseLevelText())
+        </MudLink>
+    </div>
+
+    <div class="noof-filter-bar">
+        <div class="noof-filter-field">
+            <MudText HtmlTag="label" for="logs-filter-level" Typo="Typo.caption" Class="mud-text-secondary">Level</MudText>
+            <select id="logs-filter-level" @bind="filter.MinLevel" @bind:after="ReloadAsync" class="noof-native-select">
+                @foreach (var level in Enum.GetValues<LogSeverity>())
+                {
+                    <option value="@level">@level</option>
+                }
+            </select>
+        </div>
+        <div class="noof-filter-field">
+            <MudText HtmlTag="label" for="logs-quick-range" Typo="Typo.caption" Class="mud-text-secondary">Quick range</MudText>
+            <select id="logs-quick-range" @bind="quickRange" @bind:after="OnQuickRangeChangedAsync" class="noof-native-select">
+                @foreach (var range in Enum.GetValues<QuickRange>())
+                {
+                    <option value="@range">@range</option>
+                }
+            </select>
+        </div>
+        <div class="noof-filter-field noof-filter-field-wide">
+            <MudText HtmlTag="label" for="logs-filter-from" Typo="Typo.caption" Class="mud-text-secondary">From</MudText>
+            @* @bind against a DateTime? field, not a string: Razor's @bind directive infers a
+               DateTime target type from a "datetime-local" input regardless of the bound
+               property's own declared type, and generates Blazor's own built-in date/time
+               round-trip conversion - the native binding path, rather than a hand-rolled
+               value/@onchange pair reading a string. *@
+            <input type="datetime-local" id="logs-filter-from" class="noof-input" @bind="filter.From" @bind:event="oninput" @bind:after="ReloadAsync" />
+        </div>
+        <div class="noof-filter-field noof-filter-field-wide">
+            <MudText HtmlTag="label" for="logs-filter-to" Typo="Typo.caption" Class="mud-text-secondary">To</MudText>
+            <input type="datetime-local" id="logs-filter-to" class="noof-input" @bind="filter.To" @bind:event="oninput" @bind:after="ReloadAsync" />
+        </div>
+        @* Plain native inputs, not MudTextField: a QuickGrid refresh needs to fire on every
+           keystroke, and a native input's @bind:event="oninput" does that directly, without
+           depending on MudTextField's own (JS-interop-driven) Immediate/debounce plumbing. *@
+        <div class="noof-filter-field noof-filter-field-wide">
+            <MudText HtmlTag="label" for="logs-filter-text" Typo="Typo.caption" Class="mud-text-secondary">Text</MudText>
+            <input id="logs-filter-text" class="noof-input" type="search" placeholder="Search messages" @bind="filter.Text" @bind:event="oninput" @bind:after="ReloadAsync" />
+        </div>
+        <div class="noof-filter-field">
+            <MudText HtmlTag="label" for="logs-filter-source" Typo="Typo.caption" Class="mud-text-secondary">Source</MudText>
+            <input id="logs-filter-source" class="noof-input" type="search" placeholder="e.g. Noof.Ledger.Ai" @bind="filter.Source" @bind:event="oninput" @bind:after="ReloadAsync" />
+        </div>
+        <div class="noof-filter-field noof-filter-field-wide">
+            <MudText HtmlTag="label" for="logs-filter-transaction-id" Typo="Typo.caption" Class="mud-text-secondary">Transaction id</MudText>
+            <input id="logs-filter-transaction-id" class="noof-input noof-mono" placeholder="e.g. 3a70ddca-2352-…"
+                   @bind="transactionIdText" @bind:event="oninput" @bind:after="ReloadAsync" />
+        </div>
+        <div class="noof-filter-field">
+            <MudText HtmlTag="label" for="logs-sort-order" Typo="Typo.caption" Class="mud-text-secondary">Sort</MudText>
+            <select id="logs-sort-order" @bind="filter.Sort" @bind:after="ReloadAsync" class="noof-native-select">
+                @foreach (var sort in Enum.GetValues<LogSortOrder>())
+                {
+                    <option value="@sort">@(sort == LogSortOrder.NewestFirst ? "Newest first" : "Oldest first")</option>
+                }
+            </select>
+        </div>
+    </div>
+
+    <div class="noof-grid-frame" data-empty="No log entries match these filters.">
+        <QuickGrid @key="reloadGeneration" TGridItem="LogRow" id="logs-grid" ItemsProvider="ProvideRowsAsync" Pagination="pagination" Class="noof-grid noof-grid-top noof-grid-stack">
+            @* Local time, the same zone the From/To inputs above are read in. *@
+            <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="LogRow" TProp="DateTimeOffset" Property="@(row => row.LoggedAt.ToLocalTime())" Format="yyyy-MM-dd HH:mm:ss" Title="Logged at" Class="noof-col-nowrap noof-cell-lead" />
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="LogRow" Title="Level" Class="noof-col-nowrap noof-cell-trail" Context="row">
+                <span class="noof-level @LevelClass(row.Level)">@row.Level</span>
+            </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
+            <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="LogRow" TProp="string" Property="@(row => row.Source)" Title="Source" Class="noof-cell-meta" />
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="LogRow" Title="Message" Class="noof-col-message noof-cell-main" Context="row">
+                <ChildContent>
+                    <div>
+                        @row.Message
+                        @* A button, not a link without an href: such a link is not in the tab order,
+                           so a keyboard could never open a row's details. *@
+                        <button type="button" class="noof-link-button" aria-expanded="@(expandedRowId == row.Id ? "true" : "false")"
+                                @onclick="@(() => ToggleExpanded(row.Id))">
+                            @(expandedRowId == row.Id ? "Hide" : "Details")
+                        </button>
+                        @if (expandedRowId == row.Id)
+                        {
+                            <div class="noof-log-details">
+                                @if (row.Exception is not null)
+                                {
+                                    <pre>@row.Exception</pre>
+                                }
+                                @if (row.PropertiesJson is not null)
+                                {
+                                    <pre>@row.PropertiesJson</pre>
+                                }
+                                @if (row.TransactionId is { } id)
+                                {
+                                    <MudLink Href="@($"/transactions/{id}/trace")">View trace</MudLink>
+                                }
+                            </div>
+                        }
+                    </div>
+                </ChildContent>
+            </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
+        </QuickGrid>
+    </div>
+    <Paginator State="pagination" />
+}
+
+@code {
+    // The `?source=` query parameter (set by /diagnostics's per-check Logs link) seeds the filter
+    // before this page's first ItemsProvider call, so following that link lands already narrowed
+    // to the check's rows instead of an unfiltered grid.
+    [SupplyParameterFromQuery]
+    public string? Source { get; set; }
+
+    // SupplyParameterFromQuery does not bind enums, hence the string.
+    [SupplyParameterFromQuery]
+    public Guid? TransactionId { get; set; }
+
+    [SupplyParameterFromQuery]
+    public string? Level { get; set; }
+
+    enum QuickRange { All, LastHour, Today, Last7Days }
+
+    sealed class LogFilterEdit
+    {
+        public LogSeverity MinLevel { get; set; } = LogSeverity.Information;
+        public string? Text { get; set; }
+        public string? Source { get; set; }
+        public DateTime? From { get; set; }
+        public DateTime? To { get; set; }
+        public Guid? TransactionId { get; set; }
+        public LogSortOrder Sort { get; set; } = LogSortOrder.NewestFirst;
+    }
+
+    readonly LogFilterEdit filter = new();
+    readonly SemaphoreSlim queryGate = new(1, 1);
+    PaginationState pagination = new() { ItemsPerPage = 100 };
+    int reloadGeneration;
+    string? transactionIdText;
+    QuickRange quickRange = QuickRange.All;
+    long expandedRowId = -1;
+
+    protected override void OnInitialized()
+    {
+        if (!string.IsNullOrWhiteSpace(Source))
+            filter.Source = Source;
+
+        if (TransactionId is { } transactionId)
+        {
+            filter.TransactionId = transactionId;
+            transactionIdText = transactionId.ToString();
+        }
+
+        if (Enum.TryParse<LogSeverity>(Level, ignoreCase: true, out var level))
+            filter.MinLevel = level;
+    }
+
+    string CurrentDatabaseLevelText() => DatabaseLogLevel.Current?.ToString() ?? "Off";
+
+    // A filter change tears the old QuickGrid down and mounts a new one (see ReloadAsync's comment),
+    // but the old instance's own in-flight ProvideRowsAsync call is not itself cancelled by that -
+    // it keeps running against this same, one, circuit-scoped LedgerDbContext. Left unserialized, a
+    // second filter change fired while the first is still loading raced a new query against that same
+    // DbContext from the still-live old call: sometimes visible as EF's own "a second operation was
+    // started on this context instance" crashing the whole circuit, sometimes as one of the two calls
+    // simply hanging - both observed here directly. This gate makes the two run one after the other
+    // instead of concurrently, which is correct behaviour for a single shared DbContext regardless of
+    // which of those two failure shapes a given race would otherwise have produced.
+    async ValueTask<GridItemsProviderResult<LogRow>> ProvideRowsAsync(GridItemsProviderRequest<LogRow> request)
+    {
+        await queryGate.WaitAsync(request.CancellationToken);
+        try
+        {
+            var page = await LogQuery.QueryAsync(ToFilter(), request.StartIndex / pagination.ItemsPerPage, pagination.ItemsPerPage, request.CancellationToken);
+            return GridItemsProviderResult.From<LogRow>([.. page.Rows], page.TotalCount);
+        }
+        finally
+        {
+            queryGate.Release();
+        }
+    }
+
+    LogFilter ToFilter() => new(
+        filter.MinLevel,
+        From: ToOffset(filter.From),
+        To: ToOffset(filter.To),
+        Text: filter.Text,
+        Source: filter.Source,
+        TransactionId: filter.TransactionId,
+        Sort: filter.Sort);
+
+    // The datetime-local input's bound value is a local wall-clock DateTime with no offset of its
+    // own; pairing it with this machine's current UTC offset for that instant is what turns it into
+    // the correct DateTimeOffset instant. ToUniversalTime() on top of that is not optional: Npgsql
+    // refuses to write a DateTimeOffset with any non-zero Offset to timestamptz ("only offset 0 (UTC)
+    // is supported"), so on any machine whose local zone isn't UTC - this one included - the quick
+    // ranges and the custom From/To fields threw on every query until this was added, caught live by
+    // DiagnosticsLogsTests.Selecting_a_quick_range_and_a_minimum_level_narrows_the_grid_to_matching_rows.
+    static DateTimeOffset? ToOffset(DateTime? localTime) =>
+        localTime is { } value
+            ? new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Unspecified), TimeZoneInfo.Local.GetUtcOffset(value)).ToUniversalTime()
+            : null;
+
+    Task OnQuickRangeChangedAsync()
+    {
+        var now = TimeProvider.GetLocalNow().DateTime;
+
+        (filter.From, filter.To) = quickRange switch
+        {
+            QuickRange.LastHour => (now.AddHours(-1), (DateTime?)null),
+            QuickRange.Today => (now.Date, (DateTime?)null),
+            QuickRange.Last7Days => (now.AddDays(-7), (DateTime?)null),
+            _ => ((DateTime?)null, (DateTime?)null),
+        };
+
+        return ReloadAsync();
+    }
+
+    Task ReloadAsync()
+    {
+        filter.TransactionId = Guid.TryParse(transactionIdText, out var parsed) ? parsed : null;
+
+        // Incrementing @key forces Blazor to tear down the old QuickGrid instance and mount a brand
+        // new one, rather than asking the existing instance to refresh in place. A filter change and
+        // the grid's own still in-flight initial load would otherwise be two concurrent
+        // ItemsProvider calls whose results can arrive out of order and leave a stale (unfiltered)
+        // page visible - discarding the whole component sidesteps that race instead of coordinating
+        // around it.
+        //
+        // A fresh PaginationState, not SetCurrentPageIndexAsync(0) on the old one: that call notifies
+        // the OLD (about-to-be-discarded) QuickGrid's own subscription to refresh itself, which races
+        // the NEW @key-remounted grid's own first fetch - both against the same scoped DbContext,
+        // which throws "a second operation was started on this context instance" and takes the whole
+        // circuit down. A new PaginationState already starts at page 0 and has no old subscriber to
+        // notify - proven live by DiagnosticsLogsTests.The_sort_toggle_reverses_the_order_of_the_grid,
+        // which crashed the circuit under the old SetCurrentPageIndexAsync approach every single run.
+        reloadGeneration++;
+        pagination = new PaginationState { ItemsPerPage = pagination.ItemsPerPage };
+        return Task.CompletedTask;
+    }
+
+    static string LevelClass(LogSeverity level) => $"noof-level-{level.ToString().ToLowerInvariant()}";
+
+    void ToggleExpanded(long id) => expandedRowId = expandedRowId == id ? -1 : id;
+
+    public void Dispose() => queryGate.Dispose();
+}

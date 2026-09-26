@@ -12,6 +12,7 @@ public class BackupWorkerWiringTests
     static WebApplicationFactory<Program> Factory() =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.UseTempLogDirectory();
             builder.UseSetting("Database:MigrateOnStartup", "false");
             builder.UseSetting("ConnectionStrings:Ledger",
                 "Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none;Timeout=2");
@@ -64,11 +65,34 @@ public class BackupWorkerWiringTests
         scope.ServiceProvider.GetRequiredService<IDatabaseDumper>();
     }
 
+    // PR #1 review item 5: appsettings.json now spells the default BackupDirectory out explicitly
+    // as "%LOCALAPPDATA%\NoofLedger\backups" (the same convention Logging:File:Directory already
+    // used), rather than only ever holding the pre-expanded absolute path LoggingSetup computed in
+    // code. Bind() never expands environment variables on its own - the setter has to.
+    [Fact]
+    public void BackupDirectory_from_configuration_expands_environment_variables()
+    {
+        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseTempLogDirectory();
+            builder.UseSetting("Database:MigrateOnStartup", "false");
+            builder.UseSetting("ConnectionStrings:Ledger",
+                "Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none;Timeout=2");
+            builder.UseSetting("Backup:BackupDirectory", @"%LOCALAPPDATA%\NoofBackupWiringExpansionTest");
+        });
+
+        var options = factory.Services.GetRequiredService<BackupWorkerOptions>();
+
+        options.BackupDirectory.Should().Be(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NoofBackupWiringExpansionTest"));
+    }
+
     [Fact]
     public void A_disabled_backup_worker_is_not_registered()
     {
         using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.UseTempLogDirectory();
             builder.UseSetting("Database:MigrateOnStartup", "false");
             builder.UseSetting("ConnectionStrings:Ledger",
                 "Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none;Timeout=2");

@@ -1,4 +1,6 @@
+using Microsoft.Extensions.Logging;
 using Noof.Ledger.Application.Chat;
+using Noof.Ledger.Application.Diagnostics;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Types;
@@ -6,16 +8,19 @@ using Telegram.Bot.Types.ReplyMarkups;
 
 namespace Noof.Ledger.Telegram;
 
-internal sealed class TelegramChatNotifier(TelegramClientHandle clientHandle) : IChatNotifier
+internal sealed class TelegramChatNotifier(TelegramClientHandle clientHandle, IOperationTimer timer, ILogger<TelegramChatNotifier> logger)
+    : IChatNotifier
 {
     public async Task<int> SendAsync(long chatId, string text, CancellationToken cancellationToken)
     {
+        using var timing = timer.Start(logger, TimedOperations.TelegramSendMessage);
         var message = await Client().SendMessage(chatId, text, cancellationToken: cancellationToken);
         return message.Id;
     }
 
     public async Task EditAsync(long chatId, int messageId, EchoMessage message, CancellationToken cancellationToken)
     {
+        using var timing = timer.Start(logger, TimedOperations.TelegramEditMessage);
         try
         {
             await Client().EditMessageText(chatId, messageId, message.Text,
@@ -30,6 +35,7 @@ internal sealed class TelegramChatNotifier(TelegramClientHandle clientHandle) : 
 
     public async Task<int> AskAsync(long chatId, int replyToMessageId, string prompt, CancellationToken cancellationToken)
     {
+        using var timing = timer.Start(logger, TimedOperations.TelegramAskReply);
         var message = await Client().SendMessage(chatId, prompt,
             replyParameters: new ReplyParameters { MessageId = replyToMessageId },
             replyMarkup: new ForceReplyMarkup { InputFieldPlaceholder = "no, 1500" },
@@ -39,6 +45,7 @@ internal sealed class TelegramChatNotifier(TelegramClientHandle clientHandle) : 
 
     public async Task AnswerActionAsync(string actionId, CancellationToken cancellationToken)
     {
+        using var timing = timer.Start(logger, TimedOperations.TelegramAnswerCallback);
         try
         {
             await Client().AnswerCallbackQuery(actionId, cancellationToken: cancellationToken);

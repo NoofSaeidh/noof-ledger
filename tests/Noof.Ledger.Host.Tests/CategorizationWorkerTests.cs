@@ -1,15 +1,16 @@
 using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Jobs;
 using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Host.Workers;
+using Noof.Ledger.TestKit;
 
 namespace Noof.Ledger.Host.Tests;
 
@@ -100,7 +101,8 @@ public class CategorizationWorkerTests
     }
 
     static CategorizationJob Job(
-        int attemptCount = 1, JobKind kind = JobKind.Categorize, string? instruction = null, DateOnly? instructionDay = null) => new()
+        int attemptCount = 1, JobKind kind = JobKind.Categorize, string? instruction = null, DateOnly? instructionDay = null,
+        DateTimeOffset? createdAt = null) => new()
     {
         Id = JobId,
         TransactionId = TransactionId,
@@ -110,7 +112,7 @@ public class CategorizationWorkerTests
         Instruction = instruction,
         InstructionDay = instructionDay,
         RunAfter = DateTimeOffset.UtcNow,
-        CreatedAt = DateTimeOffset.UtcNow,
+        CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
         UpdatedAt = DateTimeOffset.UtcNow,
     };
 
@@ -125,9 +127,18 @@ public class CategorizationWorkerTests
         new([new ProposedLineItem("Bread", amount, currency, "groceries", null, null)]);
 
     static CategorizationWorker CreateWorker(
-        IServiceScopeFactory scopeFactory, FakeTimeProvider time, CategorizationWorkerOptions? options = null) =>
+        IServiceScopeFactory scopeFactory, FakeTimeProvider time, CategorizationWorkerOptions? options = null,
+        IDatabaseGate? gate = null, CapturingLogger<CategorizationWorker>? logger = null, IOperationTimer? timer = null) =>
         new(scopeFactory, time, options ?? new CategorizationWorkerOptions(), WorkerId,
-            Mapper, Scan, Echo, NullLogger<CategorizationWorker>.Instance);
+            Mapper, Scan, Echo, gate ?? ReadyGate(), timer ?? new OperationTimer(time, new SlowOperationOptions()),
+            logger ?? new CapturingLogger<CategorizationWorker>());
+
+    static IDatabaseGate ReadyGate()
+    {
+        var gate = Substitute.For<IDatabaseGate>();
+        gate.WaitUntilReadyAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        return gate;
+    }
 
     static IJobQueue QueueWith(CategorizationJob job)
     {
@@ -402,6 +413,171 @@ public class CategorizationWorkerTests
                 && outcome.Items.Count == 0
                 && outcome.Kind == JobKind.Categorize),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Categorized_is_logged_with_kind_wallet_and_a_computed_summary()
+    {
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine(250m, "RSD"));
+        var logger = new CapturingLogger<CategorizationWorker>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow), logger: logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        var entry = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.CategorizedEventId).Subject;
+        entry.Stage.Should().Be(TransactionStages.Categorized);
+        entry.Properties["Kind"].Should().Be(TransactionKind.Expense);
+        entry.Properties["WalletId"].Should().Be(MainWallet.Id);
+        entry.Properties["Summary"].Should().Be("250 RSD groceries");
+        entry.Scope![TransactionStages.TransactionIdProperty].Should().Be(TransactionId);
+    }
+
+    [Fact]
+    public async Task Categorized_summarises_a_balance_statement_by_its_stated_amount()
+    {
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject(rawText: "на главном 45 тысяч"));
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new CategorizationProposal([], Kind: ProposedKind.Balance, BalanceAmount: 45000m));
+        var logger = new CapturingLogger<CategorizationWorker>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow), logger: logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        var entry = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.CategorizedEventId).Subject;
+        entry.Properties["Kind"].Should().Be(TransactionKind.BalanceCheck);
+        entry.Properties["Summary"].Should().Be("balance 45000 RSD");
+    }
+
+    [Fact]
+    public async Task Categorized_summarises_an_item_less_expense_as_no_line_items()
+    {
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new CategorizationProposal([]));
+        var logger = new CapturingLogger<CategorizationWorker>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow), logger: logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        var entry = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.CategorizedEventId).Subject;
+        entry.Properties["Kind"].Should().Be(TransactionKind.Expense);
+        entry.Properties["Summary"].Should().Be("no line items");
+    }
+
+    [Fact]
+    public async Task Persisted_is_logged_after_the_outcome_is_applied()
+    {
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine());
+        var logger = new CapturingLogger<CategorizationWorker>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow), logger: logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        var entry = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.PersistedEventId).Subject;
+        entry.Stage.Should().Be(TransactionStages.Persisted);
+        entry.Properties["Kind"].Should().Be(TransactionKind.Expense);
+        entry.Scope![TransactionStages.TransactionIdProperty].Should().Be(TransactionId);
+    }
+
+    [Fact]
+    public async Task Replied_is_logged_after_the_echo_edit_succeeds()
+    {
+        var store = StoreThatRemembersWhatItApplies(Subject());
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine());
+        var logger = new CapturingLogger<CategorizationWorker>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow), logger: logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        var entry = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.RepliedEventId).Subject;
+        entry.Stage.Should().Be(TransactionStages.Replied);
+        entry.Properties["BotMessageId"].Should().Be(42);
+        entry.Scope![TransactionStages.TransactionIdProperty].Should().Be(TransactionId);
+    }
+
+    [Fact]
+    public async Task A_terminal_failure_logs_StageFailed_for_Categorized()
+    {
+        var jobQueue = QueueWith(Job());
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new ModelCallException(ModelFailureKind.Terminal, "no credit left on this key"));
+        var logger = new CapturingLogger<CategorizationWorker>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow), logger: logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        var entry = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.StageFailedEventId).Subject;
+        entry.Properties["FailedStage"].Should().Be(TransactionStages.Categorized);
+        entry.Exception!.Message.Should().Be("no credit left on this key");
+        entry.Exception.Should().BeOfType<ModelCallException>(
+            "M-6 (Phase 5 final review): the real exception the model call raised, not a synthetic InvalidOperationException");
+        entry.Scope![TransactionStages.TransactionIdProperty].Should().Be(TransactionId);
+    }
+
+    [Fact]
+    public async Task A_transient_failure_logs_StageFailed_for_Categorized()
+    {
+        var jobQueue = Substitute.For<IJobQueue>();
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job());
+        jobQueue.RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(JobCompletionOutcome.Applied);
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new ModelCallException(ModelFailureKind.Transient, "rate limited"));
+        var logger = new CapturingLogger<CategorizationWorker>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow), logger: logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        var entry = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.StageFailedEventId).Subject;
+        entry.Properties["FailedStage"].Should().Be(TransactionStages.Categorized);
+        entry.Exception.Should().BeOfType<ModelCallException>(
+            "M-6 (Phase 5 final review): the real exception the model call raised, not a synthetic InvalidOperationException");
+    }
+
+    [Fact]
+    public async Task A_missing_transaction_logs_StageFailed_for_Categorized()
+    {
+        var jobQueue = QueueWith(Job());
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns((CategorizationSubject?)null);
+        var logger = new CapturingLogger<CategorizationWorker>();
+        var worker = CreateWorker(ScopeFactoryFor(jobQueue, KeyPresent(), store), new FakeTimeProvider(DateTimeOffset.UtcNow), logger: logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        var entry = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.StageFailedEventId).Subject;
+        entry.Properties["FailedStage"].Should().Be(TransactionStages.Categorized);
     }
 
     [Fact]
@@ -1207,5 +1383,92 @@ public class CategorizationWorkerTests
                 kinds.Order().SequenceEqual(new[] { JobKind.Categorize, JobKind.Correct, JobKind.Reinterpret })),
             Arg.Any<TimeSpan>(),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task The_loop_waits_for_the_database_gate_before_its_first_claim()
+    {
+        var jobQueue = Substitute.For<IJobQueue>();
+        var gateSource = new TaskCompletionSource();
+        var gate = Substitute.For<IDatabaseGate>();
+        gate.WaitUntilReadyAsync(Arg.Any<CancellationToken>()).Returns(gateSource.Task);
+        var worker = CreateWorker(ScopeFactoryFor(jobQueue, KeyPresent()), new FakeTimeProvider(), gate: gate);
+
+        await worker.StartAsync(TestContext.Current.CancellationToken);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        await jobQueue.DidNotReceive().ClaimAsync(
+            WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
+
+        gateSource.SetResult();
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        await jobQueue.Received().ReleaseExpiredLeasesAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+
+        await worker.StopAsync(TestContext.Current.CancellationToken);
+    }
+
+    static IJobQueue IdleQueue()
+    {
+        var jobQueue = Substitute.For<IJobQueue>();
+        jobQueue.ReleaseExpiredLeasesAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(0);
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns((CategorizationJob?)null);
+        return jobQueue;
+    }
+
+    static string? OperationOf(CapturedLogEntry entry) => entry.Properties.GetValueOrDefault("Operation") as string;
+
+    [Fact]
+    public async Task An_idle_tick_logs_no_timing_event()
+    {
+        var logger = new CapturingLogger<CategorizationWorker>();
+        var worker = CreateWorker(ScopeFactoryFor(IdleQueue(), KeyPresent()), new FakeTimeProvider(), logger: logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        logger.Entries.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_claimed_job_logs_claim_queueWait_loadContext_applyCategorization_completeJob_and_job_categorize()
+    {
+        var claimedAt = new DateTimeOffset(2026, 9, 22, 9, 0, 0, TimeSpan.Zero);
+        var job = Job(createdAt: claimedAt - TimeSpan.FromSeconds(7));
+        job.ClaimedAt = claimedAt;
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine());
+        var logger = new CapturingLogger<CategorizationWorker>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(job), KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(claimedAt), logger: logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        var operations = logger.Entries.Select(OperationOf).Where(operation => operation is not null).ToList();
+        operations.Should().Contain("db.claimJob");
+        operations.Should().Contain("job.queueWait");
+        operations.Should().Contain("db.loadCategorizationContext");
+        operations.Should().Contain("db.applyCategorization");
+        operations.Should().Contain("db.completeJob");
+        operations.Should().Contain("job.categorize");
+
+        var queueWait = logger.Entries.Should().ContainSingle(entry => OperationOf(entry) == "job.queueWait").Subject;
+        queueWait.Properties["ElapsedMs"].Should().Be(7000L);
+    }
+
+    [Fact]
+    public async Task A_ReleaseExpiredLeasesAsync_that_throws_still_logs_db_releaseExpiredLeases()
+    {
+        var jobQueue = Substitute.For<IJobQueue>();
+        jobQueue.ReleaseExpiredLeasesAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns<int>(_ => throw new InvalidOperationException("boom"));
+        var logger = new CapturingLogger<CategorizationWorker>();
+        var worker = CreateWorker(ScopeFactoryFor(jobQueue, KeyPresent()), new FakeTimeProvider(), logger: logger);
+
+        var result = await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        result.Should().Be(CategorizationTickResult.Failed);
+        logger.Entries.Should().Contain(entry => OperationOf(entry) == "db.releaseExpiredLeases");
     }
 }

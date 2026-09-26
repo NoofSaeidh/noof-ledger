@@ -3,7 +3,9 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Noof.Ledger.Ai.Anthropic;
 using Noof.Ledger.Ai.Groq;
+using Noof.Ledger.Application;
 using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Application.Transcription;
 using NSubstitute;
@@ -15,6 +17,9 @@ public class AiRegistrationTests
     static ServiceProvider Provider(IConfiguration? configuration = null)
     {
         var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(TimeProvider.System);
+        services.AddNoofApplication(new SlowOperationOptions());
         services.AddScoped(_ => Substitute.For<ISecretStore>());
         services.AddNoofAi(configuration ?? new ConfigurationBuilder().Build());
         return services.BuildServiceProvider();

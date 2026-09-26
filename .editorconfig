@@ -27,10 +27,12 @@ dotnet_diagnostic.CA2263.severity = error
 # this needs GenerateDocumentationFile to fire at all.
 dotnet_diagnostic.IDE0005.severity = error
 
+[*.{cs,razor}]
 # Naming, as this repository actually writes it rather than as any tool assumes. ReSharper's default
 # wants _underscore private fields and flagged 25 of ours; the convention lives here instead, where
 # the compiler enforces it on every build and Rider reads it too, rather than in a settings file only
-# one tool consults.
+# one tool consults. razor too: a component's @code fields are fields, and under [*.cs] alone Rider
+# fell back to its _underscore default for every one of them.
 dotnet_diagnostic.IDE1006.severity = error
 
 dotnet_naming_rule.private_constants_are_pascal_case.severity = error
@@ -59,6 +61,14 @@ dotnet_naming_style.pascal_case.capitalization = pascal_case
 # Every narrowing section is below this line. A property belongs to whichever section header
 # precedes it, so a repository-wide rule added below one of them silently becomes a rule about a
 # single directory - which reports nothing, and reads exactly like a rule with nothing to report.
+
+[src/**]
+# Task 2 (Phase 5 observability): every log call in src goes through a source-generated
+# [LoggerMessage] method - CA1848 catches a direct logger.LogXxx(...) call, CA2254 catches a
+# message template built from a runtime expression instead of a compile-time constant. Scoped to
+# src, not tests/**, per CLAUDE.md's own working agreement for this task.
+dotnet_diagnostic.CA1848.severity = error
+dotnet_diagnostic.CA2254.severity = error
 
 [src/Noof.Ledger.Domain/**]
 # Domain and Application exist to be referenced. Their public types are the contract every other

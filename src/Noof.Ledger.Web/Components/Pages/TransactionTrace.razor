@@ -1,0 +1,213 @@
+@page "/transactions/{Id:guid}/trace"
+@using System.Globalization
+@using Noof.Ledger.Application.Diagnostics
+@using Noof.Ledger.Domain
+@attribute [Authorize]
+@inject ITransactionTrace TransactionTraceReader
+@inject IDatabaseGate Gate
+@inject IDatabaseLogLevel DatabaseLogLevel
+@inject TimeZoneInfo CaptureTimeZone
+
+<PageTitle>Transaction trace</PageTitle>
+
+<MudLink Href="/transactions" Class="mb-3" Style="display:inline-block;">&larr; Transactions</MudLink>
+<MudText HtmlTag="h1" Typo="Typo.h4" Class="mb-1">Transaction trace</MudText>
+<MudText Typo="Typo.body2" Class="mud-text-secondary noof-mono mb-6">@Id</MudText>
+
+@if (Gate.State != DatabaseState.Ready)
+{
+    <DatabaseGateBanner />
+}
+else if (trace is null)
+{
+    <MudText Typo="Typo.body1">Loading…</MudText>
+}
+else if (!trace.Exists)
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">No transaction with this id.</MudAlert>
+}
+else
+{
+    @if (trace.Summary is { } summary)
+    {
+        <MudSimpleTable id="trace-summary" Dense="true" Elevation="0" Outlined="true" Class="noof-trace-summary-table mb-8">
+            <tbody>
+                <tr>
+                    <td>Message</td>
+                    <td>@(string.IsNullOrWhiteSpace(summary.RawText) ? "—" : summary.RawText)</td>
+                </tr>
+                <tr>
+                    <td>Capture</td>
+                    <td>@summary.CaptureKind</td>
+                </tr>
+                <tr>
+                    <td>Received</td>
+                    <td>@FormatReceived(summary.ReceivedAt)</td>
+                </tr>
+                <tr>
+                    <td>Status</td>
+                    <td>
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@StatusColor(summary.Status)">@summary.Status</MudChip>
+                    </td>
+                </tr>
+                <tr>
+                    <td>Kind</td>
+                    <td>@summary.Kind</td>
+                </tr>
+                <tr>
+                    <td>Wallet</td>
+                    <td>@(string.IsNullOrEmpty(summary.WalletName) ? "—" : summary.WalletName)</td>
+                </tr>
+                <tr>
+                    <td>Occurred on</td>
+                    <td>@summary.OccurredOn.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)</td>
+                </tr>
+                @if (summary.LineItems.Count > 0)
+                {
+                    <tr>
+                        <td>Line items</td>
+                        <td>
+                            @foreach (var item in summary.LineItems)
+                            {
+                                <div>@item.Description — @item.Amount.Amount.ToString("N2", CultureInfo.InvariantCulture) @item.Amount.Currency @(item.CategoryName is not null ? $"({item.CategoryName})" : "")</div>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    }
+
+    @if (DatabaseLogLevel.Current is null || DatabaseLogLevel.Current > LogSeverity.Information)
+    {
+        <MudAlert id="trace-log-level-notice" Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-4">
+            @if (DatabaseLogLevel.Current is null)
+            {
+                @:The database log level is Off — nothing is recorded to app_log, so this trace will stay empty.
+            }
+            else
+            {
+                @:The database log level is @DatabaseLogLevel.Current — stage events are not recorded above Information.
+            }
+            <MudLink Href="/diagnostics/logs/settings">Log settings</MudLink>
+        </MudAlert>
+    }
+
+    <div class="noof-section-header">
+        <MudText HtmlTag="h2" Typo="Typo.h6">Stages</MudText>
+        <MudLink id="trace-logs-link" Href="@($"/diagnostics/logs?transactionId={Id}&level=Debug")">
+            Timings and debug log &rarr;
+        </MudLink>
+    </div>
+
+    <div id="trace-stages" class="noof-stage-list mb-4">
+        @foreach (var stage in TransactionStages.Ordered)
+        {
+            var stageEvent = trace.Events.FirstOrDefault(e => e.Stage == stage);
+            var failed = trace.Events.Any(e => e.Stage == TransactionStages.StageFailed && e.FailedStage == stage);
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                     Color="@(failed ? Color.Error : stageEvent is not null ? Color.Success : Color.Default)">
+                @(stage == TransactionStages.Transcribed && stageEvent is null && !failed ? $"{stage} —" : stage)
+            </MudChip>
+        }
+    </div>
+
+    @if (trace.Events.Count == 0)
+    {
+        <MudAlert id="trace-timeline" Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-6">
+            Trace expired (its log rows are older than the retention window)
+        </MudAlert>
+    }
+    else
+    {
+        <MudSimpleTable id="trace-timeline" Dense="true" Elevation="0" Outlined="true" Class="mb-8">
+            <thead>
+                <tr>
+                    <th>Offset</th>
+                    <th>Stage</th>
+                    <th>Event</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var e in trace.Events)
+                {
+                    <tr>
+                        <td>@FormatOffset(e.At - trace.Events[0].At)</td>
+                        <td>@e.Stage</td>
+                        <td>
+                            @e.Message
+                            @if (e.Exception is not null)
+                            {
+                                <div class="noof-trace-reason">@(e.Reason ?? "See details")</div>
+                                <details class="noof-trace-details">
+                                    <summary>Details</summary>
+                                    <pre>@e.Exception</pre>
+                                </details>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    }
+
+    <MudText HtmlTag="h2" Typo="Typo.h6" Class="mb-3">History</MudText>
+    @if (trace.History.Count == 0)
+    {
+        <MudAlert id="trace-history" Severity="Severity.Info" Variant="Variant.Outlined">No edits yet</MudAlert>
+    }
+    else
+    {
+        <MudSimpleTable id="trace-history" Dense="true" Elevation="0" Outlined="true">
+            <thead>
+                <tr>
+                    <th>When</th>
+                    <th>Change</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var revision in trace.History)
+                {
+                    <tr>
+                        <td>@revision.At.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", System.Globalization.CultureInfo.InvariantCulture)</td>
+                        <td>@revision.ChangeKind</td>
+                        <td>@revision.Details</td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    }
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    // Fully qualified: this page's own generated class is also named TransactionTrace (from the
+    // file name), which shadows the unqualified domain record of the same name from Application.
+    Noof.Ledger.Application.Diagnostics.TransactionTrace? trace;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Gate.State == DatabaseState.Ready)
+            trace = await TransactionTraceReader.GetAsync(Id, CancellationToken.None);
+    }
+
+    static Color StatusColor(TransactionStatus status) => status switch
+    {
+        TransactionStatus.Failed => Color.Error,
+        TransactionStatus.Completed => Color.Success,
+        TransactionStatus.Captured => Color.Warning,
+        _ => Color.Default,
+    };
+
+    static string FormatOffset(TimeSpan offset) => offset switch
+    {
+        { TotalSeconds: < 1 } => $"+{(int)offset.TotalMilliseconds} ms",
+        { TotalSeconds: < 10 } => $"+{offset.TotalSeconds.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)} s",
+        _ => $"+{(int)offset.TotalSeconds} s",
+    };
+
+    string FormatReceived(DateTimeOffset receivedAt) =>
+        TimeZoneInfo.ConvertTime(receivedAt, CaptureTimeZone).ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+}

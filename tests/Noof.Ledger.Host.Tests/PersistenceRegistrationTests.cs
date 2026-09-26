@@ -48,4 +48,27 @@ public class PersistenceRegistrationTests
         scope.ServiceProvider.GetRequiredService<IJobQueue>().Should().NotBeNull();
         scope.ServiceProvider.GetRequiredService<IWalletDirectory>().Should().NotBeNull();
     }
+
+    // Decision (c), 2026-09-26: a leftover Logging:Retention key (an operator's environment variable
+    // from before retention moved to the Log settings screen) must fail fast, not silently stop
+    // applying - the same rationale as LoggingSetup's Serilog:MinimumLevel:Default check.
+    [Fact]
+    public void A_leftover_Logging_Retention_key_fails_fast_naming_the_replacement_screen()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton(TimeZoneInfo.Utc);
+        services.AddDataProtection();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:Ledger"] = "Host=127.0.0.1;Database=noof_ledger_never_opened;Username=x;Password=y",
+                ["Logging:Retention:Days:Warning"] = "730",
+            })
+            .Build();
+
+        var act = () => services.AddNoofPersistence(configuration, maxJobAttempts: 8);
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*Logging:Retention*diagnostics/logs/settings*");
+    }
 }

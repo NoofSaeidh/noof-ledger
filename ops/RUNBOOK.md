@@ -7,7 +7,7 @@ PostgreSQL 18 instance ready for development and tests. Run it from an
 elevated PowerShell:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File ops/reset-database-auth.ps1
+.\run.ps1 db-auth-reset
 ```
 
 What it does:
@@ -53,10 +53,21 @@ operator starts the host (`Database:MigrateOnStartup`), never by hand.
 $admin = if ($env:NOOF_TEST_PG) { $env:NOOF_TEST_PG } else { (Get-Content "$env:LOCALAPPDATA\NoofLedger\db.connection").Trim() }
 $template = $admin -replace 'Database=postgres', 'Database=noof_ledger_test_template'
 if ($template -notmatch 'Database=noof_ledger_test_template') { throw "Refusing: the connection string does not name the test template." }
-dotnet ef database update --project src/Noof.Ledger.Persistence --startup-project src/Noof.Ledger.Persistence --connection $template
+$env:NOOF_LEDGER_EF_CONNECTION = $template
+try {
+    dotnet ef database update --project src/Noof.Ledger.Persistence --startup-project src/Noof.Ledger.Persistence
+} finally {
+    Remove-Item Env:\NOOF_LEDGER_EF_CONNECTION -ErrorAction SilentlyContinue
+}
 ```
 
-The output's last line must name the new migration. Do **not** run it without `--connection`.
+The template connection string carries the postgres password, so it goes to `dotnet ef` through the
+`NOOF_LEDGER_EF_CONNECTION` environment variable - which `DesignTimeDbContextFactory` reads before
+falling back to the normal resolution - never through `--connection`, which would put the password on
+that process's command line. The output's last line must name the new migration. Do **not** run it
+without pointing `dotnet ef` at the template one way or the other.
+
+`.\run.ps1 update-test-template` runs exactly this (under the shared suite lock).
 
 ## Speech-to-text (Groq)
 
@@ -219,21 +230,146 @@ Record the result here once it has been run:
 
 > _Not yet run. When it is: date, dump file name, and OK/MISMATCH go here._
 
-## Start the published app from its own directory
+## Logging and diagnostics
+
+**Where logs live.** `%LOCALAPPDATA%\NoofLedger\logs\noof-ledger-<date>.log` by default — daily
+rolling, 14 files kept (`Logging:File:RetainedFileCountLimit`, by file count only, never by days), 50 MB
+cap each (`Logging:File:FileSizeLimitBytes`). To use a different folder, set `Logging:File:Directory` in
+`appsettings.json` (or the `Logging__File__Directory` environment variable) to the path you want; the
+app creates it if it does not exist. The file's own floor is `Logging:File:MinimumLevel` (`Debug` as
+checked in) and the console's is `Logging:Console:MinimumLevel` (`Information`); `Serilog:MinimumLevel`
+now holds only `Override` — a `Serilog:MinimumLevel:Default` left over from before this fails startup
+fast, naming these two keys as its replacement. While PostgreSQL is reachable, the same events are also written
+to the `app_log` table — every known secret (everything in `app_secret`, plus the database password)
+is redacted to `***` before either sink sees a line. If the database is down, or the table sink itself
+starts failing, the file is the only copy; nothing is lost, only the second copy is missing until the
+sink recovers. Events logged before the database gate ever turns `Ready` are buffered in memory
+(up to 10,000) and flushed to `app_log` the moment it does; if the gate never turns `Ready` before
+shutdown, one warning line naming how many events never made it lands in the file/console instead —
+they are still in the file itself, just never copied to the table.
+
+**Reading `/diagnostics` and the trace page.** `/diagnostics` lists every health check — Database,
+Migrations, Telegram, AI keys, Backup, Disk, Log sink — each with a "Logs" link that opens
+`/diagnostics/logs` pre-filtered to that check's own log category. A check that throws or times out
+shows only the exception type ("Check failed (ExceptionType) — see logs" or "No answer within 5 s"),
+never the exception's message; the full exception is logged under the check's own category, which is
+exactly what its "Logs" link opens. `/diagnostics/logs` is a paged,
+filterable grid (level, time range, free text, source, transaction id) over `app_log`, reached from
+the **Logs** tab; while the database is unavailable it shows the waiting banner like every other
+page — read the file log with `.\run.ps1 logs` instead. Every transaction has its own page at
+`/transactions/{id}/trace` — the message itself, its path from received to replied with timings and
+the reason for any failure, and the `transaction_revisions` history below it; if the log rows have
+aged out under retention the trace strip says so but the revision history still shows, since that
+table is never pruned. Above Information (or Off), the database sink drops the stage events the
+trace page reads, so the page shows an inline notice instead, linking to Log settings. Retention is
+per level, set on `/diagnostics/logs/settings` (the **Log settings** link from the Logs page header)
+and persisted in `app_setting`, never in `appsettings.json` — C# defaults: Verbose and Debug 1 day,
+Information 30, Warning/Error/Fatal 90.
+
+### Verbose logging
+
+By default the database sink only records Information and above (per-level retention defaults:
+Verbose/Debug 1 day, Information 30, Warning/Error/Fatal 90 — set on `/diagnostics/logs/settings`,
+persisted in `app_setting`). To see Debug detail — model/Telegram/worker/health timings — temporarily:
+
+1. Open `/diagnostics/logs` (the **Logs** tab), follow **Log settings**, set the database level to
+   `Debug` (or `Verbose`) and click **Save** — nothing changes until you do. It survives a restart,
+   and is kept for however many days that same screen's Debug retention field says (1 by default) —
+   turn it back to `Information` when you are done, or let it age out.
+2. Every Telegram message, model call and worker tick logs a Debug timing line
+   (`{Operation} took {ElapsedMs} ms`) once the database level allows it; a call over its own slow
+   threshold logs a Warning instead (`Logging:SlowOperationMs:<operation>`, e.g.
+   `Logging__SlowOperationMs__model=45000` as an environment variable) and is recorded regardless of
+   the database level. A Telegram long poll is judged against `Telegram:PollingSeconds` **plus** the
+   `telegram` threshold, so raising the poll interval never turns an idle poll into a Warning.
+3. Per-statement SQL is **not** part of step 1: the checked-in
+   `Serilog:MinimumLevel:Override:Microsoft.EntityFrameworkCore` is `Information`, and an override
+   applies at the root logger, before any sink sees the event. To get SQL, set
+   `Serilog__MinimumLevel__Override__Microsoft.EntityFrameworkCore.Database.Command=Debug` and
+   restart. It then reaches the file (whose own floor is `Logging:File:MinimumLevel`, `Debug` as
+   checked in) **and** `app_log` whenever step 1's level is `Debug` or lower — every query of every
+   page and worker, so expect a large table for that day; remove the variable when done.
+4. From a transaction's own trace page (`/transactions/{id}/trace`), the **Timings and debug log**
+   link opens `/diagnostics/logs` pre-filtered to that transaction at Debug — the quickest way to see
+   everything that happened to one message without hunting through the whole table.
+
+Leave `appsettings.Development.json` alone — `.\run.ps1 start` always runs Production.
+
+**Setting the PostgreSQL service to start automatically is the operator's decision, not the app's.**
+The host waits indefinitely for PostgreSQL and needs no help to recover once it is up — but if you
+want PostgreSQL itself to come back after a reboot without you starting it by hand, that is a Windows
+service setting, from an elevated shell:
 
 ```powershell
-Push-Location .\publish; .\Noof.Ledger.Host.exe; Pop-Location
+Set-Service postgresql-x64-18 -StartupType Automatic
 ```
 
-The `Push-Location` is not decoration. `WebApplication.CreateBuilder` derives the content root from
-the process's **current directory**, not from the executable's location, so a host launched from
-anywhere else resolves every static asset against the wrong folder — and `MapStaticAssets` then
-answers each one **200 with an empty body** rather than 404. The app comes up, every page renders,
-nothing is logged, and the whole thing is unstyled with no Blazor script. It looks exactly like a
-CSS bug, and it has now cost two separate debugging sessions.
+### Manual acceptance — Phase 5 (observability), the database going down and coming back
 
-A real deployment always launches with its working directory set to its install directory, which is
-why `HostProcess` in the E2E fixture sets it too.
+Ten minutes, no live model call, this costs nothing.
+
+1. **Stop PostgreSQL:**
+   ```powershell
+   Stop-Service postgresql-x64-18
+   ```
+2. **Start the host** (`Push-Location .\publish; .\Noof.Ledger.Host.exe`, per the section below). The
+   sign-in page — and every other page, if you are already signed in — shows a "Waiting for the
+   database…" banner instead of an error or a crash. The process keeps running.
+3. **Check the log file** under `%LOCALAPPDATA%\NoofLedger\logs`: it records each connection attempt
+   with the 2 s → 4 s → 8 s → 16 s → 30 s backoff (the first ten attempts each logged, then every
+   tenth).
+4. **Start PostgreSQL again:**
+   ```powershell
+   Start-Service postgresql-x64-18
+   ```
+   The host migrates and comes up on its own — no restart needed. Reload the sign-in page; the banner
+   is gone.
+5. **Ask the bot for its own health:** send `/health` from the owner's chat. Expect a plain-text
+   summary — `Health: all good` or a line per check that is not Ok.
+
+## run.ps1 — the one entry point
+
+`run.ps1` in the repo root is how the app is launched and operated from here on; `.\run.ps1` (or
+`.\run.ps1 help`) prints the command table, and `.\run.ps1 help <command>` prints one command's full
+detail — prerequisites included. `Get-Help .\run.ps1 -Full` works too. One line each:
+
+- `start [-Dev]` — the main way to run it: `dotnet run` in Production, same behaviour as the
+  published exe; `-Dev` for the Development launch profile in an IDE.
+- `publish [-Output <dir>]` — build, test, publish (`ops/publish.ps1`), under the shared suite lock;
+  refuses to publish on a failed or empty test run.
+- `start-published [-Path <dir>]` — run a published `Noof.Ledger.Host.exe`, from anywhere.
+- `set-password <username>` — create or reset a login; the only way a user is ever created.
+- `test [fast|db|e2e|all] [-Filter <class>]` — fast needs no database (it excludes the Host.Tests
+  classes tagged `[Trait("Category", "Database")]`); db/e2e/all take the shared suite lock, and db
+  runs those tagged classes too.
+- `update-test-template` — apply the newest migration to `noof_ledger_test_template` (see below).
+- `clean-test-dbs [-WhatIf]` — drop leftover `noof_test_*`/`noof_e2e_*` databases.
+- `restore-check [args passthrough]` — forwards to `ops/restore-check.ps1`.
+- `db-auth-reset` — one-time PostgreSQL setup (`ops/reset-database-auth.ps1`, needs an elevated shell).
+- `pg start|stop|status` — the `postgresql-x64-18` Windows service (start/stop need admin).
+- `status` — PostgreSQL, `/healthz`, and the newest log file, on one screen.
+- `logs [-Tail <n>] [-Follow]` — open, tail, or follow the log directory.
+- `backups` — open the backup directory.
+- `inspect` — the solution-wide accessibility sweep (`ops/inspect.ps1`).
+
+Every `ops/*.ps1` script named above still exists and still works stand-alone; `run.ps1` is what
+calls it with the right arguments, not a replacement for it.
+
+**Changing the port.** Edit `Urls` in the published `appsettings.json` (or pass `--urls` on the
+command line, which always wins) - `ASPNETCORE_URLS` is overridden by it, because
+`WebApplication.CreateBuilder` adds the JSON config source after the `ASPNETCORE_`-prefixed
+environment source, so the file wins over the standard ASP.NET Core environment-variable way of
+re-pointing an app.
+
+**Why the current directory used to matter, and no longer does.** Before Task 11,
+`WebApplication.CreateBuilder` derived the content root from the process's **current directory**, not
+from the executable's location, so a host launched from anywhere but its own install directory
+resolved every static asset against the wrong folder — and `MapStaticAssets` answered each one **200
+with an empty body** rather than 404: the app came up, every page rendered, nothing was logged, and
+the whole thing was unstyled with no Blazor script. It looked exactly like a CSS bug, and cost two
+separate debugging sessions. `Program.cs` now sets the content root from
+`AppContext.BaseDirectory` instead, so `run.ps1 start-published` (and a real deployment) works from
+any current directory.
 
 ## Manual acceptance — the end-to-end check no test can do
 
@@ -248,7 +384,7 @@ it automatically stay skipped precisely so a test run never spends anything.
 ### Before you start
 
 ```powershell
-pwsh -File ops/publish.ps1            # refuses to publish if a single test fails
+.\run.ps1 publish            # refuses to publish if a single test fails
 ```
 
 Then confirm the database is in the state you think it is:
@@ -265,8 +401,7 @@ A freshly recreated ledger reads `0 | 0 | 0 | 1 | 20`.
 
 ### The run
 
-1. **Start it.** `Push-Location .\publish; .\Noof.Ledger.Host.exe` — from that
-   directory, per the section above. It binds loopback only and refuses to
+1. **Start it.** `.\run.ps1 start-published`. It binds loopback only and refuses to
    start otherwise. Open the address it prints.
 
    Authentication is always on. The first time, `noof_ledger` has **no user

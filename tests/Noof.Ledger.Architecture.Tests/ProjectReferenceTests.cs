@@ -34,7 +34,7 @@ public class ProjectReferenceTests
         // IServiceCollection - that type lives in this one package. Widening this list further is
         // an edit somebody has to justify, same as every other project's allowed set below.
         Packages("Noof.Ledger.Application").Should().BeEquivalentTo(
-            "Microsoft.Extensions.DependencyInjection.Abstractions");
+            "Microsoft.Extensions.DependencyInjection.Abstractions", "Microsoft.Extensions.Logging.Abstractions");
     }
 
     [Fact]
@@ -60,7 +60,10 @@ public class ProjectReferenceTests
             // MudBlazor is a UI component library and belongs to exactly this assembly. It arrives
             // here rather than silently: this list is the argument about a new UI dependency, and
             // widening it is an edit somebody has to justify.
-            "MudBlazor");
+            "MudBlazor",
+            // QuickGrid backs /diagnostics/logs's paged, filterable grid (Phase 5 Task 7) - a UI
+            // concern, same as MudBlazor, and belongs to exactly this assembly for the same reason.
+            "Microsoft.AspNetCore.Components.QuickGrid");
     }
 
     [Fact]

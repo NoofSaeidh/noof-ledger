@@ -1,15 +1,16 @@
 using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Jobs;
 using Noof.Ledger.Application.Transcription;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Host.Workers;
+using Noof.Ledger.TestKit;
 
 namespace Noof.Ledger.Host.Tests;
 
@@ -45,11 +46,11 @@ public class TranscriptionWorkerTests
         }
     }
 
-    static CategorizationJob CaptureJob(int attemptCount = 1) => new()
+    static CategorizationJob CaptureJob(int attemptCount = 1, DateTimeOffset? createdAt = null) => new()
     {
         Id = JobId, TransactionId = TransactionId, Kind = JobKind.Transcribe, VoiceFileId = "voice-file-1",
         Status = JobStatus.Claimed, AttemptCount = attemptCount,
-        RunAfter = DateTimeOffset.UnixEpoch, CreatedAt = DateTimeOffset.UnixEpoch, UpdatedAt = DateTimeOffset.UnixEpoch,
+        RunAfter = DateTimeOffset.UnixEpoch, CreatedAt = createdAt ?? DateTimeOffset.UnixEpoch, UpdatedAt = DateTimeOffset.UnixEpoch,
     };
 
     static CategorizationJob CorrectionJob(int attemptCount = 1) => new()
@@ -98,9 +99,21 @@ public class TranscriptionWorkerTests
         return new Harness(queue, speechProvider, store, transcriptionStore, voiceFiles, transcriber, Substitute.For<IChatNotifier>());
     }
 
-    static TranscriptionWorker CreateWorker(IServiceScopeFactory scopeFactory, FakeTimeProvider? time = null) =>
-        new(scopeFactory, time ?? new FakeTimeProvider(new DateTimeOffset(2026, 9, 24, 9, 0, 0, TimeSpan.Zero)),
-            new CategorizationWorkerOptions(), WorkerId, Echo, NullLogger<TranscriptionWorker>.Instance);
+    static TranscriptionWorker CreateWorker(
+        IServiceScopeFactory scopeFactory, FakeTimeProvider? time = null, IDatabaseGate? gate = null,
+        CapturingLogger<TranscriptionWorker>? logger = null, IOperationTimer? timer = null)
+    {
+        var resolvedTime = time ?? new FakeTimeProvider(new DateTimeOffset(2026, 9, 24, 9, 0, 0, TimeSpan.Zero));
+        return new(scopeFactory, resolvedTime, new CategorizationWorkerOptions(), WorkerId, Echo, gate ?? ReadyGate(),
+            timer ?? new OperationTimer(resolvedTime, new SlowOperationOptions()), logger ?? new CapturingLogger<TranscriptionWorker>());
+    }
+
+    static IDatabaseGate ReadyGate()
+    {
+        var gate = Substitute.For<IDatabaseGate>();
+        gate.WaitUntilReadyAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        return gate;
+    }
 
     static Task<CategorizationTickResult> TickAsync(Harness harness) =>
         CreateWorker(harness.ScopeFactory()).RunTickAsync(TestContext.Current.CancellationToken);
@@ -140,6 +153,74 @@ public class TranscriptionWorkerTests
         await harness.Queue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
         await harness.TranscriptionStore.DidNotReceiveWithAnyArgs().CompleteCorrectionAsync(default, default!, default, default, Arg.Any<CancellationToken>());
         await harness.Store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Transcribed_is_logged_with_duration_and_character_count()
+    {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 24, 8, 0, 0, TimeSpan.Zero));
+        var harness = Setup(CaptureJob());
+        var logger = new CapturingLogger<TranscriptionWorker>();
+        var worker = CreateWorker(harness.ScopeFactory(), time, logger: logger);
+        harness.Transcriber.TranscribeAsync(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                time.Advance(TimeSpan.FromSeconds(2.5));
+                return Task.FromResult("купил вчера штуку евро");
+            });
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        var entry = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.TranscribedEventId).Subject;
+        entry.Stage.Should().Be(TransactionStages.Transcribed);
+        entry.Properties["DurationSeconds"].Should().Be(2.5);
+        entry.Properties["Characters"].Should().Be("купил вчера штуку евро".Length);
+        entry.Scope![TransactionStages.TransactionIdProperty].Should().Be(TransactionId);
+    }
+
+    [Fact]
+    public async Task A_model_failure_logs_StageFailed_for_Transcribed()
+    {
+        var harness = Setup(CaptureJob());
+        var logger = new CapturingLogger<TranscriptionWorker>();
+        var worker = CreateWorker(harness.ScopeFactory(), logger: logger);
+        harness.Transcriber.TranscribeAsync(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new ModelCallException(ModelFailureKind.Terminal, "bad audio format"));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        var entry = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.StageFailedEventId).Subject;
+        entry.Properties["FailedStage"].Should().Be(TransactionStages.Transcribed);
+        entry.Exception.Should().BeOfType<ModelCallException>();
+        entry.Scope![TransactionStages.TransactionIdProperty].Should().Be(TransactionId);
+    }
+
+    [Fact]
+    public async Task Nothing_heard_logs_StageFailed_for_Transcribed()
+    {
+        var harness = Setup(CaptureJob(), transcript: "");
+        var logger = new CapturingLogger<TranscriptionWorker>();
+        var worker = CreateWorker(harness.ScopeFactory(), logger: logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        var entry = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.StageFailedEventId).Subject;
+        entry.Properties["FailedStage"].Should().Be(TransactionStages.Transcribed);
+    }
+
+    [Fact]
+    public async Task A_missing_transaction_logs_StageFailed_for_Transcribed()
+    {
+        var harness = Setup(CaptureJob());
+        harness.Store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns((CategorizationSubject?)null);
+        var logger = new CapturingLogger<TranscriptionWorker>();
+        var worker = CreateWorker(harness.ScopeFactory(), logger: logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        var entry = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.StageFailedEventId).Subject;
+        entry.Properties["FailedStage"].Should().Be(TransactionStages.Transcribed);
+        entry.Scope![TransactionStages.TransactionIdProperty].Should().Be(TransactionId);
     }
 
     [Fact]
@@ -304,5 +385,70 @@ public class TranscriptionWorkerTests
         var worker = CreateWorker(new ThrowingScopeFactory());
 
         (await worker.RunTickAsync(TestContext.Current.CancellationToken)).Should().Be(CategorizationTickResult.Failed);
+    }
+
+    [Fact]
+    public async Task The_loop_waits_for_the_database_gate_before_its_first_claim()
+    {
+        // Not Setup(CaptureJob()): that configures ClaimAsync to always return a job, which - once
+        // the gate opens - makes ExecuteAsync's zero-delay "Processed" path a tight loop with no
+        // bound (this actually happened: an earlier version of this test ran the process out to
+        // ~28 GB before it was killed). An unconfigured ClaimAsync returns null (Idle), so the loop
+        // takes exactly one tick before PollInterval bounds it - the same shape
+        // CategorizationWorkerTests' equivalent test already uses safely.
+        var queue = Substitute.For<IJobQueue>();
+        var speechProvider = Substitute.For<ISpeechProvider>();
+        speechProvider.IsConfiguredAsync(Arg.Any<CancellationToken>()).Returns(true);
+
+        var provider = Substitute.For<IServiceProvider>();
+        provider.GetService(typeof(IJobQueue)).Returns(queue);
+        provider.GetService(typeof(ISpeechProvider)).Returns(speechProvider);
+        var scope = Substitute.For<IServiceScope>();
+        scope.ServiceProvider.Returns(provider);
+        var factory = Substitute.For<IServiceScopeFactory>();
+        factory.CreateScope().Returns(scope);
+
+        var gateSource = new TaskCompletionSource();
+        var gate = Substitute.For<IDatabaseGate>();
+        gate.WaitUntilReadyAsync(Arg.Any<CancellationToken>()).Returns(gateSource.Task);
+        var worker = CreateWorker(factory, gate: gate);
+
+        await worker.StartAsync(TestContext.Current.CancellationToken);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        await queue.DidNotReceive().ReleaseExpiredLeasesAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+
+        gateSource.SetResult();
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        await queue.Received().ReleaseExpiredLeasesAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+
+        await worker.StopAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task A_processed_job_logs_downloadFile_transcribe_completeTranscription_job_transcribe_and_queueWait()
+    {
+        var claimedAt = new DateTimeOffset(2026, 9, 24, 9, 0, 0, TimeSpan.Zero);
+        var job = CaptureJob(createdAt: claimedAt - TimeSpan.FromSeconds(4));
+        job.ClaimedAt = claimedAt;
+        var harness = Setup(job);
+        var time = new FakeTimeProvider(claimedAt);
+        var logger = new CapturingLogger<TranscriptionWorker>();
+        var worker = CreateWorker(harness.ScopeFactory(), time, logger: logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        var operations = logger.Entries
+            .Select(entry => entry.Properties.GetValueOrDefault("Operation") as string)
+            .Where(operation => operation is not null)
+            .ToList();
+        operations.Should().Contain("telegram.downloadFile");
+        operations.Should().Contain("speech.transcribe");
+        operations.Should().Contain("db.completeTranscription");
+        operations.Should().Contain("job.transcribe");
+        operations.Should().Contain("job.queueWait");
+
+        var queueWait = logger.Entries.Should()
+            .ContainSingle(entry => entry.Properties.GetValueOrDefault("Operation") as string == "job.queueWait").Subject;
+        queueWait.Properties["ElapsedMs"].Should().Be(4000L);
     }
 }

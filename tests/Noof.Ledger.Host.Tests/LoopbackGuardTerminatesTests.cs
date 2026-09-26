@@ -11,15 +11,24 @@ public class LoopbackGuardTerminatesTests
     [Fact]
     public async Task An_exposed_binding_terminates_the_host()
     {
-        using var host = StartHost("http://0.0.0.0:0");
+        string? logDirectory = null;
+        try
+        {
+            using var host = StartHost("http://0.0.0.0:0", out logDirectory);
 
-        var exited = await WaitForExitAsync(host, TimeSpan.FromSeconds(30));
+            var exited = await WaitForExitAsync(host, TimeSpan.FromSeconds(30));
 
-        exited.Should().BeTrue("the host must refuse to serve, not merely log and carry on");
-        host.ExitCode.Should().Be(1, "a safety refusal must be detectable by a service manager");
+            exited.Should().BeTrue("the host must refuse to serve, not merely log and carry on");
+            host.ExitCode.Should().Be(1, "a safety refusal must be detectable by a service manager");
+        }
+        finally
+        {
+            if (logDirectory is not null && Directory.Exists(logDirectory))
+                Directory.Delete(logDirectory, recursive: true);
+        }
     }
 
-    static Process StartHost(string urls)
+    static Process StartHost(string urls, out string logDirectory)
     {
         var start = new ProcessStartInfo("dotnet")
         {
@@ -32,6 +41,7 @@ public class LoopbackGuardTerminatesTests
         start.Environment["Database__MigrateOnStartup"] = "false";
         start.Environment["ConnectionStrings__Ledger"] =
             "Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none;Timeout=2";
+        logDirectory = start.UseTempLogDirectory();
 
         return Process.Start(start)!;
     }
