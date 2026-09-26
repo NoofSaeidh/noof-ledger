@@ -16,10 +16,12 @@ namespace Noof.Ledger.Host.Logging;
 internal static class LoggingSetup
 {
     public const string DirectoryConfigKey = "Logging:File:Directory";
+    const string FileSizeLimitBytesConfigKey = "Logging:File:FileSizeLimitBytes";
+    const string RetainedFileCountLimitConfigKey = "Logging:File:RetainedFileCountLimit";
 
     const string DefaultDirectory = @"%LOCALAPPDATA%\NoofLedger\logs";
-    const long FileSizeLimitBytes = 50 * 1024 * 1024;
-    const int RetainedFileCountLimit = 14;
+    const long DefaultFileSizeLimitBytes = 50 * 1024 * 1024;
+    const int DefaultRetainedFileCountLimit = 14;
 
     // A plain ConfigurationBuilder, not builder.Configuration - this runs before
     // WebApplication.CreateBuilder exists, because the bootstrap logger must be live before
@@ -37,19 +39,25 @@ internal static class LoggingSetup
     public static string ResolveLogDirectory(IConfiguration configuration) =>
         Environment.ExpandEnvironmentVariables(configuration[DirectoryConfigKey] ?? DefaultDirectory);
 
+    static long ResolveFileSizeLimitBytes(IConfiguration configuration) =>
+        configuration.GetValue(FileSizeLimitBytesConfigKey, DefaultFileSizeLimitBytes);
+
+    static int ResolveRetainedFileCountLimit(IConfiguration configuration) =>
+        configuration.GetValue(RetainedFileCountLimitConfigKey, DefaultRetainedFileCountLimit);
+
     // A startup exception (a bad connection string, a locked log file) is reported through this
     // logger before UseSerilog ever runs - the console+file sinks below are wrapped in the same
     // RedactingSink the fully configured logger uses in Configure(), so it never prints the
     // database password `redactor` was seeded with in the clear.
-    public static Serilog.ILogger CreateBootstrapLogger(string logDirectory, SecretRedactor redactor)
+    public static Serilog.ILogger CreateBootstrapLogger(string logDirectory, SecretRedactor redactor, IConfiguration configuration)
     {
         var destinations = new LoggerConfiguration()
             .WriteTo.Console()
             .WriteTo.File(
                 Path.Combine(logDirectory, "noof-ledger-.log"),
                 rollingInterval: RollingInterval.Day,
-                retainedFileCountLimit: RetainedFileCountLimit,
-                fileSizeLimitBytes: FileSizeLimitBytes,
+                retainedFileCountLimit: ResolveRetainedFileCountLimit(configuration),
+                fileSizeLimitBytes: ResolveFileSizeLimitBytes(configuration),
                 rollOnFileSizeLimit: true)
             .CreateLogger();
 
@@ -111,8 +119,8 @@ internal static class LoggingSetup
             .WriteTo.File(
                 Path.Combine(logDirectory, "noof-ledger-.log"),
                 rollingInterval: RollingInterval.Day,
-                retainedFileCountLimit: RetainedFileCountLimit,
-                fileSizeLimitBytes: FileSizeLimitBytes,
+                retainedFileCountLimit: ResolveRetainedFileCountLimit(hostConfiguration),
+                fileSizeLimitBytes: ResolveFileSizeLimitBytes(hostConfiguration),
                 rollOnFileSizeLimit: true)
             .CreateLogger();
 

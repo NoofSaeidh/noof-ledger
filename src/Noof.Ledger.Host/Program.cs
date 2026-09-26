@@ -32,7 +32,7 @@ var logDirectory = LoggingSetup.ResolveLogDirectory(bootstrapConfiguration);
 // the real resolution below throws the same way and is what Log.Fatal actually reports.
 var bootstrapPassword = TryResolveBootstrapDatabasePassword(bootstrapConfiguration);
 Log.Logger = LoggingSetup.CreateBootstrapLogger(
-    logDirectory, new SecretRedactor(new BootstrapSecretSource(bootstrapPassword)));
+    logDirectory, new SecretRedactor(new BootstrapSecretSource(bootstrapPassword)), bootstrapConfiguration);
 
 // Two-stage initialization (Serilog's own documented ASP.NET Core shape): the bootstrap logger
 // above is live before anything else can fail, and this try/catch/finally is what makes
@@ -79,8 +79,7 @@ try
     builder.Services.AddSingleton(CaptureTimeZoneGuard.Resolve(
         builder.Configuration["Capture:TimeZone"] ?? "Europe/Belgrade"));
 
-    var dataProtectionKeyRingDirectory = new DirectoryInfo(Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NoofLedger", "dp-keys"));
+    var dataProtectionKeyRingDirectory = DataProtectionSetup.ResolveKeyRingDirectory(builder.Configuration);
     DataProtectionSetup.Configure(builder.Services, dataProtectionKeyRingDirectory);
 
     builder.Services.AddSingleton<IPasswordHasher, PasswordHasherAdapter>();

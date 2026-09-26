@@ -1,4 +1,5 @@
 using AwesomeAssertions;
+using Microsoft.Extensions.Configuration;
 using Noof.Ledger.Host.Diagnostics;
 using Noof.Ledger.Host.Logging;
 
@@ -21,7 +22,7 @@ public class BootstrapLoggerRedactionTests
         try
         {
             var redactor = new SecretRedactor(new BootstrapSecretSource(password));
-            var logger = LoggingSetup.CreateBootstrapLogger(directory, redactor);
+            var logger = LoggingSetup.CreateBootstrapLogger(directory, redactor, new ConfigurationBuilder().Build());
 
             logger.Fatal("Startup failed for connection {ConnectionString}", $"Password={password}");
             (logger as IDisposable)?.Dispose();
