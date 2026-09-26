@@ -857,6 +857,14 @@ carries no identity and falls back to defaulting every failure to the current cl
 naming no connection at all. `SelfLogOwnershipTests` covers a host name resolving to loopback, an IPv6
 literal host, and a foreign endpoint still being rejected.
 
+**New from the same fix.** The endpoint identity is resolved once, in `Claim`, at process startup — not
+re-resolved for the life of the process. A remote database host whose DNS answer changes while the host
+is running would keep comparing against the address it resolved to at startup, so its failures would be
+dropped again, the same silent gap M-1 exists to close. Acceptable for this local-hosting deployment —
+`ops/reset-database-auth.ps1` writes `127.0.0.1`, an IP literal with no DNS involved at all — revisit if
+the database ever moves off-box to a host name whose address can actually change underneath a running
+process.
+
 **M-3 — three near-identical registration entry points for one folder.**
 `DiagnosticsRegistration.AddNoofDiagnostics`, `DiagnosticsHostRegistration.AddNoofDiagnosticsHost` and
 `HostDiagnosticsRegistration.AddNoofHostDiagnostics(connectionString)` are all called from `Program.cs`
@@ -1052,16 +1060,17 @@ practice, and a two-pass measure-then-maybe-rebuild is the kind of ceremony `CLA
 for a condition that cannot occur. Revisit if a receipt ever actually needs the distinction — a shop
 with unusually long product names could in principle overflow within 40 lines.
 
-**A correction deferred during a long extraction outage can exhaust its retry budget silently.**
-(`docs/OPEN-QUESTIONS.md` P6-1's defer-mechanism note; re-review finding R2-3.) A correction that
-arrives while a receipt is still being extracted is deferred on the job's own retry budget
-(`MaxAttempts × 5s`, ≈40s) rather than discarded — but the branch that defers it does not compute
-`isLastAttempt` the way every other failure path does, so on the final deferral the job is marked
-Failed with no `NotifyFailureAsync` call: no correction-failure echo, no `StageFailed` trace row, only a
-Debug log line. The window this needs (extraction failing to finish within ~40 seconds of a correction
-arriving) is narrow — reachable only via the same race N-4 traced — but the silence contradicts the
-branch's own comment ("never discards the operator's text"). Fix: call `NotifyFailureAsync` on the last
-deferral the same way `HandleModelFailureAsync` does for every other exhausted job.
+**Fixed (Phase 6 second re-review, R2-3) — a correction deferred during a long extraction outage no
+longer exhausts its retry budget silently.** (`docs/OPEN-QUESTIONS.md` P6-1's defer-mechanism note.) A
+correction that arrives while a receipt is still being extracted is deferred on the job's own retry
+budget (`MaxAttempts × 5s`, ≈40s) rather than discarded. `TryRouteToReceiptAsync`'s defer branch now
+computes `isLastAttempt` the same way `HandleModelFailureAsync` does; on the final deferral it logs
+Warning 1210 (`ReceiptCorrectionDeferralExhausted`), logs `StageFailed` for the `Categorized` stage the
+same way every other terminal retry path does (so the trace page shows where the job died, not
+nothing), and calls `NotifyFailureAsync` — which renders the `ComposeCorrectionFailure` echo in Telegram
+and leaves the record itself untouched (`MarkFailedAsync` only runs for a first reading, never a
+correction). The window this needs (extraction failing to finish within ~40 seconds of a correction
+arriving) is narrow — reachable only via the same race N-4 traced.
 
 **The defer branch relies on `EfJobQueue`'s claim ordering, not an explicit dependency.** The same
 defer mechanism only works because `ClaimAsync` already refuses to claim a job while an earlier job for
@@ -1073,25 +1082,27 @@ untested — `CategorizationWorkerTests` covers the deferred branch directly —
 rarely exercised is an ordering guarantee owned by a different class, worth knowing before either one
 changes independently.
 
-**Open items carried from `final-rereview-2.md`, not yet fixed:**
+**Items carried from `final-rereview-2.md`, all now fixed:**
 
-- **R2-2 (minor).** Refusing to re-file an edited link capture as a new receipt (N-2's fix) overwrites
-  the transaction's own echo with a bare "send it as its own new message" notice and no Cancel/Edit
-  buttons — the record is untouched and a later reply still corrects it, but the visible summary is
-  gone from the chat until then. Fix: send the notice as its own new message, or prepend it to the
-  existing `ComposeReceipt` render the way declined-change notes already are.
-- **R2-4 (minor).** After a Cancel and Restore, a non-money receipt (Copy/Training/Proforma/Advance) is
-  `Captured` with no job pending, and its echo renders the generic "Recording…" acknowledgement forever
-  — a dead end promising work nobody will do. `ComposeReceiptNotRecorded(kind)` already exists for this
-  exact case (N-5) and just needs wiring into the `Captured` branch of `ComposeReceipt`.
-- **R2-5 (minor, pre-existing).** An edited photo *caption* is dropped silently — Telegram delivers a
-  caption edit as `Caption`, not `Text`, so `CorrectionHandler.HandleEditAsync` returns before finding
-  the transaction at all. Only a message-edit (link captures) reaches the N-2 handling above; a photo
-  receipt's caption edit goes nowhere and no echo changes. One-line fix (`edited.Text ?? edited.Caption`)
-  plus a router test, whenever this file is next touched.
-- **R2-6 (documentation, low stakes).** A comment in `tests/Noof.Ledger.TestKit/DatabaseSettings.cs`
-  states as traced ("which is the gap ... traced back to") a root cause that was in fact inferred, not
-  reproduced — see the closed E2E-teardown-flake entry above, which now carries the same caveat.
+- **R2-2 (minor), fixed.** The N-2 refusal (an edited link capture that would re-file as a different
+  receipt) used to overwrite the transaction's own echo with a bare refusal notice, dropping the
+  Cancel/Edit buttons and the visible summary until a later reply corrected the record.
+  `CorrectionHandler.HandleEditAsync` now posts the refusal through `chatNotifier.SendAsync` as its own
+  message; the echo is never touched.
+- **R2-4 (minor), fixed.** After a Cancel and Restore, a non-money receipt (Copy/Training/Proforma/Advance)
+  landing `Captured` with no job pending used to render the generic "Recording…" acknowledgement forever.
+  `RecordEcho.ComposeReceipt`'s `Captured` branch now checks `receipt.Kind.IsNonMoneyKind()`: a non-money
+  slip renders `ComposeReceiptNotRecorded(receipt.Kind)` (with `[Edit]`); an ordinary receipt still being
+  extracted renders `ReadingReceipt` instead.
+- **R2-5 (minor, pre-existing), fixed.** An edited photo *caption* used to be dropped silently — Telegram
+  delivers a caption edit as `Caption`, not `Text`, and `CorrectionHandler.HandleEditAsync` returned before
+  finding the transaction at all. It now falls back to `Caption` when `Text` is absent and the edited
+  message is a photo or document; a voice note's own caption is still ignored (its correction text is its
+  transcript, not a caption).
+- **R2-6 (documentation, low stakes), fixed.** The comment in `tests/Noof.Ledger.TestKit/DatabaseSettings.cs`
+  now says plainly that the missing `CommandTimeout` is "the most likely explanation" for the flaky Npgsql
+  read timeouts, not a traced root cause — matching the closed E2E-teardown-flake entry above, which
+  carries the same caveat.
 
 **Cancel/Restore on a receipt loses the receipt-specific echo styling.** `RecordActionHandler` renders a
 Cancel/Restore through the generic `IRecordEcho.Compose`, not `ComposeReceipt` — the shop, location and

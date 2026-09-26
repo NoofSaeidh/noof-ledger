@@ -605,5 +605,8 @@ receipt, never from a correction.
 - **The defer mechanism for "a correction arrived mid-extraction" reuses the job's own retry budget**,
   rather than a second, purpose-built retry counter. `RetryAsync` on the same `Correct`/`Reinterpret` job
   bounds the wait at `MaxAttempts × 5s` (≈40s) and fails the job in the ordinary way if the receipt never
-  materialises — one budget to reason about, not two. `docs/BACKLOG.md` records the one gap this left:
-  exhausting that budget on the defer branch fails silently rather than notifying the operator.
+  materialises — one budget to reason about, not two. Fixed in the phase's second re-review (R2-3):
+  exhausting that budget on the defer branch used to fail silently; it now computes `isLastAttempt` the
+  same way `HandleModelFailureAsync` does, logs Warning 1210 and a `StageFailed` row at `Categorized`, and
+  calls `NotifyFailureAsync` so the operator sees the `ComposeCorrectionFailure` echo — `docs/BACKLOG.md`
+  has the full mechanism.
