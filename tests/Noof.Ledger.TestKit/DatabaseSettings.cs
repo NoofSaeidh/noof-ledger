@@ -4,13 +4,12 @@ namespace Noof.Ledger.TestKit;
 
 public static class DatabaseSettings
 {
-    // CREATE DATABASE ... TEMPLATE ... and DROP DATABASE ... WITH (FORCE) both force PostgreSQL to
-    // checkpoint the database they read from or remove - documented behaviour, not a defect - and
-    // under a loaded shared server (several worktrees, or several test collections, each creating
-    // and dropping clone databases) that wait can outlast Npgsql's default 30s CommandTimeout.
-    // Several fixtures had already raised it for DROP alone; CREATE never got the same treatment,
-    // which is the most likely explanation for a Phase 6 full-suite run's flaky Npgsql read timeouts -
-    // a hypothesis, not a reproduced trace: if the timeouts recur, look elsewhere too.
+    // Every DROP DATABASE forces a checkpoint and waits for it. Under the default WAL_LOG strategy a
+    // new database's ~300 files are written through shared buffers, so that checkpoint must fsync
+    // every database created since the last one and still alive - with 40 live clones one CHECKPOINT
+    // took 42.6s under WAL_LOG and 0.17s under FILE_COPY, which copies and fsyncs the files in the
+    // creating backend instead. That is what made full-suite drops outlast 120s (Phase 6), with or
+    // without a second checkout running; the budgets below are a ceiling, not the fix.
     //
     // This used to be one AdminDdlTimeoutSeconds backing both budgets below. They happened to share
     // a value, which let editing one look like it covered both - it did not: the connect timeout
@@ -35,11 +34,17 @@ public static class DatabaseSettings
         return connection;
     }
 
+    public static string CreateFromTemplateSql(string name) =>
+        $"CREATE DATABASE \"{name}\" TEMPLATE {TemplateDatabase} STRATEGY FILE_COPY";
+
+    public static string CreateEmptySql(string name) =>
+        $"CREATE DATABASE \"{name}\" STRATEGY FILE_COPY";
+
     public static Task CreateDatabaseFromTemplateAsync(string name, CancellationToken cancellationToken) =>
-        ExecuteAdminDdlAsync($"CREATE DATABASE \"{name}\" TEMPLATE {TemplateDatabase}", cancellationToken);
+        ExecuteAdminDdlAsync(CreateFromTemplateSql(name), cancellationToken);
 
     public static Task CreateEmptyDatabaseAsync(string name, CancellationToken cancellationToken) =>
-        ExecuteAdminDdlAsync($"CREATE DATABASE \"{name}\"", cancellationToken);
+        ExecuteAdminDdlAsync(CreateEmptySql(name), cancellationToken);
 
     public static Task DropDatabaseAsync(string name, CancellationToken cancellationToken) =>
         ExecuteAdminDdlAsync($"DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)", cancellationToken);
