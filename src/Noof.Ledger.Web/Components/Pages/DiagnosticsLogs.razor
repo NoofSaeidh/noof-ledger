@@ -7,6 +7,7 @@
 @inject ILogQuery LogQuery
 @inject IDatabaseGate Gate
 @inject TimeProvider TimeProvider
+@inject IDatabaseLogLevel DatabaseLogLevel
 
 <PageTitle>Logs</PageTitle>
 
@@ -18,6 +19,25 @@
 }
 else
 {
+    <div class="noof-filter-bar mb-2">
+        <div class="noof-filter-field">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">Record to database from</MudText>
+            <select id="logs-database-level" @bind="databaseLevel" @bind:after="SaveDatabaseLevelAsync" class="noof-native-select">
+                @foreach (var level in DatabaseLogLevel.Choices)
+                {
+                    <option value="@level">@level</option>
+                }
+            </select>
+        </div>
+    </div>
+
+    @if (databaseLevelError)
+    {
+        <MudAlert id="logs-database-level-error" Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-2">
+            Could not save the database log level. Try again.
+        </MudAlert>
+    }
+
     <div class="noof-filter-bar">
         <div class="noof-filter-field">
             <MudText Typo="Typo.caption" Class="mud-text-secondary">Level</MudText>
@@ -120,6 +140,13 @@ else
     [SupplyParameterFromQuery]
     public string? Source { get; set; }
 
+    // SupplyParameterFromQuery does not bind enums, hence the string.
+    [SupplyParameterFromQuery]
+    public Guid? TransactionId { get; set; }
+
+    [SupplyParameterFromQuery]
+    public string? Level { get; set; }
+
     enum QuickRange { All, LastHour, Today, Last7Days }
 
     sealed class LogFilterEdit
@@ -140,11 +167,38 @@ else
     string? transactionIdText;
     QuickRange quickRange = QuickRange.All;
     long expandedRowId = -1;
+    LogSeverity databaseLevel;
+    bool databaseLevelError;
 
     protected override void OnInitialized()
     {
         if (!string.IsNullOrWhiteSpace(Source))
             filter.Source = Source;
+
+        if (TransactionId is { } transactionId)
+        {
+            filter.TransactionId = transactionId;
+            transactionIdText = transactionId.ToString();
+        }
+
+        if (Enum.TryParse<LogSeverity>(Level, ignoreCase: true, out var level))
+            filter.MinLevel = level;
+
+        databaseLevel = DatabaseLogLevel.Current;
+    }
+
+    async Task SaveDatabaseLevelAsync()
+    {
+        try
+        {
+            await DatabaseLogLevel.SetAsync(databaseLevel, CancellationToken.None);
+            databaseLevelError = false;
+        }
+        catch (Exception)
+        {
+            databaseLevel = DatabaseLogLevel.Current;
+            databaseLevelError = true;
+        }
     }
 
     // A filter change tears the old QuickGrid down and mounts a new one (see ReloadAsync's comment),

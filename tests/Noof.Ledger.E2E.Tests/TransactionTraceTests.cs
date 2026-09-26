@@ -78,6 +78,51 @@ public sealed class TransactionTraceTests(CookieModeHostFixture fixture) : PageT
         await Expect(history).ToContainTextAsync("Initial");
     }
 
+    [Fact]
+    public async Task The_logs_link_leads_to_the_logs_page_filtered_to_this_transaction_at_debug()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var transactionId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var walletId = await SeedWalletAsync();
+
+        await using (var db = OpenDb())
+        {
+            db.Transactions.Add(new Transaction
+            {
+                Id = transactionId,
+                WalletId = walletId,
+                RawText = "seeded logs-link transaction",
+                CaptureKind = CaptureKind.Manual,
+                Kind = TransactionKind.Expense,
+                Status = TransactionStatus.Completed,
+                TimeZoneId = "Europe/Belgrade",
+                OccurredAt = now,
+                OccurredOn = ZonedClock.LocalDate(now, "Europe/Belgrade"),
+                TelegramChatId = null,
+                TelegramMessageId = null,
+                CreatedAt = now,
+            });
+
+            db.AppLogs.Add(NewStageRow(transactionId, now, TransactionStages.Received, TransactionStages.ReceivedEventId));
+
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync($"{fixture.BaseUrl}/transactions/{transactionId}/trace");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        await Page.ClickAsync("#trace-logs-link");
+        await Page.WaitForURLAsync(new Regex("/diagnostics/logs\\?"));
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        await Expect(Page.Locator("#logs-filter-transaction-id")).ToHaveValueAsync(transactionId.ToString());
+        await Expect(Page.Locator("#logs-filter-level")).ToHaveValueAsync("Debug");
+    }
+
     // Line items in the summary card are covered by EfTransactionTraceTests (Persistence.Tests),
     // which runs against a database freshly migrated from this branch's own migrations only - not
     // this fixture's shared noof_ledger_test_template, whose schema can carry ahead-of-this-branch

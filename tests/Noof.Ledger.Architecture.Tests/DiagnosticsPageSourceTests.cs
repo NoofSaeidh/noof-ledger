@@ -55,6 +55,12 @@ public class DiagnosticsPageSourceTests
             "a transaction id is a GUID from the trace page - the field must show what one looks like");
         source.Should().Contain("[SupplyParameterFromQuery]",
             "/diagnostics's per-check Logs link navigates to /diagnostics/logs?source=<name> - this page must read that query parameter to seed the filter");
+        source.Should().Contain("IDatabaseLogLevel");
+        source.Should().Contain("id=\"logs-database-level\"");
+        source.Should().Contain("Record to database from");
+        source.Should().Contain("id=\"logs-database-level-error\"");
+        source.Should().Contain("public Guid? TransactionId");
+        source.Should().Contain("public string? Level");
         source.Should().NotContain("Virtualize",
             "the spec is explicit: paged QuickGrid, no Virtualize (§4)");
         source.Should().NotContain("MudSelect");
@@ -78,6 +84,8 @@ public class DiagnosticsPageSourceTests
         source.Should().Contain("id=\"trace-stages\"");
         source.Should().Contain("id=\"trace-timeline\"");
         source.Should().Contain("id=\"trace-history\"");
+        source.Should().Contain("id=\"trace-logs-link\"");
+        source.Should().Contain("/diagnostics/logs?transactionId=");
         source.Should().NotContain("MudSelect");
         source.Should().NotContain("MudDatePicker");
         source.Should().NotContain("MudAutocomplete");
