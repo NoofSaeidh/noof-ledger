@@ -128,6 +128,48 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task A_replayed_save_for_the_same_transaction_with_a_fiscal_receipt_returns_the_existing_receipt_not_a_duplicate()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = NewPhotoTransaction();
+        db.Transactions.Add(transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+        var receipt = NewExtractedReceipt(sellerTaxId: "SYN-400000004", fiscalNumber: "SYN-REPLAY-1");
+
+        var first = await store.SaveExtractedAsync(transaction.Id, receipt, "photo-file-1", TestContext.Current.CancellationToken);
+        var replay = await store.SaveExtractedAsync(transaction.Id, receipt, "photo-file-1", TestContext.Current.CancellationToken);
+
+        replay.ReceiptId.Should().Be(first.ReceiptId, "a job replayed after a committed save must recognise its own receipt");
+        replay.DuplicateOfTransactionId.Should().BeNull("a transaction is never a duplicate of itself");
+        (await db.Receipts.CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
+        (await db.CategorizationJobs.CountAsync(j => j.TransactionId == transaction.Id, TestContext.Current.CancellationToken))
+            .Should().Be(1, "the replay must not enqueue a second CategorizeReceipt job");
+    }
+
+    [Fact]
+    public async Task A_replayed_save_for_the_same_transaction_with_a_vision_receipt_returns_the_existing_receipt()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = NewPhotoTransaction();
+        db.Transactions.Add(transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+        var receipt = NewExtractedReceipt(sellerTaxId: null, fiscalNumber: null) with { Source = AppReceipts.ReceiptSource.Vision };
+
+        var first = await store.SaveExtractedAsync(transaction.Id, receipt, "photo-file-1", TestContext.Current.CancellationToken);
+        var replay = await store.SaveExtractedAsync(transaction.Id, receipt, "photo-file-1", TestContext.Current.CancellationToken);
+
+        replay.ReceiptId.Should().Be(first.ReceiptId, "IX_receipts_transaction_id must be recognised, not surfaced as a generic failure");
+        replay.DuplicateOfTransactionId.Should().BeNull();
+        (await db.Receipts.CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
+    }
+
+    [Fact]
     public async Task GetByTransactionAsync_returns_null_when_the_transaction_has_no_receipt()
     {
         await using var db = await fixture.CreateContextAsync();

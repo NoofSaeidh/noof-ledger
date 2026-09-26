@@ -28,6 +28,10 @@ internal static partial class ExtractReceiptWorkerLog
         Message = "Account-level model failure on job {JobId} ({Message}); pausing new claims for {Cooldown}")]
     public static partial void AccountLevelFailure(this ILogger logger, Guid jobId, string message, TimeSpan cooldown);
 
+    [LoggerMessage(EventId = 1506, Level = LogLevel.Information,
+        Message = "Transaction {TransactionId} already has a receipt; not re-extracting a replayed job")]
+    public static partial void LogReceiptAlreadyExtracted(this ILogger logger, Guid transactionId);
+
     [LoggerMessage(EventId = 5011, Level = LogLevel.Debug, Message = "QR decoded: total {Total}, issued {IssuedAt}")]
     public static partial void LogQrDecoded(this ILogger logger, decimal total, DateTimeOffset issuedAt);
 

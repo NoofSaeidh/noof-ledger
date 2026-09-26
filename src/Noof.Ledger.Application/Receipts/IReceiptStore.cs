@@ -2,8 +2,11 @@ using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Application.Receipts;
 
-// Null when the receipt saved cleanly (ReceiptId is then set); a duplicate seller+fiscal-number
-// pair writes nothing and names the transaction that already recorded it instead.
+// Null when the receipt saved cleanly, or was already saved for this same transaction by an earlier,
+// replayed attempt (ReceiptId is then the existing row's id either way, C-1). A duplicate
+// seller+fiscal-number pair recorded for ANOTHER transaction writes nothing and names that
+// transaction instead - ReceiptId is null and DuplicateOfTransactionId never equals the transaction
+// being saved.
 public sealed record ReceiptSaveResult(Guid? ReceiptId, Guid? DuplicateOfTransactionId);
 
 public sealed record ReceiptLineView(

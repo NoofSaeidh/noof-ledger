@@ -88,6 +88,26 @@ internal sealed class ExtractReceiptWorker(
                 return;
             }
 
+            // C-1: a lease-expiry replay of a job whose earlier run already committed the receipt (the
+            // window between that commit and SucceedQuietlyAsync below, e.g. PostgreSQL going away in
+            // between). The CategorizeReceipt job was inserted in the SAME SaveChangesAsync as the
+            // receipt row (EfReceiptStore.SaveExtractedAsync), so its existence needs no separate check
+            // here - it is guaranteed by that one atomic commit. Re-extracting would re-download the
+            // photo, call the Tax Administration or vision again, and hit a unique-index violation on
+            // SaveExtractedAsync for no reason.
+            var existingReceipt = await receiptStore.GetByTransactionAsync(job.TransactionId, cancellationToken);
+            if (existingReceipt is not null)
+            {
+                logger.LogReceiptAlreadyExtracted(job.TransactionId);
+                if (record.Status == TransactionStatus.Captured)
+                {
+                    await EditQuietlyAsync(notifier, record,
+                        new EchoMessage(recordEcho.ComposeCategorisingReceipt(existingReceipt.Lines.Count), []), cancellationToken);
+                }
+                await SucceedQuietlyAsync(jobQueue, job, cancellationToken);
+                return;
+            }
+
             var telegramFileId = await receiptStore.GetTelegramFileIdAsync(job.TransactionId, cancellationToken);
             var verificationUrl = telegramFileId is null
                 ? await receiptStore.GetVerificationUrlAsync(job.TransactionId, cancellationToken)

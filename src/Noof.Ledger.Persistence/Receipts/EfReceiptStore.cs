@@ -75,9 +75,24 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
             await db.SaveChangesAsync(cancellationToken);
             return new AppReceipts.ReceiptSaveResult(receiptId, null);
         }
-        catch (DbUpdateException ex) when (IsDuplicateReceiptViolation(ex))
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex, TransactionIndex) || IsUniqueViolation(ex, ReceiptConfiguration.DuplicateIndex))
         {
             db.ChangeTracker.Clear();
+
+            // A job re-run (its lease expired between the commit below and the caller succeeding the
+            // job, C-1) lands here first: the receipt for THIS transaction already exists, whichever
+            // index caught it - IX_receipts_transaction_id for a vision receipt (no fiscal number to
+            // collide on), or the seller+fiscal index when the same fiscal receipt is replayed for the
+            // same transaction. Either way it is the caller's own earlier save, never a duplicate of
+            // itself, so this returns success with the existing id instead of falling through to the
+            // cross-transaction duplicate lookup below.
+            var ownReceiptId = await db.Receipts.AsNoTracking()
+                .Where(r => r.TransactionId == transactionId)
+                .Select(r => (Guid?)r.Id)
+                .SingleOrDefaultAsync(cancellationToken);
+
+            if (ownReceiptId is { } existingReceiptId)
+                return new AppReceipts.ReceiptSaveResult(existingReceiptId, null);
 
             var duplicateOf = await db.Receipts.AsNoTracking()
                 .Where(r => r.SellerTaxId == receipt.SellerTaxId && r.FiscalNumber == receipt.FiscalNumber)
@@ -134,10 +149,14 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
             .Select(t => t.VerificationUrl)
             .SingleOrDefaultAsync(cancellationToken);
 
-    static bool IsDuplicateReceiptViolation(DbUpdateException ex) =>
+    // EF's default naming for the one-to-one FK's auto-generated unique index (ReceiptConfiguration
+    // never names it explicitly) - confirmed against the migration, not guessed.
+    const string TransactionIndex = "IX_receipts_transaction_id";
+
+    static bool IsUniqueViolation(DbUpdateException ex, string constraintName) =>
         ex.InnerException is PostgresException
         {
             SqlState: PostgresErrorCodes.UniqueViolation,
-            ConstraintName: ReceiptConfiguration.DuplicateIndex,
-        };
+        } pg
+        && pg.ConstraintName == constraintName;
 }
