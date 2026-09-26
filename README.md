@@ -27,11 +27,23 @@ wallets and currencies.
 > backups, disk space, the log sink itself) shows as a tile on the dashboard, in full on
 > `/diagnostics`, and to the operator alone via `/health` in the bot.
 >
-> 1054 tests — 1043 passing, 11 skipped (they call a live model or a live voice provider and need
+> Photograph a Serbian fiscal receipt — or send its QR link as plain text — and it becomes one
+> transaction whose line items are the receipt's own lines, each categorised, in the receipt's own
+> order; the shop becomes a merchant row keyed by its tax id, so the same shop next time costs no
+> merchant tokens. A caption naming a wallet wins; otherwise the wallet marked default for the
+> receipt's card or cash payment (set per wallet on `/wallets`) is used, then the currency's own
+> default. When the QR can't be read, or the Tax Administration is unreachable, a vision model reads
+> the photo instead and the echo carries a visible ⚠️ warning line — the same warning shows as an amber
+> **Receipts** check on the dashboard and `/diagnostics` whenever a lookup has failed in the last 24
+> hours. The photo itself is never stored — only Telegram's file id — and every step is on the
+> transaction's trace page.
+>
+> 1373 tests — 1360 passing, 13 skipped (they call a live model or a live voice provider and need
 > keys), none failing. Browser tests included.
 >
-> Still missing: **receipt photos** and **currency exchange** (a spend in a currency other than its
-> wallet's own is recorded as-is, in its own currency, not converted).
+> Still missing: **exchange-office slips** (Phase 7), **currency exchange** (a spend in a currency
+> other than its wallet's own is recorded as-is, in its own currency, not converted), and editing a
+> receipt's own lines.
 
 ## Why it looks the way it does
 
@@ -88,8 +100,8 @@ either sink sees a line; if the database is down or the table sink itself is fai
 still the durable copy.
 
 `/diagnostics` lists every health check (database, pending migrations, Telegram, the AI keys, the
-daily backup, disk space, the log sink) with a link into `/diagnostics/logs` — a paged, filterable
-view over `app_log`; while the database itself is unavailable this page shows the same waiting banner
+daily backup, disk space, the log sink, receipts) with a link into `/diagnostics/logs` — a paged,
+filterable view over `app_log`; while the database itself is unavailable this page shows the same waiting banner
 as the rest of the app, and the file log is the one to read instead. A check that throws or times out
 shows only the exception's type, never its message. The database only records Information and above
 by default; the Logs page can switch it to Debug or Verbose on demand — the choice is saved and

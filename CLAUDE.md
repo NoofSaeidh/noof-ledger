@@ -2,9 +2,9 @@
 
 Personal finance tracker. Telegram bot captures spending (text, voice, receipt photos), an LLM categorises it per line item, a local Blazor dashboard shows it across multiple wallets and currencies. C# / .NET 10, EF Core, strict TDD, local hosting, **public repo**.
 
-> **Status:** Phases 0, 0b, 1A, 1B, 1C, 1D, 2, 3, 4 and 5 complete — full detail in `docs/STATUS.md`.
-> Cross-currency conversion, transfers and receipt photos remain future phases. Rules
-> below marked *(settled)* are direct user decisions and are not up for re-litigation.
+> **Status:** Phases 0, 0b, 1A, 1B, 1C, 1D, 2, 3, 4, 5 and 6 complete — full detail in `docs/STATUS.md`.
+> Cross-currency conversion, transfers, exchange-office slips and editing receipt lines remain future
+> phases. Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
 >
 > Deferred **decisions** live in `docs/OPEN-QUESTIONS.md`; deferred **work** lives in `docs/BACKLOG.md`. Check both before proposing something as missing.
 >
@@ -77,6 +77,8 @@ register it into) — named because they are exceptions, not a licence to invent
   not rejection. Do not re-add verbatim checks or sanity bounds — `docs/OPEN-QUESTIONS.md` P2-1.
 - **A wallet's balance is derived, never stored** *(settled 2026-09-24, Phase 4)* — details in
   `.claude/rules/database.md`.
+- **A receipt's amounts and date never come from the model** *(settled 2026-09-25, Phase 6)* — the
+  fiscal QR or the vision fallback fixes them; details in `.claude/rules/receipts.md`.
 
 **Architecture**
 - Projects are split: `Domain` ← `Application` ← (`Persistence` · `Ai` · `Fx` · `Receipts` · `Telegram` · `Web`) ← `Host`.
@@ -165,6 +167,8 @@ the code that builds the echo text.
 - Secrets are encrypted in the database and entered through the UI. Never in `appsettings.json`, never in the repo, never in a log, an exception message, or an LLM prompt.
 - `.gitignore` covers `publish/`, `artifacts/`, `*.db*`, secrets and any real receipt/voice/statement fixtures **before the first commit**.
 - Test fixtures are synthetic. Real financial data never enters the repo.
+- **A fiscal receipt's verification URL, or its `vl` payload, is never logged** *(settled 2026-09-25,
+  Phase 6)* — a log line or exception message names at most the `vl` value's first 8 characters.
 
 ## 5. Conventions
 

@@ -10,7 +10,7 @@ The spec was approved without answering these, so **each has taken its stated de
 | Q4 | Canonical mid-rate source for RSD: `open.er-api.com` for all five currencies, or add NBS *srednji kurs* for RSD? | **`open.er-api.com`** for all five | Phase 7 (was 5) |
 | Q5 | Accept the larger Phase 1, or split it and accept rework? | **Larger Phase 1** — build the capture-path contracts once | Settled by approval |
 | Q6 | Move voice and receipts earlier than Phase 4? | ✅ **Answered 2026-09-22: voice moves to Phase 3**, right after natural-language capture; receipts stay later (Phase 6) | Settled |
-| Q7 | Send the top ~50 canonical merchant names as a prompt hint? Best single lever for canonicalisation consistency, but puts a slice of the shopping profile in each request | **No** | Phase 6 (was 4) |
+| Q7 | Send the top ~50 canonical merchant names as a prompt hint? Best single lever for canonicalisation consistency, but puts a slice of the shopping profile in each request | **No** | Phase 7 (was 4, 6) — not decided in Phase 6 |
 | Q8 | OneDrive backup: dump only, or dump + Data Protection key ring? | **Dump only** — a restore means re-entering two secrets | Phase 10 (was 8) |
 
 ## Why each default is safe to defer
@@ -544,3 +544,66 @@ These five decisions were made directly by the operator and supersede the Phase 
 | (c) | Per-level database retention (days) moved from `appsettings.json` (`Logging:Retention:Days`) onto the Log settings screen, persisted in `app_setting` via `ILogRetentionSettings`/`LogRetentionDays`, with C# defaults Verbose 1, Debug 1, Information 30, Warning 90, Error 90, Fatal 90 | A day count an operator wants to change on the fly (loosen Debug briefly, tighten Warning) belongs next to the level it retains, not in a file that needs a restart; the defaults also come down from two years to ninety days for Warning/Error/Fatal, since two years of a personal ledger's warnings was never a deliberate choice, just what shipped first |
 | (d) | File and console sinks stay static, in `appsettings.json`, under explicit per-sink keys (`Logging:File:{Directory,MinimumLevel,FileSizeLimitBytes,RetainedFileCountLimit}`, `Logging:Console:MinimumLevel`); file retention stays by file count only; `Serilog:MinimumLevel:Default` is withdrawn and fails startup fast if present | Implemented in commit `4c87d5c`, ahead of (a)–(c)/(e); see `.claude/rules/logging.md` for the mechanics |
 | (e) | `transaction_revisions` retention is explicitly **not** built now | It is append-only by an enforced trigger (`UPDATE`/`DELETE`/`TRUNCATE` all refused) — any retention job would need that trigger relaxed first, which is a bigger decision than this feature's scope; tracked in `docs/BACKLOG.md` instead of decided here |
+
+### P6-1 — Phase 6 receipts decisions (2026-09-25)
+
+Full design in `docs/superpowers/specs/2026-09-25-receipts-design.md`; rules that bind future work live
+in `CLAUDE.md` and `.claude/rules/receipts.md`. The operator's seven decisions (R-1..R-7), taken before implementation:
+
+| # | Decision |
+|---|---|
+| R-1 | Scope: fiscal QR first; no QR → vision from the photo. A QR link sent as text is accepted too. Exchange-office slips are Phase 7. |
+| R-2 | Store every receipt line. A receipt is its own record (`receipts`, `receipt_lines`); the transaction's line items reference the receipt lines. The echo lists every line with its category. |
+| R-3 | Wallet: named in the photo caption → else the wallet marked default for the receipt's payment method → else the default wallet. C# decides; the model only reads the caption. |
+| R-4 | The photo is not stored (Telegram keeps it; the database keeps the file id). |
+| R-5 | QR read but the Tax Administration unreachable → read the lines from the photo by vision at once; the QR total checks the sum. |
+| R-6 | Approach A: facts from C#, the model only categorises (and reads photos in the vision fallback). |
+| R-7 | Everything logged; QR read but the tax site failed → a visible warning (echo line, Warning event, health check). |
+
+Two further rulings were made by the closing controller once implementation surfaced questions the spec
+had not settled:
+
+**F-1 (from the final review's I-2).** Keep Edit working on a receipt's echo rather than withdraw it: a
+correction of a receipt transaction re-runs `categorize_receipt` with the operator's text as an
+instruction and rebuilds the line items from `receipt_lines` — the amounts never change through Edit.
+Reasoning: this keeps the operator's one correction tool working uniformly across every capture kind
+while still honouring R-6 (the model only categorises). Cost if wrong: the operator might have preferred
+Edit withheld on a receipt entirely; reversible, since it is a routing decision, not a schema change.
+
+**F-2 (from the re-review's N-1..N-5).** Route at claim time: any `Correct`/`Reinterpret` job on a
+transaction that has a receipt goes to the receipt path, never `record_transaction` — one check,
+`CategorizationWorker.TryRouteToReceiptAsync`, covers a typed reply, a voice reply, and an edited
+message alike. A correction that arrives while the receipt is still being extracted is *deferred*, not
+discarded — it retries on the job's own existing attempt budget until the receipt exists, rather than
+inventing a second retry mechanism. A correction naming no wallet keeps the record's current wallet
+(the same `KeepingTheRecordsWallet` rule text captures already followed, now keyed on "is this a
+correction" rather than "does the subject have a wallet"). A request to change the date or an amount is
+answered in the echo rather than silently ignored or silently applied — those values come from the
+receipt, never from a correction.
+
+**Decisions made during implementation, worth knowing before revisiting this code:**
+
+- **ZXing.Net.Bindings.SkiaSharp, not .ImageSharp, for QR decoding.** `ZXing.Net.Bindings.ImageSharp`
+  (0.16.16) pins `SixLabors.ImageSharp 1.0.4` with no `net9.0`/`net10.0` target — using it with a current
+  ImageSharp risks a runtime `MissingMethodException`. Current ImageSharp also ships under the Six Labors
+  Split License (free for OSI-approved open source or under a revenue threshold, commercial otherwise);
+  this repo has no `LICENSE` file, so "OSI-approved" isn't something to assert on its behalf. SkiaSharp is
+  MIT and `ZXing.Net`/`ZXing.Net.Bindings.SkiaSharp` are Apache-2.0 — unambiguous for a public repo, and
+  the SkiaSharp binding ships an explicit `net10.0` dependency group.
+- **Non-money receipt kinds (Copy, Training, Proforma, Advance) end `Cancelled`, not `Failed`.** The
+  first pass called `MarkFailedAsync`, but a deliberate non-post is the same kind of decision a duplicate
+  receipt already gets — not a processing error — so `Failed` would have muddied "something broke" with
+  "nothing was meant to post here". Fixed in the phase's closing review (M-4): the worker now calls
+  `IRecordEditor.CancelAsync` and logs a `StageFailed` row at `Categorized` so the trace page shows why,
+  instead of Extracted-then-silence.
+- **The Domain project owns `ReceiptSource`, `ReceiptKind` and `PaymentMethod`**, not
+  `Noof.Ledger.Application.Receipts`. The shared contract (`ReceiptContracts.cs`) was written against
+  Application-side mirrors first because an early task was told not to redefine it while a parallel task
+  was adding the Domain versions; the closing review's M-5 consolidated on the Domain enums everywhere
+  (the dependency direction is Domain ← Application, and the contract already imports Domain for
+  `CurrencyCode`), deleting the Application-side twins and their cast-based mapping.
+- **The defer mechanism for "a correction arrived mid-extraction" reuses the job's own retry budget**,
+  rather than a second, purpose-built retry counter. `RetryAsync` on the same `Correct`/`Reinterpret` job
+  bounds the wait at `MaxAttempts × 5s` (≈40s) and fails the job in the ordinary way if the receipt never
+  materialises — one budget to reason about, not two. `docs/BACKLOG.md` records the one gap this left:
+  exhausting that budget on the defer branch fails silently rather than notifying the operator.

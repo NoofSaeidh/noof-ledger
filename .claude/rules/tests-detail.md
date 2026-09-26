@@ -19,3 +19,10 @@ paths:
   whose final tick digit is non-zero is truncated on the round trip, so the assertion fails most
   runs but not all — the worst kind of flake. Seed from a fixed literal, or compare with
   `BeCloseTo`. This shipped twice before it was caught.
+- **Admin DDL in test fixtures (`CREATE`/`DROP DATABASE`, and the admin connection itself) always uses
+  the explicit connect/command timeouts on `Noof.Ledger.TestKit.DatabaseSettings`, never Npgsql's 30s
+  default** *(Phase 6)*. `CREATE DATABASE ... TEMPLATE` forces the same PostgreSQL checkpoint wait as
+  `DROP`, and opening a fresh admin connection under a loaded shared server can outlast Npgsql's 15s
+  connect timeout too; every fixture that clones the test template goes through
+  `DatabaseSettings.OpenAdminConnectionAsync`/`CreateDatabaseFromTemplateAsync`/`DropDatabaseAsync`
+  rather than its own copy of the `CREATE`/`DROP` boilerplate.
