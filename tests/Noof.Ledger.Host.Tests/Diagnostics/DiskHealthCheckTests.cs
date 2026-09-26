@@ -77,4 +77,35 @@ public class DiskHealthCheckTests
         result.Status.Should().Be(HealthStatus.Degraded);
         result.Description.Should().Be("Waiting for the database");
     }
+
+    [Fact]
+    public async Task A_free_space_read_that_never_returns_is_abandoned_when_cancelled()
+    {
+        var gate = ReadyGate();
+        using var block = new ManualResetEventSlim(initialState: false);
+        var freeSpace = Substitute.For<IFreeSpaceProvider>();
+        freeSpace.GetAvailableFreeBytes(Arg.Any<string>()).Returns(_ =>
+        {
+            try
+            {
+                block.Wait();
+                return 10 * Gb;
+            }
+            finally
+            {
+                block.Set();
+            }
+        });
+        var check = new DiskHealthCheck(gate, freeSpace, ConfigWithLogDirectory("C:\\logs"),
+            new BackupWorkerOptions { BackupDirectory = "C:\\backups" });
+        using var cts = new CancellationTokenSource();
+
+        var task = check.CheckHealthAsync(new HealthCheckContext(), cts.Token);
+        cts.Cancel();
+
+        var act = async () => await task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        await act.Should().ThrowAsync<OperationCanceledException>();
+
+        block.Set();
+    }
 }
