@@ -39,7 +39,7 @@ else
                 <MudText Typo="Typo.body2">@item.Name — @item.Summary</MudText>
             }
         }
-        <MudLink Href="/diagnostics" Class="mt-1" Style="display:inline-block;">Diagnostics</MudLink>
+        <MudLink Href="/diagnostics" Underline="Underline.Always" Class="mt-1" Style="display:inline-block;">Diagnostics &rarr;</MudLink>
     </MudAlert>
 
     @if (databaseUnavailable)
@@ -66,8 +66,6 @@ else
         }
         else
         {
-            @* noof-balance-row is a plain layout hook, not yet defined in the app stylesheet -
-               harmless if unstyled, and no test asserts on its CSS. *@
             @foreach (var wallet in activeBalances)
             {
                 <div id="@($"balance-{wallet.WalletId}")" class="noof-balance-row mb-2">
@@ -87,17 +85,21 @@ else
 
                 @foreach (var total in currencyTotals)
                 {
-                    <MudText id="@($"balance-total-{total.Currency}")" Typo="Typo.subtitle2">
-                        Total @total.Currency: @FormatAmount(total.Amount)
-                    </MudText>
+                    <div id="@($"balance-total-{total.Currency}")" class="noof-balance-total">
+                        <MudText Typo="Typo.subtitle2">Total @total.Currency</MudText>
+                        <MudText Typo="Typo.subtitle2" Class="noof-amount">@FormatAmount(total.Amount) @total.Currency</MudText>
+                    </div>
                 }
             }
         }
     </MudPaper>
 
-    <MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">
-        This month, from @summaryFirstDay.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
-    </MudText>
+    <div class="noof-txn-header mb-3">
+        <MudText HtmlTag="h2" Typo="Typo.h6">This month</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+            from @summaryFirstDay.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+        </MudText>
+    </div>
 
     @if (currencyGroups.Count == 0)
     {
@@ -109,11 +111,11 @@ else
     }
     else
     {
-        <MudGrid Spacing="4" Class="mb-4">
+        <MudGrid Spacing="4" Class="mb-4 noof-month-grid">
             @foreach (var group in currencyGroups)
             {
                 <MudItem xs="12" md="6">
-                    <MudPaper Outlined="true" Elevation="0" Class="pa-5 h-100">
+                    <MudPaper Outlined="true" Elevation="0" Class="pa-5">
                         <MudText Typo="Typo.overline" Class="mud-text-secondary">@group.Currency this month</MudText>
                         <MudText Typo="Typo.h4" Class="noof-amount">@FormatAmount(group.Total)</MudText>
 
@@ -128,6 +130,7 @@ else
                                           ChartSeries="@group.Series"
                                           ChartLabels="@group.Labels"
                                           LegendPosition="Position.Right"
+                                          ChartOptions="@DonutOptions"
                                           Height="220px" />
                             </div>
                         }
@@ -231,6 +234,8 @@ else
 }
 
 @code {
+    static readonly DonutChartOptions DonutOptions = new() { ChartPalette = NoofTheme.ChartPalette };
+
     IReadOnlyList<RecentTransaction> recent = [];
     IReadOnlyList<CurrencyGroup> currencyGroups = [];
     IReadOnlyList<WalletBalance> activeBalances = [];

@@ -23,6 +23,12 @@ internal static class NoofTheme
     // the theme, because MudBlazor's Typography has no slot that means "numbers in a table".
     public const string AmountFont = "noof-amount";
 
+    // Donut series take the theme's own accents first, so a category ring belongs to this palette
+    // rather than MudBlazor's default blue, teal and amber. Error red is left out on purpose: in a
+    // spending chart it would read as an alarm.
+    public static readonly string[] ChartPalette =
+        ["#7dd3a0", "#8ab4f8", "#c792ea", "#f0b429", "#5fc9d6", "#f6a878", "#b3bccb"];
+
     public static MudTheme Instance { get; } = new()
     {
         PaletteDark = new PaletteDark
