@@ -38,9 +38,20 @@ public static class PersistenceRegistration
     // maxJobAttempts is a parameter rather than a configuration key of its own so that EfJobQueue's
     // server-side attempt limit and CategorizationWorker's "is this the last attempt" check can
     // never independently drift. The Host passes CategorizationWorkerOptions.MaxAttempts to both.
+    // Decision (c), 2026-09-26: database retention lives only on the Log settings screen now, never
+    // in appsettings.json - a leftover Logging:Retention key (an operator's environment variable
+    // from before this change) would otherwise silently stop doing anything, exactly the failure
+    // mode LoggingSetup's own legacy-Default check exists to prevent for Serilog:MinimumLevel:Default.
+    const string LegacyRetentionConfigKey = "Logging:Retention";
+
     public static IServiceCollection AddNoofPersistence(
         this IServiceCollection services, IConfiguration configuration, int maxJobAttempts)
     {
+        if (configuration.GetSection(LegacyRetentionConfigKey).Exists())
+            throw new InvalidOperationException(
+                $"{LegacyRetentionConfigKey} is no longer read. Database log retention is configured on the " +
+                "Log settings screen (/diagnostics/logs/settings), stored in app_setting.");
+
         var connectionString = LedgerConnectionString.Resolve(configuration.GetConnectionString("Ledger"));
 
         services.AddDbContext<LedgerDbContext>(options => options
