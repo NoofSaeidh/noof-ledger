@@ -18,7 +18,8 @@ internal sealed class EfLogRetentionSettingsStore(LedgerDbContext db, TimeProvid
 
         try
         {
-            return JsonSerializer.Deserialize<LogRetentionDays>(row.Value) ?? LogRetentionDays.Default;
+            var deserialized = JsonSerializer.Deserialize<LogRetentionDays>(row.Value);
+            return deserialized is null ? LogRetentionDays.Default : deserialized.SanitizedOrDefault();
         }
         catch (JsonException)
         {
