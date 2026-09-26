@@ -6,7 +6,7 @@
 
 <PageTitle>Diagnostics</PageTitle>
 
-<MudText HtmlTag="h1" Typo="Typo.h4" Class="mb-4">Diagnostics</MudText>
+<MudText HtmlTag="h1" Typo="Typo.h4" Class="mb-6">Diagnostics</MudText>
 
 @if (Gate.State != DatabaseState.Ready)
 {
@@ -14,13 +14,13 @@
 }
 else
 {
-    <MudSimpleTable id="diagnostics-checks" Dense="true" Hover="true" Elevation="0" Class="mb-8">
+    <MudSimpleTable id="diagnostics-checks" Dense="true" Hover="true" Elevation="0" Outlined="true" Class="mb-6">
         <thead>
             <tr>
                 <th>Check</th>
                 <th>Level</th>
                 <th>Summary</th>
-                <th>Checked at</th>
+                <th class="noof-hide-narrow">Checked at</th>
                 <th></th>
             </tr>
         </thead>
@@ -31,9 +31,11 @@ else
                 {
                     <tr>
                         <td>@item.Name</td>
-                        <td>@item.Level</td>
+                        <td>
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@LevelColor(item.Level)">@item.Level</MudChip>
+                        </td>
                         <td>@item.Summary</td>
-                        <td>@item.CheckedAt.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", System.Globalization.CultureInfo.InvariantCulture)</td>
+                        <td class="noof-hide-narrow noof-nowrap">@item.CheckedAt.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", System.Globalization.CultureInfo.InvariantCulture)</td>
                         <td>
                             @if (item.Level != HealthLevel.Ok)
                             {
@@ -51,6 +53,14 @@ else
 
 @code {
     SystemHealthReport? report;
+
+    static Color LevelColor(HealthLevel level) => level switch
+    {
+        HealthLevel.Ok => Color.Success,
+        HealthLevel.Warning => Color.Warning,
+        HealthLevel.Failing => Color.Error,
+        _ => Color.Default,
+    };
 
     protected override async Task OnInitializedAsync()
     {

@@ -11,7 +11,7 @@
 
 <PageTitle>Wallets</PageTitle>
 
-<MudText HtmlTag="h1" Typo="Typo.h4" Class="mb-1">Wallets</MudText>
+<MudText HtmlTag="h1" Typo="Typo.h4" Class="mb-2">Wallets</MudText>
 <MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">
     Create, rename and archive wallets here. Income and balance statements are told to the bot.
 </MudText>
@@ -44,7 +44,7 @@ else
 @foreach (var wallet in wallets)
 {
     <MudPaper id="@($"wallet-{wallet.Id}")" Outlined="true" Elevation="0" Class="pa-5 mb-4">
-        <MudText Typo="Typo.caption" Class="mud-text-secondary">@wallet.Currency</MudText>
+        <MudText Typo="Typo.overline" Class="mud-text-secondary">@wallet.Currency</MudText>
         <div class="noof-wallet-row">
             <MudTextField T="string" InputId="@($"wallet-name-{wallet.Id}")" @bind-Value="wallet.PendingName"
                           Variant="Variant.Outlined" Margin="Margin.Dense" Label="Name" />
@@ -92,36 +92,42 @@ else
 }
 
 <MudPaper Outlined="true" Elevation="0" Class="pa-5">
-    <MudText Typo="Typo.subtitle1" Class="mb-3">New wallet</MudText>
+    <MudText HtmlTag="h2" Typo="Typo.h6" Class="mb-4">New wallet</MudText>
 
-    <MudTextField T="string" InputId="new-wallet-name" @bind-Value="newName"
-                  Variant="Variant.Outlined" Margin="Margin.Dense" Label="Name" Class="mb-3" />
+    <div class="noof-form-grid">
+        <MudTextField T="string" InputId="new-wallet-name" @bind-Value="newName"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Label="Name" />
 
-    <MudText Typo="Typo.caption" Class="mud-text-secondary">Currency</MudText>
-    <select id="new-wallet-currency" @bind="newCurrency" class="noof-native-select mb-3">
-        @foreach (var currency in CurrencyCode.Supported)
-        {
-            <option value="@currency.Value">@currency.Value</option>
-        }
-    </select>
+        <div class="noof-field">
+            <label class="noof-field-label" for="new-wallet-currency">Currency</label>
+            <select id="new-wallet-currency" @bind="newCurrency" class="noof-native-select">
+                @foreach (var currency in CurrencyCode.Supported)
+                {
+                    <option value="@currency.Value">@currency.Value</option>
+                }
+            </select>
+        </div>
 
-    <MudNumericField T="decimal" InputId="new-wallet-opening" @bind-Value="newOpeningBalance"
-                     Culture="@CultureInfo.InvariantCulture"
-                     Variant="Variant.Outlined" Margin="Margin.Dense" Label="Opening balance" Class="mb-3" />
+        <MudNumericField T="decimal" InputId="new-wallet-opening" @bind-Value="newOpeningBalance"
+                         Culture="@CultureInfo.InvariantCulture"
+                         Variant="Variant.Outlined" Margin="Margin.Dense" Label="Opening balance" />
 
-    <MudTextField T="DateOnly?" InputId="new-wallet-date" @bind-Value="newOpeningDate" InputType="InputType.Date"
-                  Culture="@CultureInfo.InvariantCulture" Format="yyyy-MM-dd"
-                  Variant="Variant.Outlined" Margin="Margin.Dense" Label="Opening date" Class="mb-3" />
+        <MudTextField T="DateOnly?" InputId="new-wallet-date" @bind-Value="newOpeningDate" InputType="InputType.Date"
+                      Culture="@CultureInfo.InvariantCulture" Format="yyyy-MM-dd"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Label="Opening date" />
 
-    <MudTextField T="string" InputId="new-wallet-aliases" @bind-Value="newAliases"
-                  Variant="Variant.Outlined" Margin="Margin.Dense" Label="Aliases (comma-separated)" Class="mb-3" />
+        <MudTextField T="string" InputId="new-wallet-aliases" @bind-Value="newAliases"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Label="Aliases (comma-separated)" Class="noof-field-full" />
+    </div>
 
-    <MudCheckBox T="bool" id="new-wallet-default" @bind-Value="newIsDefault"
-                Label="Default for its currency" Class="mb-3" />
-
-    <MudButton id="create-wallet" Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateAsync">
-        Create wallet
-    </MudButton>
+    <div class="noof-wallet-row">
+        <MudCheckBox T="bool" id="new-wallet-default" @bind-Value="newIsDefault"
+                    Label="Default for its currency" />
+        <MudSpacer />
+        <MudButton id="create-wallet" Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateAsync">
+            Create wallet
+        </MudButton>
+    </div>
 </MudPaper>
 }
 

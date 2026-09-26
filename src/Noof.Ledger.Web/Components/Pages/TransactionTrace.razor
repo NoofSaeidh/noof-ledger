@@ -1,6 +1,7 @@
 @page "/transactions/{Id:guid}/trace"
 @using System.Globalization
 @using Noof.Ledger.Application.Diagnostics
+@using Noof.Ledger.Domain
 @attribute [Authorize]
 @inject ITransactionTrace TransactionTraceReader
 @inject IDatabaseGate Gate
@@ -10,7 +11,7 @@
 
 <MudLink Href="/transactions" Class="mb-3" Style="display:inline-block;">&larr; Transactions</MudLink>
 <MudText HtmlTag="h1" Typo="Typo.h4" Class="mb-1">Transaction trace</MudText>
-<MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">@Id</MudText>
+<MudText Typo="Typo.body2" Class="mud-text-secondary noof-mono mb-6">@Id</MudText>
 
 @if (Gate.State != DatabaseState.Ready)
 {
@@ -28,7 +29,7 @@ else
 {
     @if (trace.Summary is { } summary)
     {
-        <MudSimpleTable id="trace-summary" Dense="true" Elevation="0" Class="noof-trace-summary-table mb-6">
+        <MudSimpleTable id="trace-summary" Dense="true" Elevation="0" Outlined="true" Class="noof-trace-summary-table mb-8">
             <tbody>
                 <tr>
                     <td>Message</td>
@@ -44,7 +45,9 @@ else
                 </tr>
                 <tr>
                     <td>Status</td>
-                    <td>@summary.Status</td>
+                    <td>
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@StatusColor(summary.Status)">@summary.Status</MudChip>
+                    </td>
                 </tr>
                 <tr>
                     <td>Kind</td>
@@ -74,18 +77,20 @@ else
         </MudSimpleTable>
     }
 
-    <MudLink id="trace-logs-link" Href="@($"/diagnostics/logs?transactionId={Id}&level=Debug")" Class="mb-3" Style="display:inline-block;">
-        Timings and debug log
-    </MudLink>
+    <div class="noof-section-header">
+        <MudText HtmlTag="h2" Typo="Typo.h6">Stages</MudText>
+        <MudLink id="trace-logs-link" Href="@($"/diagnostics/logs?transactionId={Id}&level=Debug")">
+            Timings and debug log &rarr;
+        </MudLink>
+    </div>
 
-    <div id="trace-stages" class="mb-6">
+    <div id="trace-stages" class="noof-stage-list mb-4">
         @foreach (var stage in TransactionStages.Ordered)
         {
             var stageEvent = trace.Events.FirstOrDefault(e => e.Stage == stage);
             var failed = trace.Events.Any(e => e.Stage == TransactionStages.StageFailed && e.FailedStage == stage);
             <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
-                     Color="@(failed ? Color.Error : stageEvent is not null ? Color.Success : Color.Default)"
-                     Class="mr-2">
+                     Color="@(failed ? Color.Error : stageEvent is not null ? Color.Success : Color.Default)">
                 @(stage == TransactionStages.Transcribed && stageEvent is null && !failed ? $"{stage} —" : stage)
             </MudChip>
         }
@@ -99,7 +104,7 @@ else
     }
     else
     {
-        <MudSimpleTable id="trace-timeline" Dense="true" Elevation="0" Class="mb-6">
+        <MudSimpleTable id="trace-timeline" Dense="true" Elevation="0" Outlined="true" Class="mb-8">
             <tbody>
                 @foreach (var e in trace.Events)
                 {
@@ -130,7 +135,7 @@ else
     }
     else
     {
-        <MudSimpleTable id="trace-history" Dense="true" Elevation="0">
+        <MudSimpleTable id="trace-history" Dense="true" Elevation="0" Outlined="true">
             <tbody>
                 @foreach (var revision in trace.History)
                 {
@@ -157,6 +162,14 @@ else
         if (Gate.State == DatabaseState.Ready)
             trace = await TransactionTraceReader.GetAsync(Id, CancellationToken.None);
     }
+
+    static Color StatusColor(TransactionStatus status) => status switch
+    {
+        TransactionStatus.Failed => Color.Error,
+        TransactionStatus.Completed => Color.Success,
+        TransactionStatus.Captured => Color.Warning,
+        _ => Color.Default,
+    };
 
     static string FormatOffset(TimeSpan offset) => offset switch
     {
