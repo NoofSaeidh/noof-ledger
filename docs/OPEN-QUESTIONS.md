@@ -409,7 +409,8 @@ Append-only by trigger; the FK is RESTRICT, so a revised transaction can never b
 ### P2-5 — operator review of Phase 2 (2026-09-23)
 
 The operator reviewed the finished phase and made six decisions, since implemented (see
-`CLAUDE.md` §3/§4). Recorded here for the reasoning; the rules themselves live in `CLAUDE.md`.
+`CLAUDE.md` §3/§4). Recorded here for the reasoning; the rules themselves live in `CLAUDE.md` and
+`.claude/rules/`.
 
 | # | Decision | Reasoning |
 |---|---|---|
@@ -464,8 +465,8 @@ section) carries a table naming the identical three models — *"Claude Opus 5.5
 Claude Mythos 5.1"* — with the restriction *"`any` and `tool` return a 400 error"* and the recommended
 replacement *"`auto` with strict tool use ... or structured outputs."* The app runs
 `claude-haiku-4-5`, so nothing breaks today, but Phase 2's forced strict tool call (`tool_choice`
-any/tool, `docs/superpowers/specs/2026-09-19-noof-finance-design.md` and `CLAUDE.md` §4) cannot run on
-Claude Opus 5.5, Fable 5.1 or Mythos 5.1. Moving to one of them is a design change to the answer
+any/tool, `docs/superpowers/specs/2026-09-19-noof-finance-design.md` and `.claude/rules/model.md`)
+cannot run on Claude Opus 5.5, Fable 5.1 or Mythos 5.1. Moving to one of them is a design change to the answer
 contract — `auto` plus strict tools, or structured outputs — not a model-id change.
 
 ### P4-1 — Phase 4 money model decisions (2026-09-24)
@@ -487,7 +488,7 @@ the reasoning.
 
 Taken during the observability spec conversation; full detail in
 `docs/superpowers/specs/2026-09-24-observability-design.md`. Rules that bind future work live in
-`CLAUDE.md`; reasoning is recorded here.
+`CLAUDE.md` and `.claude/rules/`; reasoning is recorded here.
 
 | # | Decision | Reasoning |
 |---|---|---|
@@ -534,12 +535,12 @@ it, and is still not done.
 ### P5-3 — Log settings (2026-09-26, operator decisions, binding)
 
 These five decisions were made directly by the operator and supersede the Phase 5 rules they touch
-(CLAUDE.md's Logging section reflects (a)–(d); O-11 above is superseded by (a)).
+(`.claude/rules/logging.md` reflects (a)–(d); O-11 above is superseded by (a)).
 
 | # | Decision | Reasoning |
 |---|---|---|
 | (a) | The database log level offers every `LogSeverity` plus **Off** (nothing written to `app_log`) — the earlier "capped at Information" rule (O-11) is withdrawn. Above Information, or at Off, the trace page shows an inline `MudAlert` (`#trace-log-level-notice`) saying stage events are not recorded at the current level, linking to Log settings | The operator wanted the choice available and was willing to accept the stated consequence rather than have the UI refuse it; surfacing the consequence on the one page it actually affects is cheaper and more honest than a blanket cap |
 | (b) | Settings on the new Log settings page are saved by an explicit **Save** button, not on a field's own change — the same pattern `Secrets.razor` already uses | A field that persists itself the moment you touch it is not obvious from looking at it — the Logs page's former inline "Record to database from" select did exactly that, silently, which is what prompted this decision |
 | (c) | Per-level database retention (days) moved from `appsettings.json` (`Logging:Retention:Days`) onto the Log settings screen, persisted in `app_setting` via `ILogRetentionSettings`/`LogRetentionDays`, with C# defaults Verbose 1, Debug 1, Information 30, Warning 90, Error 90, Fatal 90 | A day count an operator wants to change on the fly (loosen Debug briefly, tighten Warning) belongs next to the level it retains, not in a file that needs a restart; the defaults also come down from two years to ninety days for Warning/Error/Fatal, since two years of a personal ledger's warnings was never a deliberate choice, just what shipped first |
-| (d) | File and console sinks stay static, in `appsettings.json`, under explicit per-sink keys (`Logging:File:{Directory,MinimumLevel,FileSizeLimitBytes,RetainedFileCountLimit}`, `Logging:Console:MinimumLevel`); file retention stays by file count only; `Serilog:MinimumLevel:Default` is withdrawn and fails startup fast if present | Implemented in commit `4c87d5c`, ahead of (a)–(c)/(e); see `CLAUDE.md`'s Logging section for the mechanics |
+| (d) | File and console sinks stay static, in `appsettings.json`, under explicit per-sink keys (`Logging:File:{Directory,MinimumLevel,FileSizeLimitBytes,RetainedFileCountLimit}`, `Logging:Console:MinimumLevel`); file retention stays by file count only; `Serilog:MinimumLevel:Default` is withdrawn and fails startup fast if present | Implemented in commit `4c87d5c`, ahead of (a)–(c)/(e); see `.claude/rules/logging.md` for the mechanics |
 | (e) | `transaction_revisions` retention is explicitly **not** built now | It is append-only by an enforced trigger (`UPDATE`/`DELETE`/`TRUNCATE` all refused) — any retention job would need that trigger relaxed first, which is a bigger decision than this feature's scope; tracked in `docs/BACKLOG.md` instead of decided here |
