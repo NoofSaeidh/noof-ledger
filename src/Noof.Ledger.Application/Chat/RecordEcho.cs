@@ -98,6 +98,17 @@ internal sealed class RecordEcho : IRecordEcho
     public EchoMessage ComposeReceipt(
         CategorizationSubject record, ReceiptView receipt, UnsupportedChangeKind unsupportedChange = UnsupportedChangeKind.None)
     {
+        // N-5 (Phase 6 re-review): M-4 (a non-money slip's own Cancelled) and M-11 (a duplicate's
+        // Restore) both leave RecordActionHandler re-rendering a receipt record that never reached
+        // Persisted - Captured (Restore before ApplyAsync ever ran) or Failed. Neither is
+        // "Recorded … Total: " for a record with no line items; both defer to the same rendering the
+        // ordinary, non-receipt echo already gives that status.
+        if (record.Status == TransactionStatus.Captured)
+            return new(Waiting(record), []);
+
+        if (record.Status == TransactionStatus.Failed)
+            return Failure;
+
         var header = record.Status == TransactionStatus.Cancelled ? "Cancelled" : "Recorded";
         var text = $"{header} — {ShopHeader(receipt)} · {record.WalletName} · balance {Balances(record)}\n{ReceiptBody(record, receipt)}";
 

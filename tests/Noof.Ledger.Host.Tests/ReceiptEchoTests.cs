@@ -138,6 +138,31 @@ public class ReceiptEchoTests
         echo.Text.Should().Contain("Groceries: 200.00 RSD");
     }
 
+    // N-5 (Phase 6 re-review): M-4 and M-11 can both leave RecordActionHandler re-rendering a receipt
+    // record that is Captured (a non-money slip restored to before it was Cancelled and Persisted
+    // never ran) or Failed (a Failed receipt transaction, restored). Neither is "Recorded … Total:".
+    [Fact]
+    public void A_captured_receipt_record_renders_the_waiting_text_not_Recorded()
+    {
+        var record = Record() with { Status = TransactionStatus.Captured };
+
+        var echo = Echo.ComposeReceipt(record, Receipt());
+
+        echo.Text.Should().NotContain("Recorded");
+        echo.Text.Should().NotContain("Total:");
+        echo.Actions.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_failed_receipt_record_renders_the_ordinary_failure_message()
+    {
+        var record = Record() with { Status = TransactionStatus.Failed };
+
+        var echo = Echo.ComposeReceipt(record, Receipt());
+
+        echo.Should().Be(Echo.Failure);
+    }
+
     [Fact]
     public void A_cancelled_receipt_transaction_keeps_the_shop_header_and_offers_restore()
     {
