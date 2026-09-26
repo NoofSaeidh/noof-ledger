@@ -144,7 +144,7 @@ internal sealed class ReceiptCategorizationWorker(
             if (merchantId is { } knownMerchantId && receipt.SellerTaxId is { Length: > 0 } taxId)
                 await merchantDirectory.LinkTaxIdAsync(knownMerchantId, taxId, cancellationToken);
 
-            var walletId = await ResolveWalletAsync(walletDirectory, categorization, receipt, wallets, cancellationToken);
+            var walletId = await ResolveWalletAsync(walletDirectory, job, sub, categorization, receipt, wallets, cancellationToken);
             if (walletId is null)
             {
                 await FailTerminallyAsync(jobQueue, store, notifier, job, subject, "no wallet to record into", currentStage, cancellationToken);
@@ -240,11 +240,21 @@ internal sealed class ReceiptCategorizationWorker(
     }
 
     static async Task<Guid?> ResolveWalletAsync(
-        IWalletDirectory walletDirectory, ReceiptCategorization categorization, ReceiptView receipt, IReadOnlyList<WalletOption> wallets,
-        CancellationToken cancellationToken)
+        IWalletDirectory walletDirectory, CategorizationJob job, CategorizationSubject subject, ReceiptCategorization categorization,
+        ReceiptView receipt, IReadOnlyList<WalletOption> wallets, CancellationToken cancellationToken)
     {
         if (categorization.WalletId is { } named && wallets.Any(wallet => wallet.Id == named))
             return named;
+
+        // N-3 (Phase 6 re-review): the same rule CategorizationWorker.KeepingTheRecordsWallet applies
+        // to a plain-text Correct job - job.Instruction present means this is a correction of an
+        // already-recorded receipt, not the first categorization, so a correction naming no wallet
+        // means "leave it where it is", never "the default". The payment/currency default below is a
+        // first-categorization fallback only; re-resolving it on every correction would silently move
+        // the record back whenever a later correction (or a changed wallet default) answers
+        // wallet_id as null.
+        if (job.Instruction is not null && subject.WalletId is { } current && wallets.Any(wallet => wallet.Id == current))
+            return current;
 
         if (receipt.PaymentMethod is PaymentMethod.Card or PaymentMethod.Cash
             && await walletDirectory.DefaultForPaymentAsync(receipt.PaymentMethod.Value, cancellationToken) is { } forPayment)

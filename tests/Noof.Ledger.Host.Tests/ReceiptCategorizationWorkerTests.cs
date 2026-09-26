@@ -272,6 +272,64 @@ public class ReceiptCategorizationWorkerTests
             TransactionId, Arg.Is<CategorizationOutcome>(outcome => outcome.WalletId == NamedInCaption.Id), Arg.Any<CancellationToken>());
     }
 
+    // N-3 (Phase 6 re-review): CategorizationWorker guards exactly this for a plain-text Correct job
+    // (KeepingTheRecordsWallet) - re-resolving the payment/currency default on every correction is only
+    // right the first time a receipt is categorized. A later correction (or a changed wallet default)
+    // that names no wallet must leave the record where the operator already put it, not move it back.
+    [Fact]
+    public async Task A_correction_that_names_no_wallet_keeps_the_records_current_wallet()
+    {
+        var store = DefaultStore();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(status: TransactionStatus.Completed) with { WalletId = NamedInCaption.Id });
+        var walletDirectory = DefaultWalletDirectory();
+        walletDirectory.DefaultForPaymentAsync(PaymentMethod.Card, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job("bread is groceries, not other")), KeyPresent(), store, walletDirectory: walletDirectory), Time());
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await store.Received(1).ApplyAsync(
+            TransactionId, Arg.Is<CategorizationOutcome>(outcome => outcome.WalletId == NamedInCaption.Id), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_correction_that_names_a_wallet_still_moves_the_record_there()
+    {
+        var categorizer = DefaultCategorizer();
+        categorizer.CategorizeAsync(Arg.Any<AppReceipts.ReceiptCategorizationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(Categorization(walletId: CashWallet.Id, merchantCanonicalName: "Test Market"));
+        var store = DefaultStore();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(status: TransactionStatus.Completed) with { WalletId = NamedInCaption.Id });
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job("that was from cash")), KeyPresent(), store, categorizer: categorizer), Time());
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await store.Received(1).ApplyAsync(
+            TransactionId, Arg.Is<CategorizationOutcome>(outcome => outcome.WalletId == CashWallet.Id), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_first_categorization_that_names_no_wallet_still_falls_through_to_the_payment_default()
+    {
+        var walletDirectory = DefaultWalletDirectory();
+        walletDirectory.DefaultForPaymentAsync(PaymentMethod.Card, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
+        var store = DefaultStore();
+        // No Instruction (Job() with no argument): this is the first, Initial categorization, so the
+        // payment/currency default still applies even though the subject's own WalletId happens to be
+        // set (a fresh Captured transaction has none in practice, but the guard is on Instruction, not
+        // on WalletId, precisely so a first reading is never mistaken for a correction).
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, walletDirectory: walletDirectory), Time());
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await store.Received(1).ApplyAsync(
+            TransactionId, Arg.Is<CategorizationOutcome>(outcome => outcome.WalletId == CashWallet.Id), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task A_caption_wallet_the_directory_no_longer_offers_falls_through_to_the_payment_default()
     {
