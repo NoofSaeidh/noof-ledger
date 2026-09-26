@@ -96,6 +96,8 @@ server for the rest of the run.
 
 **What was done.** The teardown `DROP DATABASE` commands got `CommandTimeout = 120` for the
 checkpoint-wait variant. That treats the symptom and was the right call mid-task. It is not a fix.
+(The checkpoint-wait variant's cause was found in Phase 6: `WAL_LOG` clones — see "Clone
+`CREATE`/`DROP DATABASE` timeouts in full runs — closed 2026-09-27" below.)
 For the pool-exhaustion variant, `PostgresFixture.CreateEmptyDatabaseConnectionStringAsync` and
 `CreateDatabaseAsync` now build their connection strings with `Pooling = false`: each per-test
 database is used by exactly one test, so Npgsql's pool buys nothing, and disabling it makes
@@ -807,7 +809,8 @@ through the existing `NOOF_TEST_PG` variable would make clones cheap, retire the
 clones off the server that holds `noof_ledger`. Costs a second cluster to start after a reboot and a
 small ops script. The operator has seen the trade-offs (2026-09-24) and not decided; the Phase 4
 rule of running database and E2E tests filtered, and in full once per phase, removed most of the
-contention in the meantime.
+contention in the meantime, and Phase 6's `FILE_COPY` clones removed the long checkpoint waits
+themselves (the 2026-09-27 entry below), which weakens the case for a second cluster.
 
 **A cancelled dump can be recorded as a failed run.** `PgDumpDatabaseDumper` kills `pg_dump` on
 cancellation with `if (!process.HasExited) process.Kill(entireProcessTree: true)`; if `pg_dump` exits
@@ -943,9 +946,15 @@ instrumenting the next time it is seen live rather than chasing from this descri
   previous one. With 40 live clones, one `CHECKPOINT` took 42.6 s under `WAL_LOG` and 0.17 s under
   `FILE_COPY`, and creating the 40 cost about the same (33 s vs 36 s). `DatabaseSettings` now creates
   every test database `STRATEGY FILE_COPY` (commit `3b04301`, guarded by
-  `DatabaseSettingsCloneStrategyTests`). Checkpoint sync time over a full run fell from 515 s to 42 s,
-  and the slowest DDL from 120 s to 4 s. Two consecutive full `dotnet test --solution` runs then passed
-  first time. The advisory lock around clone DDL that was once proposed here is not needed. Leftover
+  `DatabaseSettingsCloneStrategyTests`). `FILE_COPY` is slower for a clone dropped within seconds —
+  a short-lived create/write/drop benchmark favoured `WAL_LOG` (38.5 s vs 62.7 s), because dropping a
+  clone forgets its queued fsyncs — but a full run keeps Persistence's clones alive until collection
+  teardown, and the whole-run outcome is what was measured: checkpoint sync time over a full run fell
+  from 515 s to 42 s, and the slowest sampled DDL from the 120 s ceiling to 4 s. Two consecutive full
+  `dotnet test --solution` runs then passed first time. The cost is time: Persistence takes 13 min alone
+  and 14–15 min inside a full run under `FILE_COPY`, against about 12 min under `WAL_LOG` on the same
+  clean server — the per-test database strategy entry above is where to win that back.
+  The advisory lock around clone DDL that was once proposed here is not needed. Leftover
   clones from interrupted runs are harmless but still worth `.\run.ps1 clean-test-dbs`: 200 had built
   up, mostly from these timed-out drops.
 - **`DatabaseLogLevelDbTests.A_stored_Off_level_drops_the_next_hosts_own_startup_burst...` failed once

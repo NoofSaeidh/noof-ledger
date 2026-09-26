@@ -118,13 +118,8 @@ public sealed class CookieModeHostFixture : IAsyncLifetime
         if (cloneDatabaseName.Length is 0)
             return;
 
-        // Same reason PostgresFixture.DisposeAsync carries this: DROP DATABASE waits on a Postgres
-        // checkpoint before it can remove the files, and under the load of a whole-solution run that
-        // wait exceeds Npgsql's default 30s command timeout. This fixture only escaped it while the
-        // E2E project sat outside NoofLedger.slnx and therefore always had the server to itself.
-        // DatabaseSettings.DropDatabaseAsync also opens the admin connection with a longer connect
-        // timeout - under the same load, just opening it can outlast Npgsql's default 15s, which
-        // CommandTimeout does not cover.
+        // DROP DATABASE waits on a forced checkpoint; why that wait once outlasted 120s, and the
+        // clone strategy that fixed it, is at the top of DatabaseSettings.
         NpgsqlConnection.ClearAllPools();
         await DatabaseSettings.DropDatabaseAsync(cloneDatabaseName, CancellationToken.None);
     }
