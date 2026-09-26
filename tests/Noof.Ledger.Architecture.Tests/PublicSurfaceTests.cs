@@ -62,6 +62,7 @@ public class PublicSurfaceTests
             "IWalletDirectory",
             "WalletDetails", "NewWallet", "IWalletAdmin",
             "BackupRunRecord", "BackupStatus", "DumpResult", "IBackupLog", "IDatabaseDumper",
+            "IDatabaseLogLevelStore",
             "IDatabaseGate", "DatabaseState",
             "LogSeverity", "LogRow", "LogFilter", "LogPage", "LogSortOrder", "ILogQuery", "ILogRetention",
             "TransactionStages", "TransactionLogScope", "TraceEvent", "RevisionView", "TraceLineItem", "TransactionSummary",
