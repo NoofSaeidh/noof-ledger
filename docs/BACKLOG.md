@@ -950,9 +950,13 @@ reason to tune it appears, through the options pattern the rest already use.
 Log settings (`/diagnostics/logs/settings`) gives the operator per-level retention for `app_log`, but
 deliberately not for `transaction_revisions` — the append-only history a trace page's History section
 reads. That table has no retention at all today: every revision, forever. Doing this properly needs,
-first, the append-only trigger (`transaction_revisions_no_truncate` or its equivalent — the one that
-already cost a phase's worth of drift once, per CLAUDE.md's Database rules) relaxed to allow a
-retention job's own `DELETE`, which is a bigger decision than this feature's scope: it is the one
-guarantee that table currently makes, and loosening it for one more caller is not something to do as
-a side effect of a settings screen. Revisit alongside a real reason to prune old revisions (disk
+first, the row-level trigger (`transaction_revisions_append_only_guard`, which refuses `UPDATE` and
+`DELETE`; a sibling `transaction_revisions_no_truncate` separately refuses `TRUNCATE`) relaxed to
+allow a retention job's own `DELETE`, which is a bigger decision than this feature's scope: it is the
+one guarantee that table currently makes, and loosening it for one more caller is not something to do
+as a side effect of a settings screen. Revisit alongside a real reason to prune old revisions (disk
 growth becomes a real problem, or a GDPR-shaped request to actually forget something).
+(The drift CLAUDE.md's Database rules warn about — a guard trigger added to an already-applied
+migration never taking effect on `noof_ledger` or the test template — was `merchant_aliases_no_truncate`
+in commit `01b4961`, a different table; that story does not apply to `transaction_revisions`, whose
+guards shipped in their own migration from the start.)
