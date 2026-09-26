@@ -117,7 +117,7 @@ internal sealed class ReceiptCategorizationWorker(
                 return;
             }
 
-            if (IsNonMoneyKind(receipt.Kind))
+            if (receipt.Kind.IsNonMoneyKind())
             {
                 await ReportNotRecordedAsync(recordEditor, notifier, job, sub, receipt.Kind, cancellationToken);
                 await SucceedQuietlyAsync(jobQueue, job, cancellationToken);
@@ -209,9 +209,6 @@ internal sealed class ReceiptCategorizationWorker(
             await HandleModelFailureAsync(jobQueue, store, notifier, job, subject, ModelFailureKind.Transient, ex.Message, currentStage, cancellationToken, ex);
         }
     }
-
-    static bool IsNonMoneyKind(ReceiptKind kind) =>
-        kind is ReceiptKind.Copy or ReceiptKind.Training or ReceiptKind.Proforma or ReceiptKind.Advance;
 
     static async Task<Guid?> KnownMerchantIdAsync(
         IMerchantDirectory merchantDirectory, Dictionary<string, MerchantAliasEntry> aliasByFolded, ReceiptView receipt,

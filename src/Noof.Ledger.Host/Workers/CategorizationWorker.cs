@@ -282,7 +282,7 @@ internal sealed class CategorizationWorker(
         var receiptStore = scope.ServiceProvider.GetRequiredService<IReceiptStore>();
         var receipt = await receiptStore.GetByTransactionAsync(job.TransactionId, cancellationToken);
 
-        if (receipt is { } present && !IsNonMoneyReceiptKind(present.Kind))
+        if (receipt is { } present && !present.Kind.IsNonMoneyKind())
         {
             // Correct carries the operator's words as Instruction already; Reinterpret (an edited
             // message) carries none - the edit itself already replaced RawText, so that IS the
@@ -323,13 +323,6 @@ internal sealed class CategorizationWorker(
 
         return false;
     }
-
-    // Mirrors ReceiptCategorizationWorker.IsNonMoneyKind and EfRecordEditor's own copy, value for
-    // value: a copy/training/proforma/advance slip carries no receipt_lines worth re-categorizing, so
-    // its correction goes down the ordinary record_transaction path instead (Fix round 1, Phase 6
-    // final review).
-    static bool IsNonMoneyReceiptKind(ReceiptKind kind) =>
-        kind is ReceiptKind.Copy or ReceiptKind.Training or ReceiptKind.Proforma or ReceiptKind.Advance;
 
     static CorrectionRequest? CorrectionFor(CategorizationJob job, CategorizationSubject record) =>
         job is { Kind: JobKind.Correct, Instruction: { } instruction }

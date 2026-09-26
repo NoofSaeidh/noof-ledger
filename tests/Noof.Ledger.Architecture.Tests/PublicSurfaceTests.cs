@@ -38,7 +38,7 @@ public class PublicSurfaceTests
             "CurrencyMismatchException", "Entry", "EntryRole", "JobKind", "JobStatus", "LineItem", "Merchant", "MerchantAlias",
             "MerchantKind", "MerchantName", "Money", "Transaction", "TransactionKind",
             "TransactionStatus", "Wallet",
-            "Receipt", "ReceiptLine", "ReceiptSource", "ReceiptKind", "PaymentMethod", "WalletPaymentDefault",
+            "Receipt", "ReceiptLine", "ReceiptSource", "ReceiptKind", "ReceiptKindExtensions", "PaymentMethod", "WalletPaymentDefault",
         ],
         ["Noof.Ledger.Application"] =
         [
