@@ -115,17 +115,24 @@ internal sealed class CategorizationWorker(
             using var loading = timer.Start(logger, TimedOperations.DbLoadCategorizationContext);
 
             subject = await store.GetSubjectAsync(job.TransactionId, cancellationToken);
+            loading.Stop();
+
             if (subject is not { } sub)
             {
-                loading.Stop();
                 await FailTerminallyAsync(
                     jobQueue, store, notifier, job, null,
                     "the transaction this job points at no longer exists", currentStage, cancellationToken);
                 return;
             }
 
+            // The receipt-routing check (a possible hand-off write, or on the last deferral a Telegram
+            // notify) runs between the two `loading` timings below rather than inside either one - it
+            // is neither the subject load nor the remaining category/merchant/wallet load, and timing
+            // it as if it were either would misattribute a Slow warning to the wrong operation.
             if (await TryRouteToReceiptAsync(scope, jobQueue, store, notifier, job, sub, cancellationToken))
                 return;
+
+            using var remainingLoading = timer.Start(logger, TimedOperations.DbLoadCategorizationContext);
 
             var categories = await categoryCatalog.ActiveAsync(cancellationToken);
             var aliases = await merchantDirectory.AliasesAsync(cancellationToken);
@@ -136,7 +143,7 @@ internal sealed class CategorizationWorker(
 
             var allMerchants = await merchantDirectory.MerchantsAsync(cancellationToken);
             var wallets = await walletDirectory.ActiveAsync(cancellationToken);
-            loading.Stop();
+            remainingLoading.Stop();
 
             var request = new CategorizationRequest(
                 sub.RawText,

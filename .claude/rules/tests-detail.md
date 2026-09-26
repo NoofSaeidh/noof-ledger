@@ -22,8 +22,11 @@ paths:
 - **Admin DDL in test fixtures (`CREATE`/`DROP DATABASE`, and the admin connection itself) always uses
   the explicit connect/command timeouts on `Noof.Ledger.TestKit.DatabaseSettings`, never Npgsql's 30s
   default** *(Phase 6)*. Every fixture that clones the test template goes through
-  `DatabaseSettings.OpenAdminConnectionAsync`/`CreateDatabaseFromTemplateAsync`/`DropDatabaseAsync`
-  rather than its own copy of the `CREATE`/`DROP` boilerplate. Set these because CREATE/DROP DATABASE
+  `DatabaseSettings.OpenAdminConnectionAsync`/`CreateDatabaseFromTemplateAsync`/`DropDatabaseAsync` for
+  a single statement, or `OpenAdminConnectionAsync` + `AdminCommandTimeoutSeconds` directly for a
+  batched loop of several (`PostgresFixture.DisposeAsync` drops every database it created on one
+  admin connection this way, rather than opening one per drop) — never its own copy of the
+  `CREATE`/`DROP` boilerplate with Npgsql's default timeout. Set these because CREATE/DROP DATABASE
   is uniquely slow to wait on — but the Phase 6 full-suite timeouts this was written for (11 failures,
   even at 120s) turned out to be caused by a second checkout running its own full suite against the
   same PostgreSQL server at the same time, not by an under-timed admin connection; raising the timeout

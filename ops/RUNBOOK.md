@@ -122,8 +122,9 @@ lines from the fiscal QR automatically.
 
 **This was never tested against the real Tax Administration site or a real receipt, by design** — every
 automated test uses a synthetic `vl` payload, a hand-written journal, or a generated QR image, and the
-live suite has no receipts test at all. This is the one check that closes that gap; ten minutes, no live
-model call unless the vision fallback triggers (a few tenths of a cent if it does).
+live suite's two receipt tests (`LiveReceiptTests`) use a synthetic image and invented lines too; nothing
+exercises the real Tax Administration site or a real receipt. This is the one check that closes that gap;
+ten minutes, no live model call unless the vision fallback triggers (a few tenths of a cent if it does).
 
 1. **Send a real fiscal receipt photo** to the bot. Compare every line, the total and the date the echo
    shows against the paper receipt in your hand — name, amount and quantity per line, not just the

@@ -8,7 +8,7 @@ paths:
   - "src/Noof.Ledger.Host/Workers/ReceiptCategorizationWorker*.cs"
   - "src/Noof.Ledger.Host/Workers/CategorizationWorker*.cs"
   - "src/Noof.Ledger.Ai/*Receipt*.cs"
-  - "tests/Noof.Ledger.Ai.Tests/*Receipt*.cs"
+  - "tests/Noof.Ledger.Ai.Tests/**/*Receipt*.cs"
   - "tests/Noof.Ledger.Host.Tests/*Receipt*.cs"
   - "src/Noof.Ledger.Telegram/CorrectionHandler.cs"
   - "src/Noof.Ledger.Telegram/TelegramUpdateRouter*.cs"

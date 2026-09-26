@@ -1514,6 +1514,35 @@ public class CategorizationWorkerTests
         await store.DidNotReceive().ApplyAsync(Arg.Any<Guid>(), Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
     }
 
+    // Fix round 1 (final integration review, minor): the receipt-routing check used to run inside
+    // the same `db.loadCategorizationContext` timing as the subject load, so a receipt hand-off write
+    // (or, on the last deferral, a Telegram edit) was attributed to that operation's elapsed time and
+    // could misname a `Slow` warning. GetByTransactionAsync stands in for that work here by advancing
+    // the clock itself; the loading timing must already be stopped before that call runs.
+    [Fact]
+    public async Task DbLoadCategorizationContext_timing_excludes_the_receipt_routing_check()
+    {
+        var jobQueue = QueueWith(Job(kind: JobKind.Correct, instruction: "that was cash, not card"));
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var receiptStore = NoReceiptStore();
+        receiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(_ =>
+        {
+            time.Advance(TimeSpan.FromSeconds(2));
+            return Receipt();
+        });
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject(status: TransactionStatus.Completed));
+        var logger = new CapturingLogger<CategorizationWorker>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, receiptStore: receiptStore), time, logger: logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        var loadEntry = logger.Entries.Should()
+            .ContainSingle(entry => OperationOf(entry) == TimedOperations.DbLoadCategorizationContext).Subject;
+        ((long)loadEntry.Properties["ElapsedMs"]).Should().BeLessThan(2000);
+    }
+
     // N-2: an edited message carries no separate Instruction (Reinterpret never has one) - the edit
     // already replaced the transaction's RawText before this job was even queued, so that text IS the
     // correction to hand off.
