@@ -54,11 +54,12 @@ public class ExtractReceiptWorkerTests
         }
     }
 
-    static CategorizationJob ExtractJob(int attemptCount = 1) => new()
+    static CategorizationJob ExtractJob(int attemptCount = 1, DateTimeOffset? createdAt = null, DateTimeOffset? claimedAt = null) => new()
     {
         Id = JobId, TransactionId = TransactionId, Kind = JobKind.ExtractReceipt,
         Status = JobStatus.Claimed, AttemptCount = attemptCount,
-        RunAfter = DateTimeOffset.UnixEpoch, CreatedAt = DateTimeOffset.UnixEpoch, UpdatedAt = DateTimeOffset.UnixEpoch,
+        RunAfter = DateTimeOffset.UnixEpoch, CreatedAt = createdAt ?? DateTimeOffset.UnixEpoch, UpdatedAt = DateTimeOffset.UnixEpoch,
+        ClaimedAt = claimedAt,
     };
 
     static CategorizationSubject WaitingReceipt() =>
@@ -121,10 +122,16 @@ public class ExtractReceiptWorkerTests
 
     static ExtractReceiptWorker CreateWorker(
         IServiceScopeFactory scopeFactory, FakeTimeProvider? time = null, IDatabaseGate? gate = null,
-        CapturingLogger<ExtractReceiptWorker>? logger = null, TimeZoneInfo? captureTimeZone = null) =>
-        new(scopeFactory, time ?? new FakeTimeProvider(new DateTimeOffset(2026, 9, 25, 9, 0, 0, TimeSpan.Zero)),
+        CapturingLogger<ExtractReceiptWorker>? logger = null, TimeZoneInfo? captureTimeZone = null, IOperationTimer? timer = null)
+    {
+        var resolvedTime = time ?? new FakeTimeProvider(new DateTimeOffset(2026, 9, 25, 9, 0, 0, TimeSpan.Zero));
+        return new(scopeFactory, resolvedTime,
             new CategorizationWorkerOptions(), WorkerId, Echo, captureTimeZone ?? Belgrade, gate ?? ReadyGate(),
+            timer ?? new OperationTimer(resolvedTime, new SlowOperationOptions()),
             logger ?? new CapturingLogger<ExtractReceiptWorker>());
+    }
+
+    static string? OperationOf(CapturedLogEntry entry) => entry.Properties.GetValueOrDefault("Operation") as string;
 
     static IDatabaseGate ReadyGate()
     {
@@ -579,5 +586,46 @@ public class ExtractReceiptWorkerTests
         await queue.Received().ReleaseExpiredLeasesAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
 
         await worker.StopAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task A_claimed_job_logs_claim_queueWait_downloadFile_and_job_extractReceipt()
+    {
+        var claimedAt = new DateTimeOffset(2026, 9, 25, 9, 0, 0, TimeSpan.Zero);
+        var job = ExtractJob(createdAt: claimedAt - TimeSpan.FromSeconds(4), claimedAt: claimedAt);
+        var harness = Setup(job);
+        var logger = new CapturingLogger<ExtractReceiptWorker>();
+        var time = new FakeTimeProvider(claimedAt);
+        var worker = CreateWorker(harness.ScopeFactory(), time, logger: logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        var operations = logger.Entries.Select(OperationOf).Where(operation => operation is not null).ToList();
+        operations.Should().Contain("db.claimJob");
+        operations.Should().Contain("job.queueWait");
+        operations.Should().Contain(TimedOperations.TelegramDownloadFile);
+        operations.Should().Contain(TimedOperations.JobExtractReceipt);
+
+        var queueWait = logger.Entries.Should().ContainSingle(entry => OperationOf(entry) == "job.queueWait").Subject;
+        queueWait.Properties["ElapsedMs"].Should().Be(4000L);
+    }
+
+    [Fact]
+    public async Task An_idle_tick_logs_no_timing_event()
+    {
+        var queue = Substitute.For<IJobQueue>();
+        queue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns((CategorizationJob?)null);
+        var provider = Substitute.For<IServiceProvider>();
+        provider.GetService(typeof(IJobQueue)).Returns(queue);
+        var scope = Substitute.For<IServiceScope>();
+        scope.ServiceProvider.Returns(provider);
+        var factory = Substitute.For<IServiceScopeFactory>();
+        factory.CreateScope().Returns(scope);
+        var logger = new CapturingLogger<ExtractReceiptWorker>();
+
+        await CreateWorker(factory, logger: logger).RunTickAsync(TestContext.Current.CancellationToken);
+
+        logger.Entries.Should().BeEmpty();
     }
 }

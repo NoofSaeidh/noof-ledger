@@ -35,7 +35,8 @@ public class ReceiptCategorizationWorkerTests
     static readonly WalletOption NamedInCaption = new(
         Guid.Parse("00000000-0000-0000-0000-000000000004"), "Wise", CurrencyCode.Rsd, [], IsDefaultForCurrency: false);
 
-    static CategorizationJob Job(string? instruction = null) => new()
+    static CategorizationJob Job(
+        string? instruction = null, DateTimeOffset? createdAt = null, DateTimeOffset? claimedAt = null) => new()
     {
         Id = JobId,
         TransactionId = TransactionId,
@@ -44,8 +45,9 @@ public class ReceiptCategorizationWorkerTests
         Kind = JobKind.CategorizeReceipt,
         Instruction = instruction,
         RunAfter = DateTimeOffset.UtcNow,
-        CreatedAt = DateTimeOffset.UtcNow,
+        CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
         UpdatedAt = DateTimeOffset.UtcNow,
+        ClaimedAt = claimedAt,
     };
 
     static readonly DateOnly SentOn = new(2026, 9, 25);
@@ -186,9 +188,13 @@ public class ReceiptCategorizationWorkerTests
     }
 
     static ReceiptCategorizationWorker CreateWorker(
-        IServiceScopeFactory scopeFactory, FakeTimeProvider time, CapturingLogger<ReceiptCategorizationWorker>? logger = null) =>
+        IServiceScopeFactory scopeFactory, FakeTimeProvider time, CapturingLogger<ReceiptCategorizationWorker>? logger = null,
+        IOperationTimer? timer = null) =>
         new(scopeFactory, time, new CategorizationWorkerOptions(), WorkerId, Echo, Utc, ReadyGate(),
+            timer ?? new OperationTimer(time, new SlowOperationOptions()),
             logger ?? new CapturingLogger<ReceiptCategorizationWorker>());
+
+    static string? OperationOf(CapturedLogEntry entry) => entry.Properties.GetValueOrDefault("Operation") as string;
 
     static FakeTimeProvider Time() => new(new DateTimeOffset(2026, 9, 25, 12, 0, 0, TimeSpan.Zero));
 
@@ -598,5 +604,40 @@ public class ReceiptCategorizationWorkerTests
         result.Should().Be(CategorizationTickResult.Idle);
         await jobQueue.DidNotReceive().ClaimAsync(
             Arg.Any<string>(), Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_claimed_job_logs_claim_queueWait_and_job_categorizeReceipt()
+    {
+        var claimedAt = new DateTimeOffset(2026, 9, 25, 12, 0, 0, TimeSpan.Zero);
+        var job = Job(createdAt: claimedAt - TimeSpan.FromSeconds(3), claimedAt: claimedAt);
+        var store = DefaultStore();
+        var logger = new CapturingLogger<ReceiptCategorizationWorker>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(job), KeyPresent(), store), new FakeTimeProvider(claimedAt), logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        var operations = logger.Entries.Select(OperationOf).Where(operation => operation is not null).ToList();
+        operations.Should().Contain("db.claimJob");
+        operations.Should().Contain("job.queueWait");
+        operations.Should().Contain(TimedOperations.JobCategorizeReceipt);
+
+        var queueWait = logger.Entries.Should().ContainSingle(entry => OperationOf(entry) == "job.queueWait").Subject;
+        queueWait.Properties["ElapsedMs"].Should().Be(3000L);
+    }
+
+    [Fact]
+    public async Task An_idle_tick_logs_no_timing_event()
+    {
+        var jobQueue = Substitute.For<IJobQueue>();
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns((CategorizationJob?)null);
+        var logger = new CapturingLogger<ReceiptCategorizationWorker>();
+        var worker = CreateWorker(ScopeFactoryFor(jobQueue, KeyPresent()), Time(), logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        logger.Entries.Should().BeEmpty();
     }
 }

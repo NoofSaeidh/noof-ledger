@@ -33,6 +33,7 @@ internal static class WorkerRegistration
             sp.GetRequiredService<IRecordEcho>(),
             captureTimeZone,
             sp.GetRequiredService<IDatabaseGate>(),
+            sp.GetRequiredService<IOperationTimer>(),
             sp.GetRequiredService<ILogger<ReceiptCategorizationWorker>>()));
 
         services.AddHostedService(sp => new TranscriptionWorker(
@@ -53,6 +54,7 @@ internal static class WorkerRegistration
             sp.GetRequiredService<IRecordEcho>(),
             captureTimeZone,
             sp.GetRequiredService<IDatabaseGate>(),
+            sp.GetRequiredService<IOperationTimer>(),
             sp.GetRequiredService<ILogger<ExtractReceiptWorker>>()));
 
         if (backupOptions.Enabled)

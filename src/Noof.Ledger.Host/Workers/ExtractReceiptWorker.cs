@@ -19,6 +19,7 @@ internal sealed class ExtractReceiptWorker(
     IRecordEcho recordEcho,
     TimeZoneInfo captureTimeZone,
     IDatabaseGate gate,
+    IOperationTimer timer,
     ILogger<ExtractReceiptWorker> logger)
     : BackgroundService
 {
@@ -48,12 +49,16 @@ internal sealed class ExtractReceiptWorker(
             var jobQueue = scope.ServiceProvider.GetRequiredService<IJobQueue>();
 
             var now = timeProvider.GetUtcNow();
-            await jobQueue.ReleaseExpiredLeasesAsync(now, cancellationToken);
+            using var release = timer.Start(logger, TimedOperations.DbReleaseExpiredLeases);
+            var released = await jobQueue.ReleaseExpiredLeasesAsync(now, cancellationToken);
+            release.Stop(onlyIfSlow: released == 0);
 
             if (now < accountCooldownUntil)
                 return CategorizationTickResult.Idle;
 
+            using var claim = timer.Start(logger, TimedOperations.DbClaimJob);
             var job = await jobQueue.ClaimAsync(workerId, ClaimableKinds, options.Lease, cancellationToken);
+            claim.Stop(onlyIfSlow: job is null);
             if (job is null)
                 return CategorizationTickResult.Idle;
 
@@ -77,6 +82,8 @@ internal sealed class ExtractReceiptWorker(
         CategorizationSubject? record = null;
 
         using var logScope = TransactionLogScope.Begin(logger, job.TransactionId);
+        timer.Record(logger, TimedOperations.JobQueueWait, (job.ClaimedAt ?? timeProvider.GetUtcNow()) - job.CreatedAt);
+        using var jobTiming = timer.Start(logger, TimedOperations.JobExtractReceipt);
 
         try
         {
@@ -118,7 +125,8 @@ internal sealed class ExtractReceiptWorker(
             if (telegramFileId is not null)
             {
                 var photoSource = scope.ServiceProvider.GetRequiredService<IReceiptPhotoSource>();
-                photo = await photoSource.DownloadAsync(telegramFileId, cancellationToken);
+                using (timer.Start(logger, TimedOperations.TelegramDownloadFile))
+                    photo = await photoSource.DownloadAsync(telegramFileId, cancellationToken);
             }
 
             var qrUrl = verificationUrl;

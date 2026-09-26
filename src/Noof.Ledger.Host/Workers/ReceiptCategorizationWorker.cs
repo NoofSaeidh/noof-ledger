@@ -24,6 +24,7 @@ internal sealed class ReceiptCategorizationWorker(
     IRecordEcho recordEcho,
     TimeZoneInfo captureTimeZone,
     IDatabaseGate gate,
+    IOperationTimer timer,
     ILogger<ReceiptCategorizationWorker> logger)
     : BackgroundService
 {
@@ -58,7 +59,9 @@ internal sealed class ReceiptCategorizationWorker(
             var modelProvider = scope.ServiceProvider.GetRequiredService<IModelProvider>();
 
             var now = timeProvider.GetUtcNow();
-            await jobQueue.ReleaseExpiredLeasesAsync(now, cancellationToken);
+            using var release = timer.Start(logger, TimedOperations.DbReleaseExpiredLeases);
+            var released = await jobQueue.ReleaseExpiredLeasesAsync(now, cancellationToken);
+            release.Stop(onlyIfSlow: released == 0);
 
             // Checked before claiming, for CategorizationWorker's own reason: a claim spends an
             // attempt and nothing gives it back.
@@ -68,7 +71,9 @@ internal sealed class ReceiptCategorizationWorker(
             if (now < accountCooldownUntil)
                 return CategorizationTickResult.Idle;
 
+            using var claim = timer.Start(logger, TimedOperations.DbClaimJob);
             var job = await jobQueue.ClaimAsync(workerId, ClaimableKinds, options.Lease, cancellationToken);
+            claim.Stop(onlyIfSlow: job is null);
             if (job is null)
                 return CategorizationTickResult.Idle;
 
@@ -98,6 +103,8 @@ internal sealed class ReceiptCategorizationWorker(
         var currentStage = TransactionStages.Categorized;
 
         using var logScope = TransactionLogScope.Begin(logger, job.TransactionId);
+        timer.Record(logger, TimedOperations.JobQueueWait, (job.ClaimedAt ?? timeProvider.GetUtcNow()) - job.CreatedAt);
+        using var jobTiming = timer.Start(logger, TimedOperations.JobCategorizeReceipt);
 
         try
         {
