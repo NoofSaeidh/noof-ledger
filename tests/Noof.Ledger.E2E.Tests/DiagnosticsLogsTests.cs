@@ -226,6 +226,33 @@ public sealed class DiagnosticsLogsTests(CookieModeHostFixture fixture) : PageTe
         await Expect(grid).ToContainTextAsync(new Regex("sort-order-older-row[\\s\\S]*sort-order-newer-row"));
     }
 
+    [Fact]
+    public async Task The_database_level_choice_survives_a_reload()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/diagnostics/logs");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        try
+        {
+            await Page.SelectOptionAsync("#logs-database-level", "Debug");
+            await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+            await Page.ReloadAsync();
+            await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+            await Expect(Page.Locator("#logs-database-level")).ToHaveValueAsync("Debug");
+        }
+        finally
+        {
+            await Page.SelectOptionAsync("#logs-database-level", "Information");
+            await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        }
+    }
+
     static AppLogEntry NewRow(
         string message, DateTimeOffset? loggedAt = null, string source = "DiagnosticsLogsTests", LogSeverity level = LogSeverity.Information) => new()
     {

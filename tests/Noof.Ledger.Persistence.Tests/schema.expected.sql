@@ -20,6 +20,14 @@ CREATE TABLE public.app_secret (
 );
 
 
+CREATE TABLE public.app_setting (
+    key text NOT NULL,
+    value text NOT NULL,
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT "PK_app_setting" PRIMARY KEY (key)
+);
+
+
 CREATE TABLE public.app_user (
     id uuid NOT NULL,
     username character varying(64) NOT NULL,
@@ -237,5 +245,3 @@ CREATE INDEX "IX_transactions_wallet_id" ON public.transactions (wallet_id);
 
 
 CREATE UNIQUE INDEX ix_wallets_one_default_per_currency ON public.wallets (currency) WHERE is_default_for_currency;
-
-

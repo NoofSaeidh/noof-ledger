@@ -65,6 +65,7 @@ public static class PersistenceRegistration
             sp.GetRequiredService<TimeProvider>(),
             maxJobAttempts));
         services.AddScoped<IBackupLog, EfBackupLog>();
+        services.AddScoped<IDatabaseLogLevelStore, EfDatabaseLogLevelStore>();
         services.AddScoped<IDatabaseDumper>(_ => new PgDumpDatabaseDumper(
             connectionString, configuration["Backup:PgDumpPath"] ?? PgDumpDatabaseDumper.DefaultPath));
         var retentionOptions = new LogRetentionOptions();

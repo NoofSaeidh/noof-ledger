@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Noof.Ledger.Host.Logging;
 using Serilog;
+using Serilog.Events;
 
 namespace Noof.Ledger.Host.Tests;
 
@@ -154,6 +155,125 @@ public class LogLevelConfigurationTests
         }
     }
 
+    [Fact]
+    public void The_database_switch_decides_which_levels_reach_the_database_buffer()
+    {
+        var logDirectory = Directory.CreateTempSubdirectory("noof-logging-setup-test-").FullName;
+        try
+        {
+            var hostConfiguration = new ConfigurationBuilder().Build();
+            var fakeServices = BuildFakeServices(new NeverReadyGate());
+            var switches = fakeServices.GetRequiredService<LogLevelSwitches>();
+            switches.SetDatabaseLevel(LogEventLevel.Debug);
+
+            var configuration = new LoggerConfiguration();
+            LoggingSetup.Configure(configuration, hostConfiguration, logDirectory, UnreachableConnectionString, fakeServices);
+            using (var logger = configuration.CreateLogger())
+            {
+                var probe = logger.ForContext(Serilog.Core.Constants.SourceContextPropertyName, "Noof.Ledger.Host.Tests.Probe");
+                probe.Debug("debug marker");
+                probe.Information("information marker");
+            }
+
+            var text = ReadAllTextWithRetry(NewestLogFile(logDirectory));
+            text.Should().Contain("2", "both events cleared the Debug database floor and were buffered");
+            text.Should().Contain("never written to the database");
+        }
+        finally
+        {
+            DeleteWithRetry(new DirectoryInfo(logDirectory));
+        }
+    }
+
+    [Fact]
+    public void The_database_switch_at_Information_only_buffers_the_Information_event()
+    {
+        var logDirectory = Directory.CreateTempSubdirectory("noof-logging-setup-test-").FullName;
+        try
+        {
+            var hostConfiguration = new ConfigurationBuilder().Build();
+            var fakeServices = BuildFakeServices(new NeverReadyGate());
+            var switches = fakeServices.GetRequiredService<LogLevelSwitches>();
+            switches.SetDatabaseLevel(LogEventLevel.Information);
+
+            var configuration = new LoggerConfiguration();
+            LoggingSetup.Configure(configuration, hostConfiguration, logDirectory, UnreachableConnectionString, fakeServices);
+            using (var logger = configuration.CreateLogger())
+            {
+                var probe = logger.ForContext(Serilog.Core.Constants.SourceContextPropertyName, "Noof.Ledger.Host.Tests.Probe");
+                probe.Debug("debug marker");
+                probe.Information("information marker");
+            }
+
+            var text = ReadAllTextWithRetry(NewestLogFile(logDirectory));
+            text.Should().Contain("1", "only the Information event cleared the database floor");
+            text.Should().Contain("never written to the database");
+        }
+        finally
+        {
+            DeleteWithRetry(new DirectoryInfo(logDirectory));
+        }
+    }
+
+    [Fact]
+    public void Default_is_the_files_floor_and_Information_stops_a_Debug_marker_reaching_the_file()
+    {
+        var logDirectory = Directory.CreateTempSubdirectory("noof-logging-setup-test-").FullName;
+        try
+        {
+            var marker = $"debug-{Guid.NewGuid():N}";
+            var hostConfiguration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["Serilog:MinimumLevel:Default"] = "Information" })
+                .Build();
+            var fakeServices = BuildFakeServices();
+            fakeServices.GetRequiredService<LogLevelSwitches>().SetDatabaseLevel(LogEventLevel.Debug);
+
+            var configuration = new LoggerConfiguration();
+            LoggingSetup.Configure(configuration, hostConfiguration, logDirectory, UnreachableConnectionString, fakeServices);
+            using (var logger = configuration.CreateLogger())
+            {
+                var probe = logger.ForContext(Serilog.Core.Constants.SourceContextPropertyName, "Noof.Ledger.Host.Tests.Probe");
+                probe.Debug("{Marker}", marker);
+                probe.Information("file marker, to guarantee the file exists");
+            }
+
+            var text = ReadAllTextWithRetry(NewestLogFile(logDirectory));
+            text.Should().NotContain(marker, "the file's floor is Default, not the database level");
+        }
+        finally
+        {
+            DeleteWithRetry(new DirectoryInfo(logDirectory));
+        }
+    }
+
+    [Fact]
+    public void Default_at_Debug_lets_a_Debug_marker_reach_the_file()
+    {
+        var logDirectory = Directory.CreateTempSubdirectory("noof-logging-setup-test-").FullName;
+        try
+        {
+            var marker = $"debug-{Guid.NewGuid():N}";
+            var hostConfiguration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["Serilog:MinimumLevel:Default"] = "Debug" })
+                .Build();
+
+            var configuration = new LoggerConfiguration();
+            LoggingSetup.Configure(configuration, hostConfiguration, logDirectory, UnreachableConnectionString, BuildFakeServices());
+            using (var logger = configuration.CreateLogger())
+            {
+                var probe = logger.ForContext(Serilog.Core.Constants.SourceContextPropertyName, "Noof.Ledger.Host.Tests.Probe");
+                probe.Debug("{Marker}", marker);
+            }
+
+            var text = ReadAllTextWithRetry(NewestLogFile(logDirectory));
+            text.Should().Contain(marker, "Default=Debug is the file's floor");
+        }
+        finally
+        {
+            DeleteWithRetry(new DirectoryInfo(logDirectory));
+        }
+    }
+
     static IServiceProvider BuildFakeServices(Noof.Ledger.Application.Diagnostics.IDatabaseGate? gate = null)
     {
         var services = new ServiceCollection();
@@ -162,6 +282,7 @@ public class LogLevelConfigurationTests
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<Noof.Ledger.Host.Diagnostics.ISecretValueSource>(new NoSecrets());
         services.AddSingleton<Noof.Ledger.Host.Diagnostics.SecretRedactor>();
+        services.AddSingleton<LogLevelSwitches>();
         return services.BuildServiceProvider();
     }
 

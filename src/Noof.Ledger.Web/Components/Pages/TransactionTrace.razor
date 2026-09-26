@@ -74,6 +74,10 @@ else
         </MudSimpleTable>
     }
 
+    <MudLink id="trace-logs-link" Href="@($"/diagnostics/logs?transactionId={Id}&level=Debug")" Class="mb-3" Style="display:inline-block;">
+        Timings and debug log
+    </MudLink>
+
     <div id="trace-stages" class="mb-6">
         @foreach (var stage in TransactionStages.Ordered)
         {
