@@ -128,9 +128,18 @@ internal sealed class TelegramUpdateRouter(
         await SendAcknowledgementAsync(message.Chat.Id, transactionId, recordEcho.ReadingReceipt, cancellationToken);
     }
 
+    // M-7 (2026-09-25 final review): every image/* MIME type used to pass here, but
+    // TelegramReceiptPhotoSource.MediaTypeFor derives the actual media type from the file's
+    // extension and defaults to image/jpeg for anything it does not recognise - so a HEIC upload
+    // (image/heic, no matching case there) passed this check, SkiaSharp could not decode it, and
+    // vision received bytes mislabelled as JPEG. Only the types that source correctly maps are
+    // accepted here.
+    static readonly HashSet<string> SupportedImageMimeTypes =
+        new(StringComparer.OrdinalIgnoreCase) { "image/jpeg", "image/png", "image/webp", "image/gif" };
+
     async Task HandleReceiptDocumentAsync(Message message, Document document, string timeZoneId, CancellationToken cancellationToken)
     {
-        if (document.MimeType is not { } mimeType || !mimeType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+        if (document.MimeType is not { } mimeType || !SupportedImageMimeTypes.Contains(mimeType))
         {
             await chatNotifier.SendAsync(message.Chat.Id, recordEcho.OnlyPhotosSupported, cancellationToken);
             return;

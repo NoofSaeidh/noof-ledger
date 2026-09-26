@@ -30,6 +30,7 @@ internal sealed class TelegramReceiptPhotoSource(TelegramClientHandle clientHand
     {
         ".png" => "image/png",
         ".webp" => "image/webp",
+        ".gif" => "image/gif",
         _ => "image/jpeg",
     };
 }

@@ -45,6 +45,17 @@ public class TelegramReceiptPhotoSourceTests
     }
 
     [Fact]
+    public async Task A_gif_file_path_reports_the_gif_media_type()
+    {
+        var source = new TelegramReceiptPhotoSource(
+            new TelegramClientHandle { Current = ClientServing(SyntheticJpeg, filePath: "documents/file_3.gif") });
+
+        var photo = await source.DownloadAsync("photo-1", TestContext.Current.CancellationToken);
+
+        photo.MediaType.Should().Be("image/gif");
+    }
+
+    [Fact]
     public async Task Throws_when_no_client_is_ready_yet()
     {
         var source = new TelegramReceiptPhotoSource(new TelegramClientHandle());
