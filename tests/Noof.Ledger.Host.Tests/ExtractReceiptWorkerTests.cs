@@ -291,6 +291,31 @@ public class ExtractReceiptWorkerTests
         await harness.Vision.Received(1).ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), "image/jpeg", 500m, Arg.Any<CancellationToken>());
     }
 
+    // N-6 (2026-09-25 re-review of the final review): the QR decoded fine here, so the fiscal-QR-only
+    // operator (R-1/R-5, no key by design) has done nothing wrong - the Tax Administration outage may
+    // last minutes. M-10's own gate treated this exactly like "no readable QR at all" and failed the
+    // job terminally under a "no readable fiscal QR code" message that misdescribes what happened and
+    // loses the receipt for good. Retry like any other transient failure instead.
+    [Fact]
+    public async Task A_fetch_failure_with_a_photo_and_no_model_key_retries_instead_of_failing_terminally()
+    {
+        var harness = Setup(ExtractJob(), verificationUrl: null, telegramFileId: "photo-1");
+        harness.QrReader.Read(Arg.Any<Stream>()).Returns("https://suf.purs.gov.rs/v/?vl=abc");
+        harness.Decoder.Decode(Arg.Any<string>()).Returns(new FiscalQrDecodeResult(Payload(), null));
+        harness.FetchClient.FetchAsync(Arg.Any<FiscalQrPayload>(), Arg.Any<CancellationToken>())
+            .Returns(new FiscalFetchResult(null, new FiscalFetchFailure("504 gateway timeout", 504)));
+        harness.ModelProvider.IsConfiguredAsync(Arg.Any<CancellationToken>()).Returns(false);
+
+        await TickAsync(harness);
+
+        await harness.Vision.DidNotReceiveWithAnyArgs().ReadAsync(default, default!, default, Arg.Any<CancellationToken>());
+        await harness.ReceiptStore.DidNotReceiveWithAnyArgs().SaveExtractedAsync(default, default!, default, Arg.Any<CancellationToken>());
+        await harness.Queue.Received(1).RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await harness.Queue.DidNotReceiveWithAnyArgs().FailAsync(default, default!, default!, Arg.Any<CancellationToken>());
+        await harness.Store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, Arg.Any<CancellationToken>());
+        await harness.Notifier.DidNotReceiveWithAnyArgs().EditAsync(default, default, default!, Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task A_fetch_failure_on_a_link_only_capture_fails_with_an_unreachable_echo()
     {

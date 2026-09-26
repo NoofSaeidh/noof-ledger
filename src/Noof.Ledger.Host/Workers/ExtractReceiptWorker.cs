@@ -175,8 +175,18 @@ internal sealed class ExtractReceiptWorker(
 
                         if (photo is { } photoForFetchFailure)
                         {
-                            if (!await EnsureVisionConfiguredAsync(scope, jobQueue, store, notifier, job, record, cancellationToken))
-                                return;
+                            // N-6 (2026-09-25 re-review): the QR decoded fine, so unlike the two other
+                            // vision fallbacks (no QR at all, or a QR that failed to decode) there is
+                            // nothing wrong with this capture - the Tax Administration outage may be
+                            // transient. Failing terminally under EnsureVisionConfiguredAsync's "no
+                            // readable fiscal QR code" message would misdescribe the failure and lose
+                            // the receipt for good; retry like any other transient failure instead.
+                            var modelProvider = scope.ServiceProvider.GetRequiredService<IModelProvider>();
+                            if (!await modelProvider.IsConfiguredAsync(cancellationToken))
+                            {
+                                throw new ModelCallException(ModelFailureKind.Transient,
+                                    "the Tax Administration is unreachable and no AI key is configured for the vision fallback");
+                            }
 
                             logger.LogVisionUsed("fetch failed");
                             extracted = await ReadWithVisionAsync(scope, photoForFetchFailure, payload.Total, cancellationToken);
