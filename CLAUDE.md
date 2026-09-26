@@ -193,9 +193,12 @@ register it into) — named because they are exceptions, not a licence to invent
   `app_setting`, and capped at Information (Warning+ would empty the trace page, which reads
   Information-level stage events). `Serilog:MinimumLevel:Default` is the file sink's own floor, and
   the root level is `min(file floor, database level)`. A per-sink floor is `restrictedToMinimumLevel`
-  or a `levelSwitch` on the `WriteTo` call — and any inner `LoggerConfiguration` used as a
-  `WriteTo.Sink` target needs its own `.MinimumLevel.Verbose()`, because it *does* enforce its own
-  default Information floor (verified by test, not assumed).
+  or a `levelSwitch` on the `WriteTo` call — and an inner `LoggerConfiguration` reached through
+  `WriteTo.Sink(innerLogger)` or any other direct `ILogEventSink.Emit` call **bypasses its own
+  `MinimumLevel` entirely** (`SerilogInnerLoggerSinkTests`, against Serilog 4.4.0): `Logger.Emit`
+  dispatches to the sink pipeline unconditionally, and only `ILogger.Write` — what
+  `logger.Information(...)` and friends call — checks a logger's own floor first. `WriteTo.Logger(...)`
+  (which calls `Write`) is the one variant that would honour it.
 
 **Testing**
 - TDD: a failing test first, for all behaviour. Exempt: migrations, DTOs, `Program.cs` wiring.

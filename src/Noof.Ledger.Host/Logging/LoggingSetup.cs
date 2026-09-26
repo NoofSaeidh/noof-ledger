@@ -107,13 +107,14 @@ internal static class LoggingSetup
         // period: 1s, not the sink's own (much longer) default - an operator reading /diagnostics/logs
         // right after something happened should see it there, not wonder why a real event is
         // missing for the length of an unconfigured batching window.
-        // .MinimumLevel.Verbose() (V8 finding): a Logger used as a WriteTo.Sink target dispatches to
-        // ILogEventSink.Emit without checking its own MinimumLevel - only the levelSwitch on the
-        // outer WriteTo.Sink call actually restricts what reaches it. Without this, this inner
-        // Logger's own default Information floor would silently re-filter Debug events the switch
-        // already let through.
+        // No .MinimumLevel here (final review, major): this Logger is used only as a WriteTo.Sink
+        // target below (ReadyGatedBufferSink calls its ILogEventSink.Emit directly), and Serilog's
+        // Logger.Emit dispatches to the sink pipeline unconditionally, never checking its own
+        // MinimumLevel - only ILogger.Write (Log.Information(...) and friends) applies that check.
+        // A .MinimumLevel call here would be a no-op either way (SerilogInnerLoggerSinkTests proves
+        // it against the resolved Serilog version); the real floor is switches.Database on the
+        // outer WriteTo.Sink call.
         var postgresLogger = new LoggerConfiguration()
-            .MinimumLevel.Verbose()
             .WriteTo.PostgreSQL(connectionString, "app_log", columnOptions, period: TimeSpan.FromSeconds(1), needAutoCreateTable: false)
             .CreateLogger();
 
@@ -123,11 +124,10 @@ internal static class LoggingSetup
         // consoleAndFileLogger is built once and referenced twice: as `destinations`' own sink, and
         // as ReadyGatedBufferSink's fallback (M-9, Phase 5 final review) - the one place it can still
         // report to when it is disposed with events that never reached the database, since there is
-        // no app_log connection to write to at that point. .MinimumLevel.Verbose() (V8 finding): see
-        // postgresLogger above - each restrictedToMinimumLevel call below is what actually narrows
-        // what reaches Console and File, not this inner Logger's own floor.
+        // no app_log connection to write to at that point. No .MinimumLevel here either, for the same
+        // reason as postgresLogger above: each restrictedToMinimumLevel call below is what actually
+        // narrows what reaches Console and File, never this inner Logger's own floor.
         var consoleAndFileLogger = new LoggerConfiguration()
-            .MinimumLevel.Verbose()
             .WriteTo.Console(restrictedToMinimumLevel: Max(LogEventLevel.Information, levels.Default))
             .WriteTo.File(
                 Path.Combine(logDirectory, "noof-ledger-.log"),

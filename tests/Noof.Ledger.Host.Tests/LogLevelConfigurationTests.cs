@@ -146,8 +146,10 @@ public class LogLevelConfigurationTests
             logger.Dispose();
 
             var text = ReadAllTextWithRetry(NewestLogFile(logDirectory));
-            text.Should().Contain("2", "the file must name how many buffered events never reached the database");
-            text.Should().Contain("never written to the database");
+            // The exact rendered warning, not a bare "2": every line in this file starts with a
+            // 2026 timestamp, so Contain("2") passes whatever the real count is (final review, minor).
+            text.Should().Contain("2 log events were never written to the database",
+                "the file must name how many buffered events never reached the database");
         }
         finally
         {
@@ -176,8 +178,9 @@ public class LogLevelConfigurationTests
             }
 
             var text = ReadAllTextWithRetry(NewestLogFile(logDirectory));
-            text.Should().Contain("2", "both events cleared the Debug database floor and were buffered");
-            text.Should().Contain("never written to the database");
+            // The exact rendered warning, not a bare "2" - see the sibling test above.
+            text.Should().Contain("2 log events were never written to the database",
+                "both events cleared the Debug database floor and were buffered");
         }
         finally
         {
@@ -206,8 +209,9 @@ public class LogLevelConfigurationTests
             }
 
             var text = ReadAllTextWithRetry(NewestLogFile(logDirectory));
-            text.Should().Contain("1", "only the Information event cleared the database floor");
-            text.Should().Contain("never written to the database");
+            // The exact rendered warning, not a bare "1" - see the sibling test above.
+            text.Should().Contain("1 log events were never written to the database",
+                "only the Information event cleared the database floor");
         }
         finally
         {
