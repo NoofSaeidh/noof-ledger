@@ -20,10 +20,13 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
 > timeout; a check that throws or times out shows only its exception type. Every model, speech,
 > Telegram, worker and health-check call is timed through `IOperationTimer`, logged as Debug or, over
 > its own slow threshold (`Logging:SlowOperationMs`), a Warning. The database log sink's minimum level
-> is runtime state — Verbose/Debug/Information, switched on the Logs page, persisted in `app_setting`,
-> never above Information — while the file and console sinks each keep their own static floor,
-> `Logging:File:MinimumLevel` and `Logging:Console:MinimumLevel`; a transaction's
-> trace page links straight into the Logs page at Debug for that transaction. Transactions carry a `Kind`
+> is runtime state — any of the six severities, or Off — switched on `/diagnostics/logs/settings`
+> (linked from the Logs page header) and persisted in `app_setting`, alongside per-level database
+> retention days there too; while the file and console sinks each keep their own static floor,
+> `Logging:File:MinimumLevel` and `Logging:Console:MinimumLevel`. Above Information (or Off) the
+> trace page says so with an inline notice, since the database sink then drops the stage events it
+> reads; a transaction's trace page links straight into the Logs page at Debug for that transaction.
+> Transactions carry a `Kind`
 > (`Expense`/`Income`/`BalanceCheck`); expense and income transactions own signed double-entry-lite
 > `entries`; a balance statement is a `balance_checks` checkpoint; a wallet's balance is computed by the
 > `wallet_balances` SQL view and read back by `IBalanceReadModel`, never stored. The model's answer tool
@@ -33,7 +36,7 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
 > `%LOCALAPPDATA%\NoofLedger\backups`, the newest 14 kept, every run logged to `backup_runs` — and
 > `ops/restore-check.ps1` proves a dump restores to the same balances, checked so far against a
 > template clone; the one check against the live ledger itself is the operator's to run
-> (`ops/RUNBOOK.md`). **1271 solution tests — 1260 passing, 11 live-only tests skipped, none failing** —
+> (`ops/RUNBOOK.md`). **1280 solution tests — 1269 passing, 11 live-only tests skipped, none failing** —
 > the Playwright browser tests are in the solution now, so `dotnet test --solution` runs them too and
 > needs Chromium present. Live suites stay skipped unless `NOOF_LEDGER_LIVE_ANTHROPIC_KEY` /
 > `NOOF_LEDGER_LIVE_GROQ_KEY` + `NOOF_LEDGER_LIVE_VOICE_FILE` are set; `ops/publish.ps1` produces a
@@ -190,21 +193,36 @@ register it into) — named because they are exceptions, not a licence to invent
   `Stop(onlyIfSlow: ...)` on the success path so an idle call logs nothing; thresholds live in
   `Logging:SlowOperationMs`. Never `Stopwatch`, never a `GetUtcNow()` subtraction — `TimeProvider`'s
   `GetTimestamp`/`GetElapsedTime` end to end.
-- **The database sink's minimum level is runtime state**, set from the Logs page, persisted in
-  `app_setting`, and capped at Information (Warning+ would empty the trace page, which reads
-  Information-level stage events). The file and console sinks are static configuration instead —
+- **The database sink's minimum level is runtime state**, set on `/diagnostics/logs/settings` and
+  persisted in `app_setting`. *(Decision (a), 2026-09-26, withdraws the earlier "capped at
+  Information" rule.)* All six severities are offered, plus **Off** (nothing written to `app_log`).
+  Off is not a `LogSeverity` — `IDatabaseLogLevel.Current`/`SetAsync` take `LogSeverity?`, `null`
+  meaning Off — and is represented to Serilog by `LogLevelSwitches.Off`, a sentinel one past `Fatal`
+  that no real event ever reaches; `RecomputeRoot`'s `Min()` naturally excludes it, so Off never
+  lowers the root below the file/console floor. **Consequence the operator accepted rather than
+  guarded against:** above Information (or Off), the database sink drops the Information-level stage
+  events the trace page reads, so a transaction's trace page shows an inline notice
+  (`#trace-log-level-notice`) linking back to Log settings whenever that is the case — it does not
+  stop you choosing that level. The file and console sinks are static configuration instead —
   `Logging:File:MinimumLevel` (default `Debug`) and `Logging:Console:MinimumLevel` (default
-  `Information`) — and the root level is `min(file, console, database)`. `Serilog:MinimumLevel:Default`
-  is withdrawn *(decision (d), 2026-09-26)*: a value left under that key fails startup fast, naming
-  the two keys above, rather than silently binding neither sink. `Serilog:MinimumLevel` now holds only
-  `Override` (per-category); file retention is by file count only (`Logging:File:RetainedFileCountLimit`,
-  `Logging:File:FileSizeLimitBytes`), never by days. A per-sink floor is `restrictedToMinimumLevel`
-  or a `levelSwitch` on the `WriteTo` call — and an inner `LoggerConfiguration` reached through
-  `WriteTo.Sink(innerLogger)` or any other direct `ILogEventSink.Emit` call **bypasses its own
-  `MinimumLevel` entirely** (`SerilogInnerLoggerSinkTests`, against Serilog 4.4.0): `Logger.Emit`
-  dispatches to the sink pipeline unconditionally, and only `ILogger.Write` — what
-  `logger.Information(...)` and friends call — checks a logger's own floor first. `WriteTo.Logger(...)`
-  (which calls `Write`) is the one variant that would honour it.
+  `Information`) — and the root level is `min(file, console, database-unless-Off)`.
+  `Serilog:MinimumLevel:Default` is withdrawn *(decision (d), 2026-09-26)*: a value left under that
+  key fails startup fast, naming the two keys above, rather than silently binding neither sink.
+  `Serilog:MinimumLevel` now holds only `Override` (per-category); file retention is by file count
+  only (`Logging:File:RetainedFileCountLimit`, `Logging:File:FileSizeLimitBytes`), never by days. A
+  per-sink floor is `restrictedToMinimumLevel` or a `levelSwitch` on the `WriteTo` call — and an inner
+  `LoggerConfiguration` reached through `WriteTo.Sink(innerLogger)` or any other direct
+  `ILogEventSink.Emit` call **bypasses its own `MinimumLevel` entirely** (`SerilogInnerLoggerSinkTests`,
+  against Serilog 4.4.0): `Logger.Emit` dispatches to the sink pipeline unconditionally, and only
+  `ILogger.Write` — what `logger.Information(...)` and friends call — checks a logger's own floor
+  first. `WriteTo.Logger(...)` (which calls `Write`) is the one variant that would honour it.
+- **Database log retention, per level, lives only on `/diagnostics/logs/settings`** *(decision (c),
+  2026-09-26)*, persisted in `app_setting` through `ILogRetentionSettings`/`LogRetentionDays` — never
+  in `appsettings.json`. C# defaults (`LogRetentionDays.Default`): Verbose 1, Debug 1, Information 30,
+  Warning 90, Error 90, Fatal 90 days; `EfLogRetention` reads the stored value, falling back to these.
+  Changes on that page take effect only on **Save**, never on a field's own `@bind:after` — the same
+  pattern as `Secrets.razor` — matching decision (b): no setting in this feature autosaves on change.
+  `transaction_revisions` retention is explicitly not part of this — `docs/BACKLOG.md`.
 
 **Testing**
 - TDD: a failing test first, for all behaviour. Exempt: migrations, DTOs, `Program.cs` wiring.

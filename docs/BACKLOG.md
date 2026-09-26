@@ -944,3 +944,15 @@ to change one: the worker poll intervals (`SecretSnapshotRefreshWorker`, `LogRet
 health checks' staleness windows (Disk, Backup, Log sink, Telegram), `TelegramBackoff`'s caps, the
 5 s per-check timeout in `SystemHealth`, and `pg_dump`'s `PGCONNECT_TIMEOUT`. Move one when a real
 reason to tune it appears, through the options pattern the rest already use.
+
+### `transaction_revisions` retention — deferred 2026-09-26 (decision (e))
+
+Log settings (`/diagnostics/logs/settings`) gives the operator per-level retention for `app_log`, but
+deliberately not for `transaction_revisions` — the append-only history a trace page's History section
+reads. That table has no retention at all today: every revision, forever. Doing this properly needs,
+first, the append-only trigger (`transaction_revisions_no_truncate` or its equivalent — the one that
+already cost a phase's worth of drift once, per CLAUDE.md's Database rules) relaxed to allow a
+retention job's own `DELETE`, which is a bigger decision than this feature's scope: it is the one
+guarantee that table currently makes, and loosening it for one more caller is not something to do as
+a side effect of a settings screen. Revisit alongside a real reason to prune old revisions (disk
+growth becomes a real problem, or a GDPR-shaped request to actually forget something).

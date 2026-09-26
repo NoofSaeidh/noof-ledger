@@ -260,19 +260,22 @@ page — read the file log with `.\run.ps1 logs` instead. Every transaction has 
 `/transactions/{id}/trace` — the message itself, its path from received to replied with timings and
 the reason for any failure, and the `transaction_revisions` history below it; if the log rows have
 aged out under retention the trace strip says so but the revision history still shows, since that
-table is never pruned. Retention is per level, in `appsettings.json` under
-`Logging:Retention:Days` (defaults: Verbose and Debug 1 day, Information 90, Warning and above 730).
+table is never pruned. Above Information (or Off), the database sink drops the stage events the
+trace page reads, so the page shows an inline notice instead, linking to Log settings. Retention is
+per level, set on `/diagnostics/logs/settings` (the **Log settings** link from the Logs page header)
+and persisted in `app_setting`, never in `appsettings.json` — C# defaults: Verbose and Debug 1 day,
+Information 30, Warning/Error/Fatal 90.
 
 ### Verbose logging
 
-By default the database sink only records Information and above (per-level retention:
-Verbose/Debug 1 day, Information 90, Warning/Error/Fatal 730 — `appsettings.json` under
-`Logging:Retention:Days`). To see Debug detail — model/Telegram/worker/health timings — temporarily:
+By default the database sink only records Information and above (per-level retention defaults:
+Verbose/Debug 1 day, Information 30, Warning/Error/Fatal 90 — set on `/diagnostics/logs/settings`,
+persisted in `app_setting`). To see Debug detail — model/Telegram/worker/health timings — temporarily:
 
-1. Open `/diagnostics/logs` (the **Logs** tab) and set **Record to database from** to `Debug` (or
-   `Verbose`). The choice is saved immediately, survives a restart, and is kept for however many days
-   `Logging:Retention:Days:Debug` says (1 by default) — turn it back to `Information` when you are
-   done, or let it age out.
+1. Open `/diagnostics/logs` (the **Logs** tab), follow **Log settings**, set the database level to
+   `Debug` (or `Verbose`) and click **Save** — nothing changes until you do. It survives a restart,
+   and is kept for however many days that same screen's Debug retention field says (1 by default) —
+   turn it back to `Information` when you are done, or let it age out.
 2. Every Telegram message, model call and worker tick logs a Debug timing line
    (`{Operation} took {ElapsedMs} ms`) once the database level allows it; a call over its own slow
    threshold logs a Warning instead (`Logging:SlowOperationMs:<operation>`, e.g.
