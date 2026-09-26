@@ -329,6 +329,9 @@ internal sealed class CategorizationWorker(
                 if (isLastAttempt)
                 {
                     logger.ReceiptCorrectionDeferralExhausted(job.Id, job.TransactionId);
+                    logger.LogStageFailed(
+                        TransactionStages.StageFailed, TransactionStages.Categorized,
+                        new InvalidOperationException("the receipt for this transaction is still being extracted"));
                     await NotifyFailureAsync(store, notifier, sub, job, cancellationToken);
                 }
             }

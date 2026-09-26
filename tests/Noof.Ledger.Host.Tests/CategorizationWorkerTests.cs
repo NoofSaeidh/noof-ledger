@@ -1636,6 +1636,30 @@ public class CategorizationWorkerTests
         await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
     }
 
+    // R2-3 follow-up: the other terminal retry paths (HandleModelFailureAsync, FailTerminallyAsync)
+    // all log StageFailed so the trace page shows where the job died - the deferral-exhausted branch
+    // logged Warning 1210 but left the trace page silent about it.
+    [Fact]
+    public async Task A_deferred_correction_that_exhausts_its_attempts_logs_StageFailed_for_Categorized()
+    {
+        var jobQueue = QueueWith(Job(kind: JobKind.Correct, instruction: "that was cash", attemptCount: 8));
+        var receiptStore = NoReceiptStore();
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(status: TransactionStatus.Captured) with { CaptureKind = CaptureKind.Photo });
+        var notifier = Substitute.For<IChatNotifier>();
+        var logger = new CapturingLogger<CategorizationWorker>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, notifier: notifier, receiptStore: receiptStore),
+            new FakeTimeProvider(DateTimeOffset.UtcNow), logger: logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        var entry = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.StageFailedEventId).Subject;
+        entry.Properties["FailedStage"].Should().Be(TransactionStages.Categorized);
+        entry.Scope![TransactionStages.TransactionIdProperty].Should().Be(TransactionId);
+    }
+
     [Fact]
     public async Task A_first_reading_is_never_routed_to_the_receipt_path_even_when_one_exists()
     {
