@@ -24,6 +24,17 @@ public interface IJobQueue
 
     Task<JobCompletionOutcome> FailAsync(Guid jobId, string workerId, string error, CancellationToken cancellationToken);
 
+    // Hands a claimed Correct/Reinterpret job to the receipt-correction path at claim time (ruling
+    // F-2, Phase 6 re-review): the transaction it points at already has a money receipt, so its line
+    // items must come from receipt_lines, never a fresh record_transaction reading. Queues a
+    // CategorizeReceipt job carrying instruction as its own Instruction and marks jobId Succeeded,
+    // both inside one database transaction - a crash before it commits leaves jobId Claimed for an
+    // ordinary lease-expiry retry, never a hand-off job created without its origin marked done.
+    // NotOwned (jobId no longer Claimed by workerId) creates nothing.
+    Task<JobCompletionOutcome> HandOffToReceiptCorrectionAsync(
+        Guid jobId, string workerId, Guid transactionId, string? instruction, int? sourceMessageId, DateTimeOffset now,
+        CancellationToken cancellationToken);
+
     // Returns claimed jobs whose lease (RunAfter) has passed to Pending. Intended to run on
     // every poll tick, never as a startup sweep - a startup sweep would steal live work from
     // a second Host process.

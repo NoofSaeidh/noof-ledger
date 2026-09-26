@@ -2,6 +2,7 @@
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Jobs;
+using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Host.Workers.CategorizationLogging;
@@ -122,6 +123,9 @@ internal sealed class CategorizationWorker(
                     "the transaction this job points at no longer exists", currentStage, cancellationToken);
                 return;
             }
+
+            if (await TryRouteToReceiptAsync(scope, jobQueue, job, sub, cancellationToken))
+                return;
 
             var categories = await categoryCatalog.ActiveAsync(cancellationToken);
             var aliases = await merchantDirectory.AliasesAsync(cancellationToken);
@@ -260,6 +264,72 @@ internal sealed class CategorizationWorker(
             await HandleModelFailureAsync(jobQueue, store, notifier, job, subject, ModelFailureKind.Transient, ex.Message, currentStage, cancellationToken, ex);
         }
     }
+
+    // Ruling F-2 (Phase 6 re-review): the one place that decides whether a Correct or Reinterpret job
+    // belongs to a receipt, instead of that decision being duplicated at every enqueue site (queue-time
+    // special-casing in EfRecordEditor used to route a text reply but not a voice one - N-1 - or an
+    // edited message - N-2 - and had no way to know a receipt was still being extracted - N-4). A
+    // reading (Categorize) is never routed here: only a correction can name a transaction that already
+    // has a receipt.
+    static readonly TimeSpan ReceiptExtractionPendingDelay = TimeSpan.FromSeconds(5);
+
+    async Task<bool> TryRouteToReceiptAsync(
+        IServiceScope scope, IJobQueue jobQueue, CategorizationJob job, CategorizationSubject sub, CancellationToken cancellationToken)
+    {
+        if (job.Kind is not (JobKind.Correct or JobKind.Reinterpret))
+            return false;
+
+        var receiptStore = scope.ServiceProvider.GetRequiredService<IReceiptStore>();
+        var receipt = await receiptStore.GetByTransactionAsync(job.TransactionId, cancellationToken);
+
+        if (receipt is { } present && !IsNonMoneyReceiptKind(present.Kind))
+        {
+            // Correct carries the operator's words as Instruction already; Reinterpret (an edited
+            // message) carries none - the edit itself already replaced RawText, so that IS the
+            // correction text.
+            var instruction = job.Instruction ?? sub.RawText;
+            var now = timeProvider.GetUtcNow();
+            var outcome = await jobQueue.HandOffToReceiptCorrectionAsync(
+                job.Id, workerId, job.TransactionId, instruction, job.SourceMessageId, now, cancellationToken);
+
+            if (outcome == JobCompletionOutcome.NotOwned)
+                logger.JobAlreadyReclaimed(job.Id);
+            else
+                logger.HandedOffToReceiptCorrection(job.Id, job.TransactionId);
+
+            return true;
+        }
+
+        // N-4: a Photo capture whose receipt does not exist yet is still being extracted (or
+        // retrying) - EfJobQueue.ClaimAsync's own same-transaction ordering means ExtractReceipt is
+        // normally done, one way or the other, before a later Correct/Reinterpret job on the same
+        // transaction becomes claimable at all; this is the defensive twin of that guarantee; it
+        // never discards the operator's text. A pathologically long extraction outage could exhaust
+        // this job's own attempt budget before the receipt ever arrives - an accepted, narrow edge
+        // case rather than a reason to invent a second, unbounded wait mechanism here.
+        if (receipt is null && sub is { CaptureKind: CaptureKind.Photo, Status: TransactionStatus.Captured })
+        {
+            var runAfter = timeProvider.GetUtcNow() + ReceiptExtractionPendingDelay;
+            var outcome = await jobQueue.RetryAsync(
+                job.Id, workerId, runAfter, "the receipt for this transaction is still being extracted", cancellationToken);
+
+            if (outcome == JobCompletionOutcome.NotOwned)
+                logger.JobAlreadyReclaimed(job.Id);
+            else
+                logger.ReceiptCorrectionDeferred(job.Id, job.TransactionId);
+
+            return true;
+        }
+
+        return false;
+    }
+
+    // Mirrors ReceiptCategorizationWorker.IsNonMoneyKind and EfRecordEditor's own copy, value for
+    // value: a copy/training/proforma/advance slip carries no receipt_lines worth re-categorizing, so
+    // its correction goes down the ordinary record_transaction path instead (Fix round 1, Phase 6
+    // final review).
+    static bool IsNonMoneyReceiptKind(ReceiptKind kind) =>
+        kind is ReceiptKind.Copy or ReceiptKind.Training or ReceiptKind.Proforma or ReceiptKind.Advance;
 
     static CorrectionRequest? CorrectionFor(CategorizationJob job, CategorizationSubject record) =>
         job is { Kind: JobKind.Correct, Instruction: { } instruction }

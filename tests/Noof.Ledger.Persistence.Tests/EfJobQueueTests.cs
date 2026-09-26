@@ -553,4 +553,59 @@ public class EfJobQueueTests(PostgresFixture fixture)
         (reclaimed.ClaimedAt!.Value - reclaimed.CreatedAt).Should().BePositive(
             "job.queueWait must never go negative, on a first claim or a re-claim");
     }
+
+    [Fact]
+    public async Task Handing_off_a_claimed_job_succeeds_it_and_queues_a_CategorizeReceipt_carrying_the_instruction()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var now = new DateTimeOffset(2026, 9, 26, 9, 0, 0, TimeSpan.Zero);
+        var queue = new EfJobQueue(db, new FakeTimeProvider(now), maxAttempts: 8);
+        var transactionId = await SeedTransactionAsync(db, now, TestContext.Current.CancellationToken);
+        var job = NewJob(transactionId, now.AddMinutes(-1), kind: JobKind.Correct, instruction: "that was cash", sourceMessageId: 7);
+        db.CategorizationJobs.Add(job);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await queue.ClaimAsync("worker-a", AnyKind, TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
+
+        var outcome = await queue.HandOffToReceiptCorrectionAsync(
+            job.Id, "worker-a", transactionId, "that was cash", 7, now, TestContext.Current.CancellationToken);
+
+        outcome.Should().Be(JobCompletionOutcome.Applied);
+        var jobs = await db.CategorizationJobs.AsNoTracking().Where(j => j.TransactionId == transactionId)
+            .ToListAsync(TestContext.Current.CancellationToken);
+        jobs.Should().HaveCount(2);
+        jobs.Single(j => j.Id == job.Id).Status.Should().Be(JobStatus.Succeeded);
+        var handedOff = jobs.Single(j => j.Id != job.Id);
+        handedOff.Kind.Should().Be(JobKind.CategorizeReceipt);
+        handedOff.Instruction.Should().Be("that was cash");
+        handedOff.SourceMessageId.Should().Be(7);
+        handedOff.Status.Should().Be(JobStatus.Pending);
+    }
+
+    [Fact]
+    public async Task Handing_off_a_job_this_worker_no_longer_owns_creates_nothing()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 26, 9, 0, 0, TimeSpan.Zero));
+        var queue = new EfJobQueue(db, time, maxAttempts: 8);
+        var transactionId = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
+        var job = NewJob(transactionId, time.GetUtcNow().AddMinutes(-1), kind: JobKind.Correct, instruction: "that was cash");
+        db.CategorizationJobs.Add(job);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await queue.ClaimAsync("worker-a", AnyKind, TimeSpan.FromMinutes(1), TestContext.Current.CancellationToken);
+        time.Advance(TimeSpan.FromMinutes(2));
+        await queue.ReleaseExpiredLeasesAsync(time.GetUtcNow(), TestContext.Current.CancellationToken);
+        await queue.ClaimAsync("worker-b", AnyKind, TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
+
+        var outcome = await queue.HandOffToReceiptCorrectionAsync(
+            job.Id, "worker-a", transactionId, "that was cash", null, time.GetUtcNow(), TestContext.Current.CancellationToken);
+
+        outcome.Should().Be(JobCompletionOutcome.NotOwned);
+        var jobs = await db.CategorizationJobs.AsNoTracking().Where(j => j.TransactionId == transactionId)
+            .ToListAsync(TestContext.Current.CancellationToken);
+        jobs.Should().ContainSingle("worker-a's stale hand-off must not create a job on top of worker-b's claim");
+        jobs.Single().Status.Should().Be(JobStatus.Claimed);
+        jobs.Single().ClaimedBy.Should().Be("worker-b");
+    }
 }

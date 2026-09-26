@@ -107,6 +107,45 @@ internal sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, 
         return ToOutcome(rows);
     }
 
+    public async Task<JobCompletionOutcome> HandOffToReceiptCorrectionAsync(
+        Guid jobId, string workerId, Guid transactionId, string? instruction, int? sourceMessageId, DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        var rows = await db.Database.ExecuteSqlRawAsync(
+            "UPDATE categorization_jobs SET status = 2, updated_at = @now WHERE id = @jobId AND claimed_by = @workerId AND status = 1",
+            [
+                new NpgsqlParameter("now", now),
+                new NpgsqlParameter("jobId", jobId),
+                new NpgsqlParameter("workerId", workerId),
+            ],
+            cancellationToken);
+
+        if (rows == 0)
+        {
+            await tx.RollbackAsync(cancellationToken);
+            return JobCompletionOutcome.NotOwned;
+        }
+
+        db.CategorizationJobs.Add(new CategorizationJob
+        {
+            Id = Guid.NewGuid(),
+            TransactionId = transactionId,
+            Kind = JobKind.CategorizeReceipt,
+            Instruction = instruction,
+            SourceMessageId = sourceMessageId,
+            Status = JobStatus.Pending,
+            AttemptCount = 0,
+            RunAfter = now,
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await db.SaveChangesAsync(cancellationToken);
+        await tx.CommitAsync(cancellationToken);
+        return JobCompletionOutcome.Applied;
+    }
+
     static JobCompletionOutcome ToOutcome(int rowsAffected) =>
         rowsAffected > 0 ? JobCompletionOutcome.Applied : JobCompletionOutcome.NotOwned;
 

@@ -11,6 +11,7 @@ using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Host.Workers;
 using Noof.Ledger.TestKit;
+using AppReceipts = Noof.Ledger.Application.Receipts;
 
 namespace Noof.Ledger.Host.Tests;
 
@@ -33,7 +34,8 @@ public class CategorizationWorkerTests
     static IServiceScopeFactory ScopeFactoryFor(
         IJobQueue jobQueue, IModelProvider modelProvider, ICategorizationStore? store = null,
         ICategoryCatalog? categoryCatalog = null, IMerchantDirectory? merchantDirectory = null,
-        ICategorizer? categorizer = null, IChatNotifier? notifier = null, IWalletDirectory? walletDirectory = null)
+        ICategorizer? categorizer = null, IChatNotifier? notifier = null, IWalletDirectory? walletDirectory = null,
+        AppReceipts.IReceiptStore? receiptStore = null)
     {
         // The fallback substitutes are resolved into locals BEFORE any .Returns() call below.
         // Calling Substitute.For<T>() (or a helper that itself configures a substitute, like
@@ -48,6 +50,7 @@ public class CategorizationWorkerTests
         var resolvedCategorizer = categorizer ?? Substitute.For<ICategorizer>();
         var resolvedNotifier = notifier ?? Substitute.For<IChatNotifier>();
         var resolvedWalletDirectory = walletDirectory ?? WalletDirectoryOf(MainWallet, CashRsd, WiseEur);
+        var resolvedReceiptStore = receiptStore ?? NoReceiptStore();
 
         var provider = Substitute.For<IServiceProvider>();
         provider.GetService(typeof(IJobQueue)).Returns(jobQueue);
@@ -58,6 +61,7 @@ public class CategorizationWorkerTests
         provider.GetService(typeof(ICategorizer)).Returns(resolvedCategorizer);
         provider.GetService(typeof(IChatNotifier)).Returns(resolvedNotifier);
         provider.GetService(typeof(IWalletDirectory)).Returns(resolvedWalletDirectory);
+        provider.GetService(typeof(AppReceipts.IReceiptStore)).Returns(resolvedReceiptStore);
 
         var scope = Substitute.For<IServiceScope>();
         scope.ServiceProvider.Returns(provider);
@@ -80,6 +84,18 @@ public class CategorizationWorkerTests
         directory.AliasesAsync(Arg.Any<CancellationToken>()).Returns(new List<MerchantAliasEntry>());
         return directory;
     }
+
+    static AppReceipts.IReceiptStore NoReceiptStore()
+    {
+        var receiptStore = Substitute.For<AppReceipts.IReceiptStore>();
+        receiptStore.GetByTransactionAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((AppReceipts.ReceiptView?)null);
+        return receiptStore;
+    }
+
+    static AppReceipts.ReceiptView Receipt(ReceiptKind kind = ReceiptKind.Sale) => new(
+        Guid.NewGuid(), ReceiptSource.FiscalQr, "SYN-100000001", "Test Market", null, null, "SYN-1",
+        new DateTimeOffset(2026, 9, 21, 9, 0, 0, TimeSpan.Zero), 500m, CurrencyCode.Rsd, kind, PaymentMethod.Card, null,
+        "https://suf.purs.gov.rs/v/?vl=synthetic", []);
 
     static IWalletDirectory WalletDirectoryOf(params WalletOption[] wallets)
     {
@@ -1470,5 +1486,150 @@ public class CategorizationWorkerTests
 
         result.Should().Be(CategorizationTickResult.Failed);
         logger.Entries.Should().Contain(entry => OperationOf(entry) == "db.releaseExpiredLeases");
+    }
+
+    // Ruling F-2 (Phase 6 re-review): the claim-time routing decision, in one place, that replaces the
+    // queue-time special-casing EfRecordEditor used to do only for a typed reply (I-2). A Correct job
+    // is the same shape whether it came from a typed reply (EfRecordEditor.RequestCorrectionAsync) or
+    // a transcribed voice reply (EfTranscriptionStore.CompleteCorrectionAsync) - both are covered by
+    // this one code path, closing N-1 for the voice modality without a separate check anywhere else.
+    [Fact]
+    public async Task A_correction_on_a_transaction_with_a_money_receipt_is_handed_off_to_the_receipt_categorizer()
+    {
+        var jobQueue = QueueWith(Job(kind: JobKind.Correct, instruction: "that was cash, not card"));
+        var receiptStore = NoReceiptStore();
+        receiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Receipt());
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject(status: TransactionStatus.Completed));
+        var categorizer = Substitute.For<ICategorizer>();
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer, receiptStore: receiptStore), time);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await jobQueue.Received(1).HandOffToReceiptCorrectionAsync(
+            JobId, WorkerId, TransactionId, "that was cash, not card", null, time.GetUtcNow(), Arg.Any<CancellationToken>());
+        await categorizer.DidNotReceive().ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>());
+        await store.DidNotReceive().ApplyAsync(Arg.Any<Guid>(), Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
+    }
+
+    // N-2: an edited message carries no separate Instruction (Reinterpret never has one) - the edit
+    // already replaced the transaction's RawText before this job was even queued, so that text IS the
+    // correction to hand off.
+    [Fact]
+    public async Task An_edited_messages_reinterpret_job_on_a_receipt_uses_the_edited_text_as_the_correction()
+    {
+        var jobQueue = QueueWith(Job(kind: JobKind.Reinterpret));
+        var receiptStore = NoReceiptStore();
+        receiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Receipt());
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(status: TransactionStatus.Completed, rawText: "actually put this under groceries"));
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var worker = CreateWorker(ScopeFactoryFor(jobQueue, KeyPresent(), store, receiptStore: receiptStore), time);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await jobQueue.Received(1).HandOffToReceiptCorrectionAsync(
+            JobId, WorkerId, TransactionId, "actually put this under groceries", null, time.GetUtcNow(), Arg.Any<CancellationToken>());
+    }
+
+    // Fix round 1's own reasoning still applies once the decision moves to claim time: a
+    // copy/training/proforma/advance slip carries no receipt_lines worth re-categorizing.
+    [Fact]
+    public async Task A_correction_on_a_non_money_receipt_kind_still_falls_back_to_record_transaction()
+    {
+        var jobQueue = QueueWith(Job(kind: JobKind.Correct, instruction: "record this as an advance"));
+        var receiptStore = NoReceiptStore();
+        receiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Receipt(kind: ReceiptKind.Copy));
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(status: TransactionStatus.Cancelled, lines: [StoredBread]));
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine());
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer, receiptStore: receiptStore),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await jobQueue.DidNotReceive().HandOffToReceiptCorrectionAsync(
+            Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<DateTimeOffset>(),
+            Arg.Any<CancellationToken>());
+        await categorizer.Received(1).ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    // N-4: EfJobQueue.ClaimAsync's own same-transaction ordering normally keeps a Correct/Reinterpret
+    // job un-claimable until ExtractReceipt is done one way or the other, so this is the defensive
+    // twin of that guarantee, exercised directly here without a real database's ordering to rely on.
+    [Fact]
+    public async Task A_correction_that_arrives_while_the_receipt_is_still_being_extracted_is_deferred_not_discarded()
+    {
+        var jobQueue = QueueWith(Job(kind: JobKind.Correct, instruction: "that was cash"));
+        var receiptStore = NoReceiptStore();
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(status: TransactionStatus.Captured) with { CaptureKind = CaptureKind.Photo });
+        var categorizer = Substitute.For<ICategorizer>();
+        var now = DateTimeOffset.UtcNow;
+        var time = new FakeTimeProvider(now);
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer, receiptStore: receiptStore), time);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await jobQueue.Received(1).RetryAsync(
+            JobId, WorkerId, Arg.Is<DateTimeOffset>(runAfter => runAfter > now), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await categorizer.DidNotReceive().ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>());
+        await jobQueue.DidNotReceive().HandOffToReceiptCorrectionAsync(
+            Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<DateTimeOffset>(),
+            Arg.Any<CancellationToken>());
+        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+    }
+
+    // The same reply, claimed again once extraction has finished (its receipt now exists): the
+    // deferral above was a wait, not a loss - the very next claim hands it off instead of running it
+    // as an ordinary text correction.
+    [Fact]
+    public async Task Once_the_receipt_exists_the_next_claim_hands_the_same_shaped_job_off_instead_of_deferring()
+    {
+        var jobQueue = QueueWith(Job(kind: JobKind.Correct, instruction: "that was cash"));
+        var receiptStore = NoReceiptStore();
+        receiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Receipt());
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(status: TransactionStatus.Captured) with { CaptureKind = CaptureKind.Photo });
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var worker = CreateWorker(ScopeFactoryFor(jobQueue, KeyPresent(), store, receiptStore: receiptStore), time);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await jobQueue.Received(1).HandOffToReceiptCorrectionAsync(
+            JobId, WorkerId, TransactionId, "that was cash", null, time.GetUtcNow(), Arg.Any<CancellationToken>());
+        await jobQueue.DidNotReceive().RetryAsync(
+            Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_first_reading_is_never_routed_to_the_receipt_path_even_when_one_exists()
+    {
+        var jobQueue = QueueWith(Job());
+        var receiptStore = NoReceiptStore();
+        receiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Receipt());
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject());
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine());
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer, receiptStore: receiptStore),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await categorizer.Received(1).ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>());
+        await jobQueue.DidNotReceive().HandOffToReceiptCorrectionAsync(
+            Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<DateTimeOffset>(),
+            Arg.Any<CancellationToken>());
     }
 }
