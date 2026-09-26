@@ -981,6 +981,12 @@ health checks' staleness windows (Disk, Backup, Log sink, Telegram), `TelegramBa
 5 s per-check timeout in `SystemHealth`, and `pg_dump`'s `PGCONNECT_TIMEOUT`. Move one when a real
 reason to tune it appears, through the options pattern the rest already use.
 
+Phase 6 added its own three, swept for the Phase 5 convention pass and left in code for the same
+reason: the `suf-purs` `HttpClient`'s 15 s timeout to the Tax Administration (`ReceiptsRegistration`),
+the 5 s deferral `CategorizationWorker.TryRouteToReceiptAsync` waits before re-checking a receipt
+that is still being extracted (`ReceiptExtractionPendingDelay`), and the 40-line cap on a receipt's
+detailed echo (`RecordEcho.MaxDetailedReceiptLines`, a display decision, not a resource setting).
+
 ### `transaction_revisions` retention — deferred 2026-09-26 (decision (e))
 
 Log settings (`/diagnostics/logs/settings`) gives the operator per-level retention for `app_log`, but

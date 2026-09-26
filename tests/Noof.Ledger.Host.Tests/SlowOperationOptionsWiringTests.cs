@@ -53,4 +53,17 @@ public class SlowOperationOptionsWiringTests
 
         options.ThresholdMs["job.queueWait"].Should().Be(30000);
     }
+
+    // Phase 6: receipt.fiscalFetch is a network call to an outside site with no group threshold of
+    // its own before this - it fell back to "default" (1000 ms) and would log Slow on nearly every
+    // real call to suf.purs.gov.rs.
+    [Fact]
+    public void The_receipt_group_threshold_binds_from_the_real_appsettings_json()
+    {
+        using var factory = Factory();
+
+        var options = factory.Services.GetRequiredService<SlowOperationOptions>();
+
+        options.ThresholdMs["receipt"].Should().Be(5000);
+    }
 }

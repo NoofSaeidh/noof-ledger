@@ -16,5 +16,6 @@ public sealed class SlowOperationOptions
         ["backup"] = 600000,
         ["logs"] = 60000,
         ["health"] = 2000,
+        ["receipt"] = 5000,
     };
 }
