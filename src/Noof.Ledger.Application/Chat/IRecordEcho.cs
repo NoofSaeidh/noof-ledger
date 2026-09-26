@@ -21,6 +21,7 @@ public interface IRecordEcho
     EchoMessage NotAFiscalReceiptLink { get; }
     EchoMessage ReceiptFetchUnreachableLinkOnly { get; }
     EchoMessage ReceiptReadFailure { get; }
+    EchoMessage ReceiptVisionNotConfigured { get; }
 
     EchoMessage Compose(CategorizationSubject record);
     EchoMessage ComposeCorrectionFailure(CategorizationSubject record);

@@ -35,6 +35,10 @@ internal sealed class RecordEcho : IRecordEcho
 
     public EchoMessage ReceiptReadFailure { get; } = new("Couldn't read that receipt.", []);
 
+    public EchoMessage ReceiptVisionNotConfigured { get; } = new(
+        "This receipt has no readable fiscal QR code, and no AI key is set up to read it from the photo — " +
+        "add one in Settings, or resend a receipt with a fiscal QR visible.", []);
+
     public EchoMessage Compose(CategorizationSubject record) => WithWhatWasHeard(record, record switch
     {
         { Status: TransactionStatus.Cancelled } =>

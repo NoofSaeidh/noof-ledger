@@ -31,7 +31,7 @@ public class ExtractReceiptWorkerTests
     sealed record Harness(
         IJobQueue Queue, ICategorizationStore Store, IReceiptStore ReceiptStore, IRecordEditor RecordEditor,
         IChatNotifier Notifier, IReceiptPhotoSource PhotoSource, IQrReader QrReader, IFiscalQrDecoder Decoder,
-        IFiscalReceiptClient FetchClient, IReceiptVision Vision, IReceiptFetchStatus FetchStatus)
+        IFiscalReceiptClient FetchClient, IReceiptVision Vision, IReceiptFetchStatus FetchStatus, IModelProvider ModelProvider)
     {
         public IServiceScopeFactory ScopeFactory()
         {
@@ -47,6 +47,7 @@ public class ExtractReceiptWorkerTests
             provider.GetService(typeof(IFiscalReceiptClient)).Returns(FetchClient);
             provider.GetService(typeof(IReceiptVision)).Returns(Vision);
             provider.GetService(typeof(IReceiptFetchStatus)).Returns(FetchStatus);
+            provider.GetService(typeof(IModelProvider)).Returns(ModelProvider);
 
             var scope = Substitute.For<IServiceScope>();
             scope.ServiceProvider.Returns(provider);
@@ -112,8 +113,11 @@ public class ExtractReceiptWorkerTests
         vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), Arg.Any<decimal?>(), Arg.Any<CancellationToken>())
             .Returns(Extracted(ReceiptSource.Vision));
 
+        var modelProvider = Substitute.For<IModelProvider>();
+        modelProvider.IsConfiguredAsync(Arg.Any<CancellationToken>()).Returns(true);
+
         return new Harness(queue, store, receiptStore, recordEditor, Substitute.For<IChatNotifier>(), photoSource, qrReader, decoder,
-            fetchClient, vision, Substitute.For<IReceiptFetchStatus>());
+            fetchClient, vision, Substitute.For<IReceiptFetchStatus>(), modelProvider);
     }
 
     static readonly TimeZoneInfo Belgrade = TimeZoneInfo.FindSystemTimeZoneById("Europe/Belgrade");
@@ -197,6 +201,44 @@ public class ExtractReceiptWorkerTests
         await harness.FetchClient.DidNotReceiveWithAnyArgs().FetchAsync(default!, Arg.Any<CancellationToken>());
         var entry = logger.Entries.Should().ContainSingle(e => e.Properties.ContainsKey("Reason") && (string)e.Properties["Reason"] == "no QR").Subject;
         entry.Level.Should().Be(LogLevel.Information);
+    }
+
+    [Fact]
+    public async Task No_QR_and_no_model_key_fails_with_a_clear_echo_instead_of_burning_every_attempt_on_vision()
+    {
+        // M-10 (2026-09-25 final review): ReceiptCategorizationWorker idles rather than spend a model
+        // call it cannot make; ExtractReceiptWorker had no such gate at all, so a QR-less photo with no
+        // key configured burned all MaxAttempts retries - each re-downloading the photo - before
+        // finally failing. Only the vision branch is gated: the QR+Tax-Administration path (tested
+        // below) must still run with no key at all.
+        var harness = Setup(ExtractJob());
+        harness.ModelProvider.IsConfiguredAsync(Arg.Any<CancellationToken>()).Returns(false);
+
+        await TickAsync(harness);
+
+        await harness.Vision.DidNotReceiveWithAnyArgs().ReadAsync(default, default!, default, Arg.Any<CancellationToken>());
+        await harness.ReceiptStore.DidNotReceiveWithAnyArgs().SaveExtractedAsync(default, default!, default, Arg.Any<CancellationToken>());
+        await harness.Queue.Received(1).FailAsync(JobId, WorkerId, Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await harness.Queue.DidNotReceiveWithAnyArgs().RetryAsync(default, default!, default, default!, Arg.Any<CancellationToken>());
+        await harness.Store.Received(1).MarkFailedAsync(TransactionId, Arg.Any<CancellationToken>());
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text == Echo.ReceiptVisionNotConfigured.Text), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task The_QR_and_tax_administration_path_still_runs_with_no_model_key_configured()
+    {
+        var harness = Setup(ExtractJob(), verificationUrl: "https://suf.purs.gov.rs/v/?vl=abc", telegramFileId: null);
+        harness.Decoder.Decode(Arg.Any<string>()).Returns(new FiscalQrDecodeResult(Payload(), null));
+        harness.ModelProvider.IsConfiguredAsync(Arg.Any<CancellationToken>()).Returns(false);
+
+        (await TickAsync(harness)).Should().Be(CategorizationTickResult.Processed);
+
+        await harness.FetchClient.Received(1).FetchAsync(Arg.Any<FiscalQrPayload>(), Arg.Any<CancellationToken>());
+        await harness.Vision.DidNotReceiveWithAnyArgs().ReadAsync(default, default!, default, Arg.Any<CancellationToken>());
+        await harness.ReceiptStore.Received(1).SaveExtractedAsync(
+            TransactionId, Arg.Is<ExtractedReceipt>(r => r.Source == ReceiptSource.FiscalQr), null, Arg.Any<CancellationToken>());
+        await harness.Queue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
     }
 
     [Fact]

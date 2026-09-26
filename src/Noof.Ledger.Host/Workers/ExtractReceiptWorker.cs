@@ -141,6 +141,9 @@ internal sealed class ExtractReceiptWorker(
                 {
                     if (photo is { } photoForDecodeFailure)
                     {
+                        if (!await EnsureVisionConfiguredAsync(scope, jobQueue, store, notifier, job, record, cancellationToken))
+                            return;
+
                         logger.LogVisionUsed("decode error");
                         extracted = await ReadWithVisionAsync(scope, photoForDecodeFailure, qrTotal: null, cancellationToken);
                     }
@@ -172,6 +175,9 @@ internal sealed class ExtractReceiptWorker(
 
                         if (photo is { } photoForFetchFailure)
                         {
+                            if (!await EnsureVisionConfiguredAsync(scope, jobQueue, store, notifier, job, record, cancellationToken))
+                                return;
+
                             logger.LogVisionUsed("fetch failed");
                             extracted = await ReadWithVisionAsync(scope, photoForFetchFailure, payload.Total, cancellationToken);
                         }
@@ -186,6 +192,9 @@ internal sealed class ExtractReceiptWorker(
             }
             else if (photo is { } photoWithNoQr)
             {
+                if (!await EnsureVisionConfiguredAsync(scope, jobQueue, store, notifier, job, record, cancellationToken))
+                    return;
+
                 logger.LogVisionUsed("no QR");
                 extracted = await ReadWithVisionAsync(scope, photoWithNoQr, qrTotal: null, cancellationToken);
             }
@@ -243,6 +252,24 @@ internal sealed class ExtractReceiptWorker(
             logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Extracted, ex);
             await HandleModelFailureAsync(jobQueue, store, notifier, job, record, ModelFailureKind.Transient, ex.Message, cancellationToken);
         }
+    }
+
+    // M-10 (2026-09-25 final review): mirrors ReceiptCategorizationWorker's own gate on
+    // IModelProvider.IsConfiguredAsync, but only in front of the vision fallback - unlike that
+    // worker, this one's QR + Tax Administration path needs no model at all and must keep working
+    // with no key configured. Without this, a QR-less photo burned every retry attempt (each
+    // re-downloading the photo) on a vision call that could never succeed.
+    async Task<bool> EnsureVisionConfiguredAsync(
+        IServiceScope scope, IJobQueue jobQueue, ICategorizationStore store, IChatNotifier notifier,
+        CategorizationJob job, CategorizationSubject record, CancellationToken cancellationToken)
+    {
+        var modelProvider = scope.ServiceProvider.GetRequiredService<IModelProvider>();
+        if (await modelProvider.IsConfiguredAsync(cancellationToken))
+            return true;
+
+        await FailWithEchoAsync(jobQueue, store, notifier, job, record, recordEcho.ReceiptVisionNotConfigured,
+            "no model key is configured for the vision fallback", cancellationToken);
+        return false;
     }
 
     async Task<ExtractedReceipt> ReadWithVisionAsync(
