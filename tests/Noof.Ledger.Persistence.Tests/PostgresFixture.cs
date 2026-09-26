@@ -18,12 +18,7 @@ public sealed class PostgresFixture : IAsyncLifetime
     {
         var name = $"noof_test_{Guid.NewGuid():N}";
 
-        await using (var admin = new NpgsqlConnection(DatabaseSettings.AdminConnectionString))
-        {
-            await admin.OpenAsync(TestContext.Current.CancellationToken);
-            await using var create = new NpgsqlCommand($"CREATE DATABASE \"{name}\"", admin);
-            await create.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
-        }
+        await DatabaseSettings.CreateEmptyDatabaseAsync(name, TestContext.Current.CancellationToken);
 
         created.Add(name);
 
@@ -51,12 +46,7 @@ public sealed class PostgresFixture : IAsyncLifetime
     {
         var name = $"noof_test_{Guid.NewGuid():N}";
 
-        await using (var admin = new NpgsqlConnection(DatabaseSettings.AdminConnectionString))
-        {
-            await admin.OpenAsync(TestContext.Current.CancellationToken);
-            await using var create = new NpgsqlCommand($"CREATE DATABASE \"{name}\" TEMPLATE {DatabaseSettings.TemplateDatabase}", admin);
-            await create.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
-        }
+        await DatabaseSettings.CreateDatabaseFromTemplateAsync(name, TestContext.Current.CancellationToken);
 
         created.Add(name);
 
@@ -90,8 +80,7 @@ public sealed class PostgresFixture : IAsyncLifetime
     {
         NpgsqlConnection.ClearAllPools();
 
-        await using var admin = new NpgsqlConnection(DatabaseSettings.AdminConnectionString);
-        await admin.OpenAsync(TestContext.Current.CancellationToken);
+        await using var admin = await DatabaseSettings.OpenAdminConnectionAsync(TestContext.Current.CancellationToken);
 
         List<string> undropped = [];
 
@@ -103,7 +92,7 @@ public sealed class PostgresFixture : IAsyncLifetime
             // pg_stat_activity as wait_event = CheckpointDone, not a stuck or leaked connection.
             await using var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)", admin)
             {
-                CommandTimeout = 120,
+                CommandTimeout = DatabaseSettings.AdminDdlTimeoutSeconds,
             };
 
             // The second reason 166 databases had accumulated: this loop used to let a failed drop

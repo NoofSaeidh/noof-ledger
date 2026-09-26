@@ -29,4 +29,30 @@ public static class TestHostLogging
         startInfo.Environment["Logging__File__Directory"] = directory;
         return directory;
     }
+
+    // A test that deletes its own temp log directory right after disposing an in-process
+    // WebApplicationFactory<Program> races Serilog's rolling file sink: WebApplicationFactory's
+    // DisposeAsync disposes the host's ILoggerFactory, but the file handle the sink held is not
+    // always released by the time that call returns, so an immediate Directory.Delete can throw
+    // "the process cannot access the file" - same class of Windows race HostProcess.DeleteBestEffortAsync
+    // already retries for the out-of-process E2E host, just surfacing in-process here instead.
+    public static async Task DeleteBestEffortAsync(string? directory)
+    {
+        if (directory is null || !Directory.Exists(directory))
+            return;
+
+        const int maxAttempts = 5;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                Directory.Delete(directory, recursive: true);
+                return;
+            }
+            catch (IOException) when (attempt < maxAttempts)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(200));
+            }
+        }
+    }
 }

@@ -6,8 +6,9 @@ namespace Noof.Ledger.Architecture.Tests;
 // noof_ledger_test_template by filtering on [Trait("Category", "Database")], not by class name -
 // a class name list drifts the moment someone adds or renames a database-backed test. This is that
 // filter's own detector: any Host.Tests class that opens the shared PostgreSQL server the same way
-// (CreateCloneAsync against DatabaseSettings.TemplateDatabase, guarded by DatabaseIsReachableAsync)
-// must carry the trait, or `test fast` collides with it outside the suite lock.
+// (CreateCloneAsync against DatabaseSettings.TemplateDatabase - inline or through
+// DatabaseSettings.CreateDatabaseFromTemplateAsync, which every one of them now goes through - guarded
+// by DatabaseIsReachableAsync) must carry the trait, or `test fast` collides with it outside the suite lock.
 public class HostDatabaseTestTraitTests
 {
     [Fact]
@@ -18,7 +19,8 @@ public class HostDatabaseTestTraitTests
 
         var databaseBackedFiles = files
             .Select(path => (Path: path, Text: File.ReadAllText(path)))
-            .Where(f => f.Text.Contains("DatabaseIsReachableAsync") && f.Text.Contains("DatabaseSettings.TemplateDatabase"))
+            .Where(f => f.Text.Contains("DatabaseIsReachableAsync") &&
+                (f.Text.Contains("DatabaseSettings.TemplateDatabase") || f.Text.Contains("DatabaseSettings.CreateDatabaseFromTemplateAsync")))
             .ToList();
 
         databaseBackedFiles.Should().NotBeEmpty(
