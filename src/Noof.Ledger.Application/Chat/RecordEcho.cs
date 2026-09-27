@@ -167,23 +167,49 @@ internal sealed class RecordEcho : IRecordEcho
         "I couldn't read this receipt reliably, so nothing was recorded. Send the photo as a file "
         + "(uncompressed) or the link from its QR code.", []);
 
-    public EchoMessage ComposeReceiptNeedsConfirmation(ExtractedReceipt receipt, IReadOnlyList<string> problems)
+    public EchoMessage ComposeReceiptNeedsConfirmation(ExtractedReceipt receipt, bool taxIdMalformed = false) =>
+        ComposeReceiptNeedsConfirmationCore(
+            receipt.SellerName, receipt.LocationName, receipt.IssuedAt, receipt.SellerTaxId, receipt.FiscalNumber,
+            receipt.Lines.Select(line => (line.Name, line.Total)), receipt.Currency, receipt.Total,
+            receipt.QrTotal ?? receipt.Total, taxIdMalformed);
+
+    public EchoMessage ComposeReceiptNeedsConfirmation(ReceiptView receipt, bool taxIdMalformed = false) =>
+        ComposeReceiptNeedsConfirmationCore(
+            receipt.SellerName, receipt.LocationName, receipt.IssuedAt, receipt.SellerTaxId, receipt.FiscalNumber,
+            receipt.Lines.Select(line => (line.Name, line.Total)), receipt.Currency, receipt.Total,
+            receipt.QrTotal ?? receipt.Total, taxIdMalformed);
+
+    // Owns both the mismatch arithmetic and the wording (the same split ReceiptWarnings already makes
+    // for the recorded echo), so an ExtractedReceipt fresh off the vision fallback and a ReceiptView
+    // read back later (RecordActionHandler's Cancel/Restore, ExtractReceiptWorker's own C-1 replay)
+    // produce byte-identical prompts instead of two hand-maintained copies of the same sentence.
+    static EchoMessage ComposeReceiptNeedsConfirmationCore(
+        string? sellerName, string? locationName, DateTimeOffset? issuedAt, string? sellerTaxId, string? fiscalNumber,
+        IEnumerable<(string Name, decimal Total)> receiptLines, CurrencyCode currency, decimal total, decimal referenceTotal,
+        bool taxIdMalformed)
     {
-        var name = receipt.SellerName is { Length: > 0 } sellerName ? sellerName : "Receipt";
-        var header = receipt.LocationName is { Length: > 0 } location ? $"{name} — {location}" : name;
+        var name = sellerName is { Length: > 0 } ? sellerName : "Receipt";
+        var header = locationName is { Length: > 0 } location ? $"{name} — {location}" : name;
+        var lineList = receiptLines.ToList();
 
         List<string> lines = [$"This receipt doesn't look right — {header}"];
-        if (receipt.IssuedAt is { } issuedAt)
-            lines.Add($"Date: {issuedAt.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)}");
-        if (receipt.SellerTaxId is { Length: > 0 } sellerTaxId)
+        if (issuedAt is { } at)
+            lines.Add($"Date: {at.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)}");
+        if (sellerTaxId is { Length: > 0 })
             lines.Add($"PIB: {sellerTaxId}");
-        if (receipt.FiscalNumber is { Length: > 0 } fiscalNumber)
+        if (fiscalNumber is { Length: > 0 })
             lines.Add($"Fiscal #: {fiscalNumber}");
-        lines.AddRange(receipt.Lines.Select(line => $"• {line.Name} — {FormatAmount(line.Total)} {receipt.Currency}"));
+        lines.AddRange(lineList.Select(line => $"• {line.Name} — {FormatAmount(line.Total)} {currency}"));
         lines.Add(string.Empty);
-        lines.Add($"Total: {FormatAmount(receipt.Total)} {receipt.Currency}");
+        lines.Add($"Total: {FormatAmount(total)} {currency}");
         lines.Add(string.Empty);
-        lines.AddRange(problems.Select(problem => $"⚠️ {problem}"));
+
+        var sum = lineList.Sum(line => line.Total);
+        if (HasMismatch(sum, referenceTotal))
+            lines.Add($"⚠️ Lines add up to {FormatAmount(sum)} {currency}, the receipt says {FormatAmount(referenceTotal)} {currency}");
+        if (taxIdMalformed)
+            lines.Add("⚠️ The printed tax id does not look like a valid PIB (9 digits)");
+
         // 2026-09-27: this prompt only ever shows for a vision receipt (never a fiscal QR/SUF one), so
         // it carries the same standing hint every other vision echo does (ReceiptWarnings).
         lines.Add("⚠️ For an exact read next time, send the receipt as a file (uncompressed) or send the link from its QR code.");
@@ -192,6 +218,8 @@ internal sealed class RecordEcho : IRecordEcho
 
         return new(string.Join('\n', lines), [RecordAction.RecordAnyway, RecordAction.Cancel]);
     }
+
+    static bool HasMismatch(decimal sum, decimal referenceTotal) => Math.Abs(sum - referenceTotal) > 0.01m;
 
     public EchoMessage ComposeReceiptCancelledUnconfirmed(CategorizationSubject record, ReceiptView receipt)
     {

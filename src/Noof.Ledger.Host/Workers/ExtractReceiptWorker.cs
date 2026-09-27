@@ -112,22 +112,15 @@ internal sealed class ExtractReceiptWorker(
                     // A replay landing here (C-1) after a save that skipped enqueueing CategorizeReceipt
                     // (2026-09-27) must not claim "Categorising…" when nothing is actually running. Job
                     // existence, not a recomputed sum-vs-total, is the derivation (shared with
-                    // RecordActionHandler's Cancel/Restore through the same IsAwaitingConfirmationAsync)
-                    // - a sum-only check could not tell a malformed-PIB-only pause apart from one
-                    // already confirmed, since the PIB itself was never stored once judged invalid.
+                    // RecordActionHandler's Cancel/Restore, and EfTransactionTrace's own trace-page view,
+                    // through the same IsAwaitingConfirmationAsync) - a sum-only check could not tell a
+                    // malformed-PIB-only pause apart from one already confirmed, since the PIB itself was
+                    // never stored once judged invalid (docs/OPEN-QUESTIONS.md P6-2).
                     var stillAwaitingConfirmation = await receiptStore.IsAwaitingConfirmationAsync(job.TransactionId, cancellationToken);
 
-                    EchoMessage echo;
-                    if (stillAwaitingConfirmation)
-                    {
-                        var replayExtracted = ReceiptConfirmation.ToExtractedReceipt(existingReceipt);
-                        echo = recordEcho.ComposeReceiptNeedsConfirmation(
-                            replayExtracted, ReceiptConfirmation.BuildProblems(replayExtracted, ReceiptConfirmation.HasMismatch(replayExtracted)));
-                    }
-                    else
-                    {
-                        echo = new EchoMessage(recordEcho.ComposeCategorisingReceipt(existingReceipt.Lines.Count), []);
-                    }
+                    var echo = stillAwaitingConfirmation
+                        ? recordEcho.ComposeReceiptNeedsConfirmation(existingReceipt)
+                        : new EchoMessage(recordEcho.ComposeCategorisingReceipt(existingReceipt.Lines.Count), []);
 
                     await EditQuietlyAsync(notifier, record, echo, cancellationToken);
                 }
@@ -257,7 +250,7 @@ internal sealed class ExtractReceiptWorker(
                 return;
             }
 
-            var mismatch = ReceiptConfirmation.HasMismatch(extracted);
+            var mismatch = HasMismatch(extracted);
 
             // 2026-09-27 (vision only - a fiscal QR/SUF receipt's own numbers are never second-guessed
             // here): the receipt and its lines are still saved below so the echo can show exactly what
@@ -297,7 +290,7 @@ internal sealed class ExtractReceiptWorker(
             if (needsConfirmation)
             {
                 logger.LogAwaitingConfirmation(job.TransactionId, mismatch, taxIdMalformed);
-                var echo = recordEcho.ComposeReceiptNeedsConfirmation(extracted, ReceiptConfirmation.BuildProblems(extracted, mismatch, taxIdMalformed));
+                var echo = recordEcho.ComposeReceiptNeedsConfirmation(extracted, taxIdMalformed);
                 await EditQuietlyAsync(notifier, record, echo, cancellationToken);
             }
             else
@@ -456,4 +449,11 @@ internal sealed class ExtractReceiptWorker(
             logger.SucceedAfterHandOffFailed(ex, job.Id);
         }
     }
+
+    // This worker's own gate for whether a fresh vision read needs the operator's "Record anyway"
+    // (docs/OPEN-QUESTIONS.md P6-2) - kept private here rather than shared, since RecordEcho's
+    // ComposeReceiptNeedsConfirmation recomputes the identical one-line arithmetic itself for its own
+    // wording; there is nothing to drift between two independent decimal comparisons this small.
+    static bool HasMismatch(ExtractedReceipt extracted) =>
+        Math.Abs(extracted.Lines.Sum(line => line.Total) - (extracted.QrTotal ?? extracted.Total)) > 0.01m;
 }

@@ -68,9 +68,7 @@ internal sealed class RecordActionHandler(
             if (action != RecordAction.Restore)
                 return recordEcho.ComposeReceiptCancelledUnconfirmed(record, receipt);
 
-            var extracted = ReceiptConfirmation.ToExtractedReceipt(receipt);
-            return recordEcho.ComposeReceiptNeedsConfirmation(
-                extracted, ReceiptConfirmation.BuildProblems(extracted, ReceiptConfirmation.HasMismatch(extracted)));
+            return recordEcho.ComposeReceiptNeedsConfirmation(receipt);
         }
 
         if (action == RecordAction.RecordAnyway)

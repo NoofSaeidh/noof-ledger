@@ -264,7 +264,7 @@ public class ReceiptEchoTests
     [Fact]
     public void ComposeReceiptNeedsConfirmation_carries_the_file_or_QR_hint()
     {
-        var echo = Echo.ComposeReceiptNeedsConfirmation(NeedsConfirmationReceipt(), []);
+        var echo = Echo.ComposeReceiptNeedsConfirmation(NeedsConfirmationReceipt());
 
         echo.Text.Should().Contain(
             "⚠️ For an exact read next time, send the receipt as a file (uncompressed) or send the link from its QR code.");
@@ -277,7 +277,7 @@ public class ReceiptEchoTests
             issuedAt: new DateTimeOffset(2026, 9, 25, 9, 30, 0, TimeSpan.Zero), sellerTaxId: "123456789",
             fiscalNumber: "2WJCQFGP-2WJCQFGP-66360");
 
-        var echo = Echo.ComposeReceiptNeedsConfirmation(receipt, []);
+        var echo = Echo.ComposeReceiptNeedsConfirmation(receipt);
 
         echo.Text.Should().Contain("Date: 25.09.2026");
         echo.Text.Should().Contain("PIB: 123456789");
@@ -287,11 +287,36 @@ public class ReceiptEchoTests
     [Fact]
     public void ComposeReceiptNeedsConfirmation_omits_the_date_PIB_and_fiscal_number_when_none_were_read()
     {
-        var echo = Echo.ComposeReceiptNeedsConfirmation(NeedsConfirmationReceipt(), []);
+        var echo = Echo.ComposeReceiptNeedsConfirmation(NeedsConfirmationReceipt());
 
         echo.Text.Should().NotContain("Date:");
         echo.Text.Should().NotContain("PIB:");
         echo.Text.Should().NotContain("Fiscal #:");
+    }
+
+    [Fact]
+    public void ComposeReceiptNeedsConfirmation_names_a_malformed_tax_id()
+    {
+        var echo = Echo.ComposeReceiptNeedsConfirmation(NeedsConfirmationReceipt(), taxIdMalformed: true);
+
+        echo.Text.Should().Contain("⚠️ The printed tax id does not look like a valid PIB (9 digits)");
+    }
+
+    // The ReceiptView overload (RecordActionHandler's Cancel/Restore, ExtractReceiptWorker's own C-1
+    // replay) must produce the identical prompt a fresh ExtractedReceipt would have - same arithmetic,
+    // same wording, read from what was actually stored instead of a live model call.
+    [Fact]
+    public void ComposeReceiptNeedsConfirmation_from_a_stored_ReceiptView_matches_the_ExtractedReceipt_wording()
+    {
+        var view = Receipt(source: ReceiptSource.Vision, qrTotal: null, total: 500m,
+            lines: [new AppReceipts.ReceiptLineView(Guid.NewGuid(), 1, "Bread", 1m, "kom", 400m, 400m, null)]);
+
+        var echo = Echo.ComposeReceiptNeedsConfirmation(view);
+
+        echo.Text.Should().Contain("⚠️ Lines add up to 400.00 RSD, the receipt says 500.00 RSD");
+        echo.Text.Should().Contain(
+            "⚠️ For an exact read next time, send the receipt as a file (uncompressed) or send the link from its QR code.");
+        echo.Actions.Should().Equal(RecordAction.RecordAnyway, RecordAction.Cancel);
     }
 
     [Theory]
