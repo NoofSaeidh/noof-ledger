@@ -584,10 +584,24 @@ public class ExtractReceiptWorkerTests
         var harness = Setup(ExtractJob());
         var scaledPhoto = new ReceiptPhoto(new byte[] { 9, 9, 9 }, "image/jpeg");
         harness.Scaler.ScaleForVision(Arg.Any<ReceiptPhoto>()).Returns(scaledPhoto);
+        byte[]? qrReaderSawBytes = null;
+        harness.QrReader.Read(Arg.Any<Stream>()).Returns(callInfo =>
+        {
+            qrReaderSawBytes = ReadAllBytes(callInfo.Arg<Stream>());
+            return null;
+        });
 
         await TickAsync(harness);
 
         await harness.Vision.Received(1).ReadAsync(scaledPhoto.Bytes, "image/jpeg", null, Arg.Any<CancellationToken>());
+        qrReaderSawBytes.Should().Equal(SyntheticPhoto, "the QR reader must keep reading the original, unscaled bytes");
+    }
+
+    static byte[] ReadAllBytes(Stream stream)
+    {
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        return buffer.ToArray();
     }
 
     [Fact]
