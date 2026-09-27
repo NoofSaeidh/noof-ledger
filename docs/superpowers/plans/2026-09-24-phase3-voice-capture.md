@@ -3259,7 +3259,7 @@ git commit -m "feat(host): TranscriptionWorker claims Transcribe jobs and hands 
 
 **Files:**
 - Create: `tests/Noof.Ledger.Ai.Tests/Groq/LiveTranscriptionGate.cs`, `LiveTranscriptionGateTests.cs`, `LiveTranscriptionTests.cs`
-- Modify: `docs/OPEN-QUESTIONS.md`, `docs/BACKLOG.md`, `ops/RUNBOOK.md`, `CLAUDE.md`, `README.md`
+- Modify: `docs/OPEN-QUESTIONS.md`, `docs/backlog/`, `ops/RUNBOOK.md`, `CLAUDE.md`, `README.md`
 
 **Interfaces:**
 - Consumes: `GroqSpeechToTextClientFactory`, `GroqOptions`, `SpeechTranscriber` (Task 4) and the test project's `StubSecretStore`.
@@ -3393,9 +3393,9 @@ Append, in the house style of P2-5 (a `###` heading, prose with bold lead-ins, o
 
 Write the P3-2 paragraph from Step 2's finding. Do not leave the angle-bracket placeholder in the file.
 
-- [ ] **Step 4: `docs/BACKLOG.md`, `ops/RUNBOOK.md`**
+- [ ] **Step 4: `docs/backlog/`, `ops/RUNBOOK.md`**
 
-`docs/BACKLOG.md`: add four entries, following the file's existing format.
+`docs/backlog/`: add four entries, following the file's existing format.
 - **Vocabulary hints for the transcriber.** Groq takes a `prompt` of up to 224 tokens. Merchant names from the directory would help it spell *Maxi*, *Lidl* and *Wolt*. That sends a slice of the shopping profile to Groq, the same trade as Q7. It belongs to Phase 11 calibration.
 - **Keeping the audio.** Nothing stores the voice note itself. The `file_id` can fetch it again while Telegram keeps it. A re-transcription corpus for Phase 11 would need the bytes in the database, which would then be in every backup. That is a privacy decision for the operator.
 - **Whisper's inventions on silence.** A near-silent note can come back as *«Продолжение следует…»* or *«Субтитры сделал…»*. It is recorded as whatever the model makes of it, and the `🎤 "…"` line shows it. P2-1 forbids a filter. If it happens often, the answer is a decision (for example, Groq's `verbose_json` `no_speech_prob`), not a quiet guard.

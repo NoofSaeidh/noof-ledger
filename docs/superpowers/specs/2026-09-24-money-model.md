@@ -76,7 +76,7 @@ read straight into `decimal` (CLAUDE.md §4 *The model*). Prompt tuning waits fo
 **M10 — A spending in a currency other than its wallet's is not converted (deferred).** *(Operator:
 "курсы зависят от банка — отложи".)* Its entry keeps the spending's currency, so the wallet's balance
 shows it as a separate currency line — visible, exact, and not invented. The echo adds *"not in the
-wallet's currency — no conversion yet"*. `docs/BACKLOG.md` records the conversion work.
+wallet's currency — no conversion yet"*. `docs/backlog/` records the conversion work.
 
 **M11 — What the operator sees.**
 - Echo, expense: `Recorded — Raiffeisen RSD · balance 45 230.00 RSD`; income: `Income — Wise EUR ·
@@ -146,7 +146,7 @@ No test touches `noof_ledger`, the live model or the network.
 
 `CLAUDE.md` (status; one rule: balances are derived from entries and checkpoints, never stored),
 `README.md` (balances and the restored backup leave the "still missing" list only when true),
-`docs/OPEN-QUESTIONS.md` P4-1 (these decisions and the operator's words), `docs/BACKLOG.md`
+`docs/OPEN-QUESTIONS.md` P4-1 (these decisions and the operator's words), `docs/backlog/`
 (cross-currency conversion, dump encryption, the same-day checkpoint ordering), `ops/RUNBOOK.md`
 (backups: where, how many, how to restore, the restore-check record).
 

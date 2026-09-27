@@ -204,5 +204,5 @@ This is the phase's one lesson worth promoting: **a look that fails silently nee
 
 - [x] `README.md` gains an interface section and the corrected test count
 - [x] `CLAUDE.md` gains the render-mode rule and the silent-look rule; status block corrected
-- [x] `docs/BACKLOG.md` records what MudBlazor features are unavailable and the three ways out, the deferred light/dark toggle, and the dashboard's reading width
+- [x] `docs/backlog/` records what MudBlazor features are unavailable and the three ways out, the deferred light/dark toggle, and the dashboard's reading width
 - [x] `ops/RUNBOOK.md` gains the working-directory trap: a published host launched from the wrong directory answers every static asset 200 with an empty body, which looks exactly like a CSS bug and has now cost two debugging sessions
