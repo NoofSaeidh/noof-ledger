@@ -115,8 +115,9 @@ register it into) — named because they are exceptions, not a licence to invent
   `private` unless something outside its type calls it. Tests reach internals through
   `InternalsVisibleTo`, never by widening `src` — and substituting an internal interface needs
   `InternalsVisibleTo("DynamicProxyGenAssembly2")` on the declaring assembly as well, or
-  NSubstitute fails at runtime. `PublicSurfaceTests` holds each assembly's allowlist; widening it
-  is an edit to that file, which is the point.
+  NSubstitute fails at runtime. `PublicSurfaceTests` checks each assembly's allowlist, one file per
+  assembly under `tests/Noof.Ledger.Architecture.Tests/PublicSurface/`; widening it is an edit to
+  that assembly's file, which is the point.
 - **Each assembly registers its own services**, exposing one `AddNoofXxx(this IServiceCollection)`
   the Host calls. `Program.cs` names no implementation type.
 - **Render modes are per-page and stay that way** — moved to `.claude/rules/web-ui.md`, which loads
