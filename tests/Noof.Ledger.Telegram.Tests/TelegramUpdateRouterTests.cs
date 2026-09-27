@@ -727,6 +727,24 @@ public class TelegramUpdateRouterTests
     }
 
     [Fact]
+    public async Task A_photo_whose_caption_contains_a_fiscal_link_still_captures_only_the_file_id()
+    {
+        // Verification for the CapturedReceipt XOR invariant: a photo's caption is carried as
+        // Caption text only, never scanned for a fiscal link, so the file id is the exact source
+        // even when the caption happens to contain a link - VerificationUrl stays null.
+        var (router, captureStore, chatNotifier, _, _, _, _) = CreateRouter(ownerChatId: 111L);
+        var transactionId = Guid.NewGuid();
+        captureStore.CaptureReceiptAsync(Arg.Any<CapturedReceipt>(), "Europe/Belgrade", Arg.Any<CancellationToken>()).Returns(transactionId);
+        const string caption = "https://suf.purs.gov.rs/v/?vl=AbCdEf123";
+
+        await router.HandleAsync(PhotoMessage(111L, 5, "photo-1", caption), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await captureStore.Received(1).CaptureReceiptAsync(
+            Arg.Is<CapturedReceipt>(r => r.Caption == caption && r.TelegramFileId == "photo-1" && r.VerificationUrl == null),
+            "Europe/Belgrade", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task An_image_document_is_captured_as_a_receipt()
     {
         var (router, captureStore, chatNotifier, _, _, _, _) = CreateRouter(ownerChatId: 111L);
