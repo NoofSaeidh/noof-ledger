@@ -780,13 +780,11 @@ not earned. Revisit once transfers (above) are built.
 reader cannot tell +2000 from −2000 at a glance (M-6, Phase 4 final review). Fix by carrying `Kind`
 into `RecentTransaction` and giving the list a marker (a chip, a sign) per row.
 
-**A correction to a record whose wallet was archived moves it to the currency default.**
-`CategorizationWorker.KeepingTheRecordsWallet` (`src/Noof.Ledger.Host/Workers/CategorizationWorker.cs`)
-keeps a record's existing wallet only while it is still active; correcting a record whose wallet has
-since been archived silently falls back to the default wallet for that currency, so "hidden from
-capture, history kept" is no longer quite true for a corrected record (M-7, Phase 4 final review).
-Pinned as intended by `A_correction_whose_wallet_was_archived_falls_back_to_the_default`. Acceptable
-for a single operator; revisit if a second wallet per currency becomes common.
+**A correction to a record whose wallet was archived no longer falls back to the default (resolved
+2026-09-27, PR #3).** M-7 (Phase 4 final review) is reversed: a correction that names no wallet now
+keeps the record's existing wallet even after that wallet is archived — archiving must not rewrite a
+historical record's wallet out from under it. See `KeepingTheRecordsWallet` and
+`WalletsIncludingKept` in `src/Noof.Ledger.Host/Workers/CategorizationWorker.cs`.
 
 **The same-day checkpoint ordering edge.** A purchase dated to the same local day as a balance
 statement, but sent to the bot after the statement, is ordered after it (M6's `(occurred_on,

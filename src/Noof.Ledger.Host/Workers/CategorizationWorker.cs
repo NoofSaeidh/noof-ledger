@@ -171,8 +171,11 @@ internal sealed class CategorizationWorker(
             // it influenced would fail to map.
             var offeredMerchantIds = allMerchants.Select(merchant => merchant.Id).ToHashSet();
 
+            var keptProposal = KeepingTheRecordsWallet(job, sub, proposal);
+            var walletsForMapping = WalletsIncludingKept(wallets, proposal, keptProposal, sub);
+
             if (!proposalMapper.TryMap(
-                KeepingTheRecordsWallet(job, sub, proposal, wallets), offeredSlugs, offeredMerchantIds, wallets,
+                keptProposal, offeredSlugs, offeredMerchantIds, walletsForMapping,
                 options.DefaultCurrency, out var mapped, out var failure))
             {
                 await FailTerminallyAsync(jobQueue, store, notifier, job, subject, failure, currentStage, cancellationToken);
@@ -383,14 +386,35 @@ internal sealed class CategorizationWorker(
     // The model is shown a correction's lines, not its wallet, so a correction that names no wallet means "leave it
     // where it is", not "the default": otherwise "нет, 300" would quietly move a Raiffeisen purchase into the RSD
     // default and both balances would drift (M1). A re-read starts from scratch and resolves the wallet afresh (M3).
+    // Kept even when that wallet has since been archived (Phase 6 re-review, N-3): archiving a wallet must not
+    // rewrite a historical record's wallet out from under it - only a first categorisation, or a correction that
+    // names a wallet itself, may fall through to the payment/currency default, which does still skip archived
+    // wallets.
     static CategorizationProposal KeepingTheRecordsWallet(
-        CategorizationJob job, CategorizationSubject record, CategorizationProposal proposal, IReadOnlyList<WalletOption> wallets) =>
-        job.Kind == JobKind.Correct
-        && proposal.WalletId is null
-        && record.WalletId is { } current
-        && wallets.Any(wallet => wallet.Id == current)
+        CategorizationJob job, CategorizationSubject record, CategorizationProposal proposal) =>
+        job.Kind == JobKind.Correct && proposal.WalletId is null && record.WalletId is { } current
             ? proposal with { WalletId = current }
             : proposal;
+
+    // ProposalMapper only accepts a WalletId that appears in the wallets it is given, because that
+    // list is also "what the model was offered": an id the model invented must fail terminally. A
+    // kept archived wallet was never offered to the model - it is a fact this worker already knows
+    // from the record, injected by KeepingTheRecordsWallet - so it is added here, not to the active
+    // list the model saw, using the currency the store already read for it
+    // (EfCategorizationStore's WalletCurrency). The gate is
+    // `proposal.WalletId is null`: only when the model itself named no wallet did the worker do the
+    // substituting, so only then is the kept wallet added on the worker's own authority. A model that
+    // names a wallet directly - including one the worker would have kept anyway - must still have
+    // named one that was actually offered, or the job fails.
+    static IReadOnlyList<WalletOption> WalletsIncludingKept(
+        IReadOnlyList<WalletOption> wallets, CategorizationProposal proposal, CategorizationProposal keptProposal,
+        CategorizationSubject record) =>
+        proposal.WalletId is null
+        && keptProposal.WalletId is { } kept
+        && !wallets.Any(wallet => wallet.Id == kept)
+        && record.WalletCurrency is { } currency
+            ? [.. wallets, new WalletOption(kept, record.WalletName, currency, [], IsDefaultForCurrency: false)]
+            : wallets;
 
     static string BuildSummary(MappedProposal mapped) =>
         mapped.Items.Count > 0

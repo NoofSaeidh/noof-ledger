@@ -137,8 +137,9 @@ public class CategorizationWorkerTests
     static CategorizationSubject Subject(
         int? botMessageId = 42, string rawText = "Bread 250 RSD", DateOnly? occurredOn = null,
         TransactionStatus status = TransactionStatus.Captured, IReadOnlyList<RecordedLine>? lines = null, Guid? walletId = null,
-        CaptureKind captureKind = CaptureKind.Text) =>
-        new(TransactionId, rawText, 111L, botMessageId, "Cash", status, SentOn, occurredOn ?? SentOn, lines ?? [], captureKind, WalletId: walletId);
+        CaptureKind captureKind = CaptureKind.Text, CurrencyCode? walletCurrency = null) =>
+        new(TransactionId, rawText, 111L, botMessageId, "Cash", status, SentOn, occurredOn ?? SentOn, lines ?? [], captureKind,
+            WalletId: walletId, WalletCurrency: walletCurrency);
 
     static CategorizationProposal OneGroceryLine(decimal amount = 250m, string currency = "RSD") =>
         new([new ProposedLineItem("Bread", amount, currency, "groceries", null, null)]);
@@ -623,6 +624,26 @@ public class CategorizationWorkerTests
     }
 
     [Fact]
+    public async Task A_correction_naming_a_wallet_the_model_was_not_offered_fails_the_job_terminally()
+    {
+        var stranger = Guid.Parse("99999999-9999-9999-9999-999999999999");
+        var jobQueue = QueueWith(Job(kind: JobKind.Correct, instruction: "это было с налички"));
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(status: TransactionStatus.Completed, lines: [StoredBread], walletId: MainWallet.Id, walletCurrency: CurrencyCode.Rsd));
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(OneGroceryLine() with { WalletId = stranger });
+        var worker = CreateWorker(ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await jobQueue.Received(1).FailAsync(JobId, WorkerId, $"wallet {stranger} was not offered", Arg.Any<CancellationToken>());
+        await store.DidNotReceive().ApplyAsync(Arg.Any<Guid>(), Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task A_correction_that_names_no_wallet_keeps_the_record_in_its_wallet()
     {
         var store = Substitute.For<ICategorizationStore>();
@@ -663,12 +684,13 @@ public class CategorizationWorkerTests
     }
 
     [Fact]
-    public async Task A_correction_whose_wallet_was_archived_falls_back_to_the_default()
+    public async Task A_category_only_correction_keeps_a_wallet_that_has_since_been_archived()
     {
         var archived = Guid.Parse("55555555-5555-5555-5555-555555555555");
         var store = Substitute.For<ICategorizationStore>();
         store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
-            .Returns(Subject(status: TransactionStatus.Completed, lines: [StoredBread], walletId: archived));
+            .Returns(Subject(
+                status: TransactionStatus.Completed, lines: [StoredBread], walletId: archived, walletCurrency: CurrencyCode.Rsd));
         CategorizationOutcome? applied = null;
         store.ApplyAsync(TransactionId, Arg.Do<CategorizationOutcome>(outcome => applied = outcome), Arg.Any<CancellationToken>())
             .Returns(Task.CompletedTask);
@@ -680,8 +702,9 @@ public class CategorizationWorkerTests
 
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
-        (applied?.WalletId).Should().Be(MainWallet.Id,
-            "the line is stated in RSD and Main Wallet is the RSD default; the archived wallet is not offered, so the correction cannot keep it");
+        (applied?.WalletId).Should().Be(archived,
+            "archiving a wallet must not rewrite a historical record's wallet - only a first categorisation, " +
+            "or a correction that names a wallet itself, may fall through to the default");
     }
 
     [Fact]
