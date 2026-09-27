@@ -74,11 +74,11 @@ internal sealed class ChatReceiptVision(
         // The model's own "I could not read this" (readable: false), or a contradiction - readable but
         // no total, or readable but no lines - treated the same way rather than trusted: a receipt this
         // layer cannot vouch for must come back as unreadable, never as a half-built ExtractedReceipt.
-        if (!payload.Readable || payload.Total is null || payload.Lines.Count == 0)
+        if (!payload.Readable || payload.Total is not { } total || payload.Lines.Count == 0)
             return new ReceiptVisionResult(null, MapUnreadableReason(payload.UnreadableReason));
 
         var taxIdMalformed = !string.IsNullOrWhiteSpace(payload.SellerTaxId) && !TaxIdPattern.IsMatch(payload.SellerTaxId.Trim());
-        return new ReceiptVisionResult(ToExtractedReceipt(payload, qrTotal), null, taxIdMalformed);
+        return new ReceiptVisionResult(ToExtractedReceipt(payload, total, qrTotal), null, taxIdMalformed);
     }
 
     static FunctionCallContent? FindCall(ChatResponse response) =>
@@ -92,7 +92,7 @@ internal sealed class ChatReceiptVision(
     static ReadReceiptPayload? ToPayload(FunctionCallContent call) =>
         JsonSerializer.Deserialize<ReadReceiptPayload>(JsonSerializer.SerializeToElement(call.Arguments));
 
-    static ExtractedReceipt ToExtractedReceipt(ReadReceiptPayload payload, decimal? qrTotal)
+    static ExtractedReceipt ToExtractedReceipt(ReadReceiptPayload payload, decimal total, decimal? qrTotal)
     {
         var lines = payload.Lines
             .Select((line, index) => new ExtractedReceiptLine(
@@ -108,7 +108,7 @@ internal sealed class ChatReceiptVision(
             LocationName: null,
             AcceptIfWellFormed(payload.FiscalNumber, FiscalNumberPattern),
             ParseIssuedAt(payload.IssuedAt),
-            payload.Total!.Value,
+            total,
             new CurrencyCode(payload.Currency),
             payload.Kind == "refund" ? ReceiptKind.Refund : ReceiptKind.Sale,
             MapPaymentMethod(payload.PaymentMethod),
