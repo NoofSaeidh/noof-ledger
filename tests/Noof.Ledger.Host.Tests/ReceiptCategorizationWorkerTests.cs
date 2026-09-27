@@ -648,6 +648,26 @@ public class ReceiptCategorizationWorkerTests
             Arg.Any<string>(), Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
     }
 
+    // The Fable review finding this guards: the non-money claim used to run on every tick, even when
+    // the ordinary claim would take the job - an extra UPDATE per idle poll, and a non-money receipt
+    // could jump ahead of a money receipt regardless of run_after. With a key configured and no
+    // cooldown, the ordinary claim (which covers non-money receipts too, via IsNonMoneyKind inside
+    // ProcessClaimedJobAsync) is tried instead, and the non-money claim is never called.
+    [Fact]
+    public async Task With_a_configured_key_the_ordinary_claim_is_used_and_the_non_money_claim_is_skipped()
+    {
+        var jobQueue = QueueWith(Job());
+        var worker = CreateWorker(ScopeFactoryFor(jobQueue, KeyPresent()), Time());
+
+        var result = await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        result.Should().Be(CategorizationTickResult.Processed);
+        await jobQueue.Received(1).ClaimAsync(
+            WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
+        await jobQueue.DidNotReceive().ClaimNonMoneyReceiptAsync(
+            Arg.Any<string>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task A_claimed_job_logs_claim_queueWait_and_job_categorizeReceipt()
     {
