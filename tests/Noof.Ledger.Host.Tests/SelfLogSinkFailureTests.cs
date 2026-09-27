@@ -8,6 +8,15 @@ namespace Noof.Ledger.Host.Tests;
 
 public class SelfLogSinkFailureTests
 {
+    // A port no other Host.Tests class dials (they all share 127.0.0.1:59999 as the standard
+    // "unreachable, definitely not the operator's real db.connection" placeholder - see
+    // SelfLogOwnership's own comment). SelfLogOwnership only ever suppresses a failure that names a
+    // *different* connection than the current claim's own, so this test's claim needs an identity
+    // nothing else in the suite can accidentally share, or a stray failure from one of those other
+    // classes' hosts - including one WebApplicationFactory's own HostFactoryResolver builds and
+    // never disposes - would still be indistinguishable from this test's own.
+    const string UnreachableConnectionString = "Host=127.0.0.1;Port=59991;Database=never_dialled;Username=none;Timeout=2";
+
     [Fact]
     public async Task A_real_Postgres_sink_write_failure_sets_LastFailureAt_through_SelfLog()
     {
@@ -16,8 +25,7 @@ public class SelfLogSinkFailureTests
             builder.UseTempLogDirectory();
             builder.UseSetting("Database:MigrateOnStartup", "false");
             builder.UseSetting("Backup:Enabled", "false");
-            builder.UseSetting("ConnectionStrings:Ledger",
-                "Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none;Timeout=2");
+            builder.UseSetting("ConnectionStrings:Ledger", UnreachableConnectionString);
             builder.ConfigureServices(ReadyDatabaseGate.Register);
         });
 

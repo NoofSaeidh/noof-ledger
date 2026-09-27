@@ -5,6 +5,7 @@ using Noof.Ledger.Ai;
 using Noof.Ledger.Application;
 using Noof.Ledger.Application.Auth;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Host.Auth;
 using Noof.Ledger.Host.Cli;
 using Noof.Ledger.Host.Diagnostics;
@@ -13,6 +14,7 @@ using Noof.Ledger.Host.Logging;
 using Noof.Ledger.Host.Startup;
 using Noof.Ledger.Host.Workers;
 using Noof.Ledger.Persistence;
+using Noof.Ledger.Receipts;
 using Noof.Ledger.Telegram;
 using Noof.Ledger.Web;
 using Noof.Ledger.Web.Components;
@@ -76,11 +78,15 @@ try
 
     var slowOperations = new SlowOperationOptions();
     builder.Configuration.GetSection(SlowOperationOptions.ConfigurationSection).Bind(slowOperations.ThresholdMs);
-    builder.Services.AddNoofApplication(slowOperations);
+
+    var fiscalVerificationUrlOptions = new FiscalVerificationUrlOptions();
+    builder.Configuration.GetSection(FiscalVerificationUrlOptions.ConfigurationSection).Bind(fiscalVerificationUrlOptions);
+
+    builder.Services.AddNoofApplication(slowOperations, fiscalVerificationUrlOptions);
 
     builder.Services.AddSingleton(TimeProvider.System);
-    builder.Services.AddSingleton(CaptureTimeZoneGuard.Resolve(
-        builder.Configuration["Capture:TimeZone"] ?? "Europe/Belgrade"));
+    var captureTimeZone = CaptureTimeZoneGuard.Resolve(builder.Configuration["Capture:TimeZone"] ?? "Europe/Belgrade");
+    builder.Services.AddSingleton(captureTimeZone);
 
     var dataProtectionKeyRingDirectory = DataProtectionSetup.ResolveKeyRingDirectory(builder.Configuration);
     DataProtectionSetup.Configure(builder.Services, dataProtectionKeyRingDirectory);
@@ -123,7 +129,9 @@ try
 
     builder.Services.AddNoofAi(builder.Configuration);
 
-    builder.Services.AddNoofWorkers(categorizationOptions, backupOptions);
+    builder.Services.AddNoofReceipts();
+
+    builder.Services.AddNoofWorkers(categorizationOptions, backupOptions, captureTimeZone);
 
     builder.Services.AddNoofDiagnostics();
 

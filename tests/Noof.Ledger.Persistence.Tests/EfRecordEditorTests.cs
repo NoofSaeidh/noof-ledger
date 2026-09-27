@@ -138,6 +138,39 @@ public class EfRecordEditorTests(PostgresFixture fixture)
             .Should().Be(new EchoTarget(transaction.Id, 42));
     }
 
+    // Whether this same job later gets handed off to CategorizeReceipt is CategorizationWorker's own
+    // decision at claim time (ruling F-2, Phase 6 re-review; see CategorizationWorkerTests) - a
+    // receipt transaction here queues an ordinary Correct job exactly like any other, so there is one
+    // rule instead of the queue-time special case this used to duplicate.
+    [Fact]
+    public async Task A_correction_on_a_receipt_transaction_still_queues_an_ordinary_Correct_job()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = await SeedAsync(db);
+        db.Receipts.Add(new Receipt
+        {
+            Id = Guid.NewGuid(),
+            TransactionId = transaction.Id,
+            Source = ReceiptSource.FiscalQr,
+            Total = new Money(500m, CurrencyCode.Rsd),
+            Kind = ReceiptKind.Sale,
+            CreatedAt = Clock.GetUtcNow(),
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+        var editor = new EfRecordEditor(db, Clock);
+
+        (await editor.RequestCorrectionAsync(transaction.Id, "that was cash, not card", 8, Clock.GetUtcNow(), TestContext.Current.CancellationToken))
+            .Should().BeTrue();
+
+        db.ChangeTracker.Clear();
+        var job = await db.CategorizationJobs.SingleAsync(TestContext.Current.CancellationToken);
+        job.Kind.Should().Be(JobKind.Correct);
+        job.Instruction.Should().Be("that was cash, not card");
+        job.SourceMessageId.Should().Be(8);
+    }
+
     [Fact]
     public async Task A_correction_is_queued_once_even_when_telegram_delivers_the_reply_twice()
     {

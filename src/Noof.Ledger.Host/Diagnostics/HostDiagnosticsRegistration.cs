@@ -1,4 +1,5 @@
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Host.Logging;
 
 namespace Noof.Ledger.Host.Diagnostics;
@@ -12,6 +13,8 @@ internal static class HostDiagnosticsRegistration
         services.AddSingleton<LogLevelSwitches>();
         services.AddSingleton<LogSinkStatus>();
         services.AddSingleton<ILogSinkStatus>(sp => sp.GetRequiredService<LogSinkStatus>());
+        services.AddSingleton<ReceiptFetchStatus>();
+        services.AddSingleton<IReceiptFetchStatus>(sp => sp.GetRequiredService<ReceiptFetchStatus>());
         services.AddSingleton(sp => new SecretSnapshot(sp.GetRequiredService<IServiceScopeFactory>(), databasePassword));
         services.AddSingleton<ISecretValueSource>(sp => sp.GetRequiredService<SecretSnapshot>());
         services.AddSingleton<SecretRedactor>();

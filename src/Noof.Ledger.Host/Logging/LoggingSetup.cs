@@ -2,7 +2,6 @@ using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Host.Diagnostics;
 using NpgsqlTypes;
 using Serilog;
-using Serilog.Debugging;
 using Serilog.Events;
 using Serilog.Sinks.PostgreSQL;
 using Serilog.Sinks.PostgreSQL.ColumnWriters;
@@ -115,7 +114,7 @@ internal static class LoggingSetup
         var redactor = services.GetRequiredService<SecretRedactor>();
         var switches = services.GetRequiredService<LogLevelSwitches>();
 
-        SelfLog.Enable(_ => sinkStatus.RecordFailure(timeProvider.GetUtcNow()));
+        var selfLogRegistration = SelfLogOwnership.Claim(sinkStatus, timeProvider, connectionString);
 
         var columnOptions = new Dictionary<string, ColumnWriterBase>
         {
@@ -189,7 +188,8 @@ internal static class LoggingSetup
                     loadDatabaseLevelAsync: levelReady.WaitForLoadAsync,
                     levelSwitch: switches.Database),
                 levelSwitch: switches.Database)
-            .WriteTo.Sink(consoleAndFileLogger);
+            .WriteTo.Sink(consoleAndFileLogger)
+            .WriteTo.Sink(new SelfLogRegistrationSink(selfLogRegistration));
 
         var builtDestinations = destinations.CreateLogger();
 

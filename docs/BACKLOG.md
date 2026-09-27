@@ -96,6 +96,8 @@ server for the rest of the run.
 
 **What was done.** The teardown `DROP DATABASE` commands got `CommandTimeout = 120` for the
 checkpoint-wait variant. That treats the symptom and was the right call mid-task. It is not a fix.
+(The checkpoint-wait variant's cause was found in Phase 6: `WAL_LOG` clones — see "Clone
+`CREATE`/`DROP DATABASE` timeouts in full runs — closed 2026-09-27" below.)
 For the pool-exhaustion variant, `PostgresFixture.CreateEmptyDatabaseConnectionStringAsync` and
 `CreateDatabaseAsync` now build their connection strings with `Pooling = false`: each per-test
 database is used by exactly one test, so Npgsql's pool buys nothing, and disabling it makes
@@ -589,12 +591,6 @@ keeps every state so rollback needs no migration when it is built.
 
 ---
 
-## Line items keep no order
-
-`line_items` has no ordinal column, so the echo and the snapshot list lines by description rather than
-in the order the message named them. Harmless for one- and two-line messages; a receipt (Phase 6) will
-want its own order, and that is a column plus a migration.
-
 ## Pressing Изменить twice forgets the first prompt
 
 `transactions.prompt_message_id` holds one prompt. A reply to an older, superseded prompt is not
@@ -784,13 +780,11 @@ not earned. Revisit once transfers (above) are built.
 reader cannot tell +2000 from −2000 at a glance (M-6, Phase 4 final review). Fix by carrying `Kind`
 into `RecentTransaction` and giving the list a marker (a chip, a sign) per row.
 
-**A correction to a record whose wallet was archived moves it to the currency default.**
-`CategorizationWorker.KeepingTheRecordsWallet` (`src/Noof.Ledger.Host/Workers/CategorizationWorker.cs`)
-keeps a record's existing wallet only while it is still active; correcting a record whose wallet has
-since been archived silently falls back to the default wallet for that currency, so "hidden from
-capture, history kept" is no longer quite true for a corrected record (M-7, Phase 4 final review).
-Pinned as intended by `A_correction_whose_wallet_was_archived_falls_back_to_the_default`. Acceptable
-for a single operator; revisit if a second wallet per currency becomes common.
+**A correction to a record whose wallet was archived no longer falls back to the default (resolved
+2026-09-27, PR #3).** M-7 (Phase 4 final review) is reversed: a correction that names no wallet now
+keeps the record's existing wallet even after that wallet is archived — archiving must not rewrite a
+historical record's wallet out from under it. See `KeepingTheRecordsWallet` and
+`WalletsIncludingKept` in `src/Noof.Ledger.Host/Workers/CategorizationWorker.cs`.
 
 **The same-day checkpoint ordering edge.** A purchase dated to the same local day as a balance
 statement, but sent to the bot after the statement, is ordered after it (M6's `(occurred_on,
@@ -813,7 +807,8 @@ through the existing `NOOF_TEST_PG` variable would make clones cheap, retire the
 clones off the server that holds `noof_ledger`. Costs a second cluster to start after a reboot and a
 small ops script. The operator has seen the trade-offs (2026-09-24) and not decided; the Phase 4
 rule of running database and E2E tests filtered, and in full once per phase, removed most of the
-contention in the meantime.
+contention in the meantime, and Phase 6's `FILE_COPY` clones removed the long checkpoint waits
+themselves (the 2026-09-27 entry below), which weakens the case for a second cluster.
 
 **A cancelled dump can be recorded as a failed run.** `PgDumpDatabaseDumper` kills `pg_dump` on
 cancellation with `if (!process.HasExited) process.Kill(entireProcessTree: true)`; if `pg_dump` exits
@@ -836,13 +831,40 @@ a message when a check's state changes. Named out of scope by the observability 
 scope"); it would want a debounce (a flapping check should not spam) and a decision about which
 checks are worth a push at all.
 
-**M-1 — `SelfLog.Enable` attributes every Serilog self-log line to the database sink, process-wide.**
-`LoggingSetup.cs` records *any* Serilog internal error (a locked log file, a console write failure, not
-only a PostgreSQL batch failure) as a Log sink failure, so the check can say "logs are in the file
-only" for the wrong reason. `SelfLog` is also a process-global listener while `Configure` runs per
-host, so two in-process hosts (as in some tests) overwrite each other's listener. Fix: attach to the
-PostgreSQL sink's own failure listener if `Serilog.Sinks.Postgresql.Alternative` exposes one, otherwise
-filter `SelfLog` text by that sink's type name before recording a failure.
+**M-1 — `SelfLog.Enable` attributes every non-connection Serilog self-log line to the database sink.**
+**Closed 2026-09-26 (Phase 6), cross-host half; the message-type half remains, see below.**
+`LoggingSetup.cs` still records *any* Serilog internal error that doesn't name a specific host:port (a
+locked log file, a console write failure, not only a PostgreSQL batch failure) as a Log sink failure,
+so the check can say "logs are in the file only" for the wrong reason. The other half of this item -
+`SelfLog` being a process-global listener while `Configure` runs per host, so an orphaned host (the
+throwaway one `WebApplicationFactory`'s `HostFactoryResolver` builds and never disposes) could feed a
+later, unrelated host's `ILogSinkStatus` - is fixed: `SelfLogOwnership` (Phase 6 final tidy-up, item 3)
+tracks the current claim and drops any "Failed to connect to `<host:port>`" message that names a
+*different* connection than the current claim's own, closing the cross-host case
+`SelfLogSinkFailureTests` flaked on. What remains is purely the message-type gap: a non-connection
+failure (naming no host:port at all) still defaults to attributing to whoever is current. Fix: attach
+to the PostgreSQL sink's own failure listener if `Serilog.Sinks.Postgresql.Alternative` exposes one,
+otherwise filter `SelfLog` text by that sink's type name before recording a failure.
+
+**Fixed (Phase 6 second re-review, R2-1) — `SelfLogOwnership`'s host:port comparison was wrong for any
+connection string that named a host rather than an IP literal.** The old `HostPortOf` built the identity
+from `NpgsqlConnectionStringBuilder.Host`+`Port` verbatim (`localhost:5432`), but Npgsql's own failure
+message always names the *resolved* IP endpoint (`Failed to connect to 127.0.0.1:5432`), never the
+configured host name — verified directly against Npgsql 10.0.3. `IdentitiesOf` now resolves the identity
+the way Npgsql renders it: an IP literal (v4 or v6, `IPAddress.TryParse`) is used as-is — an IPv6 literal
+renders bracketed, `[::1]:5432` — and any other host is resolved once per claim through
+`Dns.GetHostAddresses`, keeping every resulting `IPEndPoint`; a Unix-socket path or a failed resolution
+carries no identity and falls back to defaulting every failure to the current claim, same as a message
+naming no connection at all. `SelfLogOwnershipTests` covers a host name resolving to loopback, an IPv6
+literal host, and a foreign endpoint still being rejected.
+
+**New from the same fix.** The endpoint identity is resolved once, in `Claim`, at process startup — not
+re-resolved for the life of the process. A remote database host whose DNS answer changes while the host
+is running would keep comparing against the address it resolved to at startup, so its failures would be
+dropped again, the same silent gap M-1 exists to close. Acceptable for this local-hosting deployment —
+`ops/reset-database-auth.ps1` writes `127.0.0.1`, an IP literal with no DNS involved at all — revisit if
+the database ever moves off-box to a host name whose address can actually change underneath a running
+process.
 
 **M-3 — three near-identical registration entry points for one folder.**
 `DiagnosticsRegistration.AddNoofDiagnostics`, `DiagnosticsHostRegistration.AddNoofDiagnosticsHost` and
@@ -889,20 +911,6 @@ from leaking request/response bodies (which could carry secrets) into the log pi
 `RemoveAllLoggers()` call. Low risk today (nothing in the Groq request path carries an app secret),
 but the gap is real and cheap to close whenever `Noof.Ledger.Ai/Groq` is next touched.
 
-**Phase-6 merge fix-ups, to land in the next phase-5 → phase-6 merge commit, not before:**
-- Convert phase-6's `ReceiptsHealthCheck` from `IHealthCheck` to `ISystemHealthCheck` (Order 80, Name
-  `Receipts`, LogCategory `Noof.Ledger.Host.Workers.ExtractReceiptWorker`) and extend
-  `HealthCheckCompositionTests` to eight (Name, LogCategory) pairs.
-- Renumber phase-6's duplicate `[LoggerMessage]` EventIds, which `LoggerMessageEventIdTests` (V1)
-  will reject on that branch: `ReceiptCategorizationWorkerLog` reuses 1301–1306 from
-  `TranscriptionWorkerLog`, and `ReceiptCategorizerLog`/`ExtractReceiptWorkerLog` both use 1501–1502.
-- Re-scaffold or hand-merge `LedgerDbContextModelSnapshot` so this branch's `AddAppSetting` migration
-  follows phase-6's `AddReceipts` in the migration history, rather than conflicting with it.
-- The **shared** `noof_ledger_test_template` (as opposed to this integration's private
-  `noof_ledger_test_template_p5l`) still lacks the `AddAppSetting` migration until that merge runs
-  `.\run.ps1 update-test-template` against it — any phase-6 worktree cloning the shared template before
-  then is working against a stale schema for this feature.
-
 **FX freshness check arrives with the FX phase.** The observability spec named this out of scope
 because there is no FX rate source yet (`docs/OPEN-QUESTIONS.md` Q4) — nothing to check the freshness
 of. Add it alongside whichever phase builds currency conversion.
@@ -924,16 +932,49 @@ instrumenting the next time it is seen live rather than chasing from this descri
 
 ### Test-infrastructure flakes seen at the Phase 5 close
 
-- **E2E fixture teardown timed out once** — `CookieModeHostFixture.DropCloneAsync` hit an Npgsql read
-  timeout in `DisposeAsync` during a full-solution run (1 of ~4 full runs); the rerun of all E2E tests
-  was green. Likely `DROP DATABASE ... WITH (FORCE)` waiting on the shared server under load. A longer
-  command timeout on the admin connection is the cheap fix if it recurs.
-- **`SecretRedactionSentinelTests` hits an `IOException` in its cleanup**, not its assertions:
+- **Clone `CREATE`/`DROP DATABASE` timeouts in full runs — closed 2026-09-27 (Phase 6).**
+  `CookieModeHostFixture.DropCloneAsync` and the Database-tagged Host.Tests classes hit 120 s
+  `DatabaseSettings.ExecuteAdminDdlAsync` read timeouts: once at the Phase 5 close, then 11–23 entries
+  per full run during Phase 6 — with a second checkout's suite running, and later with none. Raising
+  the admin timeouts to 120 s did not help, and a concurrent checkout was only an amplifier. Sampling
+  `pg_stat_activity` during a run showed the drops waiting on `IPC/CheckpointDone` and
+  `ProcSignalBarrier` while a single checkpoint took over two minutes. The cause: every `DROP DATABASE`
+  forces a checkpoint and waits for it, and under PostgreSQL's default `WAL_LOG` strategy each clone's
+  ~300 files go through shared buffers, so every checkpoint had to fsync every clone created since the
+  previous one. With 40 live clones, one `CHECKPOINT` took 42.6 s under `WAL_LOG` and 0.17 s under
+  `FILE_COPY`, and creating the 40 cost about the same (33 s vs 36 s). `DatabaseSettings` now creates
+  every test database `STRATEGY FILE_COPY` (commit `3b04301`, guarded by
+  `DatabaseSettingsCloneStrategyTests`). `FILE_COPY` is slower for a clone dropped within seconds —
+  a short-lived create/write/drop benchmark favoured `WAL_LOG` (38.5 s vs 62.7 s), because dropping a
+  clone forgets its queued fsyncs — but a full run keeps Persistence's clones alive until collection
+  teardown, and the whole-run outcome is what was measured: checkpoint sync time over a full run fell
+  from 515 s to 42 s, and the slowest sampled DDL from the 120 s ceiling to 4 s. Two consecutive full
+  `dotnet test --solution` runs then passed first time. The cost is time: Persistence takes 13 min alone
+  and 14–15 min inside a full run under `FILE_COPY`, against about 12 min under `WAL_LOG` on the same
+  clean server — the per-test database strategy entry above is where to win that back.
+  The advisory lock around clone DDL that was once proposed here is not needed. Leftover
+  clones from interrupted runs are harmless but still worth `.\run.ps1 clean-test-dbs`: 200 had built
+  up, mostly from these timed-out drops.
+- **`DatabaseLogLevelDbTests.A_stored_Off_level_drops_the_next_hosts_own_startup_burst...` failed once
+  in five runs** (2026-09-26, same slow server): EF's "No migrations were applied" row reached
+  `app_log` despite a stored Off. `ReadyGatedBufferSink` gives the stored-level load 5 s
+  (`LoadTimeout`) before it flushes the startup buffer at the compiled-in default, so a load slower
+  than that lets the startup burst through. It passed on an immediate rerun and was not changed in
+  Phase 6. It failed once more on 2026-09-26 in a full run with the checkpoint stalls above, and
+  passed in every run after the `FILE_COPY` fix. It recurred on 2026-09-27 in the full run after
+  Copilot round 7, on a healthy server under full-suite load, with the same row, then passed 3 of 3
+  when re-run alone. So this is a real timing race, not server degradation: the buffer times out to
+  the compiled-in default before the stored level arrives. The fix is to make `ReadyGatedBufferSink`
+  wait for the stored level, or for a definite "none stored", instead of flushing at a 5 s timeout.
+- **`SecretRedactionSentinelTests` hits an `IOException` in its cleanup — closed 2026-09-26 (Phase 6)**,
+  not its assertions:
   `Directory.Delete(logDirectory)` in the `finally` runs while the host's file sink still holds
   `noof-ledger-<date>.log`. Seen once at the Phase 5 close; on 2026-09-26 it reproduced 2 runs in 3
   when the class ran together with `SecretRedactorTests` straight through the xUnit exe, and passed
   alone and in every full `run.ps1 test all`. Parked by the operator as test-only (no effect on the
   running app); the fix is to dispose the factory before deleting, or retry the delete briefly.
+  Phase 6 took the second option: the `finally` now deletes through `TestHostLogging.DeleteBestEffortAsync`, the
+  same bounded retry `HostProcess.DeleteBestEffortAsync` uses for the out-of-process E2E host.
 - **Configuration-added Serilog sinks did not reproduce through `WebApplicationFactory`** while they did
   in an isolated logger (follow-up review I-1). `ReadFrom.Configuration` is gone, so the risk is closed,
   but the reason the hosted repro stayed silent was never found.
@@ -947,6 +988,12 @@ to change one: the worker poll intervals (`SecretSnapshotRefreshWorker`, `LogRet
 health checks' staleness windows (Disk, Backup, Log sink, Telegram), `TelegramBackoff`'s caps, the
 5 s per-check timeout in `SystemHealth`, and `pg_dump`'s `PGCONNECT_TIMEOUT`. Move one when a real
 reason to tune it appears, through the options pattern the rest already use.
+
+Phase 6 added its own three, swept for the Phase 5 convention pass and left in code for the same
+reason: the `suf-purs` `HttpClient`'s 15 s timeout to the Tax Administration (`ReceiptsRegistration`),
+the 5 s deferral `CategorizationWorker.TryRouteToReceiptAsync` waits before re-checking a receipt
+that is still being extracted (`ReceiptExtractionPendingDelay`), and the 40-line cap on a receipt's
+detailed echo (`RecordEcho.MaxDetailedReceiptLines`, a display decision, not a resource setting).
 
 ### `transaction_revisions` retention — deferred 2026-09-26 (decision (e))
 
@@ -983,3 +1030,175 @@ other two as not mattering in real use:
   creates is a valid member of the same DPAPI-protected ring, so the running app is unaffected. The
   fix mirrors the log directory: apply `TestHostDataProtection` everywhere and add an architecture
   guard like `TestHostLogDirectoryTests`.
+
+---
+
+## Deferred from Phase 6 (receipts)
+
+Recorded 2026-09-26 closing Phase 6. Named explicitly out of scope by the spec, or found and parked
+during implementation and its two closing reviews (Fable 5.1, `final-review.md`/`final-rereview.md`/
+`final-rereview-2.md`).
+
+**Exchange-office slips (Phase 7, R-1).** A currency exchange receipt is a different shape entirely — no
+line items, no category per line, a rate instead — and belongs with whichever phase finally builds
+cross-currency conversion (the deferred item above), not with the fiscal-receipt pipeline.
+
+**A product → category dictionary as a cache in front of the model (R-Q7-adjacent).** Named out of
+scope by the design as "possible later cache, like merchant aliases" — the same shape as
+`IMerchantDirectory`'s write-once alias table, but keyed on a receipt line's product name rather than a
+merchant. Would cut categorisation tokens on repeat purchases at the same shop; not built because there
+is no real usage data yet to say which products repeat often enough to be worth caching.
+
+**Editing receipt lines.** Named out of scope by the design (R-4's sibling: "storing photos" is
+declined, editing lines is simply not built). A correction today can change a line's category or the
+transaction's wallet, never a receipt line's name, quantity or price — those come from the fiscal
+record or the vision read, and F-2 (`docs/OPEN-QUESTIONS.md` P6-1) answers a request to change one in
+the echo rather than silently applying or ignoring it.
+
+**Storing photos — declined, R-4.** The photo is never kept, in the database or anywhere in the repo;
+only Telegram's `file_id` is stored, which only resolves while Telegram itself keeps the file. A
+re-transcription or re-extraction corpus (the voice equivalent is recorded under Phase 3 above) would
+need the bytes in the database, and therefore in every backup — the same privacy decision as keeping
+voice audio, not a default to reach for.
+
+**Bulk import.** Named out of scope by the design. Nothing about the receipt pipeline assumes one
+receipt per message; a bulk path would be a new intake surface (a folder of photos, an export from
+somewhere), not a change to extraction or categorisation.
+
+**The Telegram 4096-character echo limit is handled by a fixed 40-line threshold, not a measured
+length.** `RecordEcho.ComposeReceipt` lists the first 40 lines individually then groups the rest by
+category once a receipt has more than 40 lines, rather than composing the full text, measuring it, and
+falling back only if it would actually overflow. Deliberate (Task 5's report): the concrete rule the
+design gives is the 40-line cutoff, no real receipt is long enough for the two paths to differ in
+practice, and a two-pass measure-then-maybe-rebuild is the kind of ceremony `CLAUDE.md` §3 asks to skip
+for a condition that cannot occur. Revisit if a receipt ever actually needs the distinction — a shop
+with unusually long product names could in principle overflow within 40 lines.
+
+**Fixed (Phase 6 second re-review, R2-3) — a correction deferred during a long extraction outage no
+longer exhausts its retry budget silently.** (`docs/OPEN-QUESTIONS.md` P6-1's defer-mechanism note.) A
+correction that arrives while a receipt is still being extracted is deferred on the job's own retry
+budget (`MaxAttempts × 5s`, ≈40s) rather than discarded. `TryRouteToReceiptAsync`'s defer branch now
+computes `isLastAttempt` the same way `HandleModelFailureAsync` does; on the final deferral it logs
+Warning 1210 (`ReceiptCorrectionDeferralExhausted`), logs `StageFailed` for the `Categorized` stage the
+same way every other terminal retry path does (so the trace page shows where the job died, not
+nothing), and calls `NotifyFailureAsync` — which renders the `ComposeCorrectionFailure` echo in Telegram
+and leaves the record itself untouched (`MarkFailedAsync` only runs for a first reading, never a
+correction). The window this needs (extraction failing to finish within ~40 seconds of a correction
+arriving) is narrow — reachable only via the same race N-4 traced.
+
+**A URL-only reply to a non-receipt transaction silently becomes a plain re-read, with no
+"send the link separately" notice.** Found during the P6-URL branch's Fable 5.1 review, not built
+(minor, backlog). `CorrectionHandler.HandleEditAsync` checks the target already has a fiscal receipt
+(`IReceiptStore.GetVerificationUrlAsync`) before deciding a pasted link is a *different* receipt and
+sending `NewReceiptLinkMustBeSentSeparately` — but `TryHandleReplyAsync` (a Telegram *reply*, as
+opposed to an edit) has no such check. A reply whose text is nothing but a verification URL, to a
+transaction with no receipt row at all (an ordinary text/voice capture, or a failed link capture),
+still becomes a `Correct` job; `CategorizationWorker.CorrectionFor` strips the URL via
+`FiscalVerificationUrl.StripUrl`, gets back `null` (the "empty means none" contract), and the job
+re-runs the categoriser with `Correction = null` — an unannounced re-read, not the "here's a receipt"
+the person meant. Not built because it needs a design decision this branch's scope did not cover:
+whether a URL-only reply to a receipt-less transaction should get its own notice text (distinct from
+`NewReceiptLinkMustBeSentSeparately`, which talks about a *second* receipt), silently start extracting
+the link as this transaction's own receipt, or something else — `TryHandleReplyAsync` does not know at
+that point whether the target has a receipt, so wiring in a check is straightforward once the wording
+is decided.
+
+**The defer branch relies on `EfJobQueue`'s claim ordering, not an explicit dependency.** The same
+defer mechanism only works because `ClaimAsync` already refuses to claim a job while an earlier job for
+the same transaction is `Pending`/`Claimed` — a correction that arrives mid-extraction is therefore
+almost never actually claimed in the deferred state at all; it waits behind the still-running
+`ExtractReceipt` job instead. The deferral code exists for the narrow window between that job failing
+and its transaction status actually flipping away from `Captured`. This is documented behaviour, not
+untested — `CategorizationWorkerTests` covers the deferred branch directly — but the *reason* it is
+rarely exercised is an ordering guarantee owned by a different class, worth knowing before either one
+changes independently.
+
+**Items carried from `final-rereview-2.md`, all now fixed:**
+
+- **R2-2 (minor), fixed.** The N-2 refusal (an edited link capture that would re-file as a different
+  receipt) used to overwrite the transaction's own echo with a bare refusal notice, dropping the
+  Cancel/Edit buttons and the visible summary until a later reply corrected the record.
+  `CorrectionHandler.HandleEditAsync` now posts the refusal through `chatNotifier.SendAsync` as its own
+  message; the echo is never touched.
+- **R2-4 (minor), fixed.** After a Cancel and Restore, a non-money receipt (Copy/Training/Proforma/Advance)
+  landing `Captured` with no job pending used to render the generic "Recording…" acknowledgement forever.
+  `RecordEcho.ComposeReceipt`'s `Captured` branch now checks `receipt.Kind.IsNonMoneyKind()`: a non-money
+  slip renders `ComposeReceiptNotRecorded(receipt.Kind)` (with `[Edit]`); an ordinary receipt still being
+  extracted renders `ReadingReceipt` instead.
+- **R2-5 (minor, pre-existing), fixed.** An edited photo *caption* used to be dropped silently — Telegram
+  delivers a caption edit as `Caption`, not `Text`, and `CorrectionHandler.HandleEditAsync` returned before
+  finding the transaction at all. It now falls back to `Caption` when `Text` is absent and the edited
+  message is a photo or document; a voice note's own caption is still ignored (its correction text is its
+  transcript, not a caption).
+- **R2-6 (documentation, low stakes), fixed.** The comment in `tests/Noof.Ledger.TestKit/DatabaseSettings.cs`
+  now says plainly that the missing `CommandTimeout` is "the most likely explanation" for the flaky Npgsql
+  read timeouts, not a traced root cause — matching the closed E2E-teardown-flake entry above, which
+  carries the same caveat.
+
+**Cancel/Restore on a receipt loses the receipt-specific echo styling.** `RecordActionHandler` renders a
+Cancel/Restore through the generic `IRecordEcho.Compose`, not `ComposeReceipt` — the shop, location and
+warning lines are gone after a Cancel/Restore round trip, though the record, its lines, wallet and
+balance are all still correct underneath. Documented rather than fixed (Task 5's own call): making
+Cancel/Restore receipt-aware needs an `IReceiptStore` lookup on every Cancel/Restore for every
+transaction kind, for a purely cosmetic loss.
+
+**A corrected receipt transaction's line items lose their link back to `receipt_lines`.**
+`EfCategorizationStore.ApplyAsync`'s existing delete-and-replace for a `Correct`/`Reinterpret` job
+removes every model-authored line regardless of whether it carries a `ReceiptLineId`, and the
+replacement lines a text correction builds never set one. The `receipts`/`receipt_lines` rows themselves
+are untouched — only the `line_items` ↔ `receipt_lines` link and the original receipt ordering are lost
+on a corrected line. Documented, not fixed, by the same task that built the link.
+
+**A separate, stronger model for `read_receipt`, and choosing a model in the UI — deferred by the
+operator, 2026-09-27.** `read_receipt` stays on Haiku for now, same as every other tool call. Evidence
+this was considered rather than overlooked: production reads on 2026-09-27 (before the "do not invent"
+prompt and schema fix that day, `.claude/rules/receipts.md`) showed Haiku fabricating whole receipts from
+low-quality photos — a real 4-line 1570.96 RSD cash receipt read back as "BISIBONSKA ŠTAMPA 110 RSD, 1
+line", then as "МИНИСТЕРЕЛНИ 110 RSD" with an invented PIB, another as "MAXI HOLDING 2322 RSD, 16 lines"
+whose lines summed to 7664, and one that took the capture's own location line for the PIB and the
+capture time for the issue time. The `readable`/`unreadable_reason` fix and the "Record anyway"
+confirmation flow (both 2026-09-27) make Haiku's mistakes visible and non-destructive rather than
+requiring a stronger model outright; a model that reads more receipts correctly on the first try, or
+letting the operator pick a model per call from Settings the way `IChatClientFactory` already permits at
+the wiring level, is future work if the confirmation rate turns out to be high in real use.
+
+**`SkiaReceiptImageScaler` corrects only the three rotation-only EXIF origins** (`BottomRight` = 180deg,
+`RightTop`/`LeftBottom` = 90deg) that a phone camera or a scanner's own upright pass produce. The four
+mirrored origins (`TopRight`, `BottomLeft`, `LeftTop`, `RightBottom`) — a horizontally- or
+vertically-flipped scan, not a phone photo — are left untransformed. Not observed in production; add
+`SKCanvas.Scale` flips for these if a flipped receipt photo ever surfaces.
+
+**A fiscal link in a photo's caption, and several links in one message** (operator, 2026-09-27;
+deferred). Today a photo whose caption carries a fiscal link is captured by its photo alone: the link
+is ignored, and `CapturedReceipt`/`ck_transactions_capture_has_content` allow exactly one source
+(`AddReceiptCaptureSourceXor`). Real fiscal QRs did not decode from any of the operator's photos
+(`docs/OPEN-QUESTIONS.md`, Phase 6 QR entry), so that photo nearly always goes through the vision
+fallback while an exact link was right there.
+- **Operator's preference: the link wins when present.** Capture it as a link, since that gives exact
+  Tax Administration data. Still to decide when building it: keep the photo's file id as a
+  vision-fallback source for when the site is down (that relaxes the XOR constraint and needs a new
+  migration), or drop the photo (then a down site gives the link capture's usual "send a photo instead"
+  reply).
+- **Several links in one message or caption** are probably several receipts and should become separate
+  records, one per link, rather than only the first. Today `IFiscalVerificationUrl.TryFind` takes the
+  first link and `StripUrl` removes all of them from the prompt text.
+
+**`TelegramVoiceFileSource` has no size cap (found during the p6-dlcap fix round, 2026-09-27).**
+`TelegramReceiptPhotoSource` refuses a photo over 10 MB, both from `GetFile`'s reported size and from
+the bytes actually received during download (`SizeLimitedBuffer`), because a Telegram-reported size can
+be missing, stale or simply wrong. The voice path (`GetInfoAndDownloadFile` into an unbounded
+`MemoryStream`) has never had an equivalent check — confirmed absent from the start (`git log -S
+MaxBytes` on it is empty), not a regression. Worth the same guard once a voice note has actually been
+seen large enough to matter; no such case has shown up yet.
+
+**Copilot findings deferred at the PR #3 close** (operator, 2026-09-27: after round 7, only security
+bugs are fixed in this PR; the rest is recorded here).
+- **The trace page's summary and receipt section order a receipt's lines differently.** The summary
+  query in `EfTransactionTrace` (~:117) orders line items by `li.Id`, a random GUID, while the receipt
+  section orders by `ReceiptLine.Ordinal`. The summary should order by `li.Ordinal` too, with a
+  multi-line regression case, so both follow the receipt-order contract.
+- **`TestHostLoggingDeleteTests` assumes Windows file-sharing semantics.** On a Unix runner an open
+  file can still be unlinked, so the "directory remains while held" assertion fails. Harmless today
+  because the app and its tests run only on Windows. Make that assertion conditional on
+  `OperatingSystem.IsWindows()`, keeping the final-cleanup assertion on every OS, if the suite ever
+  runs on Linux or CI.

@@ -3,6 +3,7 @@ using AwesomeAssertions;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Domain;
+using Npgsql;
 
 namespace Noof.Ledger.Host.Tests;
 
@@ -188,6 +189,19 @@ public class RecordEchoTests
         echo.Actions.Should().BeEmpty();
     }
 
+    // R2-3 follow-up: a Captured photo has no transcript to acknowledge - it is a receipt still
+    // being read, so it gets the same "Reading the receipt…" wording ComposeReceipt and the initial
+    // capture acknowledgement (TelegramUpdateRouter) already give this state, not the generic
+    // text/voice "Recording…".
+    [Fact]
+    public void A_captured_photo_still_being_read_says_so_not_Recording()
+    {
+        var echo = Echo.Compose(Record(TransactionStatus.Captured, lines: []) with { CaptureKind = CaptureKind.Photo });
+
+        echo.Text.Should().Be(Echo.ReadingReceipt);
+        echo.Actions.Should().BeEmpty();
+    }
+
     [Fact]
     public void A_failed_correction_says_so_above_the_unchanged_record()
     {
@@ -197,6 +211,18 @@ public class RecordEchoTests
             "Could not apply that correction — the record is unchanged.\n\n"
             + "Recorded — Cash · balance 0.00 RSD\n• кофе — 250.00 RSD · Food & Drink\n\nTotal: 250.00 RSD");
         echo.Actions.Should().Equal(RecordAction.Cancel, RecordAction.Edit);
+    }
+
+    // R2-3 (Phase 6 second re-review): a deferred correction that exhausts its attempts on a Captured
+    // photo used to call ComposeCorrectionFailure, which falls through to Compose - rendering
+    // "…the record is unchanged.\n\nRecording…" for a receipt that was never being "recorded" in the
+    // text/voice sense at all.
+    [Fact]
+    public void A_failed_correction_on_a_captured_photo_says_so_above_reading_the_receipt_not_recording()
+    {
+        var echo = Echo.ComposeCorrectionFailure(Record(TransactionStatus.Captured, lines: []) with { CaptureKind = CaptureKind.Photo });
+
+        echo.Text.Should().Be($"Could not apply that correction — the record is unchanged.\n\n{Echo.ReadingReceipt}");
     }
 
     [Fact]
@@ -288,8 +314,25 @@ public class RecordEchoTests
     [Fact]
     public void A_note_that_could_not_be_transcribed_says_so_and_offers_edit()
     {
-        Echo.TranscriptionFailure.Text.Should().Be("Couldn't transcribe that voice note.");
+        Echo.TranscriptionFailure.Text.Should().Contain("Couldn't transcribe that voice note");
+        Echo.TranscriptionFailure.Text.Should().Contain("Reply to this message");
         Echo.TranscriptionFailure.Actions.Should().Equal(RecordAction.Edit);
+    }
+
+    [Fact]
+    public void An_unreadable_receipt_says_so_and_suggests_the_QR_link_and_offers_no_actions()
+    {
+        Echo.ReceiptUnreadable.Text.Should().Be(
+            "I couldn't read this receipt reliably, so nothing was recorded. " + "Send the link from the receipt's QR code (scan it with your phone camera).");
+        Echo.ReceiptUnreadable.Actions.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_receipt_that_could_not_be_read_says_what_to_try_instead()
+    {
+        Echo.ReceiptReadFailure.Text.Should().Contain("Couldn't read that receipt");
+        Echo.ReceiptReadFailure.Text.Should().Contain("the link from the receipt's QR code");
+        Echo.ReceiptReadFailure.Text.Should().NotContain("as a file");
     }
 
     [Fact]
@@ -300,5 +343,17 @@ public class RecordEchoTests
         echo.Text.Should().Be(
             "Heard nothing in that voice note.\n\nRecorded — Cash · balance 0.00 RSD\n• кофе — 250.00 RSD · Food & Drink\n\nTotal: 250.00 RSD");
         echo.Actions.Should().Equal(RecordAction.Cancel, RecordAction.Edit);
+    }
+
+    [Fact]
+    public void A_retry_notice_names_the_step_the_reason_and_the_next_attempt_time()
+    {
+        var echo = Echo.ComposeReceiptExtractionRetryNotice(new NpgsqlException("connection refused"),
+            new DateTimeOffset(2026, 9, 27, 14, 32, 0, TimeSpan.FromHours(2)));
+
+        echo.Text.Should().Contain("Reading the receipt");
+        echo.Text.Should().Contain("a database error");
+        echo.Text.Should().Contain("14:32");
+        echo.Actions.Should().BeEmpty();
     }
 }

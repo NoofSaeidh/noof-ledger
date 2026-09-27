@@ -23,7 +23,8 @@ internal sealed class EfWalletAdmin(LedgerDbContext db, TimeProvider timeProvide
                 .ThenBy(wallet => wallet.Name, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(wallet => wallet.Id)
                 .Select(wallet => new WalletDetails(
-                    wallet.Id, wallet.Name, wallet.Currency, wallet.Aliases, wallet.IsDefaultForCurrency, wallet.Archived)),
+                    wallet.Id, wallet.Name, wallet.Currency, wallet.Aliases, wallet.IsDefaultForCurrency, wallet.Archived,
+                    ToContract(wallet.DefaultForPayment))),
         ];
     }
 
@@ -116,12 +117,46 @@ internal sealed class EfWalletAdmin(LedgerDbContext db, TimeProvider timeProvide
         await tx.CommitAsync(cancellationToken);
     }
 
+    public async Task SetPaymentDefaultAsync(Guid walletId, PaymentMethod? method, CancellationToken cancellationToken)
+    {
+        var domainMethod = ToDomain(method);
+
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        var wallet = await WalletById(walletId).AsNoTracking()
+            .Select(w => new { w.Archived })
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw Unknown(walletId);
+
+        if (domainMethod is not null)
+        {
+            if (wallet.Archived)
+                throw new InvalidOperationException(
+                    $"Wallet {walletId} is archived; an archived wallet cannot be the payment default.");
+
+            // Clear, then set - the same reasoning as MakeDefaultForCurrencyAsync: the unique index
+            // is checked row by row, so writing the new default before the old one is cleared would
+            // violate it.
+            await db.Wallets
+                .Where(w => w.DefaultForPayment == domainMethod && w.Id != walletId)
+                .ExecuteUpdateAsync(set => set.SetProperty(w => w.DefaultForPayment, (WalletPaymentDefault?)null), cancellationToken);
+        }
+
+        await WalletById(walletId)
+            .ExecuteUpdateAsync(set => set.SetProperty(w => w.DefaultForPayment, domainMethod), cancellationToken);
+
+        await tx.CommitAsync(cancellationToken);
+    }
+
     public async Task ArchiveAsync(Guid walletId, CancellationToken cancellationToken)
     {
-        // An archived wallet is hidden from capture, so it cannot stay the default capture resolves to.
+        // An archived wallet is hidden from capture, so it cannot stay the currency or payment default
+        // capture resolves to.
         RequireFound(walletId, await WalletById(walletId)
             .ExecuteUpdateAsync(
-                set => set.SetProperty(w => w.Archived, true).SetProperty(w => w.IsDefaultForCurrency, false),
+                set => set.SetProperty(w => w.Archived, true)
+                    .SetProperty(w => w.IsDefaultForCurrency, false)
+                    .SetProperty(w => w.DefaultForPayment, (WalletPaymentDefault?)null),
                 cancellationToken));
     }
 
@@ -142,6 +177,23 @@ internal sealed class EfWalletAdmin(LedgerDbContext db, TimeProvider timeProvide
 
     static string RequireName(string name) =>
         name.Trim() is { Length: > 0 } trimmed ? trimmed : throw new ArgumentException("A wallet needs a name.", nameof(name));
+
+    static WalletPaymentDefault? ToDomain(PaymentMethod? method) => method switch
+    {
+        null => null,
+        PaymentMethod.Card => WalletPaymentDefault.Card,
+        PaymentMethod.Cash => WalletPaymentDefault.Cash,
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(method), method, "Only Card, Cash or null can be a wallet's payment default."),
+    };
+
+    static PaymentMethod? ToContract(WalletPaymentDefault? method) => method switch
+    {
+        null => null,
+        WalletPaymentDefault.Card => PaymentMethod.Card,
+        WalletPaymentDefault.Cash => PaymentMethod.Cash,
+        _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unknown wallet payment default."),
+    };
 
     static string[] Normalise(IEnumerable<string> aliases) =>
         [.. aliases.Select(alias => alias.Trim()).Where(alias => alias.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase)];

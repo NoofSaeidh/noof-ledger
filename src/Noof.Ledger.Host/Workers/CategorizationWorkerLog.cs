@@ -39,6 +39,22 @@ internal static partial class CategorizationWorkerLog
         Message = "Failed to edit Telegram message {MessageId} to report a failed job for transaction {TransactionId}")]
     public static partial void FailureEditFailed(this ILogger logger, Exception exception, int messageId, Guid transactionId);
 
+    [LoggerMessage(EventId = 1211, Level = LogLevel.Warning,
+        Message = "Failed to edit Telegram message {MessageId} with a retry notice for transaction {TransactionId}")]
+    public static partial void RetryNoticeEditFailed(this ILogger logger, Exception exception, int messageId, Guid transactionId);
+
+    [LoggerMessage(EventId = 1208, Level = LogLevel.Information,
+        Message = "Job {JobId} handed off to a CategorizeReceipt correction for transaction {TransactionId}")]
+    public static partial void HandedOffToReceiptCorrection(this ILogger logger, Guid jobId, Guid transactionId);
+
+    [LoggerMessage(EventId = 1209, Level = LogLevel.Debug,
+        Message = "Job {JobId} deferred for transaction {TransactionId}: its receipt is still being extracted")]
+    public static partial void ReceiptCorrectionDeferred(this ILogger logger, Guid jobId, Guid transactionId);
+
+    [LoggerMessage(EventId = 1210, Level = LogLevel.Warning,
+        Message = "Job {JobId} for transaction {TransactionId} exhausted its attempts waiting for the receipt to finish extracting; the correction could not be applied")]
+    public static partial void ReceiptCorrectionDeferralExhausted(this ILogger logger, Guid jobId, Guid transactionId);
+
     [LoggerMessage(EventId = TransactionStages.CategorizedEventId, EventName = TransactionStages.Categorized, Level = LogLevel.Information,
         Message = "{Stage} as {Kind} for wallet {WalletId}: {Summary}")]
     public static partial void LogCategorized(this ILogger logger, string stage, TransactionKind kind, Guid? walletId, string summary);

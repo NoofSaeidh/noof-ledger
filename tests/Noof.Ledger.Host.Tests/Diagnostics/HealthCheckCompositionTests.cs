@@ -18,7 +18,7 @@ public class HealthCheckCompositionTests
         });
 
     [Fact]
-    public async Task The_seven_checks_are_registered_with_their_names_and_log_categories_in_display_order()
+    public async Task The_eight_checks_are_registered_with_their_names_and_log_categories_in_display_order()
     {
         using var factory = Factory();
         var health = factory.Services.GetRequiredService<ISystemHealth>();
@@ -34,6 +34,7 @@ public class HealthCheckCompositionTests
             ("Backup", "Noof.Ledger.Host.Workers.BackupWorker"),
             ("Disk", "Noof.Ledger.Host.Diagnostics"),
             ("Log sink", "Noof.Ledger.Host.Logging"),
+            ("Receipts", "Noof.Ledger.Host.Workers.ExtractReceiptWorker"),
         ], options => options.WithStrictOrdering());
     }
 }

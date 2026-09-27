@@ -11,6 +11,7 @@ internal static class RecordActionButtons
         (RecordAction.Cancel, "Cancel", "cancel"),
         (RecordAction.Edit, "Edit", "edit"),
         (RecordAction.Restore, "Restore", "restore"),
+        (RecordAction.RecordAnyway, "Record anyway", "record_anyway"),
     ];
 
     public static InlineKeyboardButton ToButton(RecordAction action)

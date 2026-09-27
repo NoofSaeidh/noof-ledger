@@ -14,6 +14,8 @@ public class ShellSourceTests
 
     static string LayoutSource() => Read("Components", "Layout", "MainLayout.razor");
 
+    static string WalletsSource() => Read("Components", "Pages", "Wallets.razor");
+
     [Fact]
     public void The_document_loads_the_component_library_stylesheet()
     {
@@ -58,5 +60,34 @@ public class ShellSourceTests
         layout.Should().NotContain("<MudPopoverProvider");
         layout.Should().NotContain("<MudDialogProvider");
         layout.Should().NotContain("<MudSnackbarProvider");
+    }
+
+    // Master's 8fe9d25 fixed exactly this class of bug for the rest of app.css: a rule painted for
+    // one color scheme rendered wrong inside the other, because it named a literal color instead of
+    // one of MudThemeProvider's own --mud-palette-* variables, which already flip with the theme.
+    // .trace-row-warning (Phase 6) named #fff3cd/#7a4a00 outright.
+    [Fact]
+    public void The_trace_timelines_warning_row_uses_a_theme_variable_not_a_literal_color()
+    {
+        var css = Read("wwwroot", "app.css");
+
+        css.Should().NotContain("#fff3cd");
+        css.Should().NotContain("#7a4a00");
+        css.Should().Contain(".trace-row-warning");
+        css.Should().MatchRegex(
+            @"\.trace-row-warning\s*\{[^}]*var\(--mud-palette-warning[^}]*\}",
+            "a warning row must take its color from the theme, the same way .noof-level-warning does");
+    }
+
+    // Every other filter/field caption on Transactions, DiagnosticsLogs and Wallets itself
+    // (Name/Aliases) is a real <label for>, not just styled text - a bare <MudText> caption reads
+    // fine but is not reachable from the control it describes. Wallets' payment-default caption
+    // (Phase 6) was the one exception.
+    [Fact]
+    public void The_wallet_payment_default_caption_is_a_real_label_for_the_select()
+    {
+        WalletsSource().Should().Contain(
+            "HtmlTag=\"label\" for=\"@($\"wallet-payment-default-{wallet.Id}\")\"",
+            "every other caption beside a filter or form control in this app is a <label for>, not bare text");
     }
 }

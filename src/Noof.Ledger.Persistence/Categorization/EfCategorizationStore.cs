@@ -37,7 +37,6 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
         if (header is null)
             return null;
 
-        // line_items has no ordinal column, so the order is made deterministic rather than left to the heap.
         var lines = await (
             from li in db.LineItems.AsNoTracking()
             where li.TransactionId == transactionId
@@ -45,7 +44,7 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
             from c in categoryJoin.DefaultIfEmpty()
             join m in db.Merchants.AsNoTracking() on li.MerchantId equals m.Id into merchantJoin
             from m in merchantJoin.DefaultIfEmpty()
-            orderby li.Description
+            orderby li.Ordinal
             select new RecordedLine(
                 li.Description,
                 li.Amount,
@@ -102,8 +101,17 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
             ],
             cancellationToken);
 
+        // Starts after whatever survived the delete above (a Rule- or User-authored line), so a
+        // model re-run's fresh ordinals never collide with an ordinal a kept line already owns.
+        var ordinal = 1 + (await db.LineItems.AsNoTracking()
+            .Where(li => li.TransactionId == transactionId)
+            .Select(li => (int?)li.Ordinal)
+            .MaxAsync(cancellationToken) ?? 0);
         foreach (var item in outcome.Items)
         {
+            // A receipt line names its own Ordinal - the receipt's own order (R-2) - and never the
+            // auto-numbering below, which exists only for a text/voice capture's model-authored lines.
+            var itemOrdinal = item.Ordinal ?? ordinal;
             db.LineItems.Add(new LineItem
             {
                 Id = Guid.NewGuid(),
@@ -113,7 +121,12 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
                 CategoryId = item.CategoryId,
                 CategorizedBy = CategorizationAuthority.Model,
                 MerchantId = item.MerchantId,
+                Ordinal = itemOrdinal,
+                ReceiptLineId = item.ReceiptLineId,
             });
+
+            if (item.Ordinal is null)
+                ordinal++;
         }
 
         var transaction = await db.Transactions.SingleAsync(t => t.Id == transactionId, cancellationToken);
@@ -127,17 +140,22 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
 
         await db.SaveChangesAsync(cancellationToken);
         await LedgerPostings.RewriteAsync(db, transaction, outcome.StatedBalance, cancellationToken);
-        await RevisionLog.AppendAsync(db, transaction, RevisionKindFor(outcome.Kind), outcome.Instruction,
+        await RevisionLog.AppendAsync(db, transaction, RevisionKindFor(outcome), outcome.Instruction,
             statusBefore, timeProvider.GetUtcNow(), cancellationToken);
         await tx.CommitAsync(cancellationToken);
     }
 
-    static RevisionKind RevisionKindFor(JobKind kind) => kind switch
+    // CategorizeReceipt runs twice for the same receipt (I-2, Phase 6 final review): once from
+    // ExtractReceiptWorker's own hand-off (no Instruction - the first, Initial reading) and again from
+    // a receipt correction routed here instead of record_transaction (always carries the operator's
+    // Instruction) - the two are told apart the same way Correct already is, by whether one is present.
+    static RevisionKind RevisionKindFor(CategorizationOutcome outcome) => outcome.Kind switch
     {
         JobKind.Categorize => RevisionKind.Initial,
+        JobKind.CategorizeReceipt => outcome.Instruction is null ? RevisionKind.Initial : RevisionKind.Correction,
         JobKind.Correct => RevisionKind.Correction,
         JobKind.Reinterpret => RevisionKind.Edit,
-        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "No revision kind for this job kind."),
+        _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome.Kind, "No revision kind for this job kind."),
     };
 
     public Task MarkFailedAsync(Guid transactionId, CancellationToken cancellationToken) =>

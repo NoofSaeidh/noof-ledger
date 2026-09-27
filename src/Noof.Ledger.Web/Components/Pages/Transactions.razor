@@ -80,6 +80,10 @@ else
             <MudText HtmlTag="label" for="transactions-filter-text" Typo="Typo.caption" Class="mud-text-secondary">Text</MudText>
             <input id="transactions-filter-text" class="noof-input" type="search" placeholder="Search messages" @bind="filter.Text" @bind:event="oninput" @bind:after="ReloadAsync" />
         </div>
+        <div class="noof-filter-field">
+            <MudCheckBox T="bool" id="transactions-filter-receipts-only" @bind-Value="filter.ReceiptsOnly"
+                         @bind-Value:after="ReloadAsync" Label="Receipts only" />
+        </div>
     </div>
 
     <div class="noof-grid-frame" data-empty="No transactions match these filters.">
@@ -96,6 +100,14 @@ else
             </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
             <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Text" Class="noof-cell-main" Context="row">
                 <span class="noof-truncate" title="@row.RawText">@row.RawText</span>
+            </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
+            <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Receipt" Class="noof-cell-meta noof-cell-meta-joined" Context="row">
+                @if (row.HasReceipt)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary">
+                        Receipt@(row.ShopName is { } shop ? $": {shop}" : "")
+                    </MudChip>
+                }
             </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
             <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Amounts" Class="noof-col-amounts noof-cell-trail" Context="row">
                 @FormatAmounts(row.Amounts)
@@ -129,6 +141,7 @@ else
         public TransactionKind? Kind { get; set; }
         public TransactionStatus? Status { get; set; }
         public string? Text { get; set; }
+        public bool ReceiptsOnly { get; set; }
     }
 
     readonly TransactionFilterEdit filter = new();
@@ -173,7 +186,8 @@ else
         }
     }
 
-    TransactionListFilter ToFilter() => new(filter.From, filter.To, filter.WalletId, filter.Kind, filter.Status, filter.Text);
+    TransactionListFilter ToFilter() =>
+        new(filter.From, filter.To, filter.WalletId, filter.Kind, filter.Status, filter.Text, filter.ReceiptsOnly);
 
     // M-4 (Phase 5 final review): OccurredOn is a local date in the capture zone (Capture:TimeZone,
     // default Europe/Belgrade), not the server's own zone - the server's current-day clock property

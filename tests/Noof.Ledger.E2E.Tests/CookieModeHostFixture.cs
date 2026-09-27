@@ -118,19 +118,10 @@ public sealed class CookieModeHostFixture : IAsyncLifetime
         if (cloneDatabaseName.Length is 0)
             return;
 
+        // DROP DATABASE waits on a forced checkpoint; why that wait once outlasted 120s, and the
+        // clone strategy that fixed it, is at the top of DatabaseSettings.
         NpgsqlConnection.ClearAllPools();
-
-        await using var admin = new NpgsqlConnection(DatabaseSettings.AdminConnectionString);
-        await admin.OpenAsync(CancellationToken.None);
-        // Same reason PostgresFixture.DisposeAsync carries this: DROP DATABASE waits on a Postgres
-        // checkpoint before it can remove the files, and under the load of a whole-solution run that
-        // wait exceeds Npgsql's default 30s command timeout. This fixture only escaped it while the
-        // E2E project sat outside NoofLedger.slnx and therefore always had the server to itself.
-        await using var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{cloneDatabaseName}\" WITH (FORCE)", admin)
-        {
-            CommandTimeout = 120,
-        };
-        await drop.ExecuteNonQueryAsync(CancellationToken.None);
+        await DatabaseSettings.DropDatabaseAsync(cloneDatabaseName, CancellationToken.None);
     }
 
     static async Task<bool> DatabaseIsReachableAsync(CancellationToken cancellationToken)
@@ -147,14 +138,8 @@ public sealed class CookieModeHostFixture : IAsyncLifetime
         }
     }
 
-    static async Task CreateCloneAsync(string name, CancellationToken cancellationToken)
-    {
-        await using var admin = new NpgsqlConnection(DatabaseSettings.AdminConnectionString);
-        await admin.OpenAsync(cancellationToken);
-        await using var create = new NpgsqlCommand(
-            $"CREATE DATABASE \"{name}\" TEMPLATE {DatabaseSettings.TemplateDatabase}", admin);
-        await create.ExecuteNonQueryAsync(cancellationToken);
-    }
+    static Task CreateCloneAsync(string name, CancellationToken cancellationToken) =>
+        DatabaseSettings.CreateDatabaseFromTemplateAsync(name, cancellationToken);
 
     // Internal, not private: DiagnosticsLogsTests reuses this to seed its own isolated clone
     // (I-5, Phase 5 final review) rather than duplicating the `user set-password` CLI dance.

@@ -18,6 +18,8 @@ internal sealed class LineItemConfiguration : IEntityTypeConfiguration<LineItem>
         builder.Property(l => l.CategoryId).HasColumnName("category_id");
         builder.Property(l => l.CategorizedBy).HasColumnName("categorized_by");
         builder.Property(l => l.MerchantId).HasColumnName("merchant_id");
+        builder.Property(l => l.Ordinal).HasColumnName("ordinal");
+        builder.Property(l => l.ReceiptLineId).HasColumnName("receipt_line_id");
 
         builder.ComplexProperty(l => l.Amount, money =>
         {
@@ -42,6 +44,11 @@ internal sealed class LineItemConfiguration : IEntityTypeConfiguration<LineItem>
         builder.HasOne<Merchant>()
             .WithMany()
             .HasForeignKey(l => l.MerchantId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne<ReceiptLine>()
+            .WithMany()
+            .HasForeignKey(l => l.ReceiptLineId)
             .OnDelete(DeleteBehavior.Restrict);
     }
 }

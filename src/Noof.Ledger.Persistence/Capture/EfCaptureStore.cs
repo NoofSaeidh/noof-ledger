@@ -8,14 +8,17 @@ namespace Noof.Ledger.Persistence.Capture;
 internal sealed class EfCaptureStore(LedgerDbContext db, TimeProvider timeProvider) : ICaptureStore
 {
     public Task<Guid> CaptureAsync(CapturedMessage message, string timeZoneId, CancellationToken cancellationToken) =>
-        StoreAsync(message.ChatId, message.MessageId, message.SentAt, timeZoneId, message.Text, voice: null, cancellationToken);
+        StoreAsync(message.ChatId, message.MessageId, message.SentAt, timeZoneId, message.Text, voice: null, receipt: null, cancellationToken);
 
     public Task<Guid> CaptureVoiceAsync(CapturedVoice voice, string timeZoneId, CancellationToken cancellationToken) =>
-        StoreAsync(voice.ChatId, voice.MessageId, voice.SentAt, timeZoneId, rawText: null, voice, cancellationToken);
+        StoreAsync(voice.ChatId, voice.MessageId, voice.SentAt, timeZoneId, rawText: null, voice, receipt: null, cancellationToken);
+
+    public Task<Guid> CaptureReceiptAsync(CapturedReceipt receipt, string timeZoneId, CancellationToken cancellationToken) =>
+        StoreAsync(receipt.ChatId, receipt.MessageId, receipt.SentAt, timeZoneId, receipt.Caption, voice: null, receipt, cancellationToken);
 
     async Task<Guid> StoreAsync(
         long chatId, int messageId, DateTimeOffset sentAt, string timeZoneId, string? rawText, CapturedVoice? voice,
-        CancellationToken cancellationToken)
+        CapturedReceipt? receipt, CancellationToken cancellationToken)
     {
         var existing = await FindExistingAsync(chatId, messageId, cancellationToken);
 
@@ -25,13 +28,19 @@ internal sealed class EfCaptureStore(LedgerDbContext db, TimeProvider timeProvid
         var now = timeProvider.GetUtcNow();
         var transactionId = Guid.NewGuid();
 
+        var captureKind = voice is not null ? CaptureKind.Voice
+            : receipt is not null ? CaptureKind.Photo
+            : CaptureKind.Text;
+
         var transaction = new Transaction
         {
             Id = transactionId,
             RawText = rawText,
-            CaptureKind = voice is null ? CaptureKind.Text : CaptureKind.Voice,
+            CaptureKind = captureKind,
             VoiceFileId = voice?.VoiceFileId,
             VoiceDurationSeconds = voice?.DurationSeconds,
+            TelegramFileId = receipt?.TelegramFileId,
+            VerificationUrl = receipt?.VerificationUrl,
             Status = TransactionStatus.Captured,
             TimeZoneId = timeZoneId,
             OccurredAt = sentAt,
@@ -40,11 +49,14 @@ internal sealed class EfCaptureStore(LedgerDbContext db, TimeProvider timeProvid
             TelegramMessageId = messageId,
             CreatedAt = now,
         };
+        var jobKind = voice is not null ? JobKind.Transcribe
+            : receipt is not null ? JobKind.ExtractReceipt
+            : JobKind.Categorize;
         var job = new CategorizationJob
         {
             Id = Guid.NewGuid(),
             TransactionId = transactionId,
-            Kind = voice is null ? JobKind.Categorize : JobKind.Transcribe,
+            Kind = jobKind,
             VoiceFileId = voice?.VoiceFileId,
             Status = JobStatus.Pending,
             AttemptCount = 0,

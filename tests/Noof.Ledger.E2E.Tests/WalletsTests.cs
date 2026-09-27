@@ -91,6 +91,10 @@ public sealed class WalletsTests(CookieModeHostFixture fixture) : PageTest, ICla
         await Expect(Page.Locator("#wallets-saved")).ToContainTextAsync("Archived");
         await Expect(row).ToContainTextAsync("Archived");
 
+        // Setting one is refused server-side (EfWalletAdmin.SetPaymentDefaultAsync) once archived,
+        // so the control that would silently no-op through it must not be offered any more either.
+        await Expect(Page.Locator($"#wallet-payment-default-{walletId}")).ToHaveCountAsync(0);
+
         // This wallet was RSD's only default; archiving it leaves RSD with none, and the page must say
         // so (Task 4 finding 3 pairs the mapper's failure text with this warning).
         await Expect(Page.Locator("#wallets-warning")).ToContainTextAsync("RSD");
@@ -101,6 +105,96 @@ public sealed class WalletsTests(CookieModeHostFixture fixture) : PageTest, ICla
         wallet.Name.Should().Be(renamedTo);
         wallet.Aliases.Should().BeEquivalentTo(["нал", "cash", "налик"]);
         wallet.Archived.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Setting_a_card_default_on_one_wallet_then_another_moves_it()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var firstName = $"Card A {Guid.NewGuid():N}";
+        var secondName = $"Card B {Guid.NewGuid():N}";
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/wallets");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        await Page.FillAsync("#new-wallet-name", firstName);
+        await Page.SelectOptionAsync("#new-wallet-currency", "RSD");
+        await Page.FillAsync("#new-wallet-opening", "0");
+        await Page.FillAsync("#new-wallet-date", "2026-09-01");
+        await Page.ClickAsync("#create-wallet");
+        await Expect(Page.Locator("#wallets-saved")).ToContainTextAsync("Created");
+
+        await Page.FillAsync("#new-wallet-name", secondName);
+        await Page.SelectOptionAsync("#new-wallet-currency", "RSD");
+        await Page.FillAsync("#new-wallet-opening", "0");
+        await Page.FillAsync("#new-wallet-date", "2026-09-01");
+        await Page.ClickAsync("#create-wallet");
+        await Expect(Page.Locator("#wallets-saved")).ToContainTextAsync("Created");
+
+        var firstId = await WaitForWalletIdAsync(firstName, TestContext.Current.CancellationToken);
+        var secondId = await WaitForWalletIdAsync(secondName, TestContext.Current.CancellationToken);
+
+        await Page.SelectOptionAsync($"#wallet-payment-default-{firstId}", "Card");
+        await Expect(Page.Locator("#wallets-saved")).ToContainTextAsync("Payment default saved");
+
+        // "Payment default saved" is the same text both times this test triggers it, so Playwright's
+        // wait above can pass on the *previous* action's leftover text before this one actually
+        // commits (the same race as WaitForWalletIdAsync's "Created" - see there). Reading the wallet
+        // back with a bounded poll, rather than trusting the confirmation text alone, is immune to it.
+        (await WaitForPaymentDefaultAsync(firstId, WalletPaymentDefault.Card, TestContext.Current.CancellationToken))
+            .Should().Be(WalletPaymentDefault.Card);
+
+        await Page.SelectOptionAsync($"#wallet-payment-default-{secondId}", "Card");
+        await Expect(Page.Locator("#wallets-saved")).ToContainTextAsync("Payment default saved");
+
+        (await WaitForPaymentDefaultAsync(secondId, WalletPaymentDefault.Card, TestContext.Current.CancellationToken))
+            .Should().Be(WalletPaymentDefault.Card);
+        (await WaitForPaymentDefaultAsync(firstId, null, TestContext.Current.CancellationToken))
+            .Should().BeNull("only the second wallet must show the card default now");
+    }
+
+    // The same confirmation text ("Created {name}.", "Payment default saved.") is reused across
+    // repeated actions in a test, so Playwright's wait for it can be satisfied by a PREVIOUS action's
+    // still-visible text before the current one has actually committed - Setting_a_card_default_on_
+    // one_wallet_then_another_moves_it flaked with "Sequence contains no elements" from exactly that
+    // gap. Polling the database with a bounded wait, instead of reading it once right after the UI
+    // wait, is immune to it regardless of which confirmation raced.
+    async Task<Guid> WaitForWalletIdAsync(string name, CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (true)
+        {
+            await using var db = OpenDb();
+            var wallet = await db.Wallets.AsNoTracking().SingleOrDefaultAsync(w => w.Name == name, cancellationToken);
+            if (wallet is not null)
+                return wallet.Id;
+
+            if (DateTime.UtcNow >= deadline)
+                throw new TimeoutException($"No wallet named '{name}' appeared within the timeout.");
+
+            await Task.Delay(100, cancellationToken);
+        }
+    }
+
+    async Task<WalletPaymentDefault?> WaitForPaymentDefaultAsync(
+        Guid walletId, WalletPaymentDefault? expected, CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (true)
+        {
+            await using var db = OpenDb();
+            var current = (await db.Wallets.AsNoTracking()
+                    .SingleAsync(w => w.Id == walletId, cancellationToken))
+                .DefaultForPayment;
+
+            if (current == expected || DateTime.UtcNow >= deadline)
+                return current;
+
+            await Task.Delay(100, cancellationToken);
+        }
     }
 
     [Fact]

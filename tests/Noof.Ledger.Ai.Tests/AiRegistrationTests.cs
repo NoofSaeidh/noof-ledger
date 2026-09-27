@@ -6,6 +6,7 @@ using Noof.Ledger.Ai.Groq;
 using Noof.Ledger.Application;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Application.Transcription;
 using NSubstitute;
@@ -19,7 +20,9 @@ public class AiRegistrationTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton(TimeProvider.System);
-        services.AddNoofApplication(new SlowOperationOptions());
+        services.AddNoofApplication(
+            new SlowOperationOptions(),
+            new FiscalVerificationUrlOptions { VerificationUrlPrefix = "https://suf.purs.gov.rs/v/?vl=" });
         services.AddScoped(_ => Substitute.For<ISecretStore>());
         services.AddNoofAi(configuration ?? new ConfigurationBuilder().Build());
         return services.BuildServiceProvider();

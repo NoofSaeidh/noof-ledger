@@ -87,6 +87,11 @@ public class AiBoundaryTests
     {
         var root = RepoRoot.Find().FullName;
         var mapper = Path.Combine(root, "src", "Noof.Ledger.Application", "Categorization", "ProposalMapper.cs");
+
+        // The receipt worker's own permitted site (Phase 6, R-2/R-6): a fiscal-QR receipt's amounts
+        // come from receipt_lines, never a model answer, so its Money is built from the opposite kind
+        // of source ProposalMapper guards - deliberately a second door, not an exception to the first.
+        var receiptWorker = Path.Combine(root, "src", "Noof.Ledger.Host", "Workers", "ReceiptCategorizationWorker.cs");
         string[] scannedRoots =
         [
             Path.Combine(root, "src", "Noof.Ledger.Ai"),
@@ -97,9 +102,16 @@ public class AiBoundaryTests
         var offenders = scannedRoots
             .SelectMany(dir => Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories))
             .Where(file => !string.Equals(file, mapper, StringComparison.OrdinalIgnoreCase))
+            .Where(file => !string.Equals(file, receiptWorker, StringComparison.OrdinalIgnoreCase))
             .Where(file => File.ReadAllText(file).Contains("new Money(", StringComparison.Ordinal))
             .Select(file => Path.GetRelativePath(root, file))
             .ToArray();
+
+        // M-12 (Phase 6 final review): receiptWorker used to be exempted as a whole file, so a second,
+        // unguarded "new Money(" anywhere in it (from a future model answer, say) would have passed
+        // silently. Counting the site pins it at exactly one - the same one the comment above names.
+        CountOccurrences(File.ReadAllText(receiptWorker), "new Money(").Should().Be(
+            1, "the receipt worker's exemption covers its one permitted construction site, not the whole file");
 
         // One door, not a check: the model's reading of an amount becomes a Money in exactly one place,
         // so a wrong figure has exactly one place to be traced to. The verbatim check that used to live
@@ -107,12 +119,23 @@ public class AiBoundaryTests
         offenders.Should().BeEmpty("a Money built from a model answer must come from ProposalMapper");
         File.ReadAllText(mapper).Should().Contain("new Money(",
             "the one permitted site must exist, or an empty offender list proves nothing");
+        File.ReadAllText(receiptWorker).Should().Contain("new Money(",
+            "the receipt worker's own permitted site must exist, or the exclusion proves nothing");
     }
 
     static IEnumerable<string> SourceFiles(string pattern) =>
         Directory.EnumerateFiles(SrcRoot, pattern, SearchOption.AllDirectories);
 
     static bool InProviderFolder(string file) => file.StartsWith(ProviderFolder, StringComparison.OrdinalIgnoreCase);
+
+    static int CountOccurrences(string text, string value)
+    {
+        var count = 0;
+        for (var index = text.IndexOf(value, StringComparison.Ordinal); index >= 0; index = text.IndexOf(value, index + value.Length, StringComparison.Ordinal))
+            count++;
+
+        return count;
+    }
 
     static string Relative(string file) => Path.GetRelativePath(SrcRoot, file);
 }

@@ -138,20 +138,12 @@ public sealed class ReadyGatedBufferSinkDbTests
         }
     }
 
-    static async Task CreateCloneAsync(string name, CancellationToken cancellationToken)
-    {
-        await using var admin = new NpgsqlConnection(DatabaseSettings.AdminConnectionString);
-        await admin.OpenAsync(cancellationToken);
-        await using var create = new NpgsqlCommand($"CREATE DATABASE \"{name}\" TEMPLATE {DatabaseSettings.TemplateDatabase}", admin);
-        await create.ExecuteNonQueryAsync(cancellationToken);
-    }
+    static Task CreateCloneAsync(string name, CancellationToken cancellationToken) =>
+        DatabaseSettings.CreateDatabaseFromTemplateAsync(name, cancellationToken);
 
-    static async Task DropCloneAsync(string name)
+    static Task DropCloneAsync(string name)
     {
         NpgsqlConnection.ClearAllPools();
-        await using var admin = new NpgsqlConnection(DatabaseSettings.AdminConnectionString);
-        await admin.OpenAsync(CancellationToken.None);
-        await using var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)", admin) { CommandTimeout = 120 };
-        await drop.ExecuteNonQueryAsync(CancellationToken.None);
+        return DatabaseSettings.DropDatabaseAsync(name, CancellationToken.None);
     }
 }

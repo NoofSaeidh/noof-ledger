@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Microsoft.AspNetCore.Hosting;
 using Noof.Ledger.Host.Logging;
+using Noof.Ledger.TestKit;
 
 namespace Noof.Ledger.Host.Tests;
 
@@ -29,4 +30,14 @@ public static class TestHostLogging
         startInfo.Environment["Logging__File__Directory"] = directory;
         return directory;
     }
+
+    // A test that deletes its own temp log directory right after disposing an in-process
+    // WebApplicationFactory<Program> races Serilog's rolling file sink: WebApplicationFactory's
+    // DisposeAsync disposes the host's ILoggerFactory, but the file handle the sink held is not
+    // always released by the time that call returns, so an immediate Directory.Delete can throw -
+    // same class of Windows race HostProcess.DeleteBestEffortAsync already retries for the
+    // out-of-process E2E host. Both delegate to the one shared implementation (Copilot finding, PR
+    // #3: this copy used to fall short of that one - its final IOException escaped the filtered
+    // catch, and it never caught UnauthorizedAccessException at all).
+    public static Task DeleteBestEffortAsync(string? directory) => BestEffortDelete.DirectoryAsync(directory);
 }

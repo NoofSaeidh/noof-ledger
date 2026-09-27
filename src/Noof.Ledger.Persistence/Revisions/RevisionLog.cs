@@ -42,7 +42,7 @@ internal static class RevisionLog
             where li.TransactionId == transaction.Id
             join c in db.Categories.AsNoTracking() on li.CategoryId equals c.Id into categoryJoin
             from c in categoryJoin.DefaultIfEmpty()
-            orderby li.Description
+            orderby li.Ordinal
             select new { li.Description, li.Amount, CategorySlug = c == null ? null : c.Slug, li.MerchantId, li.CategorizedBy })
             .ToListAsync(cancellationToken);
 

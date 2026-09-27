@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Domain;
+using Noof.Ledger.Persistence.Balances;
 using Noof.Ledger.Persistence.Categorization;
 
 namespace Noof.Ledger.Persistence.Tests;
@@ -13,11 +14,11 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
 {
     static readonly FakeTimeProvider Clock = new(new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero));
 
-    static Wallet NewWallet(string name = "Cash") => new()
+    static Wallet NewWallet(string name = "Cash", CurrencyCode? currency = null) => new()
     {
         Id = Guid.NewGuid(),
         Name = name,
-        Currency = CurrencyCode.Eur,
+        Currency = currency ?? CurrencyCode.Eur,
     };
 
     static Transaction NewTransaction(
@@ -109,6 +110,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
             Amount = new Money(9.99m, CurrencyCode.Eur),
             CategoryId = categoryId,
             CategorizedBy = CategorizationAuthority.Model,
+            Ordinal = 1,
             MerchantId = null,
         });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -139,6 +141,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
             Amount = new Money(1.00m, CurrencyCode.Eur),
             CategoryId = categoryId,
             CategorizedBy = CategorizationAuthority.User,
+            Ordinal = 2,
             MerchantId = null,
         });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -155,6 +158,61 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
         userLine.Description.Should().Be("Hand-corrected by the user");
         userLine.Amount.Should().Be(new Money(1.00m, CurrencyCode.Eur));
         userLine.CategorizedBy.Should().Be(CategorizationAuthority.User);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_writes_a_receipt_line_s_ordinal_and_receipt_line_id_and_moves_the_wallet_balance_by_the_total()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var wallet = NewWallet("Cash", CurrencyCode.Rsd);
+        var transaction = NewTransaction(wallet.Id);
+        var category = NewCategory();
+        var merchant = NewMerchant();
+        db.Wallets.Add(wallet);
+        db.Transactions.Add(transaction);
+        db.Categories.Add(category);
+        db.Merchants.Add(merchant);
+        var receipt = new Receipt
+        {
+            Id = Guid.NewGuid(),
+            TransactionId = transaction.Id,
+            Source = ReceiptSource.FiscalQr,
+            Total = new Money(373.4567m, CurrencyCode.Rsd),
+            Kind = ReceiptKind.Sale,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        var receiptLine1 = new ReceiptLine
+        {
+            Id = Guid.NewGuid(), ReceiptId = receipt.Id, Ordinal = 1, Name = "Bread", Quantity = 1m, UnitPrice = 123.4567m, Total = 123.4567m,
+        };
+        var receiptLine2 = new ReceiptLine
+        {
+            Id = Guid.NewGuid(), ReceiptId = receipt.Id, Ordinal = 2, Name = "Milk", Quantity = 2m, UnitPrice = 125m, Total = 250m,
+        };
+        db.Receipts.Add(receipt);
+        db.ReceiptLines.AddRange(receiptLine1, receiptLine2);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var store = new EfCategorizationStore(db, Clock);
+        var items = new[]
+        {
+            new CategorizedLineItem("Bread", new Money(123.4567m, CurrencyCode.Rsd), category.Id, merchant.Id, 1, receiptLine1.Id),
+            new CategorizedLineItem("Milk", new Money(250m, CurrencyCode.Rsd), category.Id, merchant.Id, 2, receiptLine2.Id),
+        };
+
+        await store.ApplyAsync(transaction.Id, Outcome(items), TestContext.Current.CancellationToken);
+
+        db.ChangeTracker.Clear();
+        var lines = await db.LineItems.AsNoTracking()
+            .Where(l => l.TransactionId == transaction.Id).OrderBy(l => l.Ordinal).ToListAsync(TestContext.Current.CancellationToken);
+        lines.Should().HaveCount(2);
+        lines[0].Ordinal.Should().Be(1);
+        lines[0].ReceiptLineId.Should().Be(receiptLine1.Id);
+        lines[1].Ordinal.Should().Be(2);
+        lines[1].ReceiptLineId.Should().Be(receiptLine2.Id);
+
+        var balances = await new EfBalanceReadModel(db).BalanceOfAsync(wallet.Id, TestContext.Current.CancellationToken);
+        balances.Should().ContainSingle().Which.Should().Be(new Money(-373.4567m, CurrencyCode.Rsd));
     }
 
     [Fact]
@@ -275,6 +333,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
             Amount = new Money(3.50m, CurrencyCode.Eur),
             CategoryId = category.Id,
             CategorizedBy = CategorizationAuthority.Model,
+            Ordinal = 1,
             MerchantId = merchant.Id,
         });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);

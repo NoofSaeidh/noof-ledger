@@ -20,6 +20,10 @@ public class LoggerMessageEventIdTests
         @"EventId\s*=\s*(?<id>\d+)",
         RegexOptions.Compiled);
 
+    static readonly Regex StageEventIdReference = new(
+        @"EventId\s*=\s*TransactionStages\.\w+",
+        RegexOptions.Compiled);
+
     static readonly Regex StageIdConstant = new(
         @"const\s+int\s+\w+EventId\s*=\s*(?<id>\d+)",
         RegexOptions.Compiled);
@@ -73,6 +77,34 @@ public class LoggerMessageEventIdTests
             .ToArray();
 
         duplicates.Should().BeEmpty("every literal EventId must be unique across the solution");
+    }
+
+    // N-7 (Phase 6 re-review): the uniqueness scan above reads only a literal id, and the stage check
+    // below exempts only TransactionStages.X - an `EventId = SomeClass.Const` naming any other
+    // constant carries an id neither scan can see, so two of them could collide unnoticed.
+    [Fact]
+    public void Every_EventId_is_a_literal_or_a_TransactionStages_id()
+    {
+        var offenders = new List<string>();
+
+        foreach (var file in SourceFiles())
+        {
+            var text = File.ReadAllText(file);
+            var lineStarts = LineStarts(text);
+
+            foreach (Match attribute in LoggerMessageAttribute.Matches(text))
+            {
+                var args = attribute.Groups["args"].Value;
+                if (!args.Contains("EventId =", StringComparison.Ordinal))
+                    continue;
+
+                if (!LiteralEventId.IsMatch(args) && !StageEventIdReference.IsMatch(args))
+                    offenders.Add($"{Relative(file)}:{LineNumber(lineStarts, attribute.Index)}");
+            }
+        }
+
+        offenders.Should().BeEmpty(
+            "an EventId must be a literal or a TransactionStages constant, or the uniqueness scan cannot see it");
     }
 
     [Fact]

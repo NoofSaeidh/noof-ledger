@@ -22,8 +22,14 @@ public static class TransactionStages
     public const string Replied = "Replied";
     public const int RepliedEventId = 5005;
 
+    public const string Extracted = "Extracted";
+    public const int ExtractedEventId = 5006;
+
     public const string StageFailed = "StageFailed";
     public const int StageFailedEventId = 5009;
 
-    public static IReadOnlyList<string> Ordered { get; } = [Received, Transcribed, Categorized, Persisted, Replied];
+    public const string ReceiptFetchFailed = "ReceiptFetchFailed";
+    public const int ReceiptFetchFailedEventId = 5010;
+
+    public static IReadOnlyList<string> Ordered { get; } = [Received, Transcribed, Extracted, Categorized, Persisted, Replied];
 }
