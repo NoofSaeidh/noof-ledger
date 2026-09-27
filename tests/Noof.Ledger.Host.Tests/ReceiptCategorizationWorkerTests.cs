@@ -52,8 +52,9 @@ public class ReceiptCategorizationWorkerTests
 
     static readonly DateOnly SentOn = new(2026, 9, 25);
 
-    static CategorizationSubject Subject(int? botMessageId = 42, TransactionStatus status = TransactionStatus.Captured) =>
-        new(TransactionId, string.Empty, 111L, botMessageId, "Main RSD", status, SentOn, SentOn, [],
+    static CategorizationSubject Subject(
+        int? botMessageId = 42, TransactionStatus status = TransactionStatus.Captured, string rawText = "") =>
+        new(TransactionId, rawText, 111L, botMessageId, "Main RSD", status, SentOn, SentOn, [],
             CaptureKind.Photo, TransactionKind.Expense, CurrencyCode.Rsd, WalletId: RsdDefault.Id);
 
     static AppReceipts.ReceiptView Receipt(
@@ -198,11 +199,15 @@ public class ReceiptCategorizationWorkerTests
         return gate;
     }
 
+    static readonly AppReceipts.FiscalVerificationUrl DefaultVerificationUrl =
+        new(new AppReceipts.FiscalVerificationUrlOptions { VerificationUrlPrefix = "https://suf.purs.gov.rs/v/?vl=" });
+
     static ReceiptCategorizationWorker CreateWorker(
         IServiceScopeFactory scopeFactory, FakeTimeProvider time, CapturingLogger<ReceiptCategorizationWorker>? logger = null,
         IOperationTimer? timer = null) =>
         new(scopeFactory, time, new CategorizationWorkerOptions(), WorkerId, Echo, Utc, ReadyGate(),
             timer ?? new OperationTimer(time, new SlowOperationOptions()),
+            DefaultVerificationUrl,
             logger ?? new CapturingLogger<ReceiptCategorizationWorker>());
 
     static string? OperationOf(CapturedLogEntry entry) => entry.Properties.GetValueOrDefault("Operation") as string;
@@ -287,6 +292,60 @@ public class ReceiptCategorizationWorkerTests
 
         await store.Received(1).ApplyAsync(
             TransactionId, Arg.Is<CategorizationOutcome>(outcome => outcome.WalletId == NamedInCaption.Id), Arg.Any<CancellationToken>());
+    }
+
+    // Item A (Copilot, Phase 6 review): for a text-link capture, sub.RawText is the original message
+    // and carries the whole fiscal verification URL - it must never reach the categorisation model,
+    // only the free words alongside it.
+    [Fact]
+    public async Task The_caption_sent_to_the_model_never_contains_the_verification_url()
+    {
+        var store = DefaultStore();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(rawText: "lunch https://suf.purs.gov.rs/v/?vl=AbCdEf123 card"));
+        var categorizer = DefaultCategorizer();
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, categorizer: categorizer), Time());
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await categorizer.Received(1).CategorizeAsync(
+            Arg.Is<AppReceipts.ReceiptCategorizationRequest>(r =>
+                r.Caption == "lunch card" && !r.Caption.Contains("suf.purs.gov.rs", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_caption_that_is_only_the_verification_url_becomes_null()
+    {
+        var store = DefaultStore();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(rawText: "https://suf.purs.gov.rs/v/?vl=AbCdEf123"));
+        var categorizer = DefaultCategorizer();
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, categorizer: categorizer), Time());
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await categorizer.Received(1).CategorizeAsync(
+            Arg.Is<AppReceipts.ReceiptCategorizationRequest>(r => r.Caption == null), Arg.Any<CancellationToken>());
+    }
+
+    // A correction that resends the same fiscal link (CorrectionHandler lets that through as an
+    // ordinary edit when it matches the receipt's own link) still carries the URL in job.Instruction.
+    [Fact]
+    public async Task A_correction_that_resends_the_same_link_strips_it_before_reaching_the_model()
+    {
+        var store = DefaultStore();
+        var categorizer = DefaultCategorizer();
+        var jobQueue = QueueWith(Job(instruction: "https://suf.purs.gov.rs/v/?vl=AbCdEf123 wrong wallet"));
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer), Time());
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await categorizer.Received(1).CategorizeAsync(
+            Arg.Is<AppReceipts.ReceiptCategorizationRequest>(r => r.Correction == "wrong wallet"), Arg.Any<CancellationToken>());
     }
 
     // N-3 (Phase 6 re-review): CategorizationWorker guards exactly this for a plain-text Correct job

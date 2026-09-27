@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Noof.Ledger.Application.Capture;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Domain;
 using Telegram.Bot.Types;
 
@@ -15,6 +16,7 @@ internal sealed class TelegramUpdateRouter(
     CorrectionHandler correctionHandler,
     IRecordEcho recordEcho,
     ISystemHealth systemHealth,
+    IFiscalVerificationUrl verificationUrl,
     ILogger<TelegramUpdateRouter> logger)
     : ITelegramUpdateRouter
 {
@@ -83,9 +85,9 @@ internal sealed class TelegramUpdateRouter(
             && await correctionHandler.TryHandleReplyAsync(message, repliedTo, text, cancellationToken))
             return;
 
-        if (ReceiptLinkDetector.TryFind(text, out var verificationUrl))
+        if (verificationUrl.TryFind(text, out var url))
         {
-            await HandleReceiptLinkAsync(message, text, verificationUrl, timeZoneId, cancellationToken);
+            await HandleReceiptLinkAsync(message, text, url, timeZoneId, cancellationToken);
             return;
         }
 

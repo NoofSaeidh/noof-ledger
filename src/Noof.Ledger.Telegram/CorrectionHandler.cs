@@ -6,7 +6,8 @@ using Telegram.Bot.Types;
 namespace Noof.Ledger.Telegram;
 
 internal sealed class CorrectionHandler(
-    IRecordEditor editor, IChatNotifier chatNotifier, IRecordEcho recordEcho, IReceiptStore receiptStore)
+    IRecordEditor editor, IChatNotifier chatNotifier, IRecordEcho recordEcho, IReceiptStore receiptStore,
+    IFiscalVerificationUrl verificationUrl)
 {
     readonly EchoMessage correcting = new(recordEcho.Correcting, []);
     readonly EchoMessage transcribing = new(recordEcho.Transcribing, []);
@@ -62,7 +63,7 @@ internal sealed class CorrectionHandler(
         // Anything else (a plain correction instruction, or the same link resent) is an ordinary edit,
         // handled by CategorizationWorker's own claim-time routing once it reaches Reinterpret.
         if (await receiptStore.GetVerificationUrlAsync(target.TransactionId, cancellationToken) is { Length: > 0 } originalLink
-            && ReceiptLinkDetector.TryFind(text, out var editedLink)
+            && verificationUrl.TryFind(text, out var editedLink)
             && !string.Equals(editedLink, originalLink, StringComparison.Ordinal))
         {
             // R2-2 (Phase 6 second re-review): a chatNotifier.EditAsync here would overwrite the

@@ -2,6 +2,7 @@ using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Noof.Ledger.Application;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Host.Diagnostics;
 
 namespace Noof.Ledger.Host.Tests.Diagnostics;
@@ -14,7 +15,9 @@ public class DiagnosticsRegistrationTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton(TimeProvider.System);
-        services.AddNoofApplication(new SlowOperationOptions());
+        services.AddNoofApplication(
+            new SlowOperationOptions(),
+            new FiscalVerificationUrlOptions { VerificationUrlPrefix = "https://suf.purs.gov.rs/v/?vl=" });
 
         services.AddNoofDiagnostics();
 

@@ -1,4 +1,5 @@
 using AwesomeAssertions;
+using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Receipts.FiscalQr;
 
@@ -6,7 +7,10 @@ namespace Noof.Ledger.Receipts.Tests.FiscalQr;
 
 public class FiscalQrDecoderTests
 {
-    readonly FiscalQrDecoder decoder = new();
+    static readonly FiscalVerificationUrl DefaultVerificationUrl =
+        new(new FiscalVerificationUrlOptions { VerificationUrlPrefix = "https://suf.purs.gov.rs/v/?vl=" });
+
+    readonly FiscalQrDecoder decoder = new(DefaultVerificationUrl);
 
     [Fact]
     public void Decodes_a_sale_receipt()
@@ -158,5 +162,26 @@ public class FiscalQrDecoderTests
         var act = () => decoder.Decode("not a url at all");
 
         act.Should().NotThrow();
+    }
+
+    // Item E: the host and verification path come from configuration (Receipts:VerificationUrlPrefix),
+    // not a hard-coded constant, so a decoder pointed at a different host accepts that host and
+    // refuses the default one.
+    [Fact]
+    public void Honors_a_non_default_configured_verification_host()
+    {
+        var configuredVerificationUrl =
+            new FiscalVerificationUrl(new FiscalVerificationUrlOptions { VerificationUrlPrefix = "https://example-tax.example/verify/?vl=" });
+        var configuredDecoder = new FiscalQrDecoder(configuredVerificationUrl);
+        var payload = new SyntheticQrPayloadBuilder().Build();
+        var base64 = Uri.EscapeDataString(Convert.ToBase64String(payload));
+
+        var acceptedOnConfiguredHost = configuredDecoder.Decode($"https://example-tax.example/verify/?vl={base64}");
+        var rejectedOnDefaultHost = configuredDecoder.Decode($"https://suf.purs.gov.rs/v/?vl={base64}");
+
+        acceptedOnConfiguredHost.Error.Should().BeNull();
+        acceptedOnConfiguredHost.Payload.Should().NotBeNull();
+        rejectedOnDefaultHost.Payload.Should().BeNull();
+        rejectedOnDefaultHost.Error.Should().NotBeNullOrWhiteSpace();
     }
 }
