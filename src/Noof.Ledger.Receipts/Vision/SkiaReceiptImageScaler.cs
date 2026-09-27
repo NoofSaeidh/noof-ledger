@@ -48,7 +48,7 @@ internal sealed class SkiaReceiptImageScaler : IReceiptImageScaler
         try
         {
             using var codec = SKCodec.Create(new SKMemoryStream(bytes.ToArray()));
-            if (codec is null)
+            if (codec is null || UntrustedImagePixelLimit.Exceeds(codec.Info))
                 return null;
 
             var decoded = new SKBitmap(codec.Info.Width, codec.Info.Height);
