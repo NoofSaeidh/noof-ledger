@@ -14,31 +14,88 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
 
 ## 1. Model and effort policy
 
-**Default to the cheapest model that can do the job correctly.** Escalate on demonstrated need, not on suspicion that a task might be hard. Cost discipline is a standing requirement, not a preference.
+**The kind of work picks the model, named on every dispatch** — Agent `model`, Workflow per-stage
+`model` *(operator's decision, 2026-09-28)*. Sonnet proved weak wherever judgment or self-checking
+was needed (it reported "0 references left" with one remaining, and over-built a hook under an
+adversarial review), so cost is kept down by handing mechanical work down, not by defaulting to the
+cheapest tier.
 
-| Tier | Use for | Examples |
-|---|---|---|
-| **haiku** | Mechanical, deterministic, verifiable-at-a-glance work | Running tests and reporting pass/fail · running builds · file/dir listings · grep sweeps · renames · formatting · dependency version lookups · reading a log for a known string · scaffolding boilerplate from an explicit template |
-| **sonnet** | Analysis, review, and most implementation | Writing and modifying code · reading and explaining a subsystem · code review · test authoring · adversarial fact-checking · research against known docs · debugging a localised failure |
-| **opus** | Only genuinely hard reasoning with wide blast radius | Cross-cutting architecture decisions · synthesising many conflicting sources · designing a schema or seam that is expensive to reverse · diagnosing a bug that resisted sonnet |
+| Model | Use for |
+|---|---|
+| **opus** | Anything with judgment: implementing behaviour · design and planning · triaging review findings · investigations that end in a conclusion or recommendation · rules and docs that encode decisions · verifying a subagent's factual claims |
+| **sonnet** | Mechanical work with a fully specified recipe: moving/splitting files by a given scheme · sweeping references · renames · boilerplate from an explicit template. A recipe that leaves a decision open is judgment — opus. |
+| **haiku** | Running tests or builds and reporting pass/fail · reading a log for a known string · listings |
 
-**Effort levels.** Do not use high or xhigh effort for small tasks. `low` for mechanical work, `medium` for ordinary implementation, `high`/`xhigh` reserved for the architecture- and correctness-critical reasoning that justifies opus in the first place.
+The operator's global default model is Opus, so a dispatch without `model` runs on Opus: fine for
+judgment work, but sonnet and haiku work must name its model. Reviews use the models the review
+policy below names.
 
-**The final review of a completed implementation runs on Fable 5.1** (`model: "fable"`), not on the family that wrote the code. Models in one family share blind spots: a reviewer drawn from the same family tends to miss exactly what the implementer missed, and agreement between them is weak evidence. A different family is the cheapest independence available. This applies to the review that closes a phase or a plan — per-task reviews stay on sonnet.
+**Effort levels.** Opus at `medium`; `high`/`xhigh` only for architecture- and correctness-critical
+reasoning, never for small tasks. `low` for mechanical work.
+
+**Review policy — three tiers, three cadences, don't substitute one for another:**
+- **Per task** (inside a phase or plan): review runs on opus (effort medium). No Codex, no Fable per task.
+- **Per pull request: one Codex review**, a model family different from the implementer, run from the
+  PR branch with the Codex CLI — the plugin's `/codex:review`/`/codex:adversarial-review` slash
+  commands cannot be invoked by an agent. Never enable the plugin's stop-time review gate; it would
+  review on every Stop and burn the quota.
+  - `codex review --base <base-branch> -c model_reasoning_effort="medium"` for a mechanical PR — the
+    CLI rejects a PROMPT combined with `--base`, so this form takes no prompt.
+  - For a PR that makes design choices, use the plugin's companion script instead, which supports
+    both a base branch and a focus prompt: `node <path> adversarial-review --wait --base
+    <base-branch> "<focus>"` (challenge the approach, assumptions, trade-offs, failure modes — not
+    just defects); default to adversarial when unsure. Resolve `<path>` with Glob on
+    `~/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs` — the version
+    directory changes on update, never hard-code it.
+  - Run in the foreground with a 600000 ms timeout. Findings are judged, not obeyed: fix what's
+    confirmed, reply in the PR description to what's rejected and why.
+  - Codex refuses on usage limit → don't wait for the window; fall back to an opus review and say so
+    in the PR description.
+- **Fable 5.1 runs twice per phase** *(operator's decision, 2026-09-28)* — never per PR, never per
+  fix round. Models in one family share blind spots; a different family is the cheapest independence
+  available.
+  - **At planning**, once, after the phase's spec and plan are written and before implementation
+    starts. It reviews the decision, not code: alternatives considered, risks and failure modes,
+    conflicts with *(settled)* rules and `docs/decisions/`, and whether the PR cut is right.
+    Its findings are triaged like any review.
+  - **At the end**, closing the phase or a batch of PRs.
+  - **Trial, 3 phases** *(operator, 2026-09-28)*: both Fable reviews run in parallel with a Codex
+    adversarial review of the same scope — closing: the companion script above with `--base <base>`;
+    planning: `codex exec -s read-only "<prompt naming the spec and plan paths, even under the ignored
+    .superpowers/, asking for an adversarial review of the decision>"`. An opus pass merges both lists
+    (deduped, each tagged both / Fable only / Codex only), then triages. The phase's closing notes
+    record one tally line per review (confirmed findings by tag); after the third phase the operator keeps both or drops one.
+- **Review findings are triaged, not all fixed** *(operator's decision, 2026-09-28)*, for Copilot and
+  Codex alike: fix a critical finding (real bug, wrong money/balance, data loss, secret leak,
+  security hole, broken build/test, *(settled)*-rule violation); reply with a sentence of reasoning
+  and don't change code for a non-critical one (style, naming, nits, speculative hardening,
+  preference); ask the operator first on anything expensive (new design, migration, another topic,
+  roughly >~50 lines) instead of starting it, proposing a backlog entry — judged by this
+  single-operator local app's real risk, not completeness.
+- **Copilot is optional** — its quota runs out, so CI and the per-PR Codex review are the gate and
+  nothing waits for Copilot. When a Copilot review does arrive, handle it as below.
+- **Copilot fix rounds:** one round, one commit, opus-only review (effort medium), push — at most 2
+  rounds per PR, then list what's left for the operator. No
+  Codex/Fable for a Copilot round unless it touches money, secrets, a migration or the public
+  surface and a stronger review is judged necessary — say why in the PR. Resolve only the threads
+  you replied to or fixed, by id, never "resolve all unresolved" (hides new comments).
 
 **Anti-patterns — do not do these:**
-- Running a test suite on opus. That is a haiku task; the model is not what makes tests pass.
+- Running a test suite on opus — including by dispatching it without `model`. That is a haiku task;
+  the model is not what makes tests pass.
 - Using xhigh effort to rename a variable, fix a typo, or add a using directive.
-- Escalating to opus because a task *sounds* important. Blast radius and reversibility decide the tier, not topic gravity.
+- Choosing the model by how important a task *sounds*. A rename in money code is still sonnet; a
+  judgment call in a small doc is still opus. The kind of work decides.
 - Re-running expensive work that is already cached or already done. Check first.
+- A Fable review per fix round or per Copilot round — this cost ~5 hours on PR #3.
 
 ## 2. Subagent usage
 
-**Delegate aggressively, and delegate downward.** Any task that is self-contained, produces a summarisable result, and does not need this conversation's full context should go to a subagent on the cheapest adequate tier.
+**Delegate aggressively, and delegate downward.** Any task that is self-contained, produces a summarisable result, and does not need this conversation's full context should go to a subagent on the model §1 names for that kind of work.
 
 - **Always delegate:** multi-file searches, "find where X is defined", test runs, build verification, reading a large file to answer one question, independent research, per-file review passes.
 - **Parallelise:** independent work goes out in one message as multiple subagents, not sequentially.
-- **Workflows:** for fan-out work, set `model` per stage — haiku for mechanical stages, sonnet for research and verification, opus only for final synthesis. Never let a whole workflow inherit opus by default.
+- **Workflows:** for fan-out work, set `model` per stage by §1 — haiku for test/build stages, sonnet for recipe-driven mechanical stages, opus for research, verification and synthesis. A mechanical stage left without `model` inherits Opus.
 - **Keep the conclusion, not the transcript.** A subagent's job is to return the answer, not to dump file contents back into the main context.
 
 ## 3. Code style
@@ -91,8 +148,9 @@ register it into) — named because they are exceptions, not a licence to invent
   `private` unless something outside its type calls it. Tests reach internals through
   `InternalsVisibleTo`, never by widening `src` — and substituting an internal interface needs
   `InternalsVisibleTo("DynamicProxyGenAssembly2")` on the declaring assembly as well, or
-  NSubstitute fails at runtime. `PublicSurfaceTests` holds each assembly's allowlist; widening it
-  is an edit to that file, which is the point.
+  NSubstitute fails at runtime. `PublicSurfaceTests` checks each assembly's allowlist, one file per
+  assembly under `tests/Noof.Ledger.Architecture.Tests/PublicSurface/`; widening it is an edit to
+  that assembly's file, which is the point.
 - **Each assembly registers its own services**, exposing one `AddNoofXxx(this IServiceCollection)`
   the Host calls. `Program.cs` names no implementation type.
 - **Render modes are per-page and stay that way** — moved to `.claude/rules/web-ui.md`, which loads
@@ -181,6 +239,38 @@ the code that builds the echo text.
 - Prefer deterministic C# over an LLM call wherever both would work.
 - When a decision is expensive to reverse (schema, storage encoding, a seam), stop and flag it rather than choosing quietly.
 
+**Pull requests are small** *(operator's decision, 2026-09-28)*
+- One topic per PR — a phase is a series of PRs, not one; the plan cuts it into PR-sized tasks up
+  front and names the PR boundaries.
+- Not too small either: a PR is one coherent change a reviewer reads in one sitting. Related edits
+  go together — e.g. several rules about how agents work are one PR, never a PR per paragraph of
+  CLAUDE.md. A follow-up that belongs to an open PR goes into that PR, not a new one.
+- Stop and propose a split (operator decides) past ~500 changed lines excluding generated files
+  (migrations' `.Designer.cs`, the model snapshot, `schema.expected.sql`), or past one of §4's
+  split assemblies per PR (e.g. touching both Persistence and Web).
+- Mechanical moves/renames get their own PR, separate from behaviour changes.
+- Independent PRs branch from `master`; a PR needing another's changes is stacked on it (base = that
+  branch), never merged into it.
+- Shared hot files (backlog entries, per-assembly allowlists) are split across PRs so parallel work
+  doesn't conflict.
+
+**A PR says when it is ready** *(operator's decision, 2026-09-28)*
+- Open every PR as a draft (`gh pr create --draft`) and keep it draft while anything is still in
+  progress (implementation, tests, Codex triage, Copilot rounds).
+- Only when done: `gh pr ready <n>` plus one PR comment starting "Ready to merge" with one line per
+  check (tests run and result, Codex review triaged, Copilot rounds done if it reviewed) and, for a stacked PR,
+  "merge after #N".
+- A PR that needs more work after that goes back to draft (`gh pr ready <n> --undo`). The operator
+  merges only non-draft PRs.
+- `gh` posts as the operator's account, so every comment, review reply or PR body an agent writes
+  ends with the line `🤖 Written by Claude Code (<model>)` (PR bodies keep the "Generated with Claude
+  Code" footer). Never edit or sign a comment the operator wrote.
+  
+**Waiting on CI** *(operator's decision, 2026-09-28)*
+- After pushing to a PR branch, wait for CI with one blocking `gh pr checks <n> --watch --interval 30`
+  (timeout 600000 ms) — never poll it by hand, and never guess a result before that command returns.
+- A red CI check keeps the PR in draft until it is fixed and pushed again.
+
 ## 6. Closing a phase *(settled)*
 
 When closing a phase, read and follow `docs/CLOSING-A-PHASE.md` *(settled)*.
@@ -188,3 +278,18 @@ When closing a phase, read and follow `docs/CLOSING-A-PHASE.md` *(settled)*.
 Keep this file short: path-specific rules go in `.claude/rules/` with `paths:` frontmatter, anything longer in `docs/`.
 A path-scoped rule loads when a matching file is read, not when a shell command touches one — after
 `dotnet ef migrations add`, `run.ps1` or a scripted edit, read the file (or the rule) before relying on it.
+
+## 7. Shell and search
+
+- Locate files with the Glob tool, search content with Grep, read with Read — not shell
+  `find`/`grep`/`cat` pipelines; each shell process costs time on Windows.
+- Never `find` from the disk root or the home directory — a hook refuses it (an orphaned
+  `find / -iname X` once held 11.6M handles for hours and slowed every process spawn on the machine).
+- NuGet package API: `~/.nuget/packages/<id-lowercase>/<version>/lib/<tfm>/` holds the DLL and XML
+  docs; get source with `ilspycmd` (a global dotnet tool). No disk-wide search.
+- The app's own data lives in `%LOCALAPPDATA%\NoofLedger\`: `backups\`/`manual-backups\`, `logs\`,
+  `demo\`, `dp-keys\` (Data Protection keys — secret) and `db.connection` (secret). Search these
+  freely; never read `dp-keys\` or `db.connection` without an explicit request.
+- A command that hits its timeout keeps running in the background — stop what you started (KillShell
+  / `Stop-Process`) before you finish; never leave it running.
+- Windows Git Bash `find` is unix find — never pipe into `find /c`; use `grep -c` instead.
