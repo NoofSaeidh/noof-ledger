@@ -53,6 +53,12 @@ internal sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, 
     static readonly int[] NonMoneyReceiptKinds =
         [.. Enum.GetValues<ReceiptKind>().Where(kind => kind.IsNonMoneyKind()).Select(kind => (int)kind)];
 
+    // Shares its shape with ClaimAsync above (SET clause, NOT EXISTS ordering rule, RETURNING list)
+    // but is kept as its own literal query rather than a shared core built from a join/predicate
+    // fragment: the two differ only in the JOIN and the WHERE's kind filter, and splitting those out
+    // would turn one query anyone can read start to finish into a template reassembled from pieces -
+    // worse for a raw SQL claim query, which needs its locking and ordering guarantees read as a
+    // whole (Fable review, Phase 6 follow-up round 2).
     public async Task<CategorizationJob?> ClaimNonMoneyReceiptAsync(string workerId, TimeSpan lease, CancellationToken cancellationToken)
     {
         var now = timeProvider.GetUtcNow();
