@@ -50,6 +50,51 @@ internal sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, 
         return claimed.SingleOrDefault();
     }
 
+    static readonly int[] NonMoneyReceiptKinds =
+        [(int)ReceiptKind.Copy, (int)ReceiptKind.Training, (int)ReceiptKind.Proforma, (int)ReceiptKind.Advance];
+
+    public async Task<CategorizationJob?> ClaimNonMoneyReceiptAsync(string workerId, TimeSpan lease, CancellationToken cancellationToken)
+    {
+        var now = timeProvider.GetUtcNow();
+        var leaseExpiry = now + lease;
+
+        var claimed = await db.CategorizationJobs
+            .FromSqlRaw(
+                """
+                UPDATE categorization_jobs
+                SET status = 1,
+                    claimed_at = @now,
+                    claimed_by = @workerId,
+                    attempt_count = attempt_count + 1,
+                    run_after = @leaseExpiry,
+                    updated_at = @now
+                WHERE id = (
+                    SELECT j.id FROM categorization_jobs j
+                    JOIN receipts r ON r.transaction_id = j.transaction_id
+                    WHERE j.status = 0 AND j.run_after <= @now AND j.kind = @receiptKind AND r.receipt_kind = ANY(@nonMoneyKinds)
+                      AND NOT EXISTS (
+                          SELECT 1 FROM categorization_jobs earlier
+                          WHERE earlier.transaction_id = j.transaction_id
+                            AND earlier.status IN (0, 1)
+                            AND earlier.created_at < j.created_at)
+                    ORDER BY j.run_after
+                    LIMIT 1
+                    FOR UPDATE OF j SKIP LOCKED
+                )
+                RETURNING id, transaction_id, status, attempt_count, run_after, claimed_at, claimed_by, last_error,
+                          created_at, updated_at, kind, instruction, source_message_id, instruction_day, voice_file_id
+                """,
+                new NpgsqlParameter("now", now),
+                new NpgsqlParameter("workerId", workerId),
+                new NpgsqlParameter("leaseExpiry", leaseExpiry),
+                new NpgsqlParameter("receiptKind", (int)JobKind.CategorizeReceipt),
+                new NpgsqlParameter("nonMoneyKinds", NonMoneyReceiptKinds))
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        return claimed.SingleOrDefault();
+    }
+
     public async Task<JobCompletionOutcome> SucceedAsync(Guid jobId, string workerId, CancellationToken cancellationToken)
     {
         var rows = await db.Database.ExecuteSqlRawAsync(

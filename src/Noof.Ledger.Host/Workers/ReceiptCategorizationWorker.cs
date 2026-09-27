@@ -63,6 +63,19 @@ internal sealed class ReceiptCategorizationWorker(
             var released = await jobQueue.ReleaseExpiredLeasesAsync(now, cancellationToken);
             release.Stop(onlyIfSlow: released == 0);
 
+            // Claimed ahead of the model-key gate below and regardless of it: a Copy/Training/Proforma/
+            // Advance receipt is cancelled without ever calling the model (ReportNotRecordedAsync), so
+            // gating it behind IModelProvider like a money receipt left it stuck at "Categorising..."
+            // forever with no key configured.
+            using var claimNonMoney = timer.Start(logger, TimedOperations.DbClaimJob);
+            var nonMoneyJob = await jobQueue.ClaimNonMoneyReceiptAsync(workerId, options.Lease, cancellationToken);
+            claimNonMoney.Stop(onlyIfSlow: nonMoneyJob is null);
+            if (nonMoneyJob is not null)
+            {
+                await ProcessClaimedJobAsync(scope, jobQueue, nonMoneyJob, cancellationToken);
+                return CategorizationTickResult.Processed;
+            }
+
             // Checked before claiming, for CategorizationWorker's own reason: a claim spends an
             // attempt and nothing gives it back.
             if (!await modelProvider.IsConfiguredAsync(cancellationToken))

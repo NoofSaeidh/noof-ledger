@@ -49,6 +49,20 @@ public class EfJobQueueTests(PostgresFixture fixture)
 
     static readonly JobKind[] AnyKind = Enum.GetValues<JobKind>();
 
+    static async Task SeedReceiptAsync(LedgerDbContext db, Guid transactionId, ReceiptKind kind, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        db.Receipts.Add(new Receipt
+        {
+            Id = Guid.NewGuid(),
+            TransactionId = transactionId,
+            Source = ReceiptSource.FiscalQr,
+            Total = new Money(100m, CurrencyCode.Rsd),
+            Kind = kind,
+            CreatedAt = now,
+        });
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
     static CategorizationJob NewJob(
         Guid transactionId, DateTimeOffset runAfter, JobStatus status = JobStatus.Pending, int attemptCount = 0,
         JobKind kind = JobKind.Categorize, string? instruction = null, int? sourceMessageId = null,
@@ -580,6 +594,47 @@ public class EfJobQueueTests(PostgresFixture fixture)
         handedOff.Instruction.Should().Be("that was cash");
         handedOff.SourceMessageId.Should().Be(7);
         handedOff.Status.Should().Be(JobStatus.Pending);
+    }
+
+    [Fact]
+    public async Task ClaimNonMoneyReceiptAsync_claims_a_pending_CategorizeReceipt_job_whose_receipt_is_a_copy()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var queue = new EfJobQueue(db, time, maxAttempts: 8);
+        var transactionId = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
+        await SeedReceiptAsync(db, transactionId, ReceiptKind.Copy, time.GetUtcNow(), TestContext.Current.CancellationToken);
+        var job = NewJob(transactionId, time.GetUtcNow().AddMinutes(-1), kind: JobKind.CategorizeReceipt);
+        db.CategorizationJobs.Add(job);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var claimed = await queue.ClaimNonMoneyReceiptAsync("worker-a", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
+
+        claimed.Should().NotBeNull();
+        claimed!.Id.Should().Be(job.Id);
+        claimed.Status.Should().Be(JobStatus.Claimed);
+        claimed.ClaimedBy.Should().Be("worker-a");
+    }
+
+    [Fact]
+    public async Task ClaimNonMoneyReceiptAsync_ignores_a_pending_CategorizeReceipt_job_whose_receipt_is_a_sale()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var queue = new EfJobQueue(db, time, maxAttempts: 8);
+        var transactionId = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
+        await SeedReceiptAsync(db, transactionId, ReceiptKind.Sale, time.GetUtcNow(), TestContext.Current.CancellationToken);
+        db.CategorizationJobs.Add(NewJob(transactionId, time.GetUtcNow().AddMinutes(-1), kind: JobKind.CategorizeReceipt));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var claimed = await queue.ClaimNonMoneyReceiptAsync("worker-a", TimeSpan.FromMinutes(15), TestContext.Current.CancellationToken);
+
+        claimed.Should().BeNull("a money receipt must keep gating on the model key, never on this claim");
+        var reloaded = await db.CategorizationJobs.AsNoTracking()
+            .SingleAsync(j => j.TransactionId == transactionId, TestContext.Current.CancellationToken);
+        reloaded.Status.Should().Be(JobStatus.Pending, "an ignored job must not have its attempt spent");
     }
 
     [Fact]

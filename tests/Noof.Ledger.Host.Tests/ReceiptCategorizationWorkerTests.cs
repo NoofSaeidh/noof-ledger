@@ -180,6 +180,17 @@ public class ReceiptCategorizationWorkerTests
         return jobQueue;
     }
 
+    // A non-money job is claimed through ClaimNonMoneyReceiptAsync instead - QueueWith leaves that
+    // unconfigured (defaults to null), so a test that wants one claimed there must set it up itself.
+    static IJobQueue QueueWithNonMoneyJob(CategorizationJob job)
+    {
+        var jobQueue = Substitute.For<IJobQueue>();
+        jobQueue.ClaimNonMoneyReceiptAsync(WorkerId, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(job);
+        jobQueue.SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>()).Returns(JobCompletionOutcome.Applied);
+        jobQueue.FailAsync(JobId, WorkerId, Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(JobCompletionOutcome.Applied);
+        return jobQueue;
+    }
+
     static IDatabaseGate ReadyGate()
     {
         var gate = Substitute.For<IDatabaseGate>();
@@ -602,6 +613,37 @@ public class ReceiptCategorizationWorkerTests
         var result = await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
         result.Should().Be(CategorizationTickResult.Idle);
+        await jobQueue.DidNotReceive().ClaimAsync(
+            Arg.Any<string>(), Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
+    }
+
+    // The Copilot finding this guards: the model-key gate ran in front of every CategorizeReceipt
+    // claim, so a Copy/Training/Proforma/Advance receipt - which this worker never calls the model
+    // for (ReportNotRecordedAsync, above) - stayed at "Categorising..." forever with no key
+    // configured, instead of being cancelled. ClaimNonMoneyReceiptAsync lets that drain independently
+    // of IModelProvider, while a money receipt (the test above) still claims nothing without a key.
+    [Fact]
+    public async Task A_non_money_receipt_is_cancelled_even_with_no_model_key_configured()
+    {
+        var receiptStore = DefaultReceiptStore();
+        receiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Receipt(kind: ReceiptKind.Copy));
+        var store = DefaultStore();
+        var notifier = Substitute.For<IChatNotifier>();
+        var recordEditor = Substitute.For<IRecordEditor>();
+        var jobQueue = QueueWithNonMoneyJob(Job());
+        var modelProvider = Substitute.For<IModelProvider>();
+        modelProvider.IsConfiguredAsync(Arg.Any<CancellationToken>()).Returns(false);
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, modelProvider, store, receiptStore: receiptStore, notifier: notifier, recordEditor: recordEditor),
+            Time());
+
+        var result = await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        result.Should().Be(CategorizationTickResult.Processed);
+        await recordEditor.Received(1).CancelAsync(TransactionId, Arg.Any<CancellationToken>());
+        await notifier.Received(1).EditAsync(
+            111L, 42, Arg.Is<EchoMessage>(echo => echo.Text == "This receipt is a copy — not recorded"), Arg.Any<CancellationToken>());
+        await jobQueue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
         await jobQueue.DidNotReceive().ClaimAsync(
             Arg.Any<string>(), Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
     }
