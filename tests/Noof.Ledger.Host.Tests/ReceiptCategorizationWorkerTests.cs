@@ -372,6 +372,24 @@ public class ReceiptCategorizationWorkerTests
     }
 
     [Fact]
+    public async Task A_category_only_correction_keeps_a_wallet_that_has_since_been_archived()
+    {
+        var archived = Guid.Parse("00000000-0000-0000-0000-000000000099");
+        var store = DefaultStore();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(status: TransactionStatus.Completed) with { WalletId = archived });
+        var walletDirectory = DefaultWalletDirectory();
+        walletDirectory.DefaultForPaymentAsync(PaymentMethod.Card, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job("bread is groceries, not other")), KeyPresent(), store, walletDirectory: walletDirectory), Time());
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await store.Received(1).ApplyAsync(
+            TransactionId, Arg.Is<CategorizationOutcome>(outcome => outcome.WalletId == archived), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task A_correction_that_names_a_wallet_still_moves_the_record_there()
     {
         var categorizer = DefaultCategorizer();

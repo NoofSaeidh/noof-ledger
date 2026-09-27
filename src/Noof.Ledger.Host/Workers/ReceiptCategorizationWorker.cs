@@ -277,8 +277,10 @@ internal sealed class ReceiptCategorizationWorker(
         // means "leave it where it is", never "the default". The payment/currency default below is a
         // first-categorization fallback only; re-resolving it on every correction would silently move
         // the record back whenever a later correction (or a changed wallet default) answers
-        // wallet_id as null.
-        if (job.Instruction is not null && subject.WalletId is { } current && wallets.Any(wallet => wallet.Id == current))
+        // wallet_id as null. Kept even when that wallet has since been archived: archiving must not
+        // rewrite a historical record's wallet, so this does not filter through `wallets` (active
+        // only) the way the first-categorization fallback below does.
+        if (job.Instruction is not null && subject.WalletId is { } current)
             return current;
 
         if (receipt.PaymentMethod is PaymentMethod.Card or PaymentMethod.Cash

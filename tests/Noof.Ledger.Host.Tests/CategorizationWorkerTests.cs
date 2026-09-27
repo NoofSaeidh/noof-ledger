@@ -137,8 +137,9 @@ public class CategorizationWorkerTests
     static CategorizationSubject Subject(
         int? botMessageId = 42, string rawText = "Bread 250 RSD", DateOnly? occurredOn = null,
         TransactionStatus status = TransactionStatus.Captured, IReadOnlyList<RecordedLine>? lines = null, Guid? walletId = null,
-        CaptureKind captureKind = CaptureKind.Text) =>
-        new(TransactionId, rawText, 111L, botMessageId, "Cash", status, SentOn, occurredOn ?? SentOn, lines ?? [], captureKind, WalletId: walletId);
+        CaptureKind captureKind = CaptureKind.Text, CurrencyCode? walletCurrency = null) =>
+        new(TransactionId, rawText, 111L, botMessageId, "Cash", status, SentOn, occurredOn ?? SentOn, lines ?? [], captureKind,
+            WalletId: walletId, WalletCurrency: walletCurrency);
 
     static CategorizationProposal OneGroceryLine(decimal amount = 250m, string currency = "RSD") =>
         new([new ProposedLineItem("Bread", amount, currency, "groceries", null, null)]);
@@ -663,12 +664,13 @@ public class CategorizationWorkerTests
     }
 
     [Fact]
-    public async Task A_correction_whose_wallet_was_archived_falls_back_to_the_default()
+    public async Task A_category_only_correction_keeps_a_wallet_that_has_since_been_archived()
     {
         var archived = Guid.Parse("55555555-5555-5555-5555-555555555555");
         var store = Substitute.For<ICategorizationStore>();
         store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
-            .Returns(Subject(status: TransactionStatus.Completed, lines: [StoredBread], walletId: archived));
+            .Returns(Subject(
+                status: TransactionStatus.Completed, lines: [StoredBread], walletId: archived, walletCurrency: CurrencyCode.Rsd));
         CategorizationOutcome? applied = null;
         store.ApplyAsync(TransactionId, Arg.Do<CategorizationOutcome>(outcome => applied = outcome), Arg.Any<CancellationToken>())
             .Returns(Task.CompletedTask);
@@ -680,8 +682,9 @@ public class CategorizationWorkerTests
 
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
-        (applied?.WalletId).Should().Be(MainWallet.Id,
-            "the line is stated in RSD and Main Wallet is the RSD default; the archived wallet is not offered, so the correction cannot keep it");
+        (applied?.WalletId).Should().Be(archived,
+            "archiving a wallet must not rewrite a historical record's wallet - only a first categorisation, " +
+            "or a correction that names a wallet itself, may fall through to the default");
     }
 
     [Fact]
