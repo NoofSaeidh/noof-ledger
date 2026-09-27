@@ -169,7 +169,7 @@ public class FiscalJournalParserTests
         // Copilot review, PR #3: a journal with valid item lines but no Укупан износ (and no
         // Укупна рефундација either) must never silently report a total of 0 - that is a parse
         // failure, indistinguishable in severity from an unparseable amount.
-        var journalWithNoTotal = CyrillicCardJournal.Replace("Укупан износ: 329,90\r\n", "", StringComparison.Ordinal);
+        var journalWithNoTotal = CyrillicCardJournal.Replace("Укупан износ: 329,90", "", StringComparison.Ordinal);
 
         var act = () => FiscalJournalParser.Parse(journalWithNoTotal);
 
@@ -179,7 +179,7 @@ public class FiscalJournalParserTests
     [Fact]
     public void Throws_instead_of_defaulting_to_zero_when_a_latin_refund_journal_has_no_total_line()
     {
-        var journalWithNoTotal = LatinMixedRefundJournal.Replace("Ukupna refundacija: 399,00\r\n", "", StringComparison.Ordinal);
+        var journalWithNoTotal = LatinMixedRefundJournal.Replace("Ukupna refundacija: 399,00", "", StringComparison.Ordinal);
 
         var act = () => FiscalJournalParser.Parse(journalWithNoTotal);
 

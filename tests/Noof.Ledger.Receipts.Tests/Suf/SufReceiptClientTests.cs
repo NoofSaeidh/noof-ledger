@@ -253,7 +253,7 @@ public class SufReceiptClientTests
         // Copilot review, PR #3: a journal with valid item lines but no Укупан износ/Ukupan iznos
         // (or refund equivalent) must take the same malformed-journal path as an unparseable
         // amount, never silently report a total of 0.
-        var journalWithNoTotal = Journal.Replace("Укупан износ: 329,90\r\n", "", StringComparison.Ordinal);
+        var journalWithNoTotal = Journal.Replace("Укупан износ: 329,90", "", StringComparison.Ordinal);
         var handler = StubHttpMessageHandler.Returning(HttpStatusCode.OK, JsonBody(journalWithNoTotal));
         var client = ClientFor(handler);
 
