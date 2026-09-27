@@ -456,6 +456,75 @@ public sealed class TransactionTraceTests(CookieModeHostFixture fixture) : PageT
     }
 
     [Fact]
+    public async Task A_receipt_issued_at_is_shown_in_Belgrade_time_with_its_offset()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var transactionId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var issuedAtUtc = new DateTimeOffset(2026, 9, 25, 10, 30, 0, TimeSpan.Zero);
+        var walletId = await SeedWalletAsync();
+
+        await using (var db = OpenDb())
+        {
+            db.Transactions.Add(new Transaction
+            {
+                Id = transactionId,
+                WalletId = walletId,
+                RawText = "seeded receipt time transaction",
+                CaptureKind = CaptureKind.Manual,
+                Kind = TransactionKind.Expense,
+                Status = TransactionStatus.Completed,
+                TimeZoneId = "Europe/Belgrade",
+                OccurredAt = now,
+                OccurredOn = ZonedClock.LocalDate(now, "Europe/Belgrade"),
+                TelegramChatId = null,
+                TelegramMessageId = null,
+                CreatedAt = now,
+            });
+
+            var receiptId = Guid.NewGuid();
+            db.Receipts.Add(new Receipt
+            {
+                Id = receiptId,
+                TransactionId = transactionId,
+                Source = ReceiptSource.FiscalQr,
+                SellerName = "Test Market Nova 12",
+                SellerAddress = "Bulevar 1",
+                SellerTaxId = "987654321",
+                FiscalNumber = "FN-10",
+                IssuedAt = issuedAtUtc,
+                Total = new Money(300m, CurrencyCode.Rsd),
+                Kind = ReceiptKind.Sale,
+                PaymentMethod = PaymentMethod.Card,
+                QrTotal = 300m,
+                CreatedAt = now,
+            });
+            db.ReceiptLines.Add(new ReceiptLine
+            {
+                Id = Guid.NewGuid(),
+                ReceiptId = receiptId,
+                Ordinal = 1,
+                Name = "Bread",
+                Quantity = 1m,
+                UnitPrice = 300m,
+                Total = 300m,
+            });
+
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync($"{fixture.BaseUrl}/transactions/{transactionId}/trace");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var receiptSection = Page.Locator("#trace-receipt");
+        await Expect(receiptSection).ToContainTextAsync("2026-09-25 12:30:00 +02:00");
+        await Expect(receiptSection).Not.ToContainTextAsync("10:30:00 UTC");
+    }
+
+    [Fact]
     public async Task With_the_database_level_at_Information_the_notice_is_not_shown()
     {
         if (fixture.DatabaseUnavailable)
