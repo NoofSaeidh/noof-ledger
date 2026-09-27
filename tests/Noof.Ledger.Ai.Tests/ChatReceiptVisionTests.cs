@@ -200,6 +200,9 @@ public class ChatReceiptVisionTests
     [InlineData("1234567890", null)]
     [InlineData("PIB123456", null)]
     [InlineData(null, null)]
+    [InlineData("", null)]
+    [InlineData("   ", null)]
+    [InlineData(" 123456789 ", "123456789")]
     public async Task A_printed_tax_id_is_accepted_only_when_it_is_exactly_9_digits(string? printed, string? expected)
     {
         var vision = new ChatReceiptVision(
@@ -215,6 +218,9 @@ public class ChatReceiptVisionTests
     [InlineData("PIB123456", true)]
     [InlineData("123456789", false)]
     [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("   ", false)]
+    [InlineData(" 123456789 ", false)]
     public async Task A_malformed_printed_tax_id_is_reported_alongside_the_receipt_not_only_dropped(string? printed, bool expectedMalformed)
     {
         var vision = new ChatReceiptVision(
@@ -233,6 +239,9 @@ public class ChatReceiptVisionTests
     [InlineData("2WJCQFGP-2WJCQFGP", null)]
     [InlineData("not-a-fiscal-number", null)]
     [InlineData(null, null)]
+    [InlineData("", null)]
+    [InlineData("   ", null)]
+    [InlineData(" 2WJCQFGP-2WJCQFGP-66360 ", "2WJCQFGP-2WJCQFGP-66360")]
     public async Task A_printed_fiscal_number_is_accepted_only_when_well_formed(string? printed, string? expected)
     {
         var vision = new ChatReceiptVision(

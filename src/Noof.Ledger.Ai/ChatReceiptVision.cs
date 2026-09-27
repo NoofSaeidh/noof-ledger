@@ -77,7 +77,7 @@ internal sealed class ChatReceiptVision(
         if (!payload.Readable || payload.Total is null || payload.Lines.Count == 0)
             return new ReceiptVisionResult(null, MapUnreadableReason(payload.UnreadableReason));
 
-        var taxIdMalformed = payload.SellerTaxId is not null && !TaxIdPattern.IsMatch(payload.SellerTaxId);
+        var taxIdMalformed = !string.IsNullOrWhiteSpace(payload.SellerTaxId) && !TaxIdPattern.IsMatch(payload.SellerTaxId.Trim());
         return new ReceiptVisionResult(ToExtractedReceipt(payload, qrTotal), null, taxIdMalformed);
     }
 
@@ -116,8 +116,14 @@ internal sealed class ChatReceiptVision(
             lines);
     }
 
-    static string? AcceptIfWellFormed(string? printed, Regex pattern) =>
-        printed is not null && pattern.IsMatch(printed) ? printed : null;
+    static string? AcceptIfWellFormed(string? printed, Regex pattern)
+    {
+        if (string.IsNullOrWhiteSpace(printed))
+            return null;
+
+        var trimmed = printed.Trim();
+        return pattern.IsMatch(trimmed) ? trimmed : null;
+    }
 
     static ReceiptUnreadableReason MapUnreadableReason(string? reason) => reason switch
     {
