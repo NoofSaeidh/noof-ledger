@@ -227,6 +227,46 @@ public class SufReceiptClientTests
     }
 
     [Fact]
+    public async Task Never_leaks_the_verification_url_into_the_failure_reason_on_a_connection_failure()
+    {
+        // Copilot review, PR #3 (item B): HttpRequestException.Message can embed the request URI,
+        // which would put the full verification link (vl) into FiscalFetchFailure.Reason and from
+        // there into the log line ExtractReceiptWorker writes - forbidden by CLAUDE.md's "a fiscal
+        // receipt's verification URL is never logged".
+        const string secretUrl = "https://suf.purs.gov.rs/v/?vl=SECRETPAYLOADFROMTHEQR1234567890";
+        var payload = Payload with { VerificationUrl = secretUrl };
+        var handler = new StubHttpMessageHandler((_, _) =>
+            throw new HttpRequestException($"Connection failed while contacting {secretUrl}"));
+        var client = ClientFor(handler);
+
+        var result = await client.FetchAsync(payload, CancellationToken.None);
+
+        result.Receipt.Should().BeNull();
+        result.Failure.Should().NotBeNull();
+        result.Failure!.Reason.Should().NotContain(secretUrl);
+        result.Failure.Reason.Should().NotContain("SECRETPAYLOADFROMTHEQR1234567890");
+    }
+
+    [Fact]
+    public async Task Reports_a_failure_instead_of_throwing_on_a_malformed_journal_amount()
+    {
+        // Copilot review, PR #3 (item C): FiscalJournalParser.Parse's ParseAmount throws
+        // FormatException on an unparseable amount. Left uncaught, ExtractReceiptWorker's generic
+        // catch treats this as a transient retry instead of taking the QR-total -> vision fallback
+        // every other fetch failure gets.
+        var malformedJournal = Journal.Replace("120,00               2       240,00", "120,00               2       1,2,3,4", StringComparison.Ordinal);
+        var handler = StubHttpMessageHandler.Returning(HttpStatusCode.OK, JsonBody(malformedJournal));
+        var client = ClientFor(handler);
+
+        var result = await client.FetchAsync(Payload, CancellationToken.None);
+
+        result.Receipt.Should().BeNull();
+        result.Failure.Should().NotBeNull();
+        result.Failure!.Reason.Should().Be("The Tax Administration's journal could not be parsed.",
+            "a regression back into an unhandled FormatException, or a change to the fixed reason text, must fail this test rather than pass silently");
+    }
+
+    [Fact]
     public async Task Propagates_cancellation_from_the_callers_own_token()
     {
         var handler = StubHttpMessageHandler.NeverResponding();

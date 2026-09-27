@@ -34,7 +34,7 @@ internal sealed partial class SufReceiptClient(
         }
         catch (HttpRequestException exception)
         {
-            return Failure($"The request to the Tax Administration failed: {exception.Message}", null);
+            return Failure(ClassifyConnectionFailure(exception), exception.StatusCode is { } code ? (int)code : null);
         }
 
         using (response)
@@ -60,17 +60,32 @@ internal sealed partial class SufReceiptClient(
             // against ever reading the body separately (e.g. HttpCompletionOption.ResponseHeadersRead).
             catch (HttpRequestException exception)
             {
-                return Failure($"The Tax Administration's response body could not be read: {exception.Message}", (int)response.StatusCode);
+                return Failure(
+                    $"The Tax Administration's response body could not be read: {ClassifyConnectionFailure(exception)}",
+                    (int)response.StatusCode);
             }
-            catch (IOException exception)
+            catch (IOException)
             {
-                return Failure($"The Tax Administration's response body could not be read: {exception.Message}", (int)response.StatusCode);
+                return Failure("The Tax Administration's response body could not be read: the connection was interrupted.", (int)response.StatusCode);
             }
 
             if (parsed?.Journal is null)
                 return Failure("The Tax Administration's response had no journal.", (int)response.StatusCode);
 
-            var journal = FiscalJournalParser.Parse(parsed.Journal);
+            ParsedJournal? journal;
+            try
+            {
+                journal = FiscalJournalParser.Parse(parsed.Journal);
+            }
+            // A malformed journal (an unparseable amount, for example) must be a fetch failure like
+            // any other, not an unhandled exception - ExtractReceiptWorker's generic catch would
+            // otherwise treat it as a transient retry and skip the QR-total -> vision fallback this
+            // worker already has for every other kind of fetch failure.
+            catch (Exception exception) when (exception is FormatException or OverflowException)
+            {
+                return Failure("The Tax Administration's journal could not be parsed.", (int)response.StatusCode);
+            }
+
             if (journal is null || journal.Lines.Count == 0)
                 return Failure("The journal had no recognisable line items.", (int)response.StatusCode);
 
@@ -119,6 +134,21 @@ internal sealed partial class SufReceiptClient(
     }
 
     static FiscalFetchResult Failure(string reason, int? statusCode) => new(null, new FiscalFetchFailure(reason, statusCode));
+
+    // The reason string becomes FiscalFetchFailure.Reason, which is logged and shown on the trace
+    // and health pages verbatim - it must never carry HttpRequestException.Message, which can embed
+    // the request URI (the verification link/vl, which CLAUDE.md forbids logging). Every branch here
+    // is a fixed phrase built from structured, exception-shape data only (HttpRequestError, the status
+    // code), never free text off the exception.
+    static string ClassifyConnectionFailure(HttpRequestException exception) => exception.HttpRequestError switch
+    {
+        HttpRequestError.NameResolutionError => "The Tax Administration's host name could not be resolved.",
+        HttpRequestError.ConnectionError => "The connection to the Tax Administration failed.",
+        HttpRequestError.SecureConnectionError => "A secure connection to the Tax Administration could not be established.",
+        HttpRequestError.HttpProtocolError => "The Tax Administration returned a malformed HTTP response.",
+        _ when exception.StatusCode is { } statusCode => $"The Tax Administration returned status {(int)statusCode}.",
+        _ => "The request to the Tax Administration failed.",
+    };
 
     [GeneratedRegex(@"[+-]\d{2}:?\d{2}$")]
     private static partial Regex ExplicitOffsetSuffix();
