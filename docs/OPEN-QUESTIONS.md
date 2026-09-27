@@ -670,9 +670,16 @@ the UI, is deferred: `docs/BACKLOG.md`):
    `readable`/`unreadable_reason` (`too_small`, `blurry`, `not_a_receipt`, `cut_off`, `other`) and a
    nullable `total`. `IReceiptVision.ReadAsync` returns `ReceiptVisionResult` (shaped like
    `FiscalFetchResult`) rather than a bare `ExtractedReceipt`, so an unreadable photo is a distinct,
-   honest outcome, not a half-built record. The one deliberate default kept from before: assume RSD
-   unless another currency is clearly printed, since Serbian fiscal receipts print RSD and a legible
-   receipt showing no other currency is one — every other field must be read, never guessed.
+   honest outcome, not a half-built record. Two deliberate defaults are kept from before, and they are
+   not the same kind of default: **currency** null → `RSD`, since Serbian fiscal receipts print RSD
+   and a legible receipt showing no other currency is one — this one is a read fact, not a guess.
+   **Kind** is different: `ExtractedReceipt.Kind` has no null to hold, so an unclear sale-or-refund
+   still defaults to `Sale`, but that default is never trusted silently — `ChatReceiptVision` also
+   reports `KindUnclear`, and `ExtractReceiptWorker` treats it exactly like a mismatch or a malformed
+   tax id (item 2): saved so the echo shows what was read, held back from `CategorizeReceipt` until
+   "Record anyway", *unless* a decoded QR's own kind resolves it first (item 6) — a guessed `Sale` on
+   an actual refund would otherwise change the money's direction with no operator check. Every other
+   field must be read, never guessed.
 2. **Do not record when it does not add up — vision receipts only, never a fiscal QR/SUF receipt.** A
    receipt whose lines do not sum to its total beyond a cent, or whose printed tax id is not exactly 9
    digits, is still saved (so the echo shows exactly what was read) but `CategorizeReceipt` is not
@@ -700,14 +707,19 @@ the UI, is deferred: `docs/BACKLOG.md`):
    (Copy/Training/Proforma/Advance) then takes the existing non-money path since the saved `Kind` is
    what routes it.
 
-**The malformed-PIB-only residual.** A stored `receipts` row never carries a malformed PIB —
-`ChatReceiptVision` drops it to `null` before it is ever saved — so a replay of a still-unconfirmed job
-(`ExtractReceiptWorker`'s own C-1 path) or the operator's Cancel/Restore of one (`RecordActionHandler`)
-cannot recover *why* it is awaiting confirmation when a malformed tax id was the only reason: the
-confirmation prompt reappears with no listed problem, just "This receipt doesn't look right … Record it
-anyway, or cancel?" The receipt's own lines and total are still shown in full, so the operator can still
-judge it against the paper in hand; accepted rather than fixed, since fixing it would mean persisting a
-value that is otherwise never stored anywhere, for a rendering-only purpose.
+**The malformed-tax-id / unclear-kind residual.** A stored `receipts` row never carries a malformed PIB
+— `ChatReceiptVision` drops it to `null` before it is ever saved — and never carries "kind unclear"
+either, since `Receipt.Kind` is already resolved to the concrete `Sale` default by the time it is saved.
+So a replay of a still-unconfirmed job (`ExtractReceiptWorker`'s own C-1 path) or the operator's
+Cancel/Restore of one (`RecordActionHandler`) cannot recover *why* it is awaiting confirmation when
+either was the only reason: the confirmation prompt reappears with no listed problem, just "This
+receipt doesn't look right … Record it anyway, or cancel?" The receipt's own lines and total are still
+shown in full, so for the malformed-PIB case the operator can still judge it against the paper in hand.
+The unclear-kind case is worse: nothing about a stored `Receipt` distinguishes a read `Sale` from a
+guessed one, so after a Restore the operator sees the same plain prompt and "Record anyway" can book a
+`Sale` that was in fact a coin-flip on a refund. Accepted rather than fixed for both, since fixing either
+would mean persisting a value — the raw malformed PIB, or a "kind was guessed" flag — that is otherwise
+never stored anywhere, for a rendering-only purpose.
 
 **P2-1 is unchanged by any of this.** Text and voice capture still have no validation layer — the model
 interprets amounts and dates from natural speech, and the safety is the echo plus cancel/correct, exactly

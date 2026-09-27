@@ -77,15 +77,18 @@ public interface IRecordEcho
     // receipt. Shows exactly what was read and the specific problem(s), computed here (mismatch
     // arithmetic + wording, the same job ReceiptWarnings already does for the recorded echo);
     // RecordAction.RecordAnyway queues CategorizeReceipt, Cancel withdraws the capture.
-    EchoMessage ComposeReceiptNeedsConfirmation(ExtractedReceipt receipt, bool taxIdMalformed = false);
+    // kindUnclear: ReceiptContracts.cs, next to ReceiptVisionResult, for why Receipt.Kind can be a
+    // default guess (Sale) rather than a read fact.
+    EchoMessage ComposeReceiptNeedsConfirmation(ExtractedReceipt receipt, bool taxIdMalformed = false, bool kindUnclear = false);
 
     // The same prompt rebuilt from what was actually stored - RecordActionHandler's Cancel/Restore and
     // ExtractReceiptWorker's own C-1 replay of a still-unconfirmed job both need to turn a stored
     // ReceiptView back into this prompt without ever having an ExtractedReceipt to hand. A malformed
-    // printed tax id is never recoverable here (ChatReceiptVision only ever stores a well-formed one),
-    // so a replay or a Restore whose only original reason was the tax id shows this prompt with no
-    // listed problem - docs/OPEN-QUESTIONS.md P6-2.
-    EchoMessage ComposeReceiptNeedsConfirmation(ReceiptView receipt, bool taxIdMalformed = false);
+    // printed tax id, or an unclear kind, is never recoverable here (the stored Receipt.Kind is already
+    // a concrete value, and ChatReceiptVision only ever stores a well-formed tax id), so a replay or a
+    // Restore whose only original reason was either one shows this prompt with no listed problem -
+    // docs/OPEN-QUESTIONS.md P6-2.
+    EchoMessage ComposeReceiptNeedsConfirmation(ReceiptView receipt, bool taxIdMalformed = false, bool kindUnclear = false);
 
     // 2026-09-27: Cancel on a receipt still awaiting confirmation (IReceiptStore.IsAwaitingConfirmationAsync)
     // has no categorised line items to show - record.Lines is empty, since CategorizeReceipt never ran.

@@ -60,8 +60,9 @@ internal static partial class ExtractReceiptWorkerLog
     public static partial void LogStageFailed(this ILogger logger, string stage, string failedStage, Exception exception);
 
     [LoggerMessage(EventId = 5015, Level = LogLevel.Warning,
-        Message = "Transaction {TransactionId} saved without categorising: mismatch {Mismatch}, malformed tax id {TaxIdMalformed}")]
-    public static partial void LogAwaitingConfirmation(this ILogger logger, Guid transactionId, bool mismatch, bool taxIdMalformed);
+        Message = "Transaction {TransactionId} saved without categorising: mismatch {Mismatch}, malformed tax id {TaxIdMalformed}, unclear kind {KindUnclear}")]
+    public static partial void LogAwaitingConfirmation(
+        this ILogger logger, Guid transactionId, bool mismatch, bool taxIdMalformed, bool kindUnclear);
 
     [LoggerMessage(EventId = 5016, Level = LogLevel.Debug,
         Message = "Vision total {ModelTotal} discarded in favour of the verified QR total {QrTotal}")]

@@ -165,17 +165,17 @@ internal sealed class RecordEcho : IRecordEcho
     public EchoMessage ReceiptUnreadable { get; } = new(
         "I couldn't read this receipt reliably, so nothing was recorded. " + "Send the link from the receipt's QR code (scan it with your phone camera).", []);
 
-    public EchoMessage ComposeReceiptNeedsConfirmation(ExtractedReceipt receipt, bool taxIdMalformed = false) =>
+    public EchoMessage ComposeReceiptNeedsConfirmation(ExtractedReceipt receipt, bool taxIdMalformed = false, bool kindUnclear = false) =>
         ComposeReceiptNeedsConfirmationCore(
             receipt.SellerName, receipt.LocationName, receipt.IssuedAt, receipt.SellerTaxId, receipt.FiscalNumber,
             receipt.Lines.Select(line => (line.Name, line.Total)), receipt.Currency, receipt.Total,
-            receipt.QrTotal ?? receipt.Total, taxIdMalformed);
+            receipt.QrTotal ?? receipt.Total, taxIdMalformed, kindUnclear);
 
-    public EchoMessage ComposeReceiptNeedsConfirmation(ReceiptView receipt, bool taxIdMalformed = false) =>
+    public EchoMessage ComposeReceiptNeedsConfirmation(ReceiptView receipt, bool taxIdMalformed = false, bool kindUnclear = false) =>
         ComposeReceiptNeedsConfirmationCore(
             receipt.SellerName, receipt.LocationName, receipt.IssuedAt, receipt.SellerTaxId, receipt.FiscalNumber,
             receipt.Lines.Select(line => (line.Name, line.Total)), receipt.Currency, receipt.Total,
-            receipt.QrTotal ?? receipt.Total, taxIdMalformed);
+            receipt.QrTotal ?? receipt.Total, taxIdMalformed, kindUnclear);
 
     // Owns both the mismatch arithmetic and the wording (the same split ReceiptWarnings already makes
     // for the recorded echo), so an ExtractedReceipt fresh off the vision fallback and a ReceiptView
@@ -184,7 +184,7 @@ internal sealed class RecordEcho : IRecordEcho
     static EchoMessage ComposeReceiptNeedsConfirmationCore(
         string? sellerName, string? locationName, DateTimeOffset? issuedAt, string? sellerTaxId, string? fiscalNumber,
         IEnumerable<(string Name, decimal Total)> receiptLines, CurrencyCode currency, decimal total, decimal referenceTotal,
-        bool taxIdMalformed)
+        bool taxIdMalformed, bool kindUnclear = false)
     {
         var name = sellerName is { Length: > 0 } ? sellerName : "Receipt";
         var header = locationName is { Length: > 0 } location ? $"{name} — {location}" : name;
@@ -207,6 +207,8 @@ internal sealed class RecordEcho : IRecordEcho
             lines.Add($"⚠️ Lines add up to {FormatAmount(sum)} {currency}, the receipt says {FormatAmount(referenceTotal)} {currency}");
         if (taxIdMalformed)
             lines.Add("⚠️ The printed tax id does not look like a valid PIB (9 digits)");
+        if (kindUnclear)
+            lines.Add("⚠️ The receipt type could not be read");
 
         // 2026-09-27: this prompt only ever shows for a vision receipt (never a fiscal QR/SUF one), so
         // it carries the same standing hint every other vision echo does (ReceiptWarnings).

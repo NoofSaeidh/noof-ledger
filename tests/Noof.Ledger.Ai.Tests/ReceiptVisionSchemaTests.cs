@@ -23,6 +23,51 @@ public class ReceiptVisionSchemaTests
         branches[1].GetProperty("type").GetString().Should().Be("null");
     }
 
+    // Copilot finding, PR #3: the prompt tells read_receipt to leave every field but
+    // readable/unreadable_reason null when the photo is unreadable, but currency and kind were a plain
+    // required enum with no null branch - an unreadable answer had to invent a currency and a sale/
+    // refund it never read. Nullable via anyOf, still required (strict mode requires the property to be
+    // present, not non-null).
+    [Fact]
+    public void Currency_is_a_nullable_enum_expressed_as_anyOf_not_a_type_array()
+    {
+        var schema = ReceiptVisionSchema.BuildReadReceipt();
+
+        var currency = schema.GetProperty("properties").GetProperty("currency");
+
+        currency.TryGetProperty("type", out _).Should().BeFalse(
+            "a type array beside an enum containing null is exactly what Anthropic rejected in record_transaction (4161444)");
+        var branches = currency.GetProperty("anyOf").EnumerateArray().ToList();
+        branches.Should().HaveCount(2);
+        branches[0].GetProperty("type").GetString().Should().Be("string");
+        branches[0].GetProperty("enum").EnumerateArray().Select(e => e.GetString())
+            .Should().BeEquivalentTo(["EUR", "RSD", "USD", "RUB", "KZT"]);
+        branches[1].GetProperty("type").GetString().Should().Be("null");
+
+        var required = schema.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ToList();
+        required.Should().Contain("currency");
+    }
+
+    [Fact]
+    public void Kind_is_a_nullable_enum_expressed_as_anyOf_not_a_type_array()
+    {
+        var schema = ReceiptVisionSchema.BuildReadReceipt();
+
+        var kind = schema.GetProperty("properties").GetProperty("kind");
+
+        kind.TryGetProperty("type", out _).Should().BeFalse(
+            "a type array beside an enum containing null is exactly what Anthropic rejected in record_transaction (4161444)");
+        var branches = kind.GetProperty("anyOf").EnumerateArray().ToList();
+        branches.Should().HaveCount(2);
+        branches[0].GetProperty("type").GetString().Should().Be("string");
+        branches[0].GetProperty("enum").EnumerateArray().Select(e => e.GetString())
+            .Should().BeEquivalentTo(["sale", "refund"]);
+        branches[1].GetProperty("type").GetString().Should().Be("null");
+
+        var required = schema.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ToList();
+        required.Should().Contain("kind");
+    }
+
     [Fact]
     public void Readable_is_a_required_boolean()
     {
