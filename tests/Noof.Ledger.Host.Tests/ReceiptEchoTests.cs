@@ -322,6 +322,28 @@ public class ReceiptEchoTests
         echo.Actions.Should().Equal(RecordAction.RecordAnyway, RecordAction.Cancel);
     }
 
+    // Copilot finding on PR #3, RecordEcho.cs:~200: unlike the recorded-echo path (40-line cap above),
+    // the confirmation path listed every receipt line - a large unreadable/mismatched vision receipt
+    // could exceed Telegram's 4096-character limit and the operator would lose Record anyway/Cancel.
+    [Fact]
+    public void A_sixty_line_confirmation_echo_caps_detailed_lines_at_forty_and_summarises_the_rest()
+    {
+        var lines = Enumerable.Range(1, 60)
+            .Select(i => new AppReceipts.ExtractedReceiptLine(
+                i, $"A rather long line item name number {i}", 1m, null, 10m, 10m, null))
+            .ToList();
+        var receipt = NeedsConfirmationReceipt() with { Total = 600m, Lines = lines };
+
+        var echo = Echo.ComposeReceiptNeedsConfirmation(receipt);
+
+        echo.Text.Length.Should().BeLessThanOrEqualTo(4096);
+        echo.Text.Should().Contain("• A rather long line item name number 1 —");
+        echo.Text.Should().Contain("• A rather long line item name number 40 —");
+        echo.Text.Should().NotContain("A rather long line item name number 41 —");
+        echo.Text.Should().Contain("… 20 more lines");
+        echo.Actions.Should().Equal(RecordAction.RecordAnyway, RecordAction.Cancel);
+    }
+
     [Theory]
     [InlineData(ReceiptKind.Copy, "copy")]
     [InlineData(ReceiptKind.Training, "training")]
