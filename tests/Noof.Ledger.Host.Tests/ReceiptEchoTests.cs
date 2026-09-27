@@ -305,6 +305,18 @@ public class ReceiptEchoTests
         echo.Text.Should().Contain("⚠️ The printed tax id does not look like a valid PIB (9 digits)");
     }
 
+    // Copilot finding, PR #3: a receipt whose sale/refund could not be read defaults to Sale (there is
+    // no null to hold) but must not be categorised on that guess alone - it is held behind the same
+    // confirmation prompt, naming the problem, rather than defaulting silently.
+    [Fact]
+    public void ComposeReceiptNeedsConfirmation_names_an_unclear_receipt_type()
+    {
+        var echo = Echo.ComposeReceiptNeedsConfirmation(NeedsConfirmationReceipt(), kindUnclear: true);
+
+        echo.Text.Should().Contain("⚠️ The receipt type could not be read");
+        echo.Actions.Should().Equal(RecordAction.RecordAnyway, RecordAction.Cancel);
+    }
+
     // The ReceiptView overload (RecordActionHandler's Cancel/Restore, ExtractReceiptWorker's own C-1
     // replay) must produce the identical prompt a fresh ExtractedReceipt would have - same arithmetic,
     // same wording, read from what was actually stored instead of a live model call.

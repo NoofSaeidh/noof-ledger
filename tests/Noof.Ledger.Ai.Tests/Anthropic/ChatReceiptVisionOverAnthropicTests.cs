@@ -53,8 +53,30 @@ public class ChatReceiptVisionOverAnthropicTests
         sent.GetProperty("tool_choice").GetProperty("name").GetString().Should().Be("read_receipt");
 
         var currencyEnum = tools[0].GetProperty("input_schema").GetProperty("properties")
-            .GetProperty("currency").GetProperty("enum").EnumerateArray().Select(e => e.GetString());
+            .GetProperty("currency").GetProperty("anyOf")[0].GetProperty("enum").EnumerateArray().Select(e => e.GetString());
         currencyEnum.Should().BeEquivalentTo(["EUR", "RSD", "USD", "RUB", "KZT"]);
+    }
+
+    // Copilot finding, PR #3: currency and kind must reach the wire as a nullable anyOf too, the same
+    // shape payment_method already uses - not an enum beside a required, non-null type.
+    [Fact]
+    public async Task Currency_and_kind_reach_the_wire_as_an_anyOf_never_an_enum_beside_a_type_array()
+    {
+        var (vision, handler) = Build();
+        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.ReadReceiptJsonAnswer);
+
+        await vision.ReadAsync(TinyImage, "image/jpeg", qrTotal: null, TestContext.Current.CancellationToken);
+
+        var sent = JsonDocument.Parse(handler.Requests[0].Body).RootElement;
+        var properties = sent.GetProperty("tools")[0].GetProperty("input_schema").GetProperty("properties");
+
+        foreach (var name in new[] { "currency", "kind" })
+        {
+            var property = properties.GetProperty(name);
+            property.TryGetProperty("type", out _).Should().BeFalse(
+                $"{name} must reach the wire as an anyOf, never an enum beside a type array");
+            property.GetProperty("anyOf")[1].GetProperty("type").GetString().Should().Be("null");
+        }
     }
 
     [Fact]

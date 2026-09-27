@@ -291,6 +291,48 @@ public class ExtractReceiptWorkerTests
         await harness.Queue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
     }
 
+    // Copilot finding, PR #3: read_receipt leaves kind null rather than invent sale-or-refund, and
+    // ExtractedReceipt.Kind has no null to hold, so ChatReceiptVision defaults it to Sale and reports
+    // KindUnclear instead. A guessed Sale on an actual refund would change the money direction, so
+    // this must be held back the same way a mismatch or a malformed tax id already is.
+    [Fact]
+    public async Task A_vision_receipt_with_an_unclear_kind_is_saved_without_categorising_and_names_the_reason()
+    {
+        var harness = Setup(ExtractJob());
+        harness.Vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), Arg.Any<decimal?>(), Arg.Any<CancellationToken>())
+            .Returns(new ReceiptVisionResult(Extracted(ReceiptSource.Vision), null, KindUnclear: true));
+
+        await TickAsync(harness);
+
+        await harness.ReceiptStore.Received(1).SaveExtractedAsync(
+            TransactionId, Arg.Any<ExtractedReceipt>(), Arg.Any<string?>(), enqueueCategorization: false, Arg.Any<CancellationToken>());
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text.Contains("The receipt type could not be read", StringComparison.Ordinal)
+                && m.Actions.SequenceEqual(new[] { RecordAction.RecordAnyway, RecordAction.Cancel })),
+            Arg.Any<CancellationToken>());
+    }
+
+    // The QR's own kind is a verified fact from the Tax Administration - it must resolve the model's
+    // own uncertainty, not leave a receipt held back for confirmation when the true answer is already
+    // known offline.
+    [Fact]
+    public async Task A_QR_decoded_kind_resolves_an_unclear_vision_kind_instead_of_holding_for_confirmation()
+    {
+        var harness = Setup(ExtractJob());
+        harness.QrReader.Read(Arg.Any<Stream>()).Returns("https://suf.purs.gov.rs/v/?vl=abc");
+        harness.Decoder.Decode(Arg.Any<string>()).Returns(new FiscalQrDecodeResult(Payload(), null));
+        harness.FetchClient.FetchAsync(Arg.Any<FiscalQrPayload>(), Arg.Any<CancellationToken>())
+            .Returns(new FiscalFetchResult(null, new FiscalFetchFailure("unreachable", null)));
+        harness.Vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), Arg.Any<decimal?>(), Arg.Any<CancellationToken>())
+            .Returns(new ReceiptVisionResult(Extracted(ReceiptSource.Vision), null, KindUnclear: true));
+
+        (await TickAsync(harness)).Should().Be(CategorizationTickResult.Processed);
+
+        await harness.ReceiptStore.Received(1).SaveExtractedAsync(
+            TransactionId, Arg.Is<ExtractedReceipt>(r => r.Kind == ReceiptKind.Sale), Arg.Any<string?>(),
+            enqueueCategorization: true, Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task A_vision_receipt_with_a_malformed_tax_id_is_saved_without_categorising_and_names_the_reason()
     {

@@ -167,6 +167,101 @@ public class ChatReceiptVisionTests
         result.Unreadable.Should().Be(ReceiptUnreadableReason.Other);
     }
 
+    // Copilot finding, PR #3: the prompt tells the model to leave currency/kind null when it cannot
+    // read them - the schema must accept that, and the mapping must not invent a value the model
+    // never reported. RSD is the one deliberate default this prompt keeps (Serbian receipts); kind has
+    // no safe default, since a guessed Sale on an actual refund would change the money direction.
+    [Fact]
+    public async Task A_null_currency_on_a_readable_receipt_defaults_to_RSD()
+    {
+        var answer = new FunctionCallContent(
+            "call_1", "read_receipt",
+            new Dictionary<string, object?>
+            {
+                ["readable"] = true,
+                ["unreadable_reason"] = null,
+                ["seller_name"] = "Maxi",
+                ["seller_tax_id"] = null,
+                ["fiscal_number"] = null,
+                ["issued_at"] = null,
+                ["currency"] = null,
+                ["total"] = 100,
+                ["payment_method"] = null,
+                ["kind"] = "sale",
+                ["lines"] = new[]
+                {
+                    new Dictionary<string, object?> { ["name"] = "Bread", ["quantity"] = 1, ["unit_price"] = 100, ["total"] = 100 },
+                },
+            });
+        var provider = new ScriptedChatClient().Answer(answer);
+        var vision = new ChatReceiptVision(new FixedChatClientFactory(provider), NoopTimer, NullLogger<ChatReceiptVision>.Instance);
+
+        var result = await vision.ReadAsync(TinyImage, "image/jpeg", null, TestContext.Current.CancellationToken);
+
+        result.Receipt.Should().NotBeNull();
+        result.Receipt!.Currency.Should().Be(Noof.Ledger.Domain.CurrencyCode.Rsd);
+    }
+
+    [Fact]
+    public async Task A_null_kind_on_a_readable_receipt_is_reported_as_unclear_rather_than_a_silent_sale_guess()
+    {
+        var answer = new FunctionCallContent(
+            "call_1", "read_receipt",
+            new Dictionary<string, object?>
+            {
+                ["readable"] = true,
+                ["unreadable_reason"] = null,
+                ["seller_name"] = "Maxi",
+                ["seller_tax_id"] = null,
+                ["fiscal_number"] = null,
+                ["issued_at"] = null,
+                ["currency"] = "RSD",
+                ["total"] = 100,
+                ["payment_method"] = null,
+                ["kind"] = null,
+                ["lines"] = new[]
+                {
+                    new Dictionary<string, object?> { ["name"] = "Bread", ["quantity"] = 1, ["unit_price"] = 100, ["total"] = 100 },
+                },
+            });
+        var provider = new ScriptedChatClient().Answer(answer);
+        var vision = new ChatReceiptVision(new FixedChatClientFactory(provider), NoopTimer, NullLogger<ChatReceiptVision>.Instance);
+
+        var result = await vision.ReadAsync(TinyImage, "image/jpeg", null, TestContext.Current.CancellationToken);
+
+        result.Receipt.Should().NotBeNull();
+        result.Receipt!.Kind.Should().Be(Noof.Ledger.Domain.ReceiptKind.Sale, "there is no null to hold, so it defaults to the common case");
+        result.KindUnclear.Should().BeTrue("a guessed Sale on an actual refund would change the money direction, so this must not be trusted silently");
+    }
+
+    [Fact]
+    public async Task An_unreadable_receipt_accepts_null_currency_and_kind_without_faulting()
+    {
+        var answer = new FunctionCallContent(
+            "call_1", "read_receipt",
+            new Dictionary<string, object?>
+            {
+                ["readable"] = false,
+                ["unreadable_reason"] = "blurry",
+                ["seller_name"] = null,
+                ["seller_tax_id"] = null,
+                ["fiscal_number"] = null,
+                ["issued_at"] = null,
+                ["currency"] = null,
+                ["total"] = null,
+                ["payment_method"] = null,
+                ["kind"] = null,
+                ["lines"] = Array.Empty<object>(),
+            });
+        var provider = new ScriptedChatClient().Answer(answer);
+        var vision = new ChatReceiptVision(new FixedChatClientFactory(provider), NoopTimer, NullLogger<ChatReceiptVision>.Instance);
+
+        var result = await vision.ReadAsync(TinyImage, "image/jpeg", null, TestContext.Current.CancellationToken);
+
+        result.Receipt.Should().BeNull();
+        result.Unreadable.Should().Be(ReceiptUnreadableReason.Blurry);
+    }
+
     [Fact]
     public async Task A_scripted_client_that_advances_the_clock_gives_one_model_readReceipt_timing()
     {

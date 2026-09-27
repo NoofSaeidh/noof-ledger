@@ -76,7 +76,14 @@ public enum ReceiptUnreadableReason { TooSmall, Blurry, NotAReceipt, CutOff, Oth
 // id that does not match a real PIB's shape, so Receipt.SellerTaxId is already null (never trusted for
 // storage), but the caller still needs to know a tax id was there and looked wrong, to decide whether
 // this receipt needs the operator's own confirmation before it is categorised.
-public sealed record ReceiptVisionResult(ExtractedReceipt? Receipt, ReceiptUnreadableReason? Unreadable, bool SellerTaxIdMalformed = false);
+// KindUnclear (Copilot finding, PR #3) is set only alongside a non-null Receipt too: the model left
+// kind null because it could not read whether the receipt was a sale or a refund. Receipt.Kind is
+// still a concrete ReceiptKind (defaulted to Sale, the overwhelmingly common case) because the type
+// has no null to hold - but a guessed Sale on what is actually a refund would change the money
+// direction, so the caller must not categorise on the guess alone; it holds the receipt behind the
+// operator's own confirmation instead of trusting it silently.
+public sealed record ReceiptVisionResult(
+    ExtractedReceipt? Receipt, ReceiptUnreadableReason? Unreadable, bool SellerTaxIdMalformed = false, bool KindUnclear = false);
 
 public interface IReceiptVision
 {

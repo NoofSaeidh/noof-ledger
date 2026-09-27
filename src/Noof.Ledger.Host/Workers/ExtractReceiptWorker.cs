@@ -152,6 +152,7 @@ internal sealed class ExtractReceiptWorker(
             ExtractedReceipt extracted;
             var fetchFailed = false;
             var taxIdMalformed = false;
+            var kindUnclear = false;
             // Set only on the QR-decoded-but-fetch-failed vision fallback below - the one path where a
             // model can disagree with facts the Tax Administration's own QR already carries offline.
             FiscalQrPayload? verifiedQrFacts = null;
@@ -175,6 +176,7 @@ internal sealed class ExtractReceiptWorker(
                             return;
                         extracted = visionResult.Receipt;
                         taxIdMalformed = visionResult.TaxIdMalformed;
+                        kindUnclear = visionResult.KindUnclear;
                     }
                     else
                     {
@@ -225,6 +227,7 @@ internal sealed class ExtractReceiptWorker(
                                 return;
                             extracted = visionResult.Receipt;
                             taxIdMalformed = visionResult.TaxIdMalformed;
+                            kindUnclear = visionResult.KindUnclear;
                         }
                         else
                         {
@@ -246,6 +249,7 @@ internal sealed class ExtractReceiptWorker(
                     return;
                 extracted = visionResult.Receipt;
                 taxIdMalformed = visionResult.TaxIdMalformed;
+                kindUnclear = visionResult.KindUnclear;
             }
             else
             {
@@ -291,11 +295,16 @@ internal sealed class ExtractReceiptWorker(
                     extracted = extracted with { IssuedAt = qrIssuedAt };
                 }
 
-                if (extracted.Kind != qrFacts.Kind)
+                if (extracted.Kind != qrFacts.Kind || kindUnclear)
                 {
                     logger.LogModelKindDiscardedForQrKind(extracted.Kind, qrFacts.Kind);
                     extracted = extracted with { Kind = qrFacts.Kind };
                 }
+
+                // The QR's own kind is authoritative, so it resolves the model's own uncertainty too -
+                // a receipt no longer needs the operator's confirmation for a kind the Tax
+                // Administration itself already named.
+                kindUnclear = false;
 
                 if (extracted.FiscalNumber != qrFacts.FiscalNumber)
                 {
@@ -310,7 +319,7 @@ internal sealed class ExtractReceiptWorker(
             // here): the receipt and its lines are still saved below so the echo can show exactly what
             // was read, but categorisation waits for the operator's own "Record anyway" rather than
             // posting a total or a tax id that might be OCR noise.
-            var needsConfirmation = extracted.Source == ReceiptSource.Vision && (mismatch || taxIdMalformed);
+            var needsConfirmation = extracted.Source == ReceiptSource.Vision && (mismatch || taxIdMalformed || kindUnclear);
 
             var saveResult = await receiptStore.SaveExtractedAsync(
                 job.TransactionId, extracted, telegramFileId, enqueueCategorization: !needsConfirmation, cancellationToken);
@@ -344,7 +353,7 @@ internal sealed class ExtractReceiptWorker(
             if (needsConfirmation)
             {
                 logger.LogAwaitingConfirmation(job.TransactionId, mismatch, taxIdMalformed);
-                var echo = recordEcho.ComposeReceiptNeedsConfirmation(extracted, taxIdMalformed);
+                var echo = recordEcho.ComposeReceiptNeedsConfirmation(extracted, taxIdMalformed, kindUnclear);
                 await EditQuietlyAsync(notifier, record, echo, cancellationToken);
             }
             else
@@ -399,7 +408,7 @@ internal sealed class ExtractReceiptWorker(
     // through to SaveExtractedAsync. This is a distinct outcome from a ModelCallException: it is the
     // model succeeding at its one job, which is saying it could not read this photo, not a transient or
     // terminal failure of the call itself.
-    async Task<(ExtractedReceipt Receipt, bool TaxIdMalformed)?> ReadWithVisionAsync(
+    async Task<(ExtractedReceipt Receipt, bool TaxIdMalformed, bool KindUnclear)?> ReadWithVisionAsync(
         IServiceScope scope, IJobQueue jobQueue, ICategorizationStore store, IChatNotifier notifier,
         CategorizationJob job, CategorizationSubject record, ReceiptPhoto photo, decimal? qrTotal,
         CancellationToken cancellationToken)
@@ -416,7 +425,7 @@ internal sealed class ExtractReceiptWorker(
             return null;
         }
 
-        return (result.Receipt!, result.SellerTaxIdMalformed);
+        return (result.Receipt!, result.SellerTaxIdMalformed, result.KindUnclear);
     }
 
     async Task FailWithEchoAsync(

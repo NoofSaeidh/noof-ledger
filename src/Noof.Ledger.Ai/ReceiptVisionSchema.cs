@@ -67,12 +67,9 @@ internal static class ReceiptVisionSchema
                         "The date and time printed on the receipt, as a local ISO date-time "
                         + "(YYYY-MM-DDTHH:mm:ss), or null when not legible.",
                 },
-                ["currency"] = new JsonObject
-                {
-                    ["type"] = "string",
-                    ["enum"] = new JsonArray([.. CurrencyCode.Supported.Select(code => (JsonNode)code.Value)]),
-                    ["description"] = "The receipt's currency. Assume RSD unless the receipt clearly states another.",
-                },
+                ["currency"] = NullableEnum.String(
+                    CurrencyCode.Supported.Select(code => code.Value),
+                    "The receipt's currency. Assume RSD unless the receipt clearly states another; null when not legible."),
                 ["total"] = new JsonObject
                 {
                     ["type"] = new JsonArray("number", "null"),
@@ -81,12 +78,8 @@ internal static class ReceiptVisionSchema
                 ["payment_method"] = NullableEnum.String(
                     ["card", "cash", "transfer", "voucher", "other", "mixed"],
                     "How the receipt says it was paid, or null when not stated."),
-                ["kind"] = new JsonObject
-                {
-                    ["type"] = "string",
-                    ["enum"] = new JsonArray("sale", "refund"),
-                    ["description"] = "Whether the receipt is a sale or a refund.",
-                },
+                ["kind"] = NullableEnum.String(
+                    ["sale", "refund"], "Whether the receipt is a sale or a refund, or null when not legible."),
                 ["lines"] = new JsonObject
                 {
                     ["type"] = "array",
