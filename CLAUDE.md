@@ -49,7 +49,7 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
   security hole, broken build/test, *(settled)*-rule violation); reply with a sentence of reasoning
   and don't change code for a non-critical one (style, naming, nits, speculative hardening,
   preference); ask the operator first on anything expensive (new design, migration, another topic,
-  roughly >~50 lines) instead of starting it, proposing a `docs/BACKLOG.md` entry — judged by this
+  roughly >~50 lines) instead of starting it, proposing a backlog entry — judged by this
   single-operator local app's real risk, not completeness.
 - **Copilot fix rounds:** one round, one commit, sonnet-only review, push, then wait once (never
   poll) for its re-review — at most 2 rounds per PR, then list what's left for the operator. No
