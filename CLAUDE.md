@@ -265,6 +265,11 @@ the code that builds the echo text.
 - `gh` posts as the operator's account, so every comment, review reply or PR body an agent writes
   ends with the line `🤖 Written by Claude Code (<model>)` (PR bodies keep the "Generated with Claude
   Code" footer). Never edit or sign a comment the operator wrote.
+  
+**Waiting on CI** *(operator's decision, 2026-09-28)*
+- After pushing to a PR branch, wait for CI with one blocking `gh pr checks <n> --watch --interval 30`
+  (timeout 600000 ms) — never poll it by hand, and never guess a result before that command returns.
+- A red CI check keeps the PR in draft until it is fixed and pushed again.
 
 ## 6. Closing a phase *(settled)*
 
