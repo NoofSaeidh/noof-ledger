@@ -1,3 +1,4 @@
+using System.Globalization;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
@@ -109,8 +110,22 @@ internal sealed class ExtractReceiptWorker(
                 logger.LogReceiptAlreadyExtracted(job.TransactionId);
                 if (record.Status == TransactionStatus.Captured)
                 {
-                    await EditQuietlyAsync(notifier, record,
-                        new EchoMessage(recordEcho.ComposeCategorisingReceipt(existingReceipt.Lines.Count), []), cancellationToken);
+                    // A replay landing here (C-1) after a save that skipped enqueueing CategorizeReceipt
+                    // (2026-09-27) must not claim "Categorising…" when nothing is actually running.
+                    // Recomputed from the stored lines/total rather than a lookup for whether that job
+                    // exists: cheaper, and exactly the same arithmetic the original save itself used. A
+                    // malformed-PIB-only reason for the original pause cannot be recovered here - the
+                    // PIB itself was never stored once judged invalid - so this replay path treats the
+                    // sum-vs-total mismatch as the one signal it can still check.
+                    var stillMismatched = existingReceipt.Source == ReceiptSource.Vision
+                        && Math.Abs(existingReceipt.Lines.Sum(line => line.Total) - (existingReceipt.QrTotal ?? existingReceipt.Total)) > 0.01m;
+
+                    var echo = stillMismatched
+                        ? recordEcho.ComposeReceiptNeedsConfirmation(
+                            ToExtractedReceipt(existingReceipt), BuildProblems(ToExtractedReceipt(existingReceipt), mismatch: true, taxIdMalformed: false))
+                        : new EchoMessage(recordEcho.ComposeCategorisingReceipt(existingReceipt.Lines.Count), []);
+
+                    await EditQuietlyAsync(notifier, record, echo, cancellationToken);
                 }
                 await SucceedQuietlyAsync(jobQueue, job, cancellationToken);
                 return;
@@ -139,6 +154,7 @@ internal sealed class ExtractReceiptWorker(
 
             ExtractedReceipt extracted;
             var fetchFailed = false;
+            var taxIdMalformed = false;
 
             if (qrUrl is not null)
             {
@@ -155,9 +171,10 @@ internal sealed class ExtractReceiptWorker(
                         logger.LogVisionUsed("decode error");
                         if (await ReadWithVisionAsync(
                                 scope, jobQueue, store, notifier, job, record, photoForDecodeFailure, qrTotal: null, cancellationToken)
-                            is not { } visionReceipt)
+                            is not { } visionResult)
                             return;
-                        extracted = visionReceipt;
+                        extracted = visionResult.Receipt;
+                        taxIdMalformed = visionResult.TaxIdMalformed;
                     }
                     else
                     {
@@ -203,9 +220,10 @@ internal sealed class ExtractReceiptWorker(
                             logger.LogVisionUsed("fetch failed");
                             if (await ReadWithVisionAsync(
                                     scope, jobQueue, store, notifier, job, record, photoForFetchFailure, payload.Total, cancellationToken)
-                                is not { } visionReceipt)
+                                is not { } visionResult)
                                 return;
-                            extracted = visionReceipt;
+                            extracted = visionResult.Receipt;
+                            taxIdMalformed = visionResult.TaxIdMalformed;
                         }
                         else
                         {
@@ -223,9 +241,10 @@ internal sealed class ExtractReceiptWorker(
 
                 logger.LogVisionUsed("no QR");
                 if (await ReadWithVisionAsync(scope, jobQueue, store, notifier, job, record, photoWithNoQr, qrTotal: null, cancellationToken)
-                    is not { } visionReceipt)
+                    is not { } visionResult)
                     return;
-                extracted = visionReceipt;
+                extracted = visionResult.Receipt;
+                taxIdMalformed = visionResult.TaxIdMalformed;
             }
             else
             {
@@ -234,7 +253,16 @@ internal sealed class ExtractReceiptWorker(
                 return;
             }
 
-            var saveResult = await receiptStore.SaveExtractedAsync(job.TransactionId, extracted, telegramFileId, cancellationToken);
+            var mismatch = Math.Abs(extracted.Lines.Sum(line => line.Total) - (extracted.QrTotal ?? extracted.Total)) > 0.01m;
+
+            // 2026-09-27 (vision only - a fiscal QR/SUF receipt's own numbers are never second-guessed
+            // here): the receipt and its lines are still saved below so the echo can show exactly what
+            // was read, but categorisation waits for the operator's own "Record anyway" rather than
+            // posting a total or a tax id that might be OCR noise.
+            var needsConfirmation = extracted.Source == ReceiptSource.Vision && (mismatch || taxIdMalformed);
+
+            var saveResult = await receiptStore.SaveExtractedAsync(
+                job.TransactionId, extracted, telegramFileId, enqueueCategorization: !needsConfirmation, cancellationToken);
 
             if (saveResult.DuplicateOfTransactionId is { } duplicateId)
             {
@@ -259,12 +287,21 @@ internal sealed class ExtractReceiptWorker(
                 return;
             }
 
-            var mismatch = Math.Abs(extracted.Lines.Sum(line => line.Total) - (extracted.QrTotal ?? extracted.Total)) > 0.01m;
             logger.LogExtracted(TransactionStages.Extracted, extracted.Source, extracted.Lines.Count, extracted.Total,
                 extracted.QrTotal, mismatch, fetchFailed);
 
-            await EditQuietlyAsync(
-                notifier, record, new EchoMessage(recordEcho.ComposeCategorisingReceipt(extracted.Lines.Count), []), cancellationToken);
+            if (needsConfirmation)
+            {
+                logger.LogAwaitingConfirmation(job.TransactionId, mismatch, taxIdMalformed);
+                var echo = recordEcho.ComposeReceiptNeedsConfirmation(extracted, BuildProblems(extracted, mismatch, taxIdMalformed));
+                await EditQuietlyAsync(notifier, record, echo, cancellationToken);
+            }
+            else
+            {
+                await EditQuietlyAsync(
+                    notifier, record, new EchoMessage(recordEcho.ComposeCategorisingReceipt(extracted.Lines.Count), []), cancellationToken);
+            }
+
             await SucceedQuietlyAsync(jobQueue, job, cancellationToken);
         }
         catch (ModelCallException ex) when (ex.IsAccountLevel())
@@ -311,7 +348,7 @@ internal sealed class ExtractReceiptWorker(
     // through to SaveExtractedAsync. This is a distinct outcome from a ModelCallException: it is the
     // model succeeding at its one job, which is saying it could not read this photo, not a transient or
     // terminal failure of the call itself.
-    async Task<ExtractedReceipt?> ReadWithVisionAsync(
+    async Task<(ExtractedReceipt Receipt, bool TaxIdMalformed)?> ReadWithVisionAsync(
         IServiceScope scope, IJobQueue jobQueue, ICategorizationStore store, IChatNotifier notifier,
         CategorizationJob job, CategorizationSubject record, ReceiptPhoto photo, decimal? qrTotal,
         CancellationToken cancellationToken)
@@ -328,8 +365,30 @@ internal sealed class ExtractReceiptWorker(
             return null;
         }
 
-        return result.Receipt;
+        return (result.Receipt!, result.SellerTaxIdMalformed);
     }
+
+    static List<string> BuildProblems(ExtractedReceipt extracted, bool mismatch, bool taxIdMalformed)
+    {
+        List<string> problems = [];
+
+        if (mismatch)
+        {
+            var sum = extracted.Lines.Sum(line => line.Total).ToString("0.00", CultureInfo.InvariantCulture);
+            var total = (extracted.QrTotal ?? extracted.Total).ToString("0.00", CultureInfo.InvariantCulture);
+            problems.Add($"Lines add up to {sum} {extracted.Currency}, the receipt says {total} {extracted.Currency}");
+        }
+
+        if (taxIdMalformed)
+            problems.Add("The printed tax id does not look like a valid PIB (9 digits)");
+
+        return problems;
+    }
+
+    static ExtractedReceipt ToExtractedReceipt(ReceiptView view) => new(
+        view.Source, view.VerificationUrl, view.SellerTaxId, view.SellerName, view.SellerAddress, view.LocationName,
+        view.FiscalNumber, view.IssuedAt, view.Total, view.Currency, view.Kind, view.PaymentMethod, view.QrTotal,
+        [.. view.Lines.Select(line => new ExtractedReceiptLine(line.Ordinal, line.Name, line.Quantity, line.Unit, line.UnitPrice, line.Total, line.TaxLabel))]);
 
     async Task FailWithEchoAsync(
         IJobQueue jobQueue, ICategorizationStore store, IChatNotifier notifier, CategorizationJob job,

@@ -90,7 +90,7 @@ public class ExtractReceiptWorkerTests
         var receiptStore = Substitute.For<IReceiptStore>();
         receiptStore.GetTelegramFileIdAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(telegramFileId);
         receiptStore.GetVerificationUrlAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(verificationUrl);
-        receiptStore.SaveExtractedAsync(Arg.Any<Guid>(), Arg.Any<ExtractedReceipt>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+        receiptStore.SaveExtractedAsync(Arg.Any<Guid>(), Arg.Any<ExtractedReceipt>(), Arg.Any<string?>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
             .Returns(new ReceiptSaveResult(Guid.NewGuid(), null));
 
         var recordEditor = Substitute.For<IRecordEditor>();
@@ -172,7 +172,7 @@ public class ExtractReceiptWorkerTests
         await harness.FetchClient.Received(1).FetchAsync(Arg.Any<FiscalQrPayload>(), Arg.Any<CancellationToken>());
         await harness.Vision.DidNotReceiveWithAnyArgs().ReadAsync(default, default!, default, Arg.Any<CancellationToken>());
         await harness.ReceiptStore.Received(1).SaveExtractedAsync(
-            TransactionId, Arg.Is<ExtractedReceipt>(r => r.Source == ReceiptSource.FiscalQr), null, Arg.Any<CancellationToken>());
+            TransactionId, Arg.Is<ExtractedReceipt>(r => r.Source == ReceiptSource.FiscalQr), null, true, Arg.Any<CancellationToken>());
         await harness.Queue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
     }
 
@@ -226,7 +226,7 @@ public class ExtractReceiptWorkerTests
         await TickAsync(harness);
 
         await harness.Vision.DidNotReceiveWithAnyArgs().ReadAsync(default, default!, default, Arg.Any<CancellationToken>());
-        await harness.ReceiptStore.DidNotReceiveWithAnyArgs().SaveExtractedAsync(default, default!, default, Arg.Any<CancellationToken>());
+        await harness.ReceiptStore.DidNotReceiveWithAnyArgs().SaveExtractedAsync(default, default!, default, default, Arg.Any<CancellationToken>());
         await harness.Queue.Received(1).FailAsync(JobId, WorkerId, Arg.Any<string>(), Arg.Any<CancellationToken>());
         await harness.Queue.DidNotReceiveWithAnyArgs().RetryAsync(default, default!, default, default!, Arg.Any<CancellationToken>());
         await harness.Store.Received(1).MarkFailedAsync(TransactionId, Arg.Any<CancellationToken>());
@@ -246,7 +246,7 @@ public class ExtractReceiptWorkerTests
         await harness.FetchClient.Received(1).FetchAsync(Arg.Any<FiscalQrPayload>(), Arg.Any<CancellationToken>());
         await harness.Vision.DidNotReceiveWithAnyArgs().ReadAsync(default, default!, default, Arg.Any<CancellationToken>());
         await harness.ReceiptStore.Received(1).SaveExtractedAsync(
-            TransactionId, Arg.Is<ExtractedReceipt>(r => r.Source == ReceiptSource.FiscalQr), null, Arg.Any<CancellationToken>());
+            TransactionId, Arg.Is<ExtractedReceipt>(r => r.Source == ReceiptSource.FiscalQr), null, true, Arg.Any<CancellationToken>());
         await harness.Queue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
     }
 
@@ -261,7 +261,84 @@ public class ExtractReceiptWorkerTests
 
         await harness.Vision.Received(1).ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), "image/jpeg", null, Arg.Any<CancellationToken>());
         await harness.ReceiptStore.Received(1).SaveExtractedAsync(
-            TransactionId, Arg.Is<ExtractedReceipt>(r => r.Source == ReceiptSource.Vision), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+            TransactionId, Arg.Is<ExtractedReceipt>(r => r.Source == ReceiptSource.Vision), Arg.Any<string?>(), true, Arg.Any<CancellationToken>());
+    }
+
+    // 2026-09-27: DO NOT RECORD WHEN IT DOES NOT ADD UP - vision receipts only. The receipt and its
+    // lines are still saved (so the echo can show exactly what was read) but CategorizeReceipt waits
+    // for the operator's own "Record anyway".
+    [Fact]
+    public async Task A_vision_receipt_that_does_not_add_up_is_saved_without_categorising_and_asks_to_confirm()
+    {
+        var harness = Setup(ExtractJob());
+        var mismatched = Extracted(ReceiptSource.Vision, qrTotal: null, total: 500m) with
+        {
+            Lines = [new ExtractedReceiptLine(1, "Bread", 1m, "kom", 400m, 400m, null)],
+        };
+        harness.Vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), Arg.Any<decimal?>(), Arg.Any<CancellationToken>())
+            .Returns(new ReceiptVisionResult(mismatched, null));
+
+        (await TickAsync(harness)).Should().Be(CategorizationTickResult.Processed);
+
+        await harness.ReceiptStore.Received(1).SaveExtractedAsync(
+            TransactionId, Arg.Any<ExtractedReceipt>(), Arg.Any<string?>(), enqueueCategorization: false, Arg.Any<CancellationToken>());
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text.Contains("Record it anyway", StringComparison.Ordinal)
+                && m.Text.Contains("Lines add up to 400.00 RSD, the receipt says 500.00 RSD", StringComparison.Ordinal)
+                && m.Actions.SequenceEqual(new[] { RecordAction.RecordAnyway, RecordAction.Cancel })),
+            Arg.Any<CancellationToken>());
+        await harness.Queue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_vision_receipt_with_a_malformed_tax_id_is_saved_without_categorising_and_names_the_reason()
+    {
+        var harness = Setup(ExtractJob());
+        harness.Vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), Arg.Any<decimal?>(), Arg.Any<CancellationToken>())
+            .Returns(new ReceiptVisionResult(Extracted(ReceiptSource.Vision), null, SellerTaxIdMalformed: true));
+
+        await TickAsync(harness);
+
+        await harness.ReceiptStore.Received(1).SaveExtractedAsync(
+            TransactionId, Arg.Any<ExtractedReceipt>(), Arg.Any<string?>(), enqueueCategorization: false, Arg.Any<CancellationToken>());
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text.Contains("does not look like a valid PIB", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+    }
+
+    // A fiscal QR/Tax-Administration receipt is never held back for confirmation, even when its own
+    // lines happen not to sum to its total - only a vision read is ever second-guessed this way.
+    [Fact]
+    public async Task A_QR_fiscal_receipt_that_does_not_add_up_is_never_held_back_for_confirmation()
+    {
+        var harness = Setup(ExtractJob(), verificationUrl: "https://suf.purs.gov.rs/v/?vl=abc", telegramFileId: null);
+        harness.Decoder.Decode(Arg.Any<string>()).Returns(new FiscalQrDecodeResult(Payload(), null));
+        harness.FetchClient.FetchAsync(Arg.Any<FiscalQrPayload>(), Arg.Any<CancellationToken>())
+            .Returns(new FiscalFetchResult(Extracted(qrTotal: 999m, total: 500m), null));
+
+        (await TickAsync(harness)).Should().Be(CategorizationTickResult.Processed);
+
+        await harness.ReceiptStore.Received(1).SaveExtractedAsync(
+            TransactionId, Arg.Any<ExtractedReceipt>(), Arg.Any<string?>(), enqueueCategorization: true, Arg.Any<CancellationToken>());
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text == Echo.ComposeCategorisingReceipt(1)), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_replay_of_a_still_unconfirmed_vision_receipt_shows_the_confirmation_echo_again_not_categorising()
+    {
+        var harness = Setup(ExtractJob(), record: WaitingReceipt() with { Status = TransactionStatus.Captured });
+        harness.ReceiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(new ReceiptView(
+            Guid.NewGuid(), ReceiptSource.Vision, null, "Test Market", null, null, null,
+            DateTimeOffset.Parse("2026-09-25T09:00:00Z"), 500m, CurrencyCode.Rsd, ReceiptKind.Sale, PaymentMethod.Card, null,
+            null, [new ReceiptLineView(Guid.NewGuid(), 1, "Bread", 1m, "kom", 400m, 400m, null)]));
+
+        (await TickAsync(harness)).Should().Be(CategorizationTickResult.Processed);
+
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text.Contains("Record it anyway", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+        await harness.Queue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -321,7 +398,7 @@ public class ExtractReceiptWorkerTests
         await TickAsync(harness);
 
         await harness.Vision.DidNotReceiveWithAnyArgs().ReadAsync(default, default!, default, Arg.Any<CancellationToken>());
-        await harness.ReceiptStore.DidNotReceiveWithAnyArgs().SaveExtractedAsync(default, default!, default, Arg.Any<CancellationToken>());
+        await harness.ReceiptStore.DidNotReceiveWithAnyArgs().SaveExtractedAsync(default, default!, default, default, Arg.Any<CancellationToken>());
         await harness.Queue.Received(1).RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await harness.Queue.DidNotReceiveWithAnyArgs().FailAsync(default, default!, default!, Arg.Any<CancellationToken>());
         await harness.Store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, Arg.Any<CancellationToken>());
@@ -349,7 +426,7 @@ public class ExtractReceiptWorkerTests
     {
         var harness = Setup(ExtractJob());
         var duplicateId = Guid.NewGuid();
-        harness.ReceiptStore.SaveExtractedAsync(Arg.Any<Guid>(), Arg.Any<ExtractedReceipt>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+        harness.ReceiptStore.SaveExtractedAsync(Arg.Any<Guid>(), Arg.Any<ExtractedReceipt>(), Arg.Any<string?>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
             .Returns(new ReceiptSaveResult(null, duplicateId));
         harness.ReceiptStore.GetByTransactionAsync(duplicateId, Arg.Any<CancellationToken>()).Returns(new ReceiptView(
             Guid.NewGuid(), ReceiptSource.FiscalQr, "SYN-1", "Test Market", null, null, "SYN-F1",
@@ -374,7 +451,7 @@ public class ExtractReceiptWorkerTests
     {
         var harness = Setup(ExtractJob());
         var duplicateId = Guid.NewGuid();
-        harness.ReceiptStore.SaveExtractedAsync(Arg.Any<Guid>(), Arg.Any<ExtractedReceipt>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+        harness.ReceiptStore.SaveExtractedAsync(Arg.Any<Guid>(), Arg.Any<ExtractedReceipt>(), Arg.Any<string?>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
             .Returns(new ReceiptSaveResult(null, duplicateId));
         harness.ReceiptStore.GetByTransactionAsync(duplicateId, Arg.Any<CancellationToken>()).Returns(new ReceiptView(
             Guid.NewGuid(), ReceiptSource.FiscalQr, "SYN-1", "Test Market", null, null, "SYN-F1",
@@ -398,7 +475,7 @@ public class ExtractReceiptWorkerTests
     {
         var harness = Setup(ExtractJob());
         var duplicateId = Guid.NewGuid();
-        harness.ReceiptStore.SaveExtractedAsync(Arg.Any<Guid>(), Arg.Any<ExtractedReceipt>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+        harness.ReceiptStore.SaveExtractedAsync(Arg.Any<Guid>(), Arg.Any<ExtractedReceipt>(), Arg.Any<string?>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
             .Returns(new ReceiptSaveResult(null, duplicateId));
         // 00:30 Belgrade (+02:00 in September) is 22:30 the PREVIOUS day in UTC - M-6 (final review).
         var issuedAt = new DateTimeOffset(2026, 9, 25, 0, 30, 0, TimeSpan.FromHours(2));
@@ -428,7 +505,7 @@ public class ExtractReceiptWorkerTests
         harness.QrReader.DidNotReceiveWithAnyArgs().Read(default!);
         await harness.FetchClient.DidNotReceiveWithAnyArgs().FetchAsync(default!, Arg.Any<CancellationToken>());
         await harness.Vision.DidNotReceiveWithAnyArgs().ReadAsync(default, default!, default, Arg.Any<CancellationToken>());
-        await harness.ReceiptStore.DidNotReceiveWithAnyArgs().SaveExtractedAsync(default, default!, default, Arg.Any<CancellationToken>());
+        await harness.ReceiptStore.DidNotReceiveWithAnyArgs().SaveExtractedAsync(default, default!, default, default, Arg.Any<CancellationToken>());
         await harness.RecordEditor.DidNotReceiveWithAnyArgs().CancelAsync(default, Arg.Any<CancellationToken>());
         await harness.Store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, Arg.Any<CancellationToken>());
         await harness.Notifier.DidNotReceiveWithAnyArgs().EditAsync(default, default, default!, Arg.Any<CancellationToken>());
@@ -447,7 +524,7 @@ public class ExtractReceiptWorkerTests
         (await TickAsync(harness)).Should().Be(CategorizationTickResult.Processed);
 
         await harness.Vision.DidNotReceiveWithAnyArgs().ReadAsync(default, default!, default, Arg.Any<CancellationToken>());
-        await harness.ReceiptStore.DidNotReceiveWithAnyArgs().SaveExtractedAsync(default, default!, default, Arg.Any<CancellationToken>());
+        await harness.ReceiptStore.DidNotReceiveWithAnyArgs().SaveExtractedAsync(default, default!, default, default, Arg.Any<CancellationToken>());
         await harness.Notifier.Received(1).EditAsync(111L, 42,
             Arg.Is<EchoMessage>(m => m.Text == Echo.ComposeCategorisingReceipt(1)), Arg.Any<CancellationToken>());
         await harness.Queue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
@@ -465,7 +542,7 @@ public class ExtractReceiptWorkerTests
 
         await TickAsync(harness);
 
-        await harness.ReceiptStore.DidNotReceiveWithAnyArgs().SaveExtractedAsync(default, default!, default, Arg.Any<CancellationToken>());
+        await harness.ReceiptStore.DidNotReceiveWithAnyArgs().SaveExtractedAsync(default, default!, default, default, Arg.Any<CancellationToken>());
         await harness.Queue.Received(1).FailAsync(JobId, WorkerId, Arg.Any<string>(), Arg.Any<CancellationToken>());
         await harness.Store.Received(1).MarkFailedAsync(TransactionId, Arg.Any<CancellationToken>());
         await harness.Notifier.Received(1).EditAsync(111L, 42,
@@ -486,7 +563,7 @@ public class ExtractReceiptWorkerTests
 
         await TickAsync(harness);
 
-        await harness.ReceiptStore.DidNotReceiveWithAnyArgs().SaveExtractedAsync(default, default!, default, Arg.Any<CancellationToken>());
+        await harness.ReceiptStore.DidNotReceiveWithAnyArgs().SaveExtractedAsync(default, default!, default, default, Arg.Any<CancellationToken>());
         await harness.Queue.Received(1).FailAsync(JobId, WorkerId, Arg.Any<string>(), Arg.Any<CancellationToken>());
         await harness.Store.Received(1).MarkFailedAsync(TransactionId, Arg.Any<CancellationToken>());
         await harness.Notifier.Received(1).EditAsync(111L, 42,

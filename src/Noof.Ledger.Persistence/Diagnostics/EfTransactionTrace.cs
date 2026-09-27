@@ -1,6 +1,8 @@
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Persistence.Diagnostics;
 
@@ -33,7 +35,7 @@ internal sealed class EfTransactionTrace(LedgerDbContext db) : ITransactionTrace
                 r.Instruction ?? $"{r.StatusBefore} → {r.StatusAfter}"))
             .ToList();
 
-        var receipt = await ReceiptTraceAsync(transactionId, cancellationToken);
+        var receipt = await ReceiptTraceAsync(transactionId, summary?.Status, cancellationToken);
 
         return new TransactionTrace(transactionId, summary is not null, summary, events, historyViews, receipt);
     }
@@ -80,7 +82,7 @@ internal sealed class EfTransactionTrace(LedgerDbContext db) : ITransactionTrace
             lineItems);
     }
 
-    async Task<ReceiptTraceView?> ReceiptTraceAsync(Guid transactionId, CancellationToken cancellationToken)
+    async Task<ReceiptTraceView?> ReceiptTraceAsync(Guid transactionId, TransactionStatus? status, CancellationToken cancellationToken)
     {
         var receipt = await db.Receipts.AsNoTracking()
             .SingleOrDefaultAsync(r => r.TransactionId == transactionId, cancellationToken);
@@ -107,6 +109,23 @@ internal sealed class EfTransactionTrace(LedgerDbContext db) : ITransactionTrace
                 categoryByReceiptLineId.TryGetValue(line.Id, out var categoryNameEn) ? categoryNameEn : null))
             .ToList();
 
+        var awaitingConfirmation = status == TransactionStatus.Captured && receipt.Source == ReceiptSource.Vision
+            && !await db.CategorizationJobs.AsNoTracking()
+                .AnyAsync(job => job.TransactionId == transactionId && job.Kind == JobKind.CategorizeReceipt, cancellationToken);
+
+        List<string> problems = [];
+        if (awaitingConfirmation)
+        {
+            var sum = receiptLines.Sum(line => line.Total);
+            var referenceTotal = receipt.QrTotal ?? receipt.Total.Amount;
+            if (Math.Abs(sum - referenceTotal) > 0.01m)
+            {
+                problems.Add(
+                    $"Lines add up to {sum.ToString("0.00", CultureInfo.InvariantCulture)} {receipt.Total.Currency}, "
+                    + $"the receipt says {referenceTotal.ToString("0.00", CultureInfo.InvariantCulture)} {receipt.Total.Currency}");
+            }
+        }
+
         return new ReceiptTraceView(
             receipt.Source,
             receipt.SellerName,
@@ -119,7 +138,9 @@ internal sealed class EfTransactionTrace(LedgerDbContext db) : ITransactionTrace
             receipt.Total.Amount,
             receipt.Total.Currency,
             receipt.QrTotal,
-            lines);
+            lines,
+            awaitingConfirmation,
+            problems);
     }
 
     static TraceEvent? ToTraceEvent(AppLogEntry entry)

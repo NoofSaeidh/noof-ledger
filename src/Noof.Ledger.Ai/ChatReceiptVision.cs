@@ -77,7 +77,8 @@ internal sealed class ChatReceiptVision(
         if (!payload.Readable || payload.Total is null || payload.Lines.Count == 0)
             return new ReceiptVisionResult(null, MapUnreadableReason(payload.UnreadableReason));
 
-        return new ReceiptVisionResult(ToExtractedReceipt(payload, qrTotal), null);
+        var taxIdMalformed = payload.SellerTaxId is not null && !TaxIdPattern.IsMatch(payload.SellerTaxId);
+        return new ReceiptVisionResult(ToExtractedReceipt(payload, qrTotal), null, taxIdMalformed);
     }
 
     static FunctionCallContent? FindCall(ChatResponse response) =>

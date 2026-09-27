@@ -63,10 +63,14 @@ public interface IFiscalReceiptClient
 // approximate one.
 public enum ReceiptUnreadableReason { TooSmall, Blurry, NotAReceipt, CutOff, Other }
 
-// Shaped like FiscalFetchResult: exactly one of the two is set. Receipt is null when the model
-// reported the photo unreadable, or when it reported readable but left the total or every line
+// Shaped like FiscalFetchResult: exactly one of Receipt/Unreadable is set. Receipt is null when the
+// model reported the photo unreadable, or when it reported readable but left the total or every line
 // missing - a contradiction this layer treats the same as an honest "unreadable" rather than trust.
-public sealed record ReceiptVisionResult(ExtractedReceipt? Receipt, ReceiptUnreadableReason? Unreadable);
+// SellerTaxIdMalformed (2026-09-27) is set only alongside a non-null Receipt: the model printed a tax
+// id that does not match a real PIB's shape, so Receipt.SellerTaxId is already null (never trusted for
+// storage), but the caller still needs to know a tax id was there and looked wrong, to decide whether
+// this receipt needs the operator's own confirmation before it is categorised.
+public sealed record ReceiptVisionResult(ExtractedReceipt? Receipt, ReceiptUnreadableReason? Unreadable, bool SellerTaxIdMalformed = false);
 
 public interface IReceiptVision
 {

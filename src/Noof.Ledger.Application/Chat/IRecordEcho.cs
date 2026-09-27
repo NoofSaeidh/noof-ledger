@@ -61,4 +61,10 @@ public interface IRecordEcho
     // false, or a total/every line it left null) - distinct from ReceiptReadFailure, which is every
     // other terminal vision failure (no tool call, an empty payload).
     EchoMessage ReceiptUnreadable { get; }
+
+    // 2026-09-27: a vision-read receipt ExtractReceiptWorker judged not to add up (its lines don't sum
+    // to its total, or its printed tax id is not exactly 9 digits) - never shown for a fiscal QR/SUF
+    // receipt. Shows exactly what was read and the specific problem(s); RecordAction.RecordAnyway
+    // queues CategorizeReceipt, Cancel withdraws the capture.
+    EchoMessage ComposeReceiptNeedsConfirmation(ExtractedReceipt receipt, IReadOnlyList<string> problems);
 }

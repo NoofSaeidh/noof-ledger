@@ -5,6 +5,11 @@ namespace Noof.Ledger.Application.Diagnostics;
 public sealed record ReceiptTraceLine(
     int Ordinal, string Name, decimal Quantity, string? Unit, decimal UnitPrice, decimal Total, string? CategoryNameEn);
 
+// AwaitingConfirmation (2026-09-27) is derived, never stored: a vision receipt, still Captured, with
+// no CategorizeReceipt job yet - the operator's own "Record anyway" has not been pressed.  Problems is
+// recomputed from the stored lines and total (a sum-vs-total mismatch); a malformed printed tax id is
+// never recoverable here once ChatReceiptVision has already dropped it to null, so that reason - when
+// it was the only one - shows only as AwaitingConfirmation with an empty Problems list.
 public sealed record ReceiptTraceView(
     ReceiptSource Source,
     string? SellerName,
@@ -17,7 +22,9 @@ public sealed record ReceiptTraceView(
     decimal Total,
     CurrencyCode Currency,
     decimal? QrTotal,
-    IReadOnlyList<ReceiptTraceLine> Lines);
+    IReadOnlyList<ReceiptTraceLine> Lines,
+    bool AwaitingConfirmation = false,
+    IReadOnlyList<string>? Problems = null);
 
 public sealed record TraceEvent(
     DateTimeOffset At,

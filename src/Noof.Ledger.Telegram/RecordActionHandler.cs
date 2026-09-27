@@ -32,6 +32,9 @@ internal sealed class RecordActionHandler(
                 var promptId = await chatNotifier.AskAsync(echo.Chat.Id, echo.Id, recordEcho.EditPrompt, cancellationToken);
                 await editor.AttachPromptAsync(target.TransactionId, promptId, cancellationToken);
                 return;
+            case RecordAction.RecordAnyway:
+                await receiptStore.EnqueueCategorizationAsync(target.TransactionId, echo.Id, cancellationToken);
+                break;
             default:
                 return;
         }

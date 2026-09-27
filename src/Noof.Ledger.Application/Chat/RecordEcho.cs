@@ -142,6 +142,23 @@ internal sealed class RecordEcho : IRecordEcho
         "I couldn't read this receipt reliably, so nothing was recorded. Send the photo as a file "
         + "(uncompressed) or the link from its QR code.", []);
 
+    public EchoMessage ComposeReceiptNeedsConfirmation(ExtractedReceipt receipt, IReadOnlyList<string> problems)
+    {
+        var name = receipt.SellerName is { Length: > 0 } sellerName ? sellerName : "Receipt";
+        var header = receipt.LocationName is { Length: > 0 } location ? $"{name} — {location}" : name;
+
+        List<string> lines = [$"This receipt doesn't look right — {header}"];
+        lines.AddRange(receipt.Lines.Select(line => $"• {line.Name} — {FormatAmount(line.Total)} {receipt.Currency}"));
+        lines.Add(string.Empty);
+        lines.Add($"Total: {FormatAmount(receipt.Total)} {receipt.Currency}");
+        lines.Add(string.Empty);
+        lines.AddRange(problems.Select(problem => $"⚠️ {problem}"));
+        lines.Add(string.Empty);
+        lines.Add("Record it anyway, or cancel?");
+
+        return new(string.Join('\n', lines), [RecordAction.RecordAnyway, RecordAction.Cancel]);
+    }
+
     static string ShopHeader(ReceiptView receipt)
     {
         var name = receipt.SellerName is { Length: > 0 } sellerName ? sellerName : "Receipt";

@@ -34,8 +34,12 @@ public interface IReceiptStore
     // Inserts the receipt and its lines in one database transaction. A duplicate (seller_tax_id +
     // fiscal_number already recorded for another transaction) writes nothing and names that
     // transaction - detected through the unique index, not a racy pre-check alone.
+    // enqueueCategorization is false only for a vision receipt ExtractReceiptWorker itself judged not
+    // to add up (2026-09-27): the receipt and its lines are still saved so the echo can show exactly
+    // what was read, but CategorizeReceipt waits for the operator's own "Record anyway".
     Task<ReceiptSaveResult> SaveExtractedAsync(
-        Guid transactionId, ExtractedReceipt receipt, string? telegramFileId, CancellationToken cancellationToken);
+        Guid transactionId, ExtractedReceipt receipt, string? telegramFileId, bool enqueueCategorization,
+        CancellationToken cancellationToken);
 
     Task<ReceiptView?> GetByTransactionAsync(Guid transactionId, CancellationToken cancellationToken);
 
@@ -46,4 +50,11 @@ public interface IReceiptStore
     // The capture's own fiscal QR link, set by CaptureReceiptAsync for a text-link capture (never set
     // together with a Telegram file id - CapturedReceipt carries exactly one of the two).
     Task<string?> GetVerificationUrlAsync(Guid transactionId, CancellationToken cancellationToken);
+
+    // The operator's own "Record anyway" on a receipt SaveExtractedAsync saved without enqueueing
+    // CategorizeReceipt. sourceMessageId is the echo's own Telegram message id, so the same unique
+    // index (transaction_id, source_message_id, kind) that already makes a redelivered correction a
+    // no-op makes a second press of the same button a no-op here too - false, not an exception, is
+    // "already queued".
+    Task<bool> EnqueueCategorizationAsync(Guid transactionId, int sourceMessageId, CancellationToken cancellationToken);
 }

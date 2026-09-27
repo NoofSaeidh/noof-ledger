@@ -212,6 +212,22 @@ public class ChatReceiptVisionTests
     }
 
     [Theory]
+    [InlineData("PIB123456", true)]
+    [InlineData("123456789", false)]
+    [InlineData(null, false)]
+    public async Task A_malformed_printed_tax_id_is_reported_alongside_the_receipt_not_only_dropped(string? printed, bool expectedMalformed)
+    {
+        var vision = new ChatReceiptVision(
+            new FixedChatClientFactory(new ScriptedChatClient().Answer(AnswerWith(sellerTaxId: printed))), NoopTimer,
+            NullLogger<ChatReceiptVision>.Instance);
+
+        var result = await vision.ReadAsync(TinyImage, "image/jpeg", null, TestContext.Current.CancellationToken);
+
+        result.SellerTaxIdMalformed.Should().Be(expectedMalformed);
+        result.Receipt.Should().NotBeNull("a malformed tax id is a reason for the operator to confirm, not to fail the whole read");
+    }
+
+    [Theory]
     [InlineData("2WJCQFGP-2WJCQFGP-66360", "2WJCQFGP-2WJCQFGP-66360")]
     [InlineData("2wjcqfgp-2wjcqfgp-66360", null)]
     [InlineData("2WJCQFGP-2WJCQFGP", null)]
