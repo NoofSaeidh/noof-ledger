@@ -227,6 +227,27 @@ public class SufReceiptClientTests
     }
 
     [Fact]
+    public async Task Never_leaks_the_verification_url_into_the_failure_reason_on_a_connection_failure()
+    {
+        // Copilot review, PR #3 (item B): HttpRequestException.Message can embed the request URI,
+        // which would put the full verification link (vl) into FiscalFetchFailure.Reason and from
+        // there into the log line ExtractReceiptWorker writes - forbidden by CLAUDE.md's "a fiscal
+        // receipt's verification URL is never logged".
+        const string secretUrl = "https://suf.purs.gov.rs/v/?vl=SECRETPAYLOADFROMTHEQR1234567890";
+        var payload = Payload with { VerificationUrl = secretUrl };
+        var handler = new StubHttpMessageHandler((_, _) =>
+            throw new HttpRequestException($"Connection failed while contacting {secretUrl}"));
+        var client = ClientFor(handler);
+
+        var result = await client.FetchAsync(payload, CancellationToken.None);
+
+        result.Receipt.Should().BeNull();
+        result.Failure.Should().NotBeNull();
+        result.Failure!.Reason.Should().NotContain(secretUrl);
+        result.Failure.Reason.Should().NotContain("SECRETPAYLOADFROMTHEQR1234567890");
+    }
+
+    [Fact]
     public async Task Propagates_cancellation_from_the_callers_own_token()
     {
         var handler = StubHttpMessageHandler.NeverResponding();
