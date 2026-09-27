@@ -67,8 +67,8 @@ public class SlowOperationOptionsWiringTests
         options.ThresholdMs["receipt"].Should().Be(5000);
     }
 
-    // Item E: Receipts:VerificationUrlPrefix is the one source ReceiptLinkDetector and
-    // FiscalQrDecoder both read - proving it binds through the real host pipeline is what stands in
+    // Item E: Receipts:VerificationUrlPrefix is the one source TelegramUpdateRouter, CorrectionHandler
+    // and FiscalQrDecoder all read - proving it binds through the real host pipeline is what stands in
     // for a second copy of the constant being left behind.
     [Fact]
     public void The_receipts_verification_url_prefix_binds_from_the_real_appsettings_json()

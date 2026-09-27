@@ -37,9 +37,9 @@ internal sealed class FiscalVerificationUrl : IFiscalVerificationUrl
         PathPrefix = uri.AbsolutePath;
     }
 
-    // The one place that finds a verification link inside free text - ReceiptLinkDetector
-    // (Noof.Ledger.Telegram) and StripUrl below both go through this, so there is exactly one copy of
-    // the "match Prefix, stop at whitespace" pattern.
+    // The one place that finds a verification link inside free text - TelegramUpdateRouter and
+    // CorrectionHandler (Noof.Ledger.Telegram) and StripUrl below both go through this, so there is
+    // exactly one copy of the "match Prefix, stop at whitespace" pattern.
     public bool TryFind(string text, out string url)
     {
         var start = text.IndexOf(Prefix, StringComparison.Ordinal);
