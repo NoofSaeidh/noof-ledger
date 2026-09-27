@@ -255,10 +255,19 @@ internal sealed class ExtractReceiptWorker(
             // from the Tax Administration's journal, not a model) must never let its own model-read total
             // survive into what gets saved, logged, or shown as the receipt's total; the model's differing
             // number is discarded here rather than recorded anywhere that could be read back as the total.
-            if (extracted is { Source: ReceiptSource.Vision, QrTotal: { } verifiedTotal } && extracted.Total != verifiedTotal)
+            if (extracted is { Source: ReceiptSource.Vision, QrTotal: { } verifiedTotal })
             {
-                logger.LogModelTotalDiscardedForQrTotal(extracted.Total, verifiedTotal);
-                extracted = extracted with { Total = verifiedTotal };
+                if (extracted.Total != verifiedTotal)
+                {
+                    logger.LogModelTotalDiscardedForQrTotal(extracted.Total, verifiedTotal);
+                    extracted = extracted with { Total = verifiedTotal };
+                }
+
+                if (extracted.Currency != CurrencyCode.Rsd)
+                {
+                    logger.LogModelCurrencyDiscardedForQrCurrency(extracted.Currency);
+                    extracted = extracted with { Currency = CurrencyCode.Rsd };
+                }
             }
 
             var mismatch = HasMismatch(extracted);

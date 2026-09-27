@@ -66,4 +66,8 @@ internal static partial class ExtractReceiptWorkerLog
     [LoggerMessage(EventId = 5016, Level = LogLevel.Debug,
         Message = "Vision total {ModelTotal} discarded in favour of the verified QR total {QrTotal}")]
     public static partial void LogModelTotalDiscardedForQrTotal(this ILogger logger, decimal modelTotal, decimal qrTotal);
+
+    [LoggerMessage(EventId = 5017, Level = LogLevel.Debug,
+        Message = "Vision currency {ModelCurrency} discarded in favour of the verified QR currency RSD")]
+    public static partial void LogModelCurrencyDiscardedForQrCurrency(this ILogger logger, CurrencyCode modelCurrency);
 }

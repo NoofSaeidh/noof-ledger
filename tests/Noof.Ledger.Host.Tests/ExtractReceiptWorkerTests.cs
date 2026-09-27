@@ -435,6 +435,36 @@ public class ExtractReceiptWorkerTests
             Arg.Is<EchoMessage>(m => m.Text == Echo.ComposeCategorisingReceipt(1)), Arg.Any<CancellationToken>());
     }
 
+    // Copilot finding on PR #3, ExtractReceiptWorker.cs:261: the QR decoder and the SUF client both
+    // deal only in RSD, so a verified QrTotal is a Serbian fiscal amount - but the normalization above
+    // only replaced Total, so a vision answer of currency EUR persisted the verified RSD number under
+    // the model's own currency. Normalize Currency to RSD alongside Total.
+    [Fact]
+    public async Task A_vision_currency_that_disagrees_with_the_RSD_only_QR_total_is_normalized_to_RSD()
+    {
+        var harness = Setup(ExtractJob(), verificationUrl: null, telegramFileId: "photo-1");
+        harness.QrReader.Read(Arg.Any<Stream>()).Returns("https://suf.purs.gov.rs/v/?vl=abc");
+        harness.Decoder.Decode(Arg.Any<string>()).Returns(new FiscalQrDecodeResult(Payload() with { Total = 600m }, null));
+        harness.FetchClient.FetchAsync(Arg.Any<FiscalQrPayload>(), Arg.Any<CancellationToken>())
+            .Returns(new FiscalFetchResult(null, new FiscalFetchFailure("504 gateway timeout", 504)));
+        var modelDisagrees = Extracted(ReceiptSource.Vision, qrTotal: 600m, total: 600m) with
+        {
+            Currency = CurrencyCode.Eur,
+            Lines = [new ExtractedReceiptLine(1, "Bread", 1m, "kom", 600m, 600m, null)],
+        };
+        harness.Vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), 600m, Arg.Any<CancellationToken>())
+            .Returns(new ReceiptVisionResult(modelDisagrees, null));
+
+        (await TickAsync(harness)).Should().Be(CategorizationTickResult.Processed);
+
+        await harness.ReceiptStore.Received(1).SaveExtractedAsync(
+            TransactionId,
+            Arg.Is<ExtractedReceipt>(r => r.Total == 600m && r.Currency == CurrencyCode.Rsd),
+            Arg.Any<string?>(), enqueueCategorization: true, Arg.Any<CancellationToken>());
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text == Echo.ComposeCategorisingReceipt(1)), Arg.Any<CancellationToken>());
+    }
+
     // Same finding, the other outcome: the lines do NOT add up to the verified QR total, so the
     // receipt is held behind Record anyway exactly like the other vision mismatches - and the
     // problem text names the verified 600, never the model's own 600-vs-500 confusion.
