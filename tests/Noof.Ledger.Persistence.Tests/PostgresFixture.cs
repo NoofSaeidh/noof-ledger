@@ -58,19 +58,19 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     static async Task EnsureTemplateIsCurrentAsync()
     {
-        var latestInAssembly = LatestMigrationInAssembly();
-        var latestAppliedToTemplate = await LatestMigrationAppliedToTemplateAsync();
+        var inAssembly = MigrationsInAssembly();
+        var appliedToTemplate = await MigrationsAppliedToTemplateAsync();
 
-        TemplateFreshnessGuard.EnsureCurrent(latestInAssembly, latestAppliedToTemplate);
+        TemplateFreshnessGuard.EnsureCurrent(inAssembly, appliedToTemplate);
     }
 
-    static string LatestMigrationInAssembly()
+    static IReadOnlyList<string> MigrationsInAssembly()
     {
         var options = new DbContextOptionsBuilder<LedgerDbContext>()
             .UseNpgsql("Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none")
             .Options;
         using var db = new LedgerDbContext(options);
-        return db.Database.GetMigrations().Last();
+        return [.. db.Database.GetMigrations()];
     }
 
     // Pooling must be off here: CREATE DATABASE ... TEMPLATE (STRATEGY FILE_COPY) fails with
@@ -79,13 +79,13 @@ public sealed class PostgresFixture : IAsyncLifetime
     // running this guard and then immediately cloning the template from the same process - a pooled
     // connection here made every subsequent CreateMigratedContextAsync call fail with Postgres error
     // 55006, every time, not just under contention.
-    static async Task<string?> LatestMigrationAppliedToTemplateAsync()
+    static async Task<IReadOnlyList<string>> MigrationsAppliedToTemplateAsync()
     {
         var connectionString = WithoutPooling(DatabaseSettings.For(DatabaseSettings.TemplateDatabase));
         var options = new DbContextOptionsBuilder<LedgerDbContext>().UseNpgsql(connectionString).Options;
         await using var db = new LedgerDbContext(options);
         var applied = await db.Database.GetAppliedMigrationsAsync(TestContext.Current.CancellationToken);
-        return applied.LastOrDefault();
+        return [.. applied];
     }
 
     // NpgsqlConnection.ConnectionString drops the password once the connection has been opened
@@ -174,14 +174,22 @@ public sealed class PostgresCollection : ICollectionFixture<PostgresFixture>;
 
 internal static class TemplateFreshnessGuard
 {
-    public static void EnsureCurrent(string latestInAssembly, string? latestAppliedToTemplate)
+    // Comparing only the latest id is not enough: two histories can share the same latest migration
+    // while differing somewhere earlier (a rebase, a migration reverted and re-added under a
+    // different name in another worktree) - a template like that would pass a latest-only check
+    // while still not matching this assembly's schema. The full ordered sequence is the only thing
+    // that actually proves "this template is what these migrations produce".
+    public static void EnsureCurrent(IReadOnlyList<string> migrationsInAssembly, IReadOnlyList<string> migrationsAppliedToTemplate)
     {
-        if (latestAppliedToTemplate == latestInAssembly)
+        if (migrationsAppliedToTemplate.SequenceEqual(migrationsInAssembly))
             return;
 
+        var latestInAssembly = migrationsInAssembly.Count > 0 ? migrationsInAssembly[^1] : "none";
+        var latestApplied = migrationsAppliedToTemplate.Count > 0 ? migrationsAppliedToTemplate[^1] : "none";
+
         throw new InvalidOperationException(
-            $"noof_ledger_test_template is missing migration '{latestInAssembly}' "
-            + $"(latest applied: '{latestAppliedToTemplate ?? "none"}'). "
+            $"noof_ledger_test_template's applied migrations do not match the assembly's "
+            + $"(latest in assembly: '{latestInAssembly}', latest applied to template: '{latestApplied}'). "
             + "Run '.\\run.ps1 update-test-template' before running tests against the migrated template clone.");
     }
 }
