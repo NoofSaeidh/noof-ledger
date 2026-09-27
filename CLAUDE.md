@@ -275,6 +275,9 @@ the code that builds the echo text.
 
 When closing a phase, read and follow `docs/CLOSING-A-PHASE.md` *(settled)*.
 
+Plans and progress logs are written to the git-ignored `.superpowers/` — never to
+`docs/superpowers/plans`, the superpowers skills' default. Specs live in `docs/specs/`.
+
 Keep this file short: path-specific rules go in `.claude/rules/` with `paths:` frontmatter, anything longer in `docs/`.
 A path-scoped rule loads when a matching file is read, not when a shell command touches one — after
 `dotnet ef migrations add`, `run.ps1` or a scripted edit, read the file (or the rule) before relying on it.
