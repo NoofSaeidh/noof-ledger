@@ -7,7 +7,7 @@ phase: Phase 6
 related: [p6-2-vision-fallback-stopped-inventing-receipts]
 ---
 
-Full design in `docs/superpowers/specs/2026-09-25-receipts-design.md`; rules that bind future work live
+Full design in `docs/specs/2026-09-25-receipts-design.md`; rules that bind future work live
 in `CLAUDE.md` and `.claude/rules/receipts.md`. The operator's seven decisions (R-1..R-7), taken before implementation:
 
 | # | Decision |

@@ -352,7 +352,7 @@ Same pipeline, same attributes, same policies; both modes exercised in CI by par
 
 ### §15 corrections — found when the design was made concrete
 
-*Ten items below were proven wrong or incomplete by execution. Each was reproduced on this machine, several by two independent parties. The implementation plan at `docs/superpowers/plans/2026-09-19-phase0b-auth-and-data-layer.md` is authoritative where it differs from the text above.*
+*Ten items below were proven wrong or incomplete by execution. Each was reproduced on this machine, several by two independent parties. The implementation plan (`docs/superpowers/plans/2026-09-20-phase0b-auth-and-data.md`, removed; see git history at `dd19e4b`) was authoritative where it differed from the text above.*
 
 1. **`Database:MigrateOnStartup` was missing entirely, and it is load-bearing.** Code between `builder.Build()` and `app.Run()` genuinely executes under `WebApplicationFactory`, so an ungated `MigrateAsync()` there makes **every** integration test require a live PostgreSQL. Add the flag (default `true` in appsettings); every factory test sets it `false` via `UseSetting`. Without this the entire offline test suite is impossible.
 2. **The `LocalOwnerHandler` constructor is not a free choice.** The 4-argument `AuthenticationHandler` overload taking `ISystemClock` is `[Obsolete]`, which `TreatWarningsAsErrors` escalates to **CS0618 — verified to fail this repo's build with 2 errors**. Use the 3-argument `(IOptionsMonitor, ILoggerFactory, UrlEncoder)` overload. Every Microsoft sample still shows the 4-arg form.

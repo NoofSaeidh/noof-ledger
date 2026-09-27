@@ -195,7 +195,7 @@ function Get-NewestLogFile {
 
 # Every filtered database/E2E test run, every test-template migration and every private-template
 # `dotnet ef database update` shares this one server across worktrees - the operator's own rule
-# (docs/superpowers/sdd/.../global-constraints.md and CLAUDE.md's testing section). A lock older
+# (.superpowers/.../global-constraints.md and CLAUDE.md's testing section). A lock older
 # than 30 minutes is treated as orphaned (a killed process left it) and taken.
 function Enter-SuiteLock {
     $lockPath = Join-Path $env:TEMP 'noof-suite.lock'

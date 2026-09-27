@@ -7,7 +7,7 @@ phase: Phase 4
 ---
 
 The operator made these decisions during Phase 4 spec discussion; the rules themselves live in
-`CLAUDE.md` and `docs/superpowers/specs/2026-09-24-money-model.md` (M1–M13, B1–B5). Recorded here for
+`CLAUDE.md` and `docs/specs/2026-09-24-money-model.md` (M1–M13, B1–B5). Recorded here for
 the reasoning.
 
 | # | Decision | Reasoning |
