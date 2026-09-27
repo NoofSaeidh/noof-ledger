@@ -16,6 +16,7 @@ internal sealed class TranscriptionWorker(
     CategorizationWorkerOptions options,
     string workerId,
     IRecordEcho recordEcho,
+    TimeZoneInfo captureTimeZone,
     IDatabaseGate gate,
     IOperationTimer timer,
     ILogger<TranscriptionWorker> logger)
@@ -147,18 +148,18 @@ internal sealed class TranscriptionWorker(
             logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Transcribed, ex);
             accountCooldownUntil = timeProvider.GetUtcNow() + options.AccountCooldown;
             logger.AccountLevelFailure(job.Id, ex.Message, options.AccountCooldown);
-            await HandleFailureAsync(jobQueue, store, notifier, job, record, ModelFailureKind.Transient, ex.Message, cancellationToken);
+            await HandleFailureAsync(jobQueue, store, notifier, job, record, ModelFailureKind.Transient, ex.Message, ex, cancellationToken);
         }
         catch (ModelCallException ex)
         {
             logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Transcribed, ex);
-            await HandleFailureAsync(jobQueue, store, notifier, job, record, ex.Kind, ex.Message, cancellationToken);
+            await HandleFailureAsync(jobQueue, store, notifier, job, record, ex.Kind, ex.Message, ex, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // A failed download lands here and is worth another attempt (V9); the attempt cap bounds everything else.
             logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Transcribed, ex);
-            await HandleFailureAsync(jobQueue, store, notifier, job, record, ModelFailureKind.Transient, ex.Message, cancellationToken);
+            await HandleFailureAsync(jobQueue, store, notifier, job, record, ModelFailureKind.Transient, ex.Message, ex, cancellationToken);
         }
     }
 
@@ -183,7 +184,7 @@ internal sealed class TranscriptionWorker(
 
     async Task HandleFailureAsync(
         IJobQueue jobQueue, ICategorizationStore store, IChatNotifier notifier, CategorizationJob job,
-        CategorizationSubject? record, ModelFailureKind kind, string error, CancellationToken cancellationToken)
+        CategorizationSubject? record, ModelFailureKind kind, string error, Exception exception, CancellationToken cancellationToken)
     {
         if (kind == ModelFailureKind.Terminal)
         {
@@ -197,8 +198,23 @@ internal sealed class TranscriptionWorker(
         var runAfter = timeProvider.GetUtcNow() + options.ComputeBackoff(job.AttemptCount);
         var outcome = await jobQueue.RetryAsync(job.Id, workerId, runAfter, error, cancellationToken);
 
-        if (outcome == JobCompletionOutcome.Applied && isLastAttempt)
+        if (outcome != JobCompletionOutcome.Applied)
+            return;
+
+        if (isLastAttempt)
+        {
             await ReportFailureAsync(store, notifier, job, record, cancellationToken);
+            return;
+        }
+
+        if (record is null)
+            return;
+
+        var step = IsCorrection(job) ? "Transcribing your correction" : "Transcribing the voice note";
+        var reason = SafeFailureReason.Describe(exception, FailureArea.Transcription);
+        var localRunAfter = TimeZoneInfo.ConvertTime(runAfter, captureTimeZone);
+        var notice = recordEcho.ComposeRetryNotice(step, reason, localRunAfter);
+        await EditQuietlyAsync(notifier, record, notice, cancellationToken);
     }
 
     async Task ReportFailureAsync(

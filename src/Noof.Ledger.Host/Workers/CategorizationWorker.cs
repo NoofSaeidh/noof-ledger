@@ -19,6 +19,7 @@ internal sealed class CategorizationWorker(
     IProposalMapper proposalMapper,
     IMerchantScan merchantScan,
     IRecordEcho recordEcho,
+    TimeZoneInfo captureTimeZone,
     IDatabaseGate gate,
     IOperationTimer timer,
     ILogger<CategorizationWorker> logger)
@@ -417,7 +418,8 @@ internal sealed class CategorizationWorker(
         // M-6 (Phase 5 final review): the real exception when the catch block that called here had
         // one (a bug, an unexpected EF failure) - only a mapping/lookup failure with no exception of
         // its own falls back to a synthetic one, so the trace page still shows something.
-        logger.LogStageFailed(TransactionStages.StageFailed, failedStage, exception ?? new InvalidOperationException(error));
+        var actualException = exception ?? new InvalidOperationException(error);
+        logger.LogStageFailed(TransactionStages.StageFailed, failedStage, actualException);
 
         // The same predicate EfJobQueue.RetryAsync evaluates server-side - see decision 10. This only
         // stays correct because Program.cs feeds EfJobQueue the same CategorizationWorkerOptions.MaxAttempts.
@@ -425,8 +427,40 @@ internal sealed class CategorizationWorker(
         var runAfter = timeProvider.GetUtcNow() + options.ComputeBackoff(job.AttemptCount);
         var outcome = await jobQueue.RetryAsync(job.Id, workerId, runAfter, error, cancellationToken);
 
-        if (outcome == JobCompletionOutcome.Applied && isLastAttempt)
+        if (outcome != JobCompletionOutcome.Applied)
+            return;
+
+        if (isLastAttempt)
+        {
             await NotifyFailureAsync(store, notifier, subject, job, cancellationToken);
+            return;
+        }
+
+        await ReportRetryAsync(notifier, subject, job, actualException, runAfter, cancellationToken);
+    }
+
+    static string RetryStepFor(CategorizationJob job) =>
+        job.Kind == JobKind.Categorize ? "Recording this" : "Applying your correction";
+
+    async Task ReportRetryAsync(
+        IChatNotifier notifier, CategorizationSubject? subject, CategorizationJob job, Exception exception, DateTimeOffset runAfter,
+        CancellationToken cancellationToken)
+    {
+        if (subject is not { BotMessageId: { } messageId } sub)
+            return;
+
+        var reason = SafeFailureReason.Describe(exception, FailureArea.Categorization);
+        var localRunAfter = TimeZoneInfo.ConvertTime(runAfter, captureTimeZone);
+        var notice = recordEcho.ComposeRetryNotice(RetryStepFor(job), reason, localRunAfter);
+
+        try
+        {
+            await notifier.EditAsync(sub.TelegramChatId, messageId, notice, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.RetryNoticeEditFailed(ex, messageId, job.TransactionId);
+        }
     }
 
     async Task FailTerminallyAsync(

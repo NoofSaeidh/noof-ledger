@@ -21,6 +21,7 @@ internal static class WorkerRegistration
             sp.GetRequiredService<IProposalMapper>(),
             sp.GetRequiredService<IMerchantScan>(),
             sp.GetRequiredService<IRecordEcho>(),
+            captureTimeZone,
             sp.GetRequiredService<IDatabaseGate>(),
             sp.GetRequiredService<IOperationTimer>(),
             sp.GetRequiredService<ILogger<CategorizationWorker>>()));
@@ -42,6 +43,7 @@ internal static class WorkerRegistration
             options,
             CategorizationWorker.CreateWorkerId(),
             sp.GetRequiredService<IRecordEcho>(),
+            captureTimeZone,
             sp.GetRequiredService<IDatabaseGate>(),
             sp.GetRequiredService<IOperationTimer>(),
             sp.GetRequiredService<ILogger<TranscriptionWorker>>()));
