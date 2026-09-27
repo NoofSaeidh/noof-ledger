@@ -78,12 +78,8 @@ internal sealed class ChatReceiptVision(
             return new ReceiptVisionResult(null, MapUnreadableReason(payload.UnreadableReason));
 
         var taxIdMalformed = !string.IsNullOrWhiteSpace(payload.SellerTaxId) && !TaxIdPattern.IsMatch(payload.SellerTaxId.Trim());
-        // Copilot finding, PR #3: the prompt tells the model to leave currency/kind null when the
-        // receipt is readable but neither is legible - held back from CategorizeReceipt below rather
-        // than defaulting Sale (or RSD) silently, since a guessed Sale on what is actually a refund
-        // would change the money direction. Currency has no equivalent safety concern (RSD is the
-        // prompt's own documented, deliberate default for a legible Serbian receipt), so it defaults
-        // outright.
+        // KindUnclear's rationale (why Kind still defaults to Sale, and why that default is never
+        // trusted silently): ReceiptContracts.cs, next to ReceiptVisionResult.
         var kindUnclear = payload.Kind is null;
         return new ReceiptVisionResult(ToExtractedReceipt(payload, total, qrTotal), null, taxIdMalformed, kindUnclear);
     }

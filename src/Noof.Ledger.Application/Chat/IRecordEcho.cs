@@ -77,8 +77,8 @@ public interface IRecordEcho
     // receipt. Shows exactly what was read and the specific problem(s), computed here (mismatch
     // arithmetic + wording, the same job ReceiptWarnings already does for the recorded echo);
     // RecordAction.RecordAnyway queues CategorizeReceipt, Cancel withdraws the capture.
-    // kindUnclear (Copilot finding, PR #3): the vision fallback could not tell a sale from a refund, so
-    // Receipt.Kind is a default guess (Sale) rather than a read fact.
+    // kindUnclear: ReceiptContracts.cs, next to ReceiptVisionResult, for why Receipt.Kind can be a
+    // default guess (Sale) rather than a read fact.
     EchoMessage ComposeReceiptNeedsConfirmation(ExtractedReceipt receipt, bool taxIdMalformed = false, bool kindUnclear = false);
 
     // The same prompt rebuilt from what was actually stored - RecordActionHandler's Cancel/Restore and
