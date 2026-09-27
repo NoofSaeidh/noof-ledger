@@ -30,10 +30,14 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
   PR branch with the Codex CLI — the plugin's `/codex:review`/`/codex:adversarial-review` slash
   commands cannot be invoked by an agent. Never enable the plugin's stop-time review gate; it would
   review on every Stop and burn the quota.
-  - `codex review --base <base-branch> -c model_reasoning_effort="medium"` for a mechanical PR.
-  - For a PR that makes design choices, pass an adversarial prompt as the PROMPT argument (challenge
-    the approach, assumptions, trade-offs, failure modes — not just defects); default to adversarial
-    when unsure.
+  - `codex review --base <base-branch> -c model_reasoning_effort="medium"` for a mechanical PR — the
+    CLI rejects a PROMPT combined with `--base`, so this form takes no prompt.
+  - For a PR that makes design choices, use the plugin's companion script instead, which supports
+    both a base branch and a focus prompt: `node <path> adversarial-review --wait --base
+    <base-branch> "<focus>"` (challenge the approach, assumptions, trade-offs, failure modes — not
+    just defects); default to adversarial when unsure. Resolve `<path>` with Glob on
+    `~/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs` — the version
+    directory changes on update, never hard-code it.
   - Run in the foreground with a 600000 ms timeout. Findings are judged, not obeyed: fix what's
     confirmed, reply in the PR description to what's rejected and why.
   - Codex refuses on usage limit → don't wait for the window; fall back to a sonnet review and say so
