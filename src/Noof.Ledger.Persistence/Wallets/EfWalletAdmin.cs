@@ -123,12 +123,17 @@ internal sealed class EfWalletAdmin(LedgerDbContext db, TimeProvider timeProvide
 
         await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
 
-        var exists = await WalletById(walletId).AnyAsync(cancellationToken);
-        if (!exists)
-            throw Unknown(walletId);
+        var wallet = await WalletById(walletId).AsNoTracking()
+            .Select(w => new { w.Archived })
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw Unknown(walletId);
 
         if (domainMethod is not null)
         {
+            if (wallet.Archived)
+                throw new InvalidOperationException(
+                    $"Wallet {walletId} is archived; an archived wallet cannot be the payment default.");
+
             // Clear, then set - the same reasoning as MakeDefaultForCurrencyAsync: the unique index
             // is checked row by row, so writing the new default before the old one is cleared would
             // violate it.
