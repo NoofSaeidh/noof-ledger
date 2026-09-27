@@ -36,6 +36,11 @@ public interface IRecordEcho
     EchoMessage Compose(CategorizationSubject record);
     EchoMessage ComposeCorrectionFailure(CategorizationSubject record);
     EchoMessage ComposeHeardNothing(CategorizationSubject record);
+
+    // A failed attempt that will still be retried (CLAUDE.md Phase 6b: never a raw exception message
+    // - reason is one of SafeFailureReason's fixed categories). nextAttemptLocal is already converted
+    // to the capture time zone by the caller; this only formats it.
+    EchoMessage ComposeRetryNotice(string step, string reason, DateTimeOffset nextAttemptLocal);
     string ComposeCategorisingReceipt(int lineCount);
     // originalCancelled (M-11, Phase 6 final review): the duplicate index ignores status, so a
     // receipt whose earlier transaction was Cancelled is rejected forever unless this says Restore

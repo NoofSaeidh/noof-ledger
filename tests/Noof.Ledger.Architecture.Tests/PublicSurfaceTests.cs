@@ -58,7 +58,7 @@ public class PublicSurfaceTests
             "ISpendingReadModel", "ProbeResult", "ISecretProbe", "ISecretStore", "SecretKeys",
             "TransactionListFilter", "TransactionListRow", "TransactionListPage", "ITransactionList",
             "SecretResult", "SecretState", "SecretStatus",
-            "RecordAction", "EchoMessage", "IRecordEcho",
+            "RecordAction", "EchoMessage", "IRecordEcho", "FailureArea", "SafeFailureReason",
             "EchoTarget", "IRecordEditor", "ApplicationRegistration",
             "ITranscriber", "ISpeechProvider", "CapturedVoice", "ITranscriptionStore", "IVoiceFileSource",
             "IWalletDirectory",
