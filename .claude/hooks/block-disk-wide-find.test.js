@@ -34,6 +34,30 @@ const REFUSE_CASES = [
   ["windows-style find /c piped in bash", 'tasklist | find /c "x"'],
   ["windows-style find /i piped in bash", 'something | find /i "x"'],
   ["inside command substitution", "echo $(find / -name x)"],
+  ["a second, unbounded starting path", "find src / -name '*.dll'"],
+  ["nested sh -c shell invocation", "sh -c 'find / -name x'"],
+  ["command substitution inside double quotes", 'echo "$(find / -name x)"'],
+  ["bare command substitution with no predicate", "echo $(find /)"],
+  ["command builtin prefix", "command find / -name x"],
+  ["absolute path to the find executable", "/usr/bin/find / -name x"],
+  ["a leading env-var assignment", "LC_ALL=C find / -name x"],
+  ["a quoted executable name", '"find" / -name x'],
+  ["a parenthesised subshell", "(find / -name x)"],
+  ["a background job delimiter (single &)", "echo ready & find / -name x"],
+  ["root written as /.", "find /. -name x"],
+  ["root written as repeated slashes", "find /// -name x"],
+  ["root reached via a trailing ..", "find /tmp/.. -name x"],
+  ["$HOME written with a trailing /.", 'find "$HOME/." -name x'],
+  ["a git-bash mount for another drive letter", "find /d -name x"],
+  ["a POSIX-style home directory for another user", "find /home/alice -name x"],
+  ["a shell variable assigned to root earlier in the command", 'root=/; find "$root" -name x'],
+  ["a parameter expansion with a default naming $HOME", 'find "${HOME:-/tmp}" -name x'],
+  ["PowerShell's own $env:USERPROFILE syntax", "find $env:USERPROFILE -name x"],
+  ["cd to root, then a bare find in the same command", "cd / && find . -name x"],
+  ["cd to home (no args), then find with no path", "cd ~ && find -name x"],
+  ["a backslash-escaped slash", "find \\/ -name x"],
+  ["ANSI-C quoting of the root path", "find $'/' -name x"],
+  ["a backslash-newline line continuation splitting the word find", "fi\\\nnd / -name x"],
 ];
 
 for (const [label, command] of REFUSE_CASES) {
@@ -54,6 +78,9 @@ const ALLOW_CASES = [
   ["git log --find-renames is not find", "git log --find-renames"],
   ["PowerShell Find-Module is not find", "Find-Module something"],
   ["find as literal text inside a quoted grep pattern", 'grep "find /"'],
+  ["a predicate argument that happens to look like a root, e.g. -name '~'", "find -name '~'"],
+  ["cd to a bounded directory, then a bare find", "cd /tmp && find . -name x"],
+  ["a Windows path with backslash separators, not escapes", "find C:\\repos\\dev -name x"],
 ];
 
 for (const [label, command] of ALLOW_CASES) {
