@@ -5,6 +5,7 @@ using Noof.Ledger.Ai;
 using Noof.Ledger.Application;
 using Noof.Ledger.Application.Auth;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Host.Auth;
 using Noof.Ledger.Host.Cli;
 using Noof.Ledger.Host.Diagnostics;
@@ -77,7 +78,11 @@ try
 
     var slowOperations = new SlowOperationOptions();
     builder.Configuration.GetSection(SlowOperationOptions.ConfigurationSection).Bind(slowOperations.ThresholdMs);
-    builder.Services.AddNoofApplication(slowOperations);
+
+    var fiscalVerificationUrlOptions = new FiscalVerificationUrlOptions();
+    builder.Configuration.GetSection(FiscalVerificationUrlOptions.ConfigurationSection).Bind(fiscalVerificationUrlOptions);
+
+    builder.Services.AddNoofApplication(slowOperations, fiscalVerificationUrlOptions);
 
     builder.Services.AddSingleton(TimeProvider.System);
     var captureTimeZone = CaptureTimeZoneGuard.Resolve(builder.Configuration["Capture:TimeZone"] ?? "Europe/Belgrade");

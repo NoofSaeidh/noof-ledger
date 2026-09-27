@@ -25,6 +25,7 @@ internal sealed class ReceiptCategorizationWorker(
     TimeZoneInfo captureTimeZone,
     IDatabaseGate gate,
     IOperationTimer timer,
+    IFiscalVerificationUrl verificationUrl,
     ILogger<ReceiptCategorizationWorker> logger)
     : BackgroundService
 {
@@ -155,9 +156,14 @@ internal sealed class ReceiptCategorizationWorker(
             var categories = await categoryCatalog.ActiveAsync(cancellationToken);
             var wallets = await walletDirectory.ActiveAsync(cancellationToken);
 
+            // Item A (Copilot, Phase 6 review): sub.RawText is the original message and, for a
+            // text-link capture, contains the whole fiscal verification URL - the model only needs
+            // any free words alongside it (e.g. "lunch card"), never the vl payload. job.Instruction
+            // carries the same risk on a correction that resends the same link (CorrectionHandler).
             var request = new ReceiptCategorizationRequest(
                 [.. receipt.Lines.Select(line => new ReceiptLineToCategorize(line.Ordinal, line.Name, line.Quantity, line.Total))],
-                receipt.SellerName, receipt.SellerTaxId, merchantKnown, sub.RawText, job.Instruction);
+                receipt.SellerName, receipt.SellerTaxId, merchantKnown,
+                verificationUrl.StripUrl(sub.RawText), verificationUrl.StripUrl(job.Instruction));
 
             var categorization = await receiptCategorizer.CategorizeAsync(request, cancellationToken);
 
@@ -351,14 +357,43 @@ internal sealed class ReceiptCategorizationWorker(
             return;
         }
 
-        logger.LogStageFailed(TransactionStages.StageFailed, failedStage, exception ?? new InvalidOperationException(error));
+        var actualException = exception ?? new InvalidOperationException(error);
+        logger.LogStageFailed(TransactionStages.StageFailed, failedStage, actualException);
 
         var isLastAttempt = job.AttemptCount >= options.MaxAttempts;
         var runAfter = timeProvider.GetUtcNow() + options.ComputeBackoff(job.AttemptCount);
         var outcome = await jobQueue.RetryAsync(job.Id, workerId, runAfter, error, cancellationToken);
 
-        if (outcome == JobCompletionOutcome.Applied && isLastAttempt)
+        if (outcome != JobCompletionOutcome.Applied)
+            return;
+
+        if (isLastAttempt)
+        {
             await NotifyFailureAsync(store, notifier, subject, cancellationToken);
+            return;
+        }
+
+        await ReportRetryAsync(notifier, subject, actualException, runAfter, cancellationToken);
+    }
+
+    async Task ReportRetryAsync(
+        IChatNotifier notifier, CategorizationSubject? subject, Exception exception, DateTimeOffset runAfter,
+        CancellationToken cancellationToken)
+    {
+        if (subject is not { BotMessageId: { } messageId } sub)
+            return;
+
+        var localRunAfter = TimeZoneInfo.ConvertTime(runAfter, captureTimeZone);
+        var notice = recordEcho.ComposeReceiptCategorizationRetryNotice(exception, localRunAfter);
+
+        try
+        {
+            await notifier.EditAsync(sub.TelegramChatId, messageId, notice, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.RetryNoticeEditFailed(ex, messageId, sub.TransactionId);
+        }
     }
 
     async Task FailTerminallyAsync(

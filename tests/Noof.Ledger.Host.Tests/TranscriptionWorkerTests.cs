@@ -99,13 +99,16 @@ public class TranscriptionWorkerTests
         return new Harness(queue, speechProvider, store, transcriptionStore, voiceFiles, transcriber, Substitute.For<IChatNotifier>());
     }
 
+    static readonly TimeZoneInfo Belgrade = TimeZoneInfo.FindSystemTimeZoneById("Europe/Belgrade");
+
     static TranscriptionWorker CreateWorker(
         IServiceScopeFactory scopeFactory, FakeTimeProvider? time = null, IDatabaseGate? gate = null,
-        CapturingLogger<TranscriptionWorker>? logger = null, IOperationTimer? timer = null)
+        CapturingLogger<TranscriptionWorker>? logger = null, IOperationTimer? timer = null, TimeZoneInfo? captureTimeZone = null)
     {
         var resolvedTime = time ?? new FakeTimeProvider(new DateTimeOffset(2026, 9, 24, 9, 0, 0, TimeSpan.Zero));
-        return new(scopeFactory, resolvedTime, new CategorizationWorkerOptions(), WorkerId, Echo, gate ?? ReadyGate(),
-            timer ?? new OperationTimer(resolvedTime, new SlowOperationOptions()), logger ?? new CapturingLogger<TranscriptionWorker>());
+        return new(scopeFactory, resolvedTime, new CategorizationWorkerOptions(), WorkerId, Echo, captureTimeZone ?? Belgrade,
+            gate ?? ReadyGate(), timer ?? new OperationTimer(resolvedTime, new SlowOperationOptions()),
+            logger ?? new CapturingLogger<TranscriptionWorker>());
     }
 
     static IDatabaseGate ReadyGate()
@@ -265,18 +268,61 @@ public class TranscriptionWorkerTests
     }
 
     [Fact]
-    public async Task A_transient_failure_retries_and_tells_nobody_yet()
+    public async Task A_transient_failure_retries_and_edits_the_echo_with_a_retry_notice()
     {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 24, 9, 0, 0, TimeSpan.Zero));
         var harness = Setup(CaptureJob());
+        harness.Transcriber.TranscribeAsync(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new ModelCallException(ModelFailureKind.Transient, "Groq transcription failed with status 429."));
+
+        await CreateWorker(harness.ScopeFactory(), time).RunTickAsync(TestContext.Current.CancellationToken);
+
+        await harness.Queue.Received(1).RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await harness.Queue.DidNotReceiveWithAnyArgs().FailAsync(default, default!, default!, Arg.Any<CancellationToken>());
+        await harness.Store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, Arg.Any<CancellationToken>());
+        await harness.Notifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(m =>
+            m.Text.Contains("Transcribing the voice note", StringComparison.Ordinal)
+            && m.Text.Contains("the model did not answer", StringComparison.Ordinal)
+            && m.Text.Contains("retrying", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_transient_failure_on_a_spoken_correction_names_the_correction_in_the_retry_notice()
+    {
+        var harness = Setup(CorrectionJob(), record: RecordedCoffee());
         harness.Transcriber.TranscribeAsync(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new ModelCallException(ModelFailureKind.Transient, "Groq transcription failed with status 429."));
 
         await TickAsync(harness);
 
-        await harness.Queue.Received(1).RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
-        await harness.Queue.DidNotReceiveWithAnyArgs().FailAsync(default, default!, default!, Arg.Any<CancellationToken>());
-        await harness.Store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, Arg.Any<CancellationToken>());
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text.Contains("Transcribing your correction", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+    }
+
+    // TranscriptionWorker itself never edits the echo on success - CompleteCaptureAsync hands the
+    // transcript to a Categorize job, and that job's own worker composes the eventual echo (including
+    // the "🎤 ..." prefix). Requirement 3 (a success replaces a retry notice) is proven at that layer
+    // (CategorizationWorkerTests) instead.
+    [Fact]
+    public async Task A_recovered_capture_after_a_retried_failure_still_hands_off_and_edits_nothing_itself()
+    {
+        var harness = Setup(CaptureJob());
+        var worker = CreateWorker(harness.ScopeFactory());
+        harness.Transcriber.TranscribeAsync(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new ModelCallException(ModelFailureKind.Transient, "Groq transcription failed with status 429."));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+        harness.Notifier.ClearReceivedCalls();
+
+        harness.Transcriber.TranscribeAsync(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
+            .Returns("купил вчера штуку евро");
+
+        (await worker.RunTickAsync(TestContext.Current.CancellationToken)).Should().Be(CategorizationTickResult.Processed);
+
         await harness.Notifier.DidNotReceiveWithAnyArgs().EditAsync(default, default, default!, Arg.Any<CancellationToken>());
+        await harness.TranscriptionStore.Received(1).CompleteCaptureAsync(TransactionId, "купил вчера штуку евро", Arg.Any<CancellationToken>());
     }
 
     [Fact]

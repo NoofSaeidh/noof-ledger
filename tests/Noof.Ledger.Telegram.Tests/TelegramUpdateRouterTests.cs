@@ -17,6 +17,8 @@ namespace Noof.Ledger.Telegram.Tests;
 public class TelegramUpdateRouterTests
 {
     static readonly IRecordEcho Echo = new RecordEcho();
+    static readonly IFiscalVerificationUrl VerificationUrl =
+        new FiscalVerificationUrl(new FiscalVerificationUrlOptions { VerificationUrlPrefix = "https://suf.purs.gov.rs/v/?vl=" });
 
     sealed record Harness(
         TelegramUpdateRouter Router, ICaptureStore CaptureStore, IChatNotifier ChatNotifier,
@@ -38,8 +40,8 @@ public class TelegramUpdateRouterTests
         var logger = new CapturingLogger<TelegramUpdateRouter>();
         var router = new TelegramUpdateRouter(captureStore, chatNotifier, new TelegramOwnerGate(secretStore),
             new RecordActionHandler(editor, store, chatNotifier, Echo, receiptStore),
-            new CorrectionHandler(editor, chatNotifier, Echo, receiptStore), Echo,
-            Substitute.For<ISystemHealth>(), logger);
+            new CorrectionHandler(editor, chatNotifier, Echo, receiptStore, VerificationUrl), Echo,
+            Substitute.For<ISystemHealth>(), VerificationUrl, logger);
 
         return new Harness(router, captureStore, chatNotifier, editor, store, logger, receiptStore);
     }
@@ -60,8 +62,8 @@ public class TelegramUpdateRouterTests
         var logger = new CapturingLogger<TelegramUpdateRouter>();
         var router = new TelegramUpdateRouter(captureStore, chatNotifier, new TelegramOwnerGate(secretStore),
             new RecordActionHandler(editor, store, chatNotifier, Echo, receiptStore),
-            new CorrectionHandler(editor, chatNotifier, Echo, receiptStore), Echo,
-            systemHealth, logger);
+            new CorrectionHandler(editor, chatNotifier, Echo, receiptStore, VerificationUrl), Echo,
+            systemHealth, VerificationUrl, logger);
 
         return (router, chatNotifier, systemHealth, secretStore);
     }

@@ -31,7 +31,9 @@ public class TelegramRegistrationTests
             return gate;
         });
         services.AddSingleton(_ => Substitute.For<IPollingHeartbeat>());
-        services.AddNoofApplication(new SlowOperationOptions());
+        services.AddNoofApplication(
+            new SlowOperationOptions(),
+            new Application.Receipts.FiscalVerificationUrlOptions { VerificationUrlPrefix = "https://suf.purs.gov.rs/v/?vl=" });
         services.AddScoped(_ => Substitute.For<ISecretStore>());
         services.AddScoped(_ => Substitute.For<Application.Capture.ICaptureStore>());
         services.AddScoped(_ => Substitute.For<Application.Editing.IRecordEditor>());

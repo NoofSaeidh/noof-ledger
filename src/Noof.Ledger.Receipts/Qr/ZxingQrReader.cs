@@ -10,6 +10,7 @@ internal sealed class ZxingQrReader : IQrReader
 {
     const int MaxDownscaledDimension = 1600;
     const int UpscaleFactor = 2;
+    static readonly SKSamplingOptions UpscaleSampling = new(SKFilterMode.Linear, SKMipmapMode.None);
 
     public string? Read(Stream image)
     {
@@ -82,7 +83,7 @@ internal sealed class ZxingQrReader : IQrReader
             var width = Math.Max(1, (int)(bitmap.Width * scale));
             var height = Math.Max(1, (int)(bitmap.Height * scale));
 
-            return bitmap.Resize(new SKImageInfo(width, height), SKSamplingOptions.Default);
+            return bitmap.Resize(new SKImageInfo(width, height), UpscaleSampling);
         }
         catch
         {

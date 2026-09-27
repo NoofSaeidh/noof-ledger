@@ -111,6 +111,20 @@ photo compression is what most often leaves a receipt too degraded for the visio
   date or an amount; those always come from the receipt, never from a correction, so the request was
   noted and nothing moved.
 
+**If the Tax Administration ever moves the verification URL.** Change `Receipts:VerificationUrlPrefix`
+in `appsettings.json` (e.g. `"https://suf.purs.gov.rs/v/?vl="`) — it is the one source both the
+Telegram link detector and the fiscal QR decoder's host/path check read; a bad or missing value fails
+startup instead of silently disabling receipts.
+
+**Send the QR's link, not a photo, for an exact receipt.** Scan the fiscal QR with the phone's camera
+(or Google Lens) and send its `https://suf.purs.gov.rs/v/?vl=...` link to the bot as plain text: the
+lines, PIB and fiscal number then come exactly from the Tax Administration. A photo of the whole
+receipt almost always goes through the vision fallback instead — the fiscal QR is a version ~40 code
+(~177 modules a side), and on the operator's real photos (2026-09-27, Telegram-compressed and
+full-resolution 12 MP files alike) no decoder tried read it: ZXing.Net, zxing-cpp, OpenCV's QR detector
+and the WeChat CNN detector (`docs/OPEN-QUESTIONS.md`, Phase 6 QR entry). A close-up photo of the QR
+alone, sent as a file, is untested.
+
 **The Receipts health check** (`/diagnostics`, the dashboard tile, the bot's `/health`) turns amber for
 24 hours after any Tax Administration lookup fails, naming the time it happened, then clears itself back
 to green — it does not mean the *current* lookup is failing, only that one recently did and receipts may
@@ -120,6 +134,14 @@ have fallen back to the photo during that window.
 vision fallback, with the warning above. If it stays down for a while, the Receipts check stays amber;
 there is nothing to restart or reconfigure. Once it answers again, new receipts go back to reading their
 lines from the fiscal QR automatically.
+
+**When an attempt fails, the operator is told in Telegram, not just the log** — every
+capture pipeline (receipt extraction, receipt categorisation, first-capture/correction categorisation,
+voice transcription) edits the same placeholder message with a short fixed reason (never the raw
+exception, a verification URL or a `vl` payload) and roughly when it will try again, whenever an
+attempt fails but the job still has attempts left; the last attempt's failure instead shows a clear
+failure message and what to do (resend the photo, paste the QR link, or send it as a file); a later
+success simply overwrites either with the ordinary echo.
 
 ### Manual acceptance — Phase 6 (receipts), the operator's first real receipt
 

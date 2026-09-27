@@ -19,8 +19,10 @@ internal sealed class CategorizationWorker(
     IProposalMapper proposalMapper,
     IMerchantScan merchantScan,
     IRecordEcho recordEcho,
+    TimeZoneInfo captureTimeZone,
     IDatabaseGate gate,
     IOperationTimer timer,
+    IFiscalVerificationUrl verificationUrl,
     ILogger<CategorizationWorker> logger)
     : BackgroundService
 {
@@ -136,7 +138,12 @@ internal sealed class CategorizationWorker(
 
             var categories = await categoryCatalog.ActiveAsync(cancellationToken);
             var aliases = await merchantDirectory.AliasesAsync(cancellationToken);
-            var hints = merchantScan.Matches(sub.RawText, aliases, options.MerchantHintLimit)
+            // A link capture whose extraction failed terminally has no receipt row, so
+            // TryRouteToReceiptAsync above never intercepted it - RawText here can still be the whole
+            // fiscal verification URL, vl payload included, and that must never reach the model
+            // (CLAUDE.md, "...and never in a model prompt either").
+            var rawTextForModel = verificationUrl.StripUrl(sub.RawText) ?? "";
+            var hints = merchantScan.Matches(rawTextForModel, aliases, options.MerchantHintLimit)
                 .DistinctBy(alias => alias.MerchantId)
                 .Select(alias => new MerchantOption(alias.MerchantId, alias.DisplayName))
                 .ToList();
@@ -146,7 +153,7 @@ internal sealed class CategorizationWorker(
             optionsLoading.Stop();
 
             var request = new CategorizationRequest(
-                sub.RawText,
+                rawTextForModel,
                 TodayFor(job, sub),
                 [.. categories.Select(category => new CategoryOption(category.Slug, category.NameEn, category.NameRu, category.ParentSlug))],
                 hints,
@@ -349,9 +356,16 @@ internal sealed class CategorizationWorker(
         return false;
     }
 
-    static CorrectionRequest? CorrectionFor(CategorizationJob job, CategorizationSubject record) =>
-        job is { Kind: JobKind.Correct, Instruction: { } instruction }
-            ? new CorrectionRequest(record.OccurredOn, record.Lines, instruction)
+    // Important finding (Fable 5.1 review round on this branch): a reply to any echo becomes a Correct
+    // job whose Instruction is the reply's own text, unfiltered (EfRecordEditor.RequestCorrectionAsync)
+    // - a reply that pastes a fiscal verification link ("here's the receipt https://...?vl=...") to a
+    // transaction with no receipt row (an ordinary text/voice capture, or a failed link capture) used
+    // to reach the model's prompt verbatim through here. Stripped with the same FiscalVerificationUrl
+    // every other model-facing path uses; an instruction that turns out to be nothing but the URL
+    // strips to null, and that means "no correction" rather than an empty one.
+    CorrectionRequest? CorrectionFor(CategorizationJob job, CategorizationSubject record) =>
+        job is { Kind: JobKind.Correct, Instruction: { } instruction } && verificationUrl.StripUrl(instruction) is { } stripped
+            ? new CorrectionRequest(record.OccurredOn, record.Lines, stripped)
             : null;
 
     // A correction's "today" is the reply's own send day (job.InstructionDay), not the original
@@ -417,7 +431,8 @@ internal sealed class CategorizationWorker(
         // M-6 (Phase 5 final review): the real exception when the catch block that called here had
         // one (a bug, an unexpected EF failure) - only a mapping/lookup failure with no exception of
         // its own falls back to a synthetic one, so the trace page still shows something.
-        logger.LogStageFailed(TransactionStages.StageFailed, failedStage, exception ?? new InvalidOperationException(error));
+        var actualException = exception ?? new InvalidOperationException(error);
+        logger.LogStageFailed(TransactionStages.StageFailed, failedStage, actualException);
 
         // The same predicate EfJobQueue.RetryAsync evaluates server-side - see decision 10. This only
         // stays correct because Program.cs feeds EfJobQueue the same CategorizationWorkerOptions.MaxAttempts.
@@ -425,8 +440,39 @@ internal sealed class CategorizationWorker(
         var runAfter = timeProvider.GetUtcNow() + options.ComputeBackoff(job.AttemptCount);
         var outcome = await jobQueue.RetryAsync(job.Id, workerId, runAfter, error, cancellationToken);
 
-        if (outcome == JobCompletionOutcome.Applied && isLastAttempt)
+        if (outcome != JobCompletionOutcome.Applied)
+            return;
+
+        if (isLastAttempt)
+        {
             await NotifyFailureAsync(store, notifier, subject, job, cancellationToken);
+            return;
+        }
+
+        await ReportRetryAsync(notifier, subject, job, actualException, runAfter, cancellationToken);
+    }
+
+    static string RetryStepFor(CategorizationJob job) =>
+        job.Kind == JobKind.Categorize ? "Recording this" : "Applying your correction";
+
+    async Task ReportRetryAsync(
+        IChatNotifier notifier, CategorizationSubject? subject, CategorizationJob job, Exception exception, DateTimeOffset runAfter,
+        CancellationToken cancellationToken)
+    {
+        if (subject is not { BotMessageId: { } messageId } sub)
+            return;
+
+        var localRunAfter = TimeZoneInfo.ConvertTime(runAfter, captureTimeZone);
+        var notice = recordEcho.ComposeCategorizationRetryNotice(RetryStepFor(job), exception, localRunAfter);
+
+        try
+        {
+            await notifier.EditAsync(sub.TelegramChatId, messageId, notice, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.RetryNoticeEditFailed(ex, messageId, job.TransactionId);
+        }
     }
 
     async Task FailTerminallyAsync(

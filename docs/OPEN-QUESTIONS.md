@@ -610,6 +610,50 @@ receipt, never from a correction.
   same way `HandleModelFailureAsync` does, logs Warning 1210 and a `StageFailed` row at `Categorized`, and
   calls `NotifyFailureAsync` so the operator sees the `ComposeCorrectionFailure` echo — `docs/BACKLOG.md`
   has the full mechanism.
+- **The synthetic fiscal QR is dense — version 22, 105x105 modules** (`QrDensityTests`, built from
+  `SyntheticQrPayloadBuilder`'s default, non-large-block payload: 796 characters of
+  `https://suf.purs.gov.rs/v/?vl=...`). At the resolution Telegram actually delivers a compressed
+  photo (≤1280px long side, JPEG ~q80) the QR occupies only 15–30% of the frame on a typical receipt
+  photo, which puts it at roughly 1–5 pixels per module depending on the exact crop — the regime that
+  produced the production "Vision used: no QR" failure. `ZxingQrReaderRealisticPhotoTests` benchmarks
+  this with synthetic photos (a receipt-shaped canvas, text-noise, the QR placed and JPEG-compressed
+  the same way). **The benchmark's own downscale must use a filtered resampler.**
+  `SKBitmap.Resize`'s `SKSamplingOptions.Default` is nearest-neighbour in SkiaSharp 4.151.1
+  (`Filter=Nearest, Mipmap=None`, confirmed by printing it) — no phone or Telegram resampler works
+  this way. A first pass of this benchmark used `SKSamplingOptions.Default` for its 2400→1280
+  downscale and reported a "chaotic, non-monotonic" pass/fail sweep (17/18/19/21/29/30% decoded,
+  everything else did not) as proof that nothing past that point could move a single case; that
+  pattern was the benchmark's own nearest-neighbour aliasing on a pixel-perfect QR, not JPEG
+  quantisation — re-running the identical sweep with `SKSamplingOptions(SKFilterMode.Linear,
+  SKMipmapMode.Linear)` for the downscale alone raises the same benchmark, same reader, to 9/17 clean
+  + 1/6 compounded (10/23 total, up from 8/23), a different pass set. With that filtered benchmark in
+  place, giving `ZxingQrReader`'s own 2x upscale (`src/Noof.Ledger.Receipts/Qr/ZxingQrReader.cs`) a
+  linear filter instead of nearest (which was pixel-duplication, so it added nothing a binarizer could
+  use) is a measured, strict improvement: 17/23 (13/17 clean + 4/6 compounded), a superset of every
+  case the nearest-nearest baseline passed, at 118 ms average vs 175 ms before — the fix ships.
+  Corrected conclusion: nearest-neighbour resampling anywhere in this pipeline destroys exactly the
+  sub-pixel information a phone's own bilinear resize preserves; a decoder given filtered pixels *can*
+  recover more than one given nearest-neighbour pixels, so "nothing afterwards can help" was an
+  artefact of the benchmark, not a property of JPEG quantisation. `ZxingQrReaderRealisticPhotoTests`
+  now pins six cases from the filtered sweep: two that already decoded before this fix (a regression
+  guard) and four that only decode with the reader's linear upscale (the improvement this change
+  ships). The five further techniques tried in the same investigation — additional upscale factors,
+  a `GlobalHistogramBinarizer` fallback, a contrast-stretch/grayscale pass, an unsharp-mask sharpen,
+  and a finder-pattern crop — were tried only against the nearest-neighbour benchmark and were not
+  re-tried after this fix; whether any of them helps further, now that the benchmark itself is
+  trustworthy, is open.
+- **Real fiscal QRs are denser still, and no decoder tried reads them from a photo** (2026-09-27, the
+  operator's own receipts, five photos kept out of the repo). The printed codes are version ~40 (a 7x7
+  grid of alignment patterns, ~177 modules a side), not the synthetic version 22. On the two
+  Telegram-compressed copies (1280x720) the QR spans ~210 px, under 2 px per module. On three
+  full-resolution 12 MP files sent as documents it spans 640-760 px, ~4 px per module, one of them flat
+  and sharp. Not one image decoded with ZXing.Net (hybrid and global-histogram binarizers, 0.25x-2x
+  scales, the QR region cropped and upscaled, blur to merge thermal-print dots), zxing-cpp 0.5.3,
+  OpenCV 4.10's `QRCodeDetector`, or the WeChat CNN detector with its super-resolution model. The same
+  receipts' links, sent as text, decoded and fetched exactly. So the exact path is the link, scanned by
+  the phone's own camera; the photo path is the vision fallback in practice, which is why its guards
+  (`P6-2`) matter. A close-up of the QR alone (~15 px per module) is untested; a heavier decoder would
+  need to show a win on these real photos first, and none did.
 
 ### P6-2 — Vision fallback stopped inventing receipts (2026-09-27)
 

@@ -309,19 +309,19 @@ internal sealed class ExtractReceiptWorker(
             logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Extracted, ex);
             accountCooldownUntil = timeProvider.GetUtcNow() + options.AccountCooldown;
             logger.AccountLevelFailure(job.Id, ex.Message, options.AccountCooldown);
-            await HandleModelFailureAsync(jobQueue, store, notifier, job, record, ModelFailureKind.Transient, ex.Message, cancellationToken);
+            await HandleModelFailureAsync(jobQueue, store, notifier, job, record, ModelFailureKind.Transient, ex.Message, ex, cancellationToken);
         }
         catch (ModelCallException ex)
         {
             logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Extracted, ex);
-            await HandleModelFailureAsync(jobQueue, store, notifier, job, record, ex.Kind, ex.Message, cancellationToken);
+            await HandleModelFailureAsync(jobQueue, store, notifier, job, record, ex.Kind, ex.Message, ex, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // A failed photo download or QR read lands here too, same as a failed voice download in
             // TranscriptionWorker: worth another attempt, bounded by the attempt cap.
             logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Extracted, ex);
-            await HandleModelFailureAsync(jobQueue, store, notifier, job, record, ModelFailureKind.Transient, ex.Message, cancellationToken);
+            await HandleModelFailureAsync(jobQueue, store, notifier, job, record, ModelFailureKind.Transient, ex.Message, ex, cancellationToken);
         }
     }
 
@@ -405,7 +405,7 @@ internal sealed class ExtractReceiptWorker(
 
     async Task HandleModelFailureAsync(
         IJobQueue jobQueue, ICategorizationStore store, IChatNotifier notifier, CategorizationJob job,
-        CategorizationSubject? record, ModelFailureKind kind, string error, CancellationToken cancellationToken)
+        CategorizationSubject? record, ModelFailureKind kind, string error, Exception exception, CancellationToken cancellationToken)
     {
         if (kind == ModelFailureKind.Terminal)
         {
@@ -418,8 +418,21 @@ internal sealed class ExtractReceiptWorker(
         var runAfter = timeProvider.GetUtcNow() + options.ComputeBackoff(job.AttemptCount);
         var outcome = await jobQueue.RetryAsync(job.Id, workerId, runAfter, error, cancellationToken);
 
-        if (outcome == JobCompletionOutcome.Applied && isLastAttempt)
+        if (outcome != JobCompletionOutcome.Applied)
+            return;
+
+        if (isLastAttempt)
+        {
             await ReportFailureAsync(store, notifier, job, record, cancellationToken);
+            return;
+        }
+
+        if (record is null)
+            return;
+
+        var localRunAfter = TimeZoneInfo.ConvertTime(runAfter, captureTimeZone);
+        var notice = recordEcho.ComposeReceiptExtractionRetryNotice(exception, localRunAfter);
+        await EditQuietlyAsync(notifier, record, notice, cancellationToken);
     }
 
     async Task ReportFailureAsync(
