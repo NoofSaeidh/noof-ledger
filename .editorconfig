@@ -18,7 +18,8 @@ dotnet_diagnostic.CA1852.severity = error
 dotnet_code_quality.CA1852.ignore_internalsvisibleto = true
 
 # Cheap correctness rules that the AnalysisMode=All measurement showed cost fewer than a handful of
-# fixes each. Enabled by name rather than by turning on the whole rulebook - see docs/BACKLOG.md.
+# fixes each. Enabled by name rather than by turning on the whole rulebook - see
+# docs/backlog/analysismode-all-measured-and-rejected.md.
 dotnet_diagnostic.CA1862.severity = error
 dotnet_diagnostic.CA1861.severity = error
 dotnet_diagnostic.CA2263.severity = error

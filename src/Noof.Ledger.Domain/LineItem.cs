@@ -12,7 +12,8 @@ public sealed class LineItem
 
     // Order within the transaction (1-based): the order the message named the items in, or the
     // receipt's own order when ReceiptLineId is set. The echo and every read model order by this,
-    // never by Description (BACKLOG "Line items keep no order").
+    // never by Description — the backlog item that tracked this gap ("Line items keep no order")
+    // is resolved and removed.
     public required int Ordinal { get; set; }
 
     // Set once the categorisation worker resolves this line from a receipt's own lines (Phase 6).
