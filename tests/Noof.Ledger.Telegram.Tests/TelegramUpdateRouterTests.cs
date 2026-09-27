@@ -10,6 +10,7 @@ using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Domain;
 using Noof.Ledger.TestKit;
 using Telegram.Bot.Types;
+using Telegram.Bot.Types.Enums;
 
 namespace Noof.Ledger.Telegram.Tests;
 
@@ -824,6 +825,43 @@ public class TelegramUpdateRouterTests
 
         await captureStore.DidNotReceiveWithAnyArgs().CaptureReceiptAsync(default!, default!, Arg.Any<CancellationToken>());
         await chatNotifier.DidNotReceiveWithAnyArgs().SendAsync(default, default!, Arg.Any<CancellationToken>());
+    }
+
+    static Update StickerMessage(long chatId, int messageId) => new()
+    {
+        Id = 912,
+        Message = new Message
+        {
+            Id = messageId,
+            Chat = new Chat { Id = chatId },
+            Date = DateTime.UtcNow,
+            Sticker = new Sticker { FileId = "sticker-1", FileUniqueId = "sticker-unique-1", Width = 512, Height = 512, Type = StickerType.Regular },
+        },
+    };
+
+    [Fact]
+    public async Task A_sticker_from_the_owner_is_logged_and_answered_with_what_the_bot_can_read()
+    {
+        var (router, captureStore, chatNotifier, _, _, logger, _) = CreateRouter(ownerChatId: 111L);
+
+        await router.HandleAsync(StickerMessage(111L, 5), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await captureStore.DidNotReceiveWithAnyArgs().CaptureAsync(default!, default!, Arg.Any<CancellationToken>());
+        await chatNotifier.Received(1).SendAsync(111L, Echo.UnsupportedMessageType, Arg.Any<CancellationToken>());
+        var entry = logger.Entries.Should().ContainSingle(e => e.EventId.Id == 6002).Subject;
+        entry.Properties["MessageType"].Should().Be(MessageType.Sticker);
+    }
+
+    [Fact]
+    public async Task A_strangers_sticker_produces_no_reply_and_no_log_event()
+    {
+        var (router, captureStore, chatNotifier, _, _, logger, _) = CreateRouter(ownerChatId: 111L);
+
+        await router.HandleAsync(StickerMessage(999L, 5), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await captureStore.DidNotReceiveWithAnyArgs().CaptureAsync(default!, default!, Arg.Any<CancellationToken>());
+        await chatNotifier.DidNotReceiveWithAnyArgs().SendAsync(default, default!, Arg.Any<CancellationToken>());
+        logger.Entries.Should().NotContain(e => e.EventId.Id == 6002);
     }
 
     [Fact]

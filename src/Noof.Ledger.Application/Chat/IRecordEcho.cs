@@ -18,6 +18,11 @@ public interface IRecordEcho
     // outcomes ExtractReceiptWorker itself reports (Task 5 owns the final categorised echo).
     string ReadingReceipt { get; }
     string OnlyPhotosSupported { get; }
+
+    // A message of a kind the bot cannot read at all (a sticker, video, video note, audio,
+    // animation, location, contact, ...) - distinct from OnlyPhotosSupported, which answers a
+    // document the bot DID recognise but whose MIME type it cannot decode.
+    string UnsupportedMessageType { get; }
     EchoMessage NotAFiscalReceiptLink { get; }
     EchoMessage ReceiptFetchUnreachableLinkOnly { get; }
     EchoMessage ReceiptReadFailure { get; }

@@ -73,7 +73,11 @@ internal sealed class TelegramUpdateRouter(
         }
 
         if (message.Text is not { Length: > 0 } text)
+        {
+            logger.LogUnsupportedMessageType(message.Type);
+            await chatNotifier.SendAsync(message.Chat.Id, recordEcho.UnsupportedMessageType, cancellationToken);
             return;
+        }
 
         if (message.ReplyToMessage is { } repliedTo
             && await correctionHandler.TryHandleReplyAsync(message, repliedTo, text, cancellationToken))
@@ -141,6 +145,7 @@ internal sealed class TelegramUpdateRouter(
     {
         if (document.MimeType is not { } mimeType || !SupportedImageMimeTypes.Contains(mimeType))
         {
+            logger.LogUnsupportedMessageType(message.Type);
             await chatNotifier.SendAsync(message.Chat.Id, recordEcho.OnlyPhotosSupported, cancellationToken);
             return;
         }
