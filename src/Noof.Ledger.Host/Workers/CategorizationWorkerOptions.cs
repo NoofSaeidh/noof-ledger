@@ -43,7 +43,8 @@ internal sealed class CategorizationWorkerOptions
 
     // The currency whose default wallet takes a record when neither the model nor the spending's own
     // currency picks one (M3). A line that states no currency takes its wallet's currency, not this. A
-    // single hard default for now; see docs/BACKLOG.md for the deferred bot command that would set it.
+    // single hard default for now; see docs/backlog/choosing-default-currency-from-telegram.md for
+    // the deferred bot command that would set it.
     public string DefaultCurrency { get; init; } = "RSD";
 
     public TimeSpan ComputeBackoff(int attemptCount)

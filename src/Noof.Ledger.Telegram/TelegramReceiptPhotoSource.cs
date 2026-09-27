@@ -14,7 +14,7 @@ internal sealed class TelegramReceiptPhotoSource(TelegramClientHandle clientHand
     // FileSize cannot be used to force an unbounded MemoryStream. Both checks map to the same
     // ModelCallException(Terminal, ...) - retrying either would only re-download the same oversized
     // file for no different outcome (TelegramVoiceFileSource has no such check: it downloads
-    // unbounded into MemoryStream today - docs/BACKLOG.md).
+    // unbounded into MemoryStream today - docs/backlog/deferred-from-phase-6-receipts.md).
     const long MaxBytes = 10 * 1024 * 1024;
 
     public async Task<ReceiptPhoto> DownloadAsync(string fileId, CancellationToken cancellationToken)

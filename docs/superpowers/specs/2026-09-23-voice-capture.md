@@ -125,7 +125,7 @@ operator presses Test. The key never appears in a log, an exception message or a
   those models out until the design changes.
 - `ops/RUNBOOK.md`: getting a Groq key, entering it, turning on zero data retention.
 - `CLAUDE.md` status block and `README.md`.
-- `docs/BACKLOG.md`: prompt/keyword hints for the transcriber (Phase 11); storing audio for a
+- `docs/backlog/`: prompt/keyword hints for the transcriber (Phase 11); storing audio for a
   re-transcription corpus, if the operator ever wants one.
 
 ## Out of scope
