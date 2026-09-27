@@ -32,7 +32,7 @@ internal sealed class EfWalletDirectory(LedgerDbContext db) : IWalletDirectory
             return null;
 
         return await db.Wallets.AsNoTracking()
-            .Where(wallet => wallet.DefaultForPayment == domainMethod)
+            .Where(wallet => wallet.DefaultForPayment == domainMethod && !wallet.Archived)
             .Select(wallet => (Guid?)wallet.Id)
             .SingleOrDefaultAsync(cancellationToken);
     }

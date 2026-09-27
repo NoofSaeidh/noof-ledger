@@ -56,6 +56,20 @@ public class WalletsPageSourceTests
     }
 
     [Fact]
+    public void Does_not_offer_a_payment_default_control_on_an_archived_row()
+    {
+        // An archived wallet's payment default is cleared on archive and refused if set again
+        // (EfWalletAdmin.SetPaymentDefaultAsync) - the control it would silently no-op through
+        // should not be offered, the same way the currency-default button is not offered.
+        var source = SourceText();
+        var paymentDefaultRow = source.IndexOf("wallet-payment-default-", StringComparison.Ordinal);
+        var guard = source.LastIndexOf("@if (!wallet.Archived)", paymentDefaultRow, StringComparison.Ordinal);
+
+        paymentDefaultRow.Should().BeGreaterThan(0);
+        guard.Should().BeGreaterThan(0, "the payment-default control should be inside an archived guard");
+    }
+
+    [Fact]
     public void Parses_numbers_and_dates_against_invariant_culture()
     {
         // MudNumericField and a MudTextField typed DateOnly? parse user input against the server's

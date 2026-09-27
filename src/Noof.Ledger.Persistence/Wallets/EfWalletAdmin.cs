@@ -123,12 +123,17 @@ internal sealed class EfWalletAdmin(LedgerDbContext db, TimeProvider timeProvide
 
         await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
 
-        var exists = await WalletById(walletId).AnyAsync(cancellationToken);
-        if (!exists)
-            throw Unknown(walletId);
+        var wallet = await WalletById(walletId).AsNoTracking()
+            .Select(w => new { w.Archived })
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw Unknown(walletId);
 
         if (domainMethod is not null)
         {
+            if (wallet.Archived)
+                throw new InvalidOperationException(
+                    $"Wallet {walletId} is archived; an archived wallet cannot be the payment default.");
+
             // Clear, then set - the same reasoning as MakeDefaultForCurrencyAsync: the unique index
             // is checked row by row, so writing the new default before the old one is cleared would
             // violate it.
@@ -145,10 +150,13 @@ internal sealed class EfWalletAdmin(LedgerDbContext db, TimeProvider timeProvide
 
     public async Task ArchiveAsync(Guid walletId, CancellationToken cancellationToken)
     {
-        // An archived wallet is hidden from capture, so it cannot stay the default capture resolves to.
+        // An archived wallet is hidden from capture, so it cannot stay the currency or payment default
+        // capture resolves to.
         RequireFound(walletId, await WalletById(walletId)
             .ExecuteUpdateAsync(
-                set => set.SetProperty(w => w.Archived, true).SetProperty(w => w.IsDefaultForCurrency, false),
+                set => set.SetProperty(w => w.Archived, true)
+                    .SetProperty(w => w.IsDefaultForCurrency, false)
+                    .SetProperty(w => w.DefaultForPayment, (WalletPaymentDefault?)null),
                 cancellationToken));
     }
 

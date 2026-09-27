@@ -249,6 +249,20 @@ public class EfWalletAdminTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task SetPaymentDefaultAsync_refuses_an_archived_wallet()
+    {
+        await using var db = await MigratedAsync();
+        var admin = Admin(db);
+        var walletId = await admin.CreateAsync(Raiffeisen(), TestContext.Current.CancellationToken);
+        await admin.ArchiveAsync(walletId, TestContext.Current.CancellationToken);
+
+        var act = () => admin.SetPaymentDefaultAsync(walletId, PaymentMethod.Card, TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        (await ReadAsync(db, walletId)).DefaultForPayment.Should().BeNull();
+    }
+
+    [Fact]
     public async Task ArchiveAsync_hides_the_wallet_gives_up_its_default_and_keeps_its_history()
     {
         await using var db = await MigratedAsync();
@@ -262,6 +276,20 @@ public class EfWalletAdminTests(PostgresFixture fixture)
         wallet.IsDefaultForCurrency.Should().BeFalse();
         (await db.BalanceChecks.AsNoTracking().CountAsync(c => c.WalletId == walletId, TestContext.Current.CancellationToken))
             .Should().Be(1, "archiving hides a wallet, it does not erase what happened in it");
+    }
+
+    [Fact]
+    public async Task ArchiveAsync_clears_the_wallets_payment_default_too()
+    {
+        await using var db = await MigratedAsync();
+        var admin = Admin(db);
+        var walletId = await admin.CreateAsync(Raiffeisen(), TestContext.Current.CancellationToken);
+        await admin.SetPaymentDefaultAsync(walletId, PaymentMethod.Card, TestContext.Current.CancellationToken);
+
+        await admin.ArchiveAsync(walletId, TestContext.Current.CancellationToken);
+
+        (await ReadAsync(db, walletId)).DefaultForPayment.Should().BeNull(
+            "an archived wallet cannot stay the payment default receipt categorization resolves to");
     }
 
     [Fact]

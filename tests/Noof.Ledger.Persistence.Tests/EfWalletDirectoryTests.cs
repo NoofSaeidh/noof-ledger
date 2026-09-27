@@ -68,6 +68,24 @@ public class EfWalletDirectoryTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task DefaultForPaymentAsync_ignores_an_archived_wallet()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var archivedCardWallet = NewWallet("Closed Card Wallet", CurrencyCode.Rsd, archived: true);
+        archivedCardWallet.DefaultForPayment = WalletPaymentDefault.Card;
+        db.Wallets.Add(archivedCardWallet);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var walletId = await new EfWalletDirectory(db)
+            .DefaultForPaymentAsync(PaymentMethod.Card, TestContext.Current.CancellationToken);
+
+        walletId.Should().BeNull(
+            "an archived wallet is hidden from capture; receipt categorization must fall through to the default wallet (R-3)");
+    }
+
+    [Fact]
     public async Task DefaultForPaymentAsync_returns_null_when_no_wallet_is_marked_default_for_cash()
     {
         await using var db = await fixture.CreateContextAsync();
