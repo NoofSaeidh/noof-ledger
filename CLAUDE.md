@@ -49,7 +49,7 @@ reasoning, never for small tasks. `low` for mechanical work.
     directory changes on update, never hard-code it.
   - Run in the foreground with a 600000 ms timeout. Findings are judged, not obeyed: fix what's
     confirmed, reply in the PR description to what's rejected and why.
-  - Codex refuses on usage limit → don't wait for the window; fall back to a sonnet review and say so
+  - Codex refuses on usage limit → don't wait for the window; fall back to an opus review and say so
     in the PR description.
 - **Fable 5.1 runs twice per phase** *(operator's decision, 2026-09-28)* — never per PR, never per
   fix round. Models in one family share blind spots; a different family is the cheapest independence
