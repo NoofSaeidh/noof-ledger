@@ -60,10 +60,12 @@ public interface IReceiptStore
 
     // True for a vision receipt that has never had a CategorizeReceipt job - independent of the
     // transaction's own current status, so it reads the same right after Cancel (Captured -> Cancelled,
-    // still no job) as it does before either button is pressed. RecordActionHandler uses this to keep
-    // showing the confirmation prompt through Cancel/Restore instead of falling back to the generic,
-    // line-item-less rendering (2026-09-27); ExtractReceiptWorker's own C-1 replay uses it in place of
-    // recomputing the mismatch arithmetic, which could not tell a malformed-PIB-only pause apart from
-    // one already confirmed.
+    // still no job) as it does before either button is pressed. RecordActionHandler uses this both to
+    // keep showing the confirmation prompt through Cancel/Restore instead of falling back to the
+    // generic, line-item-less rendering, and to guard RecordAnyway itself against a stale press
+    // (2026-09-27); EfTransactionTrace reads the same value for the trace page, so the two views cannot
+    // drift; ExtractReceiptWorker's own C-1 replay uses it in place of recomputing the mismatch
+    // arithmetic, which could not tell a malformed-PIB-only pause apart from one already confirmed
+    // (docs/OPEN-QUESTIONS.md P6-2).
     Task<bool> IsAwaitingConfirmationAsync(Guid transactionId, CancellationToken cancellationToken);
 }

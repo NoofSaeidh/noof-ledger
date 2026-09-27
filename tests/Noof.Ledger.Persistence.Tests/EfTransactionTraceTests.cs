@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Diagnostics;
+using Noof.Ledger.Persistence.Receipts;
 using Noof.Ledger.Persistence.Revisions;
 
 namespace Noof.Ledger.Persistence.Tests;
@@ -11,6 +12,8 @@ namespace Noof.Ledger.Persistence.Tests;
 public class EfTransactionTraceTests(PostgresFixture fixture)
 {
     static readonly Guid TransactionId = new("00000000-0000-0000-0003-000000000001");
+
+    static EfTransactionTrace Trace(LedgerDbContext db) => new(db, new EfReceiptStore(db, TimeProvider.System));
 
     static async Task SeedTransactionAsync(LedgerDbContext db) =>
         await SeedTransactionAsync(db, TransactionId);
@@ -88,7 +91,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
             StageEvent(2, t0.AddSeconds(1), TransactionStages.Persisted, TransactionStages.PersistedEventId, TransactionId));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+        var trace = await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
 
         trace.Exists.Should().BeTrue();
         trace.Events.Select(e => e.Stage).Should().Equal(
@@ -108,7 +111,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
             NonStageEvent(2, t0.AddSeconds(1), TransactionId));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+        var trace = await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
 
         trace.Events.Should().ContainSingle().Which.Stage.Should().Be(TransactionStages.Received);
     }
@@ -133,7 +136,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
         });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+        var trace = await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
 
         trace.Exists.Should().BeTrue();
         trace.Events.Should().BeEmpty();
@@ -161,7 +164,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
             });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+        var trace = await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
 
         trace.History.Select(h => h.Details).Should().Equal("Captured → Completed", "нет, 1500");
         trace.History.Select(h => h.ChangeKind).Should().Equal(nameof(RevisionKind.Initial), nameof(RevisionKind.Correction));
@@ -177,7 +180,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
         db.AppLogs.Add(StageFailedEvent(1, t0, TransactionStages.Categorized, TransactionId));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+        var trace = await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
 
         var stageFailed = trace.Events.Should().ContainSingle().Subject;
         stageFailed.Stage.Should().Be(TransactionStages.StageFailed);
@@ -194,7 +197,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
         db.AppLogs.Add(StageEvent(1, t0, TransactionStages.Received, TransactionStages.ReceivedEventId, TransactionId));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+        var trace = await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
 
         trace.Events.Should().ContainSingle().Which.FailedStage.Should().BeNull();
     }
@@ -206,7 +209,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
         await SeedTransactionAsync(db);
 
-        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+        var trace = await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
 
         trace.Receipt.Should().BeNull();
     }
@@ -266,7 +269,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
         });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+        var trace = await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
 
         trace.Receipt.Should().NotBeNull();
         trace.Receipt!.Source.Should().Be(ReceiptSource.Vision);
@@ -337,7 +340,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
         });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+        var trace = await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
 
         trace.Receipt.Should().NotBeNull();
         trace.Receipt!.AwaitingConfirmation.Should().BeTrue();
@@ -400,7 +403,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
         });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+        var trace = await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
 
         trace.Receipt!.AwaitingConfirmation.Should().BeFalse();
         trace.Receipt.Problems.Should().BeEmpty();
@@ -412,7 +415,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
         await using var db = await fixture.CreateContextAsync();
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
 
-        var trace = await new EfTransactionTrace(db).GetAsync(Guid.NewGuid(), TestContext.Current.CancellationToken);
+        var trace = await Trace(db).GetAsync(Guid.NewGuid(), TestContext.Current.CancellationToken);
 
         trace.Exists.Should().BeFalse();
         trace.Events.Should().BeEmpty();
@@ -427,7 +430,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
         await SeedTransactionAsync(db);
 
-        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+        var trace = await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
 
         trace.Summary.Should().NotBeNull();
         trace.Summary!.RawText.Should().Be("кофе 250");
@@ -462,7 +465,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
         });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+        var trace = await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
 
         trace.Summary.Should().NotBeNull();
         trace.Summary!.WalletName.Should().BeNull();
@@ -489,7 +492,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
         });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+        var trace = await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
 
         trace.Summary!.LineItems.Should().ContainSingle().Which.Should().Be(
             new TraceLineItem("Coffee", new Money(250m, CurrencyCode.Rsd), "Groceries"));
@@ -502,7 +505,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
         await SeedTransactionAsync(db);
 
-        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+        var trace = await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
 
         trace.Summary!.LineItems.Should().BeEmpty();
     }
@@ -521,7 +524,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
         db.AppLogs.Add(StageFailedEvent(1, t0, TransactionStages.Categorized, TransactionId, exceptionText));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+        var trace = await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
 
         trace.Events.Should().ContainSingle().Which.Reason.Should().Be("tools.1.custom: Invalid schema");
     }
@@ -536,7 +539,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
         db.AppLogs.Add(StageEvent(1, t0, TransactionStages.Received, TransactionStages.ReceivedEventId, TransactionId));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var trace = await new EfTransactionTrace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+        var trace = await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
 
         trace.Events.Should().ContainSingle().Which.Reason.Should().BeNull();
     }

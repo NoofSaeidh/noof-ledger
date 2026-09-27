@@ -5,11 +5,14 @@ namespace Noof.Ledger.Application.Diagnostics;
 public sealed record ReceiptTraceLine(
     int Ordinal, string Name, decimal Quantity, string? Unit, decimal UnitPrice, decimal Total, string? CategoryNameEn);
 
-// AwaitingConfirmation (2026-09-27) is derived, never stored: a vision receipt, still Captured, with
-// no CategorizeReceipt job yet - the operator's own "Record anyway" has not been pressed.  Problems is
+// AwaitingConfirmation (2026-09-27) is derived, never stored: a vision receipt with no CategorizeReceipt
+// job yet - the operator's own "Record anyway" has not been pressed - the same, status-independent
+// IReceiptStore.IsAwaitingConfirmationAsync RecordActionHandler's Cancel/Restore also reads, so a
+// Cancelled-but-still-unconfirmed receipt shows the same way here as it does in the bot. Problems is
 // recomputed from the stored lines and total (a sum-vs-total mismatch); a malformed printed tax id is
 // never recoverable here once ChatReceiptVision has already dropped it to null, so that reason - when
-// it was the only one - shows only as AwaitingConfirmation with an empty Problems list.
+// it was the only one - shows only as AwaitingConfirmation with an empty Problems list
+// (docs/OPEN-QUESTIONS.md P6-2).
 public sealed record ReceiptTraceView(
     ReceiptSource Source,
     string? SellerName,
