@@ -1165,3 +1165,18 @@ the wiring level, is future work if the confirmation rate turns out to be high i
 mirrored origins (`TopRight`, `BottomLeft`, `LeftTop`, `RightBottom`) — a horizontally- or
 vertically-flipped scan, not a phone photo — are left untransformed. Not observed in production; add
 `SKCanvas.Scale` flips for these if a flipped receipt photo ever surfaces.
+
+**A fiscal link in a photo's caption, and several links in one message** (operator, 2026-09-27;
+deferred). Today a photo whose caption carries a fiscal link is captured by its photo alone: the link
+is ignored, and `CapturedReceipt`/`ck_transactions_capture_has_content` allow exactly one source
+(`AddReceiptCaptureSourceXor`). Real fiscal QRs did not decode from any of the operator's photos
+(`docs/OPEN-QUESTIONS.md`, Phase 6 QR entry), so that photo nearly always goes through the vision
+fallback while an exact link was right there.
+- **Operator's preference: the link wins when present.** Capture it as a link, since that gives exact
+  Tax Administration data. Still to decide when building it: keep the photo's file id as a
+  vision-fallback source for when the site is down (that relaxes the XOR constraint and needs a new
+  migration), or drop the photo (then a down site gives the link capture's usual "send a photo instead"
+  reply).
+- **Several links in one message or caption** are probably several receipts and should become separate
+  records, one per link, rather than only the first. Today `IFiscalVerificationUrl.TryFind` takes the
+  first link and `StripUrl` removes all of them from the prompt text.
