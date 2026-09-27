@@ -168,11 +168,14 @@ public class RecordActionHandlerTests
             Arg.Any<CancellationToken>());
     }
 
-    // 2026-09-27 finding: a stale RecordAnyway press delivered after Cancel used to enqueue
-    // CategorizeReceipt unconditionally - EfCategorizationStore.ApplyAsync keeps a Cancelled record
-    // Cancelled but still writes its line items, so the next Restore landed on a Captured record that
-    // already had lines and no job: ComposeReceipt's dead-end "Reading the receipt…" with no buttons.
-    // The guard must check the record's own current status, not just whether the button was ever valid.
+    // 2026-09-27 finding: a stale RecordAnyway press delivered after Cancel used to be filtered out by
+    // a status read the handler did itself before enqueueing, which was not atomic with a concurrent
+    // Cancel - EfCategorizationStore.ApplyAsync keeps a Cancelled record Cancelled but still writes its
+    // line items, so the next Restore landed on a Captured record that already had lines and no job:
+    // ComposeReceipt's dead-end "Reading the receipt…" with no buttons. The atomic guard now lives
+    // inside EnqueueCategorizationAsync itself (2026-09-27, item 2): the handler always calls it and
+    // treats a false result - the store's own row-locked status check failing - the same way it always
+    // treated "already queued".
     [Fact]
     public async Task A_stale_record_anyway_press_after_cancel_does_not_enqueue_and_re_renders_the_cancelled_echo()
     {
@@ -180,11 +183,12 @@ public class RecordActionHandlerTests
         var receipt = UnconfirmedVisionReceipt();
         harness.ReceiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(receipt);
         harness.ReceiptStore.IsAwaitingConfirmationAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(true);
+        harness.ReceiptStore.EnqueueCategorizationAsync(TransactionId, 42, Arg.Any<CancellationToken>()).Returns(false);
         var query = RecordAnyway();
 
         await harness.Handler.HandleAsync(query, query.Message!, TestContext.Current.CancellationToken);
 
-        await harness.ReceiptStore.DidNotReceiveWithAnyArgs().EnqueueCategorizationAsync(default, default, Arg.Any<CancellationToken>());
+        await harness.ReceiptStore.Received(1).EnqueueCategorizationAsync(TransactionId, 42, Arg.Any<CancellationToken>());
         var expectedRecord = new CategorizationSubject(TransactionId, "", 555L, 42, "Cash", TransactionStatus.Cancelled,
             new DateOnly(2026, 9, 27), new DateOnly(2026, 9, 27), Array.Empty<RecordedLine>(), CaptureKind.Photo);
         var expectedText = Echo.ComposeReceiptCancelledUnconfirmed(expectedRecord, receipt).Text;
@@ -200,11 +204,12 @@ public class RecordActionHandlerTests
         var receipt = UnconfirmedVisionReceipt();
         harness.ReceiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(receipt);
         harness.ReceiptStore.IsAwaitingConfirmationAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(false);
+        harness.ReceiptStore.EnqueueCategorizationAsync(TransactionId, 42, Arg.Any<CancellationToken>()).Returns(false);
         var query = RecordAnyway();
 
         await harness.Handler.HandleAsync(query, query.Message!, TestContext.Current.CancellationToken);
 
-        await harness.ReceiptStore.DidNotReceiveWithAnyArgs().EnqueueCategorizationAsync(default, default, Arg.Any<CancellationToken>());
+        await harness.ReceiptStore.Received(1).EnqueueCategorizationAsync(TransactionId, 42, Arg.Any<CancellationToken>());
         var expectedRecord = new CategorizationSubject(TransactionId, "", 555L, 42, "Cash", TransactionStatus.Completed,
             new DateOnly(2026, 9, 27), new DateOnly(2026, 9, 27), Array.Empty<RecordedLine>(), CaptureKind.Photo);
         var expected = Echo.ComposeReceipt(expectedRecord, receipt);

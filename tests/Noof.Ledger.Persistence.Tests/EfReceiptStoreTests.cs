@@ -332,7 +332,8 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
         db.ChangeTracker.Clear();
         var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
         await store.SaveExtractedAsync(
-            transaction.Id, NewExtractedReceipt(), "photo-file-1", enqueueCategorization: false, TestContext.Current.CancellationToken);
+            transaction.Id, NewExtractedReceipt() with { Source = ReceiptSource.Vision }, "photo-file-1",
+            enqueueCategorization: false, TestContext.Current.CancellationToken);
 
         var queued = await store.EnqueueCategorizationAsync(transaction.Id, 999, TestContext.Current.CancellationToken);
 
@@ -354,7 +355,8 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
         db.ChangeTracker.Clear();
         var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
         await store.SaveExtractedAsync(
-            transaction.Id, NewExtractedReceipt(), "photo-file-1", enqueueCategorization: false, TestContext.Current.CancellationToken);
+            transaction.Id, NewExtractedReceipt() with { Source = ReceiptSource.Vision }, "photo-file-1",
+            enqueueCategorization: false, TestContext.Current.CancellationToken);
 
         var first = await store.EnqueueCategorizationAsync(transaction.Id, 999, TestContext.Current.CancellationToken);
         var second = await store.EnqueueCategorizationAsync(transaction.Id, 999, TestContext.Current.CancellationToken);
@@ -362,6 +364,35 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
         first.Should().BeTrue();
         second.Should().BeFalse();
         (await db.CategorizationJobs.CountAsync(j => j.TransactionId == transaction.Id, TestContext.Current.CancellationToken)).Should().Be(1);
+    }
+
+    // The status/awaiting-confirmation check runs inside EnqueueCategorizationAsync itself, under the
+    // same row lock the insert runs under (2026-09-27) - not as a separate read the caller does first,
+    // which a concurrent Cancel could land between. This proves the sequential case: once Cancel has
+    // already committed, the guard must still catch it and insert nothing.
+    [Fact]
+    public async Task EnqueueCategorizationAsync_returns_false_and_inserts_nothing_once_the_transaction_is_cancelled()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = NewPhotoTransaction();
+        db.Transactions.Add(transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+        await store.SaveExtractedAsync(
+            transaction.Id, NewExtractedReceipt() with { Source = ReceiptSource.Vision }, "photo-file-1",
+            enqueueCategorization: false, TestContext.Current.CancellationToken);
+        var toCancel = await db.Transactions.SingleAsync(t => t.Id == transaction.Id, TestContext.Current.CancellationToken);
+        toCancel.Status = TransactionStatus.Cancelled;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var queued = await store.EnqueueCategorizationAsync(transaction.Id, 999, TestContext.Current.CancellationToken);
+
+        queued.Should().BeFalse();
+        (await db.CategorizationJobs.CountAsync(j => j.TransactionId == transaction.Id, TestContext.Current.CancellationToken))
+            .Should().Be(0, "a Cancelled transaction must never get a CategorizeReceipt job queued for it");
     }
 
     [Fact]

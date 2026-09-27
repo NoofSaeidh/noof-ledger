@@ -55,7 +55,11 @@ public interface IReceiptStore
     // CategorizeReceipt. sourceMessageId is the echo's own Telegram message id, so the same unique
     // index (transaction_id, source_message_id, kind) that already makes a redelivered correction a
     // no-op makes a second press of the same button a no-op here too - false, not an exception, is
-    // "already queued".
+    // "already queued". The transaction must still be Captured and still awaiting confirmation at
+    // insert time, checked under the same row lock the insert runs under (2026-09-27): a Cancel that
+    // lands between a caller's own status read and this call must never still get a job queued -
+    // false covers that case too, and the caller treats it exactly like "already queued": nothing to
+    // do, re-render whatever the record's current state actually is.
     Task<bool> EnqueueCategorizationAsync(Guid transactionId, int sourceMessageId, CancellationToken cancellationToken);
 
     // True for a vision receipt that has never had a CategorizeReceipt job - independent of the

@@ -153,8 +153,30 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
             .Select(t => t.VerificationUrl)
             .SingleOrDefaultAsync(cancellationToken);
 
+    // Row lock, same pattern and reason as EfRecordEditor.LockAsync / EfCategorizationStore.ApplyAsync:
+    // without it, the status/awaiting-confirmation reads that decide whether to insert are not atomic
+    // with a concurrent Cancel. A Cancel that commits between an unlocked read and this insert would
+    // otherwise still get a CategorizeReceipt job queued for it - the receipt worker can then apply
+    // line items while the transaction itself stays Cancelled. FOR UPDATE makes a concurrent Cancel
+    // (which takes the same lock in EfRecordEditor) block until this transaction commits or rolls
+    // back, so the status this reads is never stale by the time the insert happens.
     public async Task<bool> EnqueueCategorizationAsync(Guid transactionId, int sourceMessageId, CancellationToken cancellationToken)
     {
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        await db.Database.SqlQueryRaw<Guid>(
+            "SELECT id FROM transactions WHERE id = @transactionId FOR UPDATE",
+            new NpgsqlParameter("transactionId", transactionId))
+            .ToListAsync(cancellationToken);
+
+        var status = await db.Transactions.AsNoTracking()
+            .Where(t => t.Id == transactionId)
+            .Select(t => (TransactionStatus?)t.Status)
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (status != TransactionStatus.Captured || !await IsAwaitingConfirmationAsync(transactionId, cancellationToken))
+            return false;
+
         var now = timeProvider.GetUtcNow();
         db.CategorizationJobs.Add(new CategorizationJob
         {
@@ -172,13 +194,15 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
         try
         {
             await db.SaveChangesAsync(cancellationToken);
-            return true;
         }
         catch (DbUpdateException ex) when (IsUniqueViolation(ex, CategorizationJobConfiguration.SourceMessageIndex))
         {
             db.ChangeTracker.Clear();
             return false;
         }
+
+        await tx.CommitAsync(cancellationToken);
+        return true;
     }
 
     public async Task<bool> IsAwaitingConfirmationAsync(Guid transactionId, CancellationToken cancellationToken)
