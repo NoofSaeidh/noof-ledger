@@ -47,7 +47,7 @@ model call, works offline. The read model excludes cancelled rows. The button be
 which restores the previous status.
 
 > **Note, operator, 2026-09-23.** The labels above are now **Cancel** / **Edit** / **Restore**, and
-> the bot writes English only (multi-language is deferred — `docs/BACKLOG.md`). The operator may
+> the bot writes English only (multi-language is deferred — `docs/backlog/`). The operator may
 > still write to the bot in any language; only the bot's own output changed. See
 > `docs/OPEN-QUESTIONS.md` P2-5.
 
@@ -78,8 +78,8 @@ In: D1–D8, text messages only, all tests against a faked model and the test da
 Out, each with a home:
 - **Voice** — the next phase (see the phase table below). Needs a speech-to-text decision (no STT at
   Anthropic; a hosted service or local whisper — a price and privacy question).
-- **Editing in the dashboard** — `docs/BACKLOG.md`.
-- **Rollback to an earlier revision** — `docs/BACKLOG.md`.
+- **Editing in the dashboard** — `docs/backlog/`.
+- **Rollback to an earlier revision** — `docs/backlog/`.
 - **Prompt tuning against the live model** — the final phase, each live run only with the operator's
   explicit permission.
 

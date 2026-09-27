@@ -203,8 +203,9 @@ public sealed class DatabaseLogLevelDbTests
     // Warning flush barrier, zero app_log rows had a source starting with "Npgsql" - so Npgsql does
     // not log through the app's ILoggerFactory here, and no Serilog:MinimumLevel:Override:Npgsql
     // entry is needed. A test asserting "0 rows" would never have gone red, which CLAUDE.md's
-    // Testing section calls out by name as enforcing nothing; recorded in docs/BACKLOG.md instead
-    // (V12) so a future EF/Npgsql upgrade that changes this is a decision, not a silent flood.
+    // Testing section calls out by name as enforcing nothing; recorded in
+    // docs/backlog/loose-ends-phase-5-observability.md instead (V12) so a future EF/Npgsql upgrade
+    // that changes this is a decision, not a silent flood.
 
     static WebApplicationFactory<Program> BuildFactory(string connectionString) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>

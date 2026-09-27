@@ -27,7 +27,7 @@ change leaves a trace in git:
 | S-3 | Screenshots are committed under `docs/screenshots/` and shown in `README.md`; git history is the before/after. |
 | S-4 | A change to anything the operator sees updates the mock data if needed, regenerates the screenshots, commits the changed images with the change, and sends them to the operator. |
 
-Dropped from the first draft — `docs/BACKLOG.md` records them so they are not re-proposed as new: a
+Dropped from the first draft — `docs/backlog/demo-cut-from-first-design.md` records them so they are not re-proposed as new: a
 live fake Telegram chat driving the real bot, a rule-based fake model, seeding by replaying a
 conversation through the app, labelled before/after screenshot runs.
 

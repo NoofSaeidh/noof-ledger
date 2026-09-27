@@ -12,7 +12,7 @@ paths:
 ## CLAUDE.md §4 — Bot text *(settled 2026-09-23)*
 
 - The bot writes English only, including the category name shown in the echo (`Category.NameEn`).
-  Multi-language is deferred — `docs/BACKLOG.md`. The operator may still write to the bot in any
+  Multi-language is deferred — `docs/backlog/multi-language-bot.md`. The operator may still write to the bot in any
   language; only the bot's own output is English.
 - Identifiers and comments use English action names — `Cancel`/`Edit`/`Restore` — never the Russian
   labels the UI used to show.

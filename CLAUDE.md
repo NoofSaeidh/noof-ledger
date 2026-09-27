@@ -6,7 +6,7 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
 > Cross-currency conversion, transfers, exchange-office slips and editing receipt lines remain future
 > phases. Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
 >
-> Deferred **decisions** live in `docs/OPEN-QUESTIONS.md`; deferred **work** lives in `docs/BACKLOG.md`. Check both before proposing something as missing.
+> Deferred **decisions** live in `docs/OPEN-QUESTIONS.md`; deferred **work** lives in `docs/backlog/`. Check both before proposing something as missing.
 >
 > **`noof_ledger` holds the operator's real credentials now.** Never run tests, experiments or manual checks against it, or call the live model, without an explicit request. Tests use the `noof_ledger_test_template` clones only.
 
@@ -24,13 +24,37 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
 
 **Effort levels.** Do not use high or xhigh effort for small tasks. `low` for mechanical work, `medium` for ordinary implementation, `high`/`xhigh` reserved for the architecture- and correctness-critical reasoning that justifies opus in the first place.
 
-**The final review of a completed implementation runs on Fable 5.1** (`model: "fable"`), not on the family that wrote the code. Models in one family share blind spots: a reviewer drawn from the same family tends to miss exactly what the implementer missed, and agreement between them is weak evidence. A different family is the cheapest independence available. This applies to the review that closes a phase or a plan — per-task reviews stay on sonnet.
+**Review policy — three tiers, three cadences, don't substitute one for another:**
+- **Per task** (inside a phase or plan): review stays on sonnet, as today. No Codex, no Fable per task.
+- **Per pull request: one Codex review**, a model family different from the implementer, run from the
+  PR branch with the Codex CLI — the plugin's `/codex:review`/`/codex:adversarial-review` slash
+  commands cannot be invoked by an agent. Never enable the plugin's stop-time review gate; it would
+  review on every Stop and burn the quota.
+  - `codex review --base <base-branch> -c model_reasoning_effort="medium"` for a mechanical PR — the
+    CLI rejects a PROMPT combined with `--base`, so this form takes no prompt.
+  - For a PR that makes design choices, use the plugin's companion script instead, which supports
+    both a base branch and a focus prompt: `node <path> adversarial-review --wait --base
+    <base-branch> "<focus>"` (challenge the approach, assumptions, trade-offs, failure modes — not
+    just defects); default to adversarial when unsure. Resolve `<path>` with Glob on
+    `~/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs` — the version
+    directory changes on update, never hard-code it.
+  - Run in the foreground with a 600000 ms timeout. Findings are judged, not obeyed: fix what's
+    confirmed, reply in the PR description to what's rejected and why.
+  - Codex refuses on usage limit → don't wait for the window; fall back to a sonnet review and say so
+    in the PR description.
+- **Fable 5.1 runs once**, closing a phase or a batch of PRs — never per PR, never per fix round.
+  Models in one family share blind spots; a different family is the cheapest independence available.
+- **After fixing GitHub Copilot review comments:** batch every open comment into one fix round,
+  review it with sonnet only, then push — Copilot re-reviews the PR itself. No Codex, no Fable for a
+  Copilot fix round, unless the fix touches money, secrets, a migration or the public surface and the
+  agent judges a stronger review necessary — then say why in the PR.
 
 **Anti-patterns — do not do these:**
 - Running a test suite on opus. That is a haiku task; the model is not what makes tests pass.
 - Using xhigh effort to rename a variable, fix a typo, or add a using directive.
 - Escalating to opus because a task *sounds* important. Blast radius and reversibility decide the tier, not topic gravity.
 - Re-running expensive work that is already cached or already done. Check first.
+- A Fable review per fix round or per Copilot round — this cost ~5 hours on PR #3.
 
 ## 2. Subagent usage
 
@@ -91,8 +115,9 @@ register it into) — named because they are exceptions, not a licence to invent
   `private` unless something outside its type calls it. Tests reach internals through
   `InternalsVisibleTo`, never by widening `src` — and substituting an internal interface needs
   `InternalsVisibleTo("DynamicProxyGenAssembly2")` on the declaring assembly as well, or
-  NSubstitute fails at runtime. `PublicSurfaceTests` holds each assembly's allowlist; widening it
-  is an edit to that file, which is the point.
+  NSubstitute fails at runtime. `PublicSurfaceTests` checks each assembly's allowlist, one file per
+  assembly under `tests/Noof.Ledger.Architecture.Tests/PublicSurface/`; widening it is an edit to
+  that assembly's file, which is the point.
 - **Each assembly registers its own services**, exposing one `AddNoofXxx(this IServiceCollection)`
   the Host calls. `Program.cs` names no implementation type.
 - **Render modes are per-page and stay that way** — moved to `.claude/rules/web-ui.md`, which loads
@@ -185,6 +210,27 @@ the code that builds the echo text.
   `.\run.ps1 screenshots`, commits the changed images in `docs/screenshots/` with the change, and sends
   them to the operator (the command lists them; phone-sized copies are in `artifacts/screenshots/`).
   A new page or bot reply gets a screen or a scene added. Never from `noof_ledger`.
+
+**Pull requests are small** *(operator's decision, 2026-09-28)*
+- One topic per PR — a phase is a series of PRs, not one; the plan cuts it into PR-sized tasks up
+  front and names the PR boundaries.
+- Stop and propose a split (operator decides) past ~500 changed lines excluding generated files
+  (migrations' `.Designer.cs`, the model snapshot, `schema.expected.sql`), or past one of §4's
+  split assemblies per PR (e.g. touching both Persistence and Web).
+- Mechanical moves/renames get their own PR, separate from behaviour changes.
+- Independent PRs branch from `master`; a PR needing another's changes is stacked on it (base = that
+  branch), never merged into it.
+- Shared hot files (backlog entries, per-assembly allowlists) are split across PRs so parallel work
+  doesn't conflict.
+
+**A PR says when it is ready** *(operator's decision, 2026-09-28)*
+- Open every PR as a draft (`gh pr create --draft`) and keep it draft while anything is still in
+  progress (implementation, tests, Codex triage, Copilot rounds).
+- Only when done: `gh pr ready <n>` plus one PR comment starting "Ready to merge" with one line per
+  check (tests run and result, Codex review triaged, Copilot rounds done) and, for a stacked PR,
+  "merge after #N".
+- A PR that needs more work after that goes back to draft (`gh pr ready <n> --undo`). The operator
+  merges only non-draft PRs.
 
 ## 6. Closing a phase *(settled)*
 

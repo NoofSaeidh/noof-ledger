@@ -154,7 +154,7 @@ Log sink check amber.
 - When polling starts and the owner is known, the bot calls `setMyCommands` with `/health` ("System
   health") scoped to `BotCommandScopeChat(ownerChatId)`. No owner → skipped until the next start.
 - While the database is down the bot is silent (the owner check and polling need the database).
-- Proactive alerts in Telegram → `docs/BACKLOG.md`.
+- Proactive alerts in Telegram → `docs/backlog/`.
 
 ## 4. UI
 

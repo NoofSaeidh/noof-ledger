@@ -31,7 +31,7 @@ Stating these prevents a well-meaning implementer from building them and a revie
 
 - **No parser, tokenizer or currency-alias table.** Extraction is the model's job, by user decision. `QuotedAmount` verifies and parses a quote; it does not find one.
 - **No `DeterministicOfflineCategorizer`.** The spec asks for two categoriser implementations from day one, which made sense when extraction was deterministic. With LLM extraction there is nothing to categorise offline; the offline guarantee is durable raw capture plus retry.
-- **No category management UI.** Moved to `docs/BACKLOG.md` by user decision. The schema supports renaming, re-parenting and sub-categories from the first migration — that is the half that is expensive to retrofit. A CRUD page over a schema that already supports the operations costs the same in any later phase.
+- **No category management UI.** Moved to `docs/backlog/` by user decision. The schema supports renaming, re-parenting and sub-categories from the first migration — that is the half that is expensive to retrofit. A CRUD page over a schema that already supports the operations costs the same in any later phase.
 - **No change to the PostgreSQL credential.** Deferred by explicit instruction to a later hardening phase.
 - **No dashboard.** Plan 1B.
 
@@ -765,7 +765,7 @@ public sealed class Category
 }
 ```
 
-> `Slug` is `init`-only; `NameEn`, `NameRu` and `IsActive` are `set`. Renaming a category changes the display names, never the slug - do not add a setter to `Slug` to make renaming "more complete." A category management UI is explicitly out of scope this phase (see `docs/BACKLOG.md`), but the schema must already support renaming and re-parenting without ever touching `Slug`.
+> `Slug` is `init`-only; `NameEn`, `NameRu` and `IsActive` are `set`. Renaming a category changes the display names, never the slug - do not add a setter to `Slug` to make renaming "more complete." A category management UI is explicitly out of scope this phase (see `docs/backlog/`), but the schema must already support renaming and re-parenting without ever touching `Slug`.
 
 - [ ] **Step 3: Create `Merchant.cs`**
 

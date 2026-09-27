@@ -549,7 +549,7 @@ A freshly recreated ledger reads `0 | 0 | 0 | 1 | 20`.
 
 7. **Check a message with no currency.** Send `обед 700`. It must be recorded as
    RSD, the single hard default. Choosing it from Telegram is deferred; see
-   `docs/BACKLOG.md`.
+   `docs/backlog/choosing-default-currency-from-telegram.md`.
 
 8. **The dashboard shows it.** Reload `/`. Both spends appear with this month's
    totals per currency, never summed across currencies.
@@ -578,6 +578,6 @@ second, and `TRUNCATE merchant_aliases` would succeed.
 - **Nothing at all after the machine was off** — Telegram discards unfetched
   updates after 24 hours and a bot cannot read history. That is a property of the
   platform, not a bug here; four researched options are costed in
-  `docs/BACKLOG.md`, none built, by decision.
+  `docs/backlog/` (starting at `wake-the-machine-on-a-schedule.md`), none built, by decision.
 - **Leftover `noof_test_*` databases after a killed test run** —
   `pwsh -File ops/clean-test-databases.ps1`.
