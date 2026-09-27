@@ -249,6 +249,15 @@ the code that builds the echo text.
 - Shared hot files (backlog entries, per-assembly allowlists) are split across PRs so parallel work
   doesn't conflict.
 
+**A PR says when it is ready** *(operator's decision, 2026-09-28)*
+- Open every PR as a draft (`gh pr create --draft`) and keep it draft while anything is still in
+  progress (implementation, tests, Codex triage, Copilot rounds).
+- Only when done: `gh pr ready <n>` plus one PR comment starting "Ready to merge" with one line per
+  check (tests run and result, Codex review triaged, Copilot rounds done) and, for a stacked PR,
+  "merge after #N".
+- A PR that needs more work after that goes back to draft (`gh pr ready <n> --undo`). The operator
+  merges only non-draft PRs.
+
 ## 6. Closing a phase *(settled)*
 
 When closing a phase, read and follow `docs/CLOSING-A-PHASE.md` *(settled)*.
