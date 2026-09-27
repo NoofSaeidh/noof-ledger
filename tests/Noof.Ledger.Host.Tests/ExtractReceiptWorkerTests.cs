@@ -868,6 +868,23 @@ public class ExtractReceiptWorkerTests
     }
 
     [Fact]
+    public async Task An_oversized_photo_download_fails_the_record_without_retrying()
+    {
+        var harness = Setup(ExtractJob());
+        harness.PhotoSource.DownloadAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new ModelCallException(ModelFailureKind.Terminal, "Receipt photo photo-1 is 11534336 bytes, over the 10485760-byte limit."));
+
+        await TickAsync(harness);
+
+        await harness.Queue.Received(1).FailAsync(JobId, WorkerId, Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await harness.Store.Received(1).MarkFailedAsync(TransactionId, Arg.Any<CancellationToken>());
+        await harness.Queue.DidNotReceiveWithAnyArgs().RetryAsync(default, default!, default, default!, Arg.Any<CancellationToken>());
+        await harness.Vision.DidNotReceiveWithAnyArgs().ReadAsync(default, default!, default, Arg.Any<CancellationToken>());
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text == Echo.ReceiptReadFailure.Text), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task A_missing_transaction_logs_StageFailed_for_Extracted()
     {
         var harness = Setup(ExtractJob());

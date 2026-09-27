@@ -45,11 +45,11 @@ internal sealed class SizeLimitedBuffer(long maxBytes) : Stream
     public override bool CanRead => false;
     public override bool CanSeek => false;
     public override bool CanWrite => true;
-    public override long Length => inner.Length;
+    public override long Length => throw new NotSupportedException();
 
     public override long Position
     {
-        get => inner.Position;
+        get => throw new NotSupportedException();
         set => throw new NotSupportedException();
     }
 

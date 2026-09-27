@@ -1180,3 +1180,11 @@ fallback while an exact link was right there.
 - **Several links in one message or caption** are probably several receipts and should become separate
   records, one per link, rather than only the first. Today `IFiscalVerificationUrl.TryFind` takes the
   first link and `StripUrl` removes all of them from the prompt text.
+
+**`TelegramVoiceFileSource` has no size cap (found during the p6-dlcap fix round, 2026-09-27).**
+`TelegramReceiptPhotoSource` refuses a photo over 10 MB, both from `GetFile`'s reported size and from
+the bytes actually received during download (`SizeLimitedBuffer`), because a Telegram-reported size can
+be missing, stale or simply wrong. The voice path (`GetInfoAndDownloadFile` into an unbounded
+`MemoryStream`) has never had an equivalent check — confirmed absent from the start (`git log -S
+MaxBytes` on it is empty), not a regression. Worth the same guard once a voice note has actually been
+seen large enough to matter; no such case has shown up yet.

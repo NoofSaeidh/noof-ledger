@@ -6,13 +6,15 @@ namespace Noof.Ledger.Telegram;
 
 internal sealed class TelegramReceiptPhotoSource(TelegramClientHandle clientHandle) : IReceiptPhotoSource
 {
-    // Mirrors TelegramVoiceFileSource's reasoning: refuses before spending a download on something
-    // no reasonable receipt photo would ever be. Telegram's own file API caps everything at 20 MB.
-    // Enforced twice against the one constant: FileSize is Telegram's own metadata and the cheap
-    // first gate, but it can be missing, stale or simply wrong, so the copy below counts the bytes
-    // actually received and stops as soon as they pass the same limit (Copilot finding, PR #3) -
-    // it never buffers past the limit, so a lying FileSize cannot be used to force an unbounded
-    // MemoryStream.
+    // Refuses before spending a download on something no reasonable receipt photo would ever be.
+    // Telegram's own file API caps everything at 20 MB. Enforced twice against the one constant:
+    // FileSize is Telegram's own metadata and the cheap first gate, but it can be missing, stale or
+    // simply wrong, so the copy below counts the bytes actually received and stops as soon as they
+    // pass the same limit (Copilot finding, PR #3) - it never buffers past the limit, so a lying
+    // FileSize cannot be used to force an unbounded MemoryStream. Both checks map to the same
+    // ModelCallException(Terminal, ...) - retrying either would only re-download the same oversized
+    // file for no different outcome (TelegramVoiceFileSource has no such check: it downloads
+    // unbounded into MemoryStream today - docs/BACKLOG.md).
     const long MaxBytes = 10 * 1024 * 1024;
 
     public async Task<ReceiptPhoto> DownloadAsync(string fileId, CancellationToken cancellationToken)
@@ -29,21 +31,32 @@ internal sealed class TelegramReceiptPhotoSource(TelegramClientHandle clientHand
         {
             await client.DownloadFile(file, buffer, cancellationToken);
         }
-        catch (StreamSizeLimitExceededException ex)
+        catch (Exception ex) when (FindSizeLimitExceeded(ex) is { } sizeLimitExceeded)
         {
-            // Unlike the metadata pre-check above (cheap to retry: it never starts a download), this
-            // is Terminal rather than Transient - the worker's generic catch would otherwise retry a
-            // download that has already proven itself oversized, re-downloading the same bytes on
-            // every attempt up to the attempt cap for no different outcome.
-            throw new ModelCallException(
-                ModelFailureKind.Terminal, OverLimitMessage(fileId, ex.BytesReceived));
+            // Telegram.Bot's own DownloadFile wraps every exception CopyToAsync throws - including
+            // this one - in its own RequestException(statusCode, innerException), so the exception
+            // that actually reaches here is never StreamSizeLimitExceededException itself; walking
+            // InnerException is the only way to recognise it (verified by decompiling Telegram.Bot
+            // 22.10.3.1, not from its docs).
+            throw OverLimit(fileId, sizeLimitExceeded.BytesReceived);
         }
 
         return new ReceiptPhoto(buffer.ToArray(), MediaTypeFor(file.FilePath));
     }
 
-    static InvalidOperationException OverLimit(string fileId, long size) =>
-        new(OverLimitMessage(fileId, size));
+    static StreamSizeLimitExceededException? FindSizeLimitExceeded(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (current is StreamSizeLimitExceededException sizeLimitExceeded)
+                return sizeLimitExceeded;
+        }
+
+        return null;
+    }
+
+    static ModelCallException OverLimit(string fileId, long size) =>
+        new(ModelFailureKind.Terminal, OverLimitMessage(fileId, size));
 
     static string OverLimitMessage(string fileId, long size) =>
         $"Receipt photo {fileId} is {size} bytes, over the {MaxBytes}-byte limit.";
