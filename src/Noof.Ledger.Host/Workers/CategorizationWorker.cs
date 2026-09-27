@@ -355,9 +355,16 @@ internal sealed class CategorizationWorker(
         return false;
     }
 
-    static CorrectionRequest? CorrectionFor(CategorizationJob job, CategorizationSubject record) =>
-        job is { Kind: JobKind.Correct, Instruction: { } instruction }
-            ? new CorrectionRequest(record.OccurredOn, record.Lines, instruction)
+    // Important finding (Fable 5.1 review round on this branch): a reply to any echo becomes a Correct
+    // job whose Instruction is the reply's own text, unfiltered (EfRecordEditor.RequestCorrectionAsync)
+    // - a reply that pastes a fiscal verification link ("here's the receipt https://...?vl=...") to a
+    // transaction with no receipt row (an ordinary text/voice capture, or a failed link capture) used
+    // to reach the model's prompt verbatim through here. Stripped with the same FiscalVerificationUrl
+    // every other model-facing path uses; an instruction that turns out to be nothing but the URL
+    // strips to null, and that means "no correction" rather than an empty one.
+    CorrectionRequest? CorrectionFor(CategorizationJob job, CategorizationSubject record) =>
+        job is { Kind: JobKind.Correct, Instruction: { } instruction } && verificationUrl.StripUrl(instruction) is { } stripped
+            ? new CorrectionRequest(record.OccurredOn, record.Lines, stripped)
             : null;
 
     // A correction's "today" is the reply's own send day (job.InstructionDay), not the original

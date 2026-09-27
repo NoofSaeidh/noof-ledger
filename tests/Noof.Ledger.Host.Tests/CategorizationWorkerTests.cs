@@ -1664,6 +1664,56 @@ public class CategorizationWorkerTests
             Arg.Is<CategorizationRequest>(request => !request.RawText.Contains("suf.purs.gov.rs")), Arg.Any<CancellationToken>());
     }
 
+    // Important finding (Fable 5.1 review, item 1): a reply to any echo becomes a Correct job whose
+    // Instruction is the reply's own text, unfiltered - when the target transaction has no receipt
+    // row (an ordinary text/voice capture, or a failed link capture already covered above),
+    // TryRouteToReceiptAsync falls through and CorrectionFor used to build CorrectionRequest straight
+    // from job.Instruction, carrying a fiscal verification URL straight into
+    // CategorizationPrompt's "Correction from the person: {Instruction}".
+    [Fact]
+    public async Task A_correction_that_pastes_a_verification_url_never_sends_it_to_the_model()
+    {
+        var jobQueue = QueueWith(Job(kind: JobKind.Correct, instruction: "here is the receipt https://suf.purs.gov.rs/v/?vl=A1B2C3D4E5"));
+        var receiptStore = NoReceiptStore();
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(status: TransactionStatus.Completed, captureKind: CaptureKind.Text, lines: [StoredBread]));
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine());
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer, receiptStore: receiptStore),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await categorizer.Received(1).ProposeAsync(
+            Arg.Is<CategorizationRequest>(request => request.Correction != null && !request.Correction.Instruction.Contains("suf.purs.gov.rs")),
+            Arg.Any<CancellationToken>());
+    }
+
+    // Same finding: an instruction that is nothing but the pasted verification URL strips down to
+    // nothing at all - CorrectionFor must not send an empty instruction as if it were a real
+    // correction, the same "empty means none" contract FiscalVerificationUrl.StripUrl already has.
+    [Fact]
+    public async Task A_correction_that_is_only_a_verification_url_sends_no_correction_at_all()
+    {
+        var jobQueue = QueueWith(Job(kind: JobKind.Correct, instruction: "https://suf.purs.gov.rs/v/?vl=A1B2C3D4E5"));
+        var receiptStore = NoReceiptStore();
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(status: TransactionStatus.Completed, captureKind: CaptureKind.Text, lines: [StoredBread]));
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine());
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer, receiptStore: receiptStore),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await categorizer.Received(1).ProposeAsync(
+            Arg.Is<CategorizationRequest>(request => request.Correction == null), Arg.Any<CancellationToken>());
+    }
+
     // N-4: EfJobQueue.ClaimAsync's own same-transaction ordering normally keeps a Correct/Reinterpret
     // job un-claimable until ExtractReceipt is done one way or the other, so this is the defensive
     // twin of that guarantee, exercised directly here without a real database's ordering to rely on.
