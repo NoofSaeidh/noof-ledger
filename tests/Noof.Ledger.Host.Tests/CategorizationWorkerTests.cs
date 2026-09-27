@@ -624,6 +624,26 @@ public class CategorizationWorkerTests
     }
 
     [Fact]
+    public async Task A_correction_naming_a_wallet_the_model_was_not_offered_fails_the_job_terminally()
+    {
+        var stranger = Guid.Parse("99999999-9999-9999-9999-999999999999");
+        var jobQueue = QueueWith(Job(kind: JobKind.Correct, instruction: "это было с налички"));
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(status: TransactionStatus.Completed, lines: [StoredBread], walletId: MainWallet.Id, walletCurrency: CurrencyCode.Rsd));
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(OneGroceryLine() with { WalletId = stranger });
+        var worker = CreateWorker(ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await jobQueue.Received(1).FailAsync(JobId, WorkerId, $"wallet {stranger} was not offered", Arg.Any<CancellationToken>());
+        await store.DidNotReceive().ApplyAsync(Arg.Any<Guid>(), Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task A_correction_that_names_no_wallet_keeps_the_record_in_its_wallet()
     {
         var store = Substitute.For<ICategorizationStore>();

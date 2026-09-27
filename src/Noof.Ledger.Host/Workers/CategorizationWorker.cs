@@ -172,7 +172,7 @@ internal sealed class CategorizationWorker(
             var offeredMerchantIds = allMerchants.Select(merchant => merchant.Id).ToHashSet();
 
             var keptProposal = KeepingTheRecordsWallet(job, sub, proposal);
-            var walletsForMapping = WalletsIncludingKept(wallets, keptProposal, sub);
+            var walletsForMapping = WalletsIncludingKept(wallets, proposal, keptProposal, sub);
 
             if (!proposalMapper.TryMap(
                 keptProposal, offeredSlugs, offeredMerchantIds, walletsForMapping,
@@ -397,13 +397,20 @@ internal sealed class CategorizationWorker(
             : proposal;
 
     // ProposalMapper only accepts a WalletId that appears in the wallets it is given, because that
-    // list is also "what the model was offered" (docs/OPEN-QUESTIONS.md-adjacent: an id the model
-    // invented must fail). A kept archived wallet was never offered to the model - it is a fact this
-    // worker already knows from the record - so it is added here, not to the active list the model
-    // saw, using the currency the store already read for it (EfCategorizationStore's WalletCurrency).
+    // list is also "what the model was offered": an id the model invented must fail terminally. A
+    // kept archived wallet was never offered to the model - it is a fact this worker already knows
+    // from the record, injected by KeepingTheRecordsWallet - so it is added here, not to the active
+    // list the model saw, using the currency the store already read for it
+    // (EfCategorizationStore's WalletCurrency). The gate is
+    // `proposal.WalletId is null`: only when the model itself named no wallet did the worker do the
+    // substituting, so only then is the kept wallet added on the worker's own authority. A model that
+    // names a wallet directly - including one the worker would have kept anyway - must still have
+    // named one that was actually offered, or the job fails.
     static IReadOnlyList<WalletOption> WalletsIncludingKept(
-        IReadOnlyList<WalletOption> wallets, CategorizationProposal keptProposal, CategorizationSubject record) =>
-        keptProposal.WalletId is { } kept
+        IReadOnlyList<WalletOption> wallets, CategorizationProposal proposal, CategorizationProposal keptProposal,
+        CategorizationSubject record) =>
+        proposal.WalletId is null
+        && keptProposal.WalletId is { } kept
         && !wallets.Any(wallet => wallet.Id == kept)
         && record.WalletCurrency is { } currency
             ? [.. wallets, new WalletOption(kept, record.WalletName, currency, [], IsDefaultForCurrency: false)]
