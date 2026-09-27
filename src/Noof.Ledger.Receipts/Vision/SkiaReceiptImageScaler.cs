@@ -70,7 +70,7 @@ internal sealed class SkiaReceiptImageScaler : IReceiptImageScaler
     // Only the three rotation-only origins a camera or a scanner's own upright pass actually produces
     // (Default, BottomRight = 180deg, RightTop/LeftBottom = 90deg) are corrected. The mirrored origins
     // (TopRight, BottomLeft, LeftTop, RightBottom) come from a flipped scan, not a phone camera, and
-    // are not handled - docs/BACKLOG.md.
+    // are not handled - docs/backlog/deferred-from-phase-6-receipts.md.
     static SKBitmap ApplyExifOrientation(SKBitmap bitmap, SKEncodedOrigin origin)
     {
         SKBitmap rotated;
