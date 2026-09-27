@@ -6,6 +6,7 @@ using SkiaSharp;
 
 namespace Noof.Ledger.Receipts.Tests.Vision;
 
+[Collection(ImageMemoryCollection.Name)]
 public class SkiaReceiptImageScalerTests
 {
     readonly SkiaReceiptImageScaler scaler = new();

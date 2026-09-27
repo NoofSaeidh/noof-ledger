@@ -8,6 +8,7 @@ using ZXing.SkiaSharp;
 
 namespace Noof.Ledger.Receipts.Tests.Qr;
 
+[Collection(ImageMemoryCollection.Name)]
 public class ZxingQrReaderTests
 {
     const string PayloadUrl = "https://suf.purs.gov.rs/v/?vl=synthetic-test-payload";
