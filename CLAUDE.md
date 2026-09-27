@@ -240,6 +240,9 @@ the code that builds the echo text.
 **Pull requests are small** *(operator's decision, 2026-09-28)*
 - One topic per PR — a phase is a series of PRs, not one; the plan cuts it into PR-sized tasks up
   front and names the PR boundaries.
+- Not too small either: a PR is one coherent change a reviewer reads in one sitting. Related edits
+  go together — e.g. several rules about how agents work are one PR, never a PR per paragraph of
+  CLAUDE.md. A follow-up that belongs to an open PR goes into that PR, not a new one.
 - Stop and propose a split (operator decides) past ~500 changed lines excluding generated files
   (migrations' `.Designer.cs`, the model snapshot, `schema.expected.sql`), or past one of §4's
   split assemblies per PR (e.g. touching both Persistence and Web).
