@@ -7,7 +7,7 @@
 // does not track `cd`, shell variables, nested shells (`sh -c`, subshells), or escaping. See the PR
 // for the fuller parser this replaced and why it was cut back down.
 
-const FIND_INVOCATION_RE = /(?:^|[;&|(])\s*find\s+(?:-[A-Za-z]\S*\s+)*(\S+)/g;
+const FIND_INVOCATION_RE = /(?:^|[;&|(\n\r])\s*find\s+(?:-[A-Za-z]\S*\s+)*(\S+)/g;
 const HOME_USERS_RE = /^\/c\/users\/[^/]+$/;
 const DISALLOWED_PATHS = new Set([
   "/",

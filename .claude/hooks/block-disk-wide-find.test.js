@@ -30,6 +30,8 @@ const REFUSE_CASES = [
   ["options before the path", "find -L /"],
   ["windows-style find /c piped in bash", 'tasklist | find /c "x"'],
   ["windows-style find /i piped in bash", 'something | find /i "x"'],
+  ["after a bare newline (heredoc/multi-line command)", "echo ok\nfind /"],
+  ["after a CRLF line ending", "echo ok\r\nfind /"],
 ];
 
 for (const [label, command] of REFUSE_CASES) {
