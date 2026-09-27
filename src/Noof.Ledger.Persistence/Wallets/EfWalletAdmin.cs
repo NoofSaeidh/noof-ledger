@@ -145,10 +145,13 @@ internal sealed class EfWalletAdmin(LedgerDbContext db, TimeProvider timeProvide
 
     public async Task ArchiveAsync(Guid walletId, CancellationToken cancellationToken)
     {
-        // An archived wallet is hidden from capture, so it cannot stay the default capture resolves to.
+        // An archived wallet is hidden from capture, so it cannot stay the currency or payment default
+        // capture resolves to.
         RequireFound(walletId, await WalletById(walletId)
             .ExecuteUpdateAsync(
-                set => set.SetProperty(w => w.Archived, true).SetProperty(w => w.IsDefaultForCurrency, false),
+                set => set.SetProperty(w => w.Archived, true)
+                    .SetProperty(w => w.IsDefaultForCurrency, false)
+                    .SetProperty(w => w.DefaultForPayment, (WalletPaymentDefault?)null),
                 cancellationToken));
     }
 

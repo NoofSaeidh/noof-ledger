@@ -265,6 +265,20 @@ public class EfWalletAdminTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task ArchiveAsync_clears_the_wallets_payment_default_too()
+    {
+        await using var db = await MigratedAsync();
+        var admin = Admin(db);
+        var walletId = await admin.CreateAsync(Raiffeisen(), TestContext.Current.CancellationToken);
+        await admin.SetPaymentDefaultAsync(walletId, PaymentMethod.Card, TestContext.Current.CancellationToken);
+
+        await admin.ArchiveAsync(walletId, TestContext.Current.CancellationToken);
+
+        (await ReadAsync(db, walletId)).DefaultForPayment.Should().BeNull(
+            "an archived wallet cannot stay the payment default receipt categorization resolves to");
+    }
+
+    [Fact]
     public async Task RenameAsync_stores_the_trimmed_name()
     {
         await using var db = await MigratedAsync();
