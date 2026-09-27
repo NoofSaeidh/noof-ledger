@@ -118,6 +118,14 @@ vision fallback, with the warning above. If it stays down for a while, the Recei
 there is nothing to restart or reconfigure. Once it answers again, new receipts go back to reading their
 lines from the fiscal QR automatically.
 
+**When an attempt fails, the operator is told in Telegram, not just the log** *(Phase 6b)* — every
+capture pipeline (receipt extraction, receipt categorisation, first-capture/correction categorisation,
+voice transcription) edits the same placeholder message with a short fixed reason (never the raw
+exception, a verification URL or a `vl` payload) and roughly when it will try again, whenever an
+attempt fails but the job still has attempts left; the last attempt's failure instead shows a clear
+failure message and what to do (resend the photo, paste the QR link, or send it as a file); a later
+success simply overwrites either with the ordinary echo.
+
 ### Manual acceptance — Phase 6 (receipts), the operator's first real receipt
 
 **This was never tested against the real Tax Administration site or a real receipt, by design** — every
