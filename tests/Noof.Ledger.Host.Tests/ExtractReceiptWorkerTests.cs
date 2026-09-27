@@ -404,6 +404,68 @@ public class ExtractReceiptWorkerTests
         await harness.Vision.Received(1).ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), "image/jpeg", 500m, Arg.Any<CancellationToken>());
     }
 
+    // Copilot finding on PR #3, ExtractReceiptWorker.cs:262: when the QR decodes but the Tax
+    // Administration fetch fails, extracted.QrTotal is the verified offline amount while
+    // extracted.Total still comes from the vision model - a model total that disagrees with the QR
+    // total must never survive into Receipt.Total. Here the lines happen to sum to the verified QR
+    // total, so the mismatch check (line sum vs. the verified total) passes and the receipt is
+    // recorded normally - but with the QR's own total, never the model's 500.
+    [Fact]
+    public async Task A_vision_total_that_disagrees_with_the_verified_QR_total_is_normalized_to_it_when_the_lines_still_add_up()
+    {
+        var harness = Setup(ExtractJob(), verificationUrl: null, telegramFileId: "photo-1");
+        harness.QrReader.Read(Arg.Any<Stream>()).Returns("https://suf.purs.gov.rs/v/?vl=abc");
+        harness.Decoder.Decode(Arg.Any<string>()).Returns(new FiscalQrDecodeResult(Payload() with { Total = 600m }, null));
+        harness.FetchClient.FetchAsync(Arg.Any<FiscalQrPayload>(), Arg.Any<CancellationToken>())
+            .Returns(new FiscalFetchResult(null, new FiscalFetchFailure("504 gateway timeout", 504)));
+        var modelDisagrees = Extracted(ReceiptSource.Vision, qrTotal: 600m, total: 500m) with
+        {
+            Lines = [new ExtractedReceiptLine(1, "Bread", 1m, "kom", 600m, 600m, null)],
+        };
+        harness.Vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), 600m, Arg.Any<CancellationToken>())
+            .Returns(new ReceiptVisionResult(modelDisagrees, null));
+
+        (await TickAsync(harness)).Should().Be(CategorizationTickResult.Processed);
+
+        await harness.ReceiptStore.Received(1).SaveExtractedAsync(
+            TransactionId,
+            Arg.Is<ExtractedReceipt>(r => r.Total == 600m),
+            Arg.Any<string?>(), enqueueCategorization: true, Arg.Any<CancellationToken>());
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text == Echo.ComposeCategorisingReceipt(1)), Arg.Any<CancellationToken>());
+    }
+
+    // Same finding, the other outcome: the lines do NOT add up to the verified QR total, so the
+    // receipt is held behind Record anyway exactly like the other vision mismatches - and the
+    // problem text names the verified 600, never the model's own 600-vs-500 confusion.
+    [Fact]
+    public async Task A_vision_total_that_disagrees_with_the_verified_QR_total_holds_the_receipt_when_the_lines_do_not_add_up_to_it()
+    {
+        var harness = Setup(ExtractJob(), verificationUrl: null, telegramFileId: "photo-1");
+        harness.QrReader.Read(Arg.Any<Stream>()).Returns("https://suf.purs.gov.rs/v/?vl=abc");
+        harness.Decoder.Decode(Arg.Any<string>()).Returns(new FiscalQrDecodeResult(Payload() with { Total = 600m }, null));
+        harness.FetchClient.FetchAsync(Arg.Any<FiscalQrPayload>(), Arg.Any<CancellationToken>())
+            .Returns(new FiscalFetchResult(null, new FiscalFetchFailure("504 gateway timeout", 504)));
+        var modelDisagrees = Extracted(ReceiptSource.Vision, qrTotal: 600m, total: 600m) with
+        {
+            Lines = [new ExtractedReceiptLine(1, "Bread", 1m, "kom", 500m, 500m, null)],
+        };
+        harness.Vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), 600m, Arg.Any<CancellationToken>())
+            .Returns(new ReceiptVisionResult(modelDisagrees, null));
+
+        (await TickAsync(harness)).Should().Be(CategorizationTickResult.Processed);
+
+        await harness.ReceiptStore.Received(1).SaveExtractedAsync(
+            TransactionId,
+            Arg.Is<ExtractedReceipt>(r => r.Total == 600m),
+            Arg.Any<string?>(), enqueueCategorization: false, Arg.Any<CancellationToken>());
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text.Contains("Record it anyway", StringComparison.Ordinal)
+                && m.Text.Contains("Lines add up to 500.00 RSD, the receipt says 600.00 RSD", StringComparison.Ordinal)
+                && m.Actions.SequenceEqual(new[] { RecordAction.RecordAnyway, RecordAction.Cancel })),
+            Arg.Any<CancellationToken>());
+    }
+
     // N-6 (2026-09-25 re-review of the final review): the QR decoded fine here, so the fiscal-QR-only
     // operator (R-1/R-5, no key by design) has done nothing wrong - the Tax Administration outage may
     // last minutes. M-10's own gate treated this exactly like "no readable QR at all" and failed the

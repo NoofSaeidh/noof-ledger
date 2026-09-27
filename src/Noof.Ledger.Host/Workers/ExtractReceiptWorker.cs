@@ -250,6 +250,14 @@ internal sealed class ExtractReceiptWorker(
                 return;
             }
 
+            // Copilot finding, PR #3: a QR-decoded total is a verified fact and always wins. The vision
+            // fallback (the only path that can disagree - a fiscal QR/SUF fetch's own Total already comes
+            // from the Tax Administration's journal, not a model) must never let its own model-read total
+            // survive into what gets saved, logged, or shown as the receipt's total; the model's differing
+            // number is discarded here rather than recorded anywhere that could be read back as the total.
+            if (extracted is { Source: ReceiptSource.Vision, QrTotal: { } verifiedTotal })
+                extracted = extracted with { Total = verifiedTotal };
+
             var mismatch = HasMismatch(extracted);
 
             // 2026-09-27 (vision only - a fiscal QR/SUF receipt's own numbers are never second-guessed
