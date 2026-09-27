@@ -99,6 +99,8 @@ public class SlowOperationOptionsWiringTests
             _ = factory.Services;
         };
 
-        act.Should().Throw<InvalidOperationException>();
+        act.Should().Throw<InvalidOperationException>().WithMessage("*entry point*",
+            "this must be WebApplicationFactory's own wrapper for the swallowed startup failure, not some " +
+            "unrelated InvalidOperationException the bad setting happened not to cause");
     }
 }
