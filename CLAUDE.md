@@ -262,6 +262,9 @@ the code that builds the echo text.
   "merge after #N".
 - A PR that needs more work after that goes back to draft (`gh pr ready <n> --undo`). The operator
   merges only non-draft PRs.
+- `gh` posts as the operator's account, so every comment, review reply or PR body an agent writes
+  ends with the line `🤖 Written by Claude Code (<model>)` (PR bodies keep the "Generated with Claude
+  Code" footer). Never edit or sign a comment the operator wrote.
 
 ## 6. Closing a phase *(settled)*
 
