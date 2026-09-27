@@ -72,8 +72,10 @@ reasoning, never for small tasks. `low` for mechanical work.
   preference); ask the operator first on anything expensive (new design, migration, another topic,
   roughly >~50 lines) instead of starting it, proposing a backlog entry — judged by this
   single-operator local app's real risk, not completeness.
-- **Copilot fix rounds:** one round, one commit, opus-only review (effort medium), push, then wait once (never
-  poll) for its re-review — at most 2 rounds per PR, then list what's left for the operator. No
+- **Copilot is optional** — its quota runs out, so CI and the per-PR Codex review are the gate and
+  nothing waits for Copilot. When a Copilot review does arrive, handle it as below.
+- **Copilot fix rounds:** one round, one commit, opus-only review (effort medium), push — at most 2
+  rounds per PR, then list what's left for the operator. No
   Codex/Fable for a Copilot round unless it touches money, secrets, a migration or the public
   surface and a stronger review is judged necessary — say why in the PR. Resolve only the threads
   you replied to or fixed, by id, never "resolve all unresolved" (hides new comments).
@@ -256,7 +258,7 @@ the code that builds the echo text.
 - Open every PR as a draft (`gh pr create --draft`) and keep it draft while anything is still in
   progress (implementation, tests, Codex triage, Copilot rounds).
 - Only when done: `gh pr ready <n>` plus one PR comment starting "Ready to merge" with one line per
-  check (tests run and result, Codex review triaged, Copilot rounds done) and, for a stacked PR,
+  check (tests run and result, Codex review triaged, Copilot rounds done if it reviewed) and, for a stacked PR,
   "merge after #N".
 - A PR that needs more work after that goes back to draft (`gh pr ready <n> --undo`). The operator
   merges only non-draft PRs.
