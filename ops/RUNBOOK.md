@@ -113,6 +113,15 @@ in `appsettings.json` (e.g. `"https://suf.purs.gov.rs/v/?vl="`) — it is the on
 Telegram link detector and the fiscal QR decoder's host/path check read; a bad or missing value fails
 startup instead of silently disabling receipts.
 
+**Send the QR's link, not a photo, for an exact receipt.** Scan the fiscal QR with the phone's camera
+(or Google Lens) and send its `https://suf.purs.gov.rs/v/?vl=...` link to the bot as plain text: the
+lines, PIB and fiscal number then come exactly from the Tax Administration. A photo of the whole
+receipt almost always goes through the vision fallback instead — the fiscal QR is a version ~40 code
+(~177 modules a side), and on the operator's real photos (2026-09-27, Telegram-compressed and
+full-resolution 12 MP files alike) no decoder tried read it: ZXing.Net, zxing-cpp, OpenCV's QR detector
+and the WeChat CNN detector (`docs/OPEN-QUESTIONS.md`, Phase 6 QR entry). A close-up photo of the QR
+alone, sent as a file, is untested.
+
 **The Receipts health check** (`/diagnostics`, the dashboard tile, the bot's `/health`) turns amber for
 24 hours after any Tax Administration lookup fails, naming the time it happened, then clears itself back
 to green — it does not mean the *current* lookup is failing, only that one recently did and receipts may
