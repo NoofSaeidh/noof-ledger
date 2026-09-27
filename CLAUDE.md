@@ -209,8 +209,8 @@ the code that builds the echo text.
 - One topic per PR — a phase is a series of PRs, not one; the plan cuts it into PR-sized tasks up
   front and names the PR boundaries.
 - Stop and propose a split (operator decides) past ~500 changed lines excluding generated files
-  (migrations' `.Designer.cs`, the model snapshot, `schema.expected.sql`), or past one project-split
-  layer per PR (e.g. Persistence + Web + Telegram).
+  (migrations' `.Designer.cs`, the model snapshot, `schema.expected.sql`), or past one of §4's
+  split assemblies per PR (e.g. touching both Persistence and Web).
 - Mechanical moves/renames get their own PR, separate from behaviour changes.
 - Independent PRs branch from `master`; a PR needing another's changes is stacked on it (base = that
   branch), never merged into it.
