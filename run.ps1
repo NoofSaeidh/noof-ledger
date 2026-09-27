@@ -28,6 +28,7 @@ Commands (run `.\run.ps1 help <command>` for the detail on any one of them):
   logs               - open, tail or follow the log directory
   backups            - open the backup directory
   inspect            - the solution-wide accessibility sweep (ops/inspect.ps1)
+  pr-wait            - block until a PR's CI and Copilot review land (ops/pr-wait.ps1)
   help               - this table, or `.\run.ps1 help <command>` for one command's detail
 
 An unrecognised command prints this table and exits 1.
@@ -112,6 +113,11 @@ Prints the last 50 lines of the newest log file.
 .EXAMPLE
 .\run.ps1 logs -Follow
 Keeps printing new log lines as the running host writes them.
+
+.EXAMPLE
+.\run.ps1 pr-wait 8
+Blocks until PR #8's CI checks and Copilot review have both landed for its current head commit, or
+9 minutes pass.
 
 .EXAMPLE
 .\run.ps1 help test
@@ -441,6 +447,27 @@ was last built, not what is currently on disk.
 Prerequisites: JetBrains.ReSharper.GlobalTools restored (dotnet tool restore); a prior build.
 '@
     }
+    'pr-wait' = @{
+        Summary = 'Block until a PR''s CI and Copilot review land (ops\pr-wait.ps1)'
+        Detail  = @'
+pr-wait <number> [-TimeoutMinutes <n>]
+
+Runs ops\pr-wait.ps1: blocks, polling the GitHub API internally every ~25s, until BOTH every CI check
+run for the PR's current head commit has completed (no checks at all counts as done) and GitHub
+Copilot's reviewer has posted a review against that same head commit - or until -TimeoutMinutes
+passes (default 9, so one call fits inside a 600000 ms tool timeout). Prints a compact summary: head
+SHA, each check's name/conclusion/duration, whether the Copilot review is in, and any Copilot review
+comment that is still unresolved and has not been replied to. If the PR is a draft and CI has
+resolved with no matching Copilot review yet, it returns early instead of waiting out the full budget
+(Copilot does not reliably review drafts on its own) and says so.
+
+Exit codes: 0 = CI green (or none) and Copilot review in; 1 = a check failed (prints a
+`gh run view --log-failed` hint); 2 = timed out, or gave up early on a draft - names what is still
+pending; 3 = usage error (bad PR number, `gh` not authenticated).
+
+Prerequisites: `gh` authenticated against this repo.
+'@
+    }
 }
 
 function Write-CommandTable {
@@ -700,6 +727,12 @@ switch ($CommandName) {
 
     'inspect' {
         Invoke-Checked { & (Join-Path $Root 'ops\inspect.ps1') }
+    }
+
+    'pr-wait' {
+        # pr-wait.ps1 exits with its own codes (0/1/2/3) - it terminates this whole process directly
+        # via `exit`, so there is nothing for Invoke-Checked to check afterwards.
+        & (Join-Path $Root 'ops\pr-wait.ps1') @Rest
     }
 
     default {

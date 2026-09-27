@@ -218,10 +218,14 @@ the code that builds the echo text.
 - Shared hot files (backlog entries, per-assembly allowlists) are split across PRs so parallel work
   doesn't conflict.
 
-**Waiting on CI** *(operator's decision, 2026-09-28)*
-- After pushing to a PR branch, wait for CI with one blocking `gh pr checks <n> --watch --interval 30`
-  (timeout 600000 ms) — never poll it by hand, and never guess a result before that command returns.
-- A red CI check keeps the PR in draft until it is fixed and pushed again.
+**Waiting on a PR** *(operator's decision, 2026-09-28)*
+- After pushing to a PR branch, run `.\run.ps1 pr-wait <n>` once in the foreground (600000 ms
+  timeout) instead of polling `gh` yourself — it blocks on CI internally and returns once. A red CI
+  check keeps the PR in draft until it is fixed and pushed again.
+- CI is the gate; it waits for a Copilot review only when Copilot is actually requested on the PR
+  (the operator's Copilot quota runs out, so most PRs never get one) — otherwise it says so and
+  doesn't wait on it. Exit 2 (timeout) → run it once more at most.
+- Handle every comment it lists in ONE round, per the Copilot-fix-round rule in §1.
 
 ## 6. Closing a phase *(settled)*
 
