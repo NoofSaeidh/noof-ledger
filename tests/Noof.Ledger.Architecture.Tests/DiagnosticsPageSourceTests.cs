@@ -95,6 +95,8 @@ public class DiagnosticsPageSourceTests
         source.Should().Contain("id=\"trace-log-level-notice\"",
             "operator decision (a), 2026-09-26: above Information (or Off) the database sink drops stage events, so the trace page must say so");
         source.Should().Contain("/diagnostics/logs/settings");
+        source.Should().Contain("id=\"trace-receipt-awaiting-confirmation\"",
+            "2026-09-27: a vision receipt saved without a CategorizeReceipt job must say so on its own trace page");
         source.Should().NotContain("MudSelect");
         source.Should().NotContain("MudDatePicker");
         source.Should().NotContain("MudAutocomplete");
