@@ -188,3 +188,18 @@ When closing a phase, read and follow `docs/CLOSING-A-PHASE.md` *(settled)*.
 Keep this file short: path-specific rules go in `.claude/rules/` with `paths:` frontmatter, anything longer in `docs/`.
 A path-scoped rule loads when a matching file is read, not when a shell command touches one — after
 `dotnet ef migrations add`, `run.ps1` or a scripted edit, read the file (or the rule) before relying on it.
+
+## 7. Shell and search
+
+- Locate files with the Glob tool, search content with Grep, read with Read — not shell
+  `find`/`grep`/`cat` pipelines; each shell process costs time on Windows.
+- Never `find` from the disk root or the home directory — a hook refuses it (an orphaned
+  `find / -iname X` once held 11.6M handles for hours and slowed every process spawn on the machine).
+- NuGet package API: `~/.nuget/packages/<id-lowercase>/<version>/lib/<tfm>/` holds the DLL and XML
+  docs; get source with `ilspycmd` (a global dotnet tool). No disk-wide search.
+- The app's own data lives in `%LOCALAPPDATA%\NoofLedger\`: `backups\`/`manual-backups\`, `logs\`,
+  `demo\`, `dp-keys\` (Data Protection keys — secret) and `db.connection` (secret). Search these
+  freely; never read `dp-keys\` or `db.connection` without an explicit request.
+- A command that hits its timeout keeps running in the background — stop what you started (KillShell
+  / `Stop-Process`) before you finish; never leave it running.
+- Windows Git Bash `find` is unix find — never pipe into `find /c`; use `grep -c` instead.
