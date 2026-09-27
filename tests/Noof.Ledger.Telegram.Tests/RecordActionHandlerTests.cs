@@ -34,7 +34,10 @@ public class RecordActionHandlerTests
         var receiptStore = Substitute.For<IReceiptStore>();
         receiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns((ReceiptView?)null);
         receiptStore.EnqueueCategorizationAsync(TransactionId, 42, Arg.Any<CancellationToken>()).Returns(true);
-        receiptStore.IsAwaitingConfirmationAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(false);
+        // A RecordAnyway press only makes sense while the receipt is still awaiting confirmation
+        // (RecordActionHandler's own guard checks this before enqueueing) - true by default so the
+        // "happy path" tests below exercise a legitimate press; the malformed-scenario test overrides it.
+        receiptStore.IsAwaitingConfirmationAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(true);
 
         var notifier = Substitute.For<IChatNotifier>();
 
@@ -162,6 +165,31 @@ public class RecordActionHandlerTests
 
         await harness.Notifier.Received(1).EditAsync(555L, 42,
             Arg.Is<EchoMessage>(m => m.Text == Echo.ComposeCategorisingReceipt(receipt.Lines.Count) && m.Actions.Count == 0),
+            Arg.Any<CancellationToken>());
+    }
+
+    // 2026-09-27 finding: a stale RecordAnyway press delivered after Cancel used to enqueue
+    // CategorizeReceipt unconditionally - EfCategorizationStore.ApplyAsync keeps a Cancelled record
+    // Cancelled but still writes its line items, so the next Restore landed on a Captured record that
+    // already had lines and no job: ComposeReceipt's dead-end "Reading the receipt…" with no buttons.
+    // The guard must check the record's own current status, not just whether the button was ever valid.
+    [Fact]
+    public async Task A_stale_record_anyway_press_after_cancel_does_not_enqueue_and_re_renders_the_cancelled_echo()
+    {
+        var harness = Create(status: TransactionStatus.Cancelled);
+        var receipt = UnconfirmedVisionReceipt();
+        harness.ReceiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(receipt);
+        harness.ReceiptStore.IsAwaitingConfirmationAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(true);
+        var query = RecordAnyway();
+
+        await harness.Handler.HandleAsync(query, query.Message!, TestContext.Current.CancellationToken);
+
+        await harness.ReceiptStore.DidNotReceiveWithAnyArgs().EnqueueCategorizationAsync(default, default, Arg.Any<CancellationToken>());
+        var expectedRecord = new CategorizationSubject(TransactionId, "", 555L, 42, "Cash", TransactionStatus.Cancelled,
+            new DateOnly(2026, 9, 27), new DateOnly(2026, 9, 27), Array.Empty<RecordedLine>(), CaptureKind.Photo);
+        var expectedText = Echo.ComposeReceiptCancelledUnconfirmed(expectedRecord, receipt).Text;
+        await harness.Notifier.Received(1).EditAsync(555L, 42, Arg.Is<EchoMessage>(m =>
+            m.Text == expectedText && m.Actions.SequenceEqual(new[] { RecordAction.Restore })),
             Arg.Any<CancellationToken>());
     }
 

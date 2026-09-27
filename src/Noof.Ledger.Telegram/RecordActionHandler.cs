@@ -2,6 +2,7 @@ using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Editing;
 using Noof.Ledger.Application.Receipts;
+using Noof.Ledger.Domain;
 using Telegram.Bot.Types;
 
 namespace Noof.Ledger.Telegram;
@@ -33,7 +34,18 @@ internal sealed class RecordActionHandler(
                 await editor.AttachPromptAsync(target.TransactionId, promptId, cancellationToken);
                 return;
             case RecordAction.RecordAnyway:
-                await receiptStore.EnqueueCategorizationAsync(target.TransactionId, echo.Id, cancellationToken);
+                // A stale press: the record was Cancelled (or already confirmed) between this button
+                // being shown and being pressed. Enqueueing anyway would run CategorizeReceipt on a
+                // Cancelled record - EfCategorizationStore.ApplyAsync keeps it Cancelled but still
+                // writes line items, so the next Restore would land on a Captured record that already
+                // has lines and no job, which ComposeReceipt renders as a dead-end "Reading the
+                // receipt…" with no buttons. Falling through to the refresh below re-renders whatever
+                // the record's own current state actually is instead.
+                if (await store.GetSubjectAsync(target.TransactionId, cancellationToken) is { Status: TransactionStatus.Captured }
+                    && await receiptStore.IsAwaitingConfirmationAsync(target.TransactionId, cancellationToken))
+                {
+                    await receiptStore.EnqueueCategorizationAsync(target.TransactionId, echo.Id, cancellationToken);
+                }
                 break;
             default:
                 return;
