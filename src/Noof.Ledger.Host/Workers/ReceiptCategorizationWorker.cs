@@ -25,6 +25,7 @@ internal sealed class ReceiptCategorizationWorker(
     TimeZoneInfo captureTimeZone,
     IDatabaseGate gate,
     IOperationTimer timer,
+    FiscalVerificationUrl verificationUrl,
     ILogger<ReceiptCategorizationWorker> logger)
     : BackgroundService
 {
@@ -155,9 +156,14 @@ internal sealed class ReceiptCategorizationWorker(
             var categories = await categoryCatalog.ActiveAsync(cancellationToken);
             var wallets = await walletDirectory.ActiveAsync(cancellationToken);
 
+            // Item A (Copilot, Phase 6 review): sub.RawText is the original message and, for a
+            // text-link capture, contains the whole fiscal verification URL - the model only needs
+            // any free words alongside it (e.g. "lunch card"), never the vl payload. job.Instruction
+            // carries the same risk on a correction that resends the same link (CorrectionHandler).
             var request = new ReceiptCategorizationRequest(
                 [.. receipt.Lines.Select(line => new ReceiptLineToCategorize(line.Ordinal, line.Name, line.Quantity, line.Total))],
-                receipt.SellerName, receipt.SellerTaxId, merchantKnown, sub.RawText, job.Instruction);
+                receipt.SellerName, receipt.SellerTaxId, merchantKnown,
+                verificationUrl.StripUrl(sub.RawText), verificationUrl.StripUrl(job.Instruction));
 
             var categorization = await receiptCategorizer.CategorizeAsync(request, cancellationToken);
 

@@ -2,6 +2,7 @@
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Receipts;
 
 namespace Noof.Ledger.Host.Workers;
 
@@ -34,6 +35,7 @@ internal static class WorkerRegistration
             captureTimeZone,
             sp.GetRequiredService<IDatabaseGate>(),
             sp.GetRequiredService<IOperationTimer>(),
+            sp.GetRequiredService<FiscalVerificationUrl>(),
             sp.GetRequiredService<ILogger<ReceiptCategorizationWorker>>()));
 
         services.AddHostedService(sp => new TranscriptionWorker(
