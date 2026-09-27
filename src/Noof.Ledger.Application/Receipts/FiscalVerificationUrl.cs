@@ -23,6 +23,15 @@ internal sealed class FiscalVerificationUrl : IFiscalVerificationUrl
                 $"{FiscalVerificationUrlOptions.ConfigurationSection}:{nameof(FiscalVerificationUrlOptions.VerificationUrlPrefix)} "
                 + $"'{prefix}' must be an absolute https URL.");
 
+        // FiscalQrDecoder admits a link with AbsolutePath.StartsWith(PathPrefix) - without the
+        // trailing slash, "/v" would also admit "/verify/...", a different path that merely shares a
+        // segment prefix. Failing fast here is simpler than normalising a value the operator can just
+        // as easily write correctly in appsettings.json.
+        if (!uri.AbsolutePath.EndsWith('/'))
+            throw new InvalidOperationException(
+                $"{FiscalVerificationUrlOptions.ConfigurationSection}:{nameof(FiscalVerificationUrlOptions.VerificationUrlPrefix)} "
+                + $"'{prefix}' must end with a slash before the query string.");
+
         Prefix = prefix;
         Host = uri.Host;
         PathPrefix = uri.AbsolutePath;
