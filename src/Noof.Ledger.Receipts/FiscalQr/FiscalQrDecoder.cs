@@ -5,7 +5,7 @@ using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Receipts.FiscalQr;
 
-// Byte layout ported from turanjanin/serbian-fiscal-receipts-parser (MIT):
+// Byte layout ported from turanjanin/serbian-fiscal-receipts-parser (MIT; notice in THIRD-PARTY-NOTICES.md):
 // https://github.com/turanjanin/serbian-fiscal-receipts-parser
 internal sealed class FiscalQrDecoder(IFiscalVerificationUrl verificationUrl) : IFiscalQrDecoder
 {

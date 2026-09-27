@@ -6,7 +6,7 @@ using Noof.Ledger.Domain;
 namespace Noof.Ledger.Receipts.Journal;
 
 // Section shape (delimiters, header layout, item/payment/fiscalization key-value lines) verified
-// against turanjanin/serbian-fiscal-receipts-parser's Parser.php (MIT):
+// against turanjanin/serbian-fiscal-receipts-parser's Parser.php (MIT; notice in THIRD-PARTY-NOTICES.md):
 // https://github.com/turanjanin/serbian-fiscal-receipts-parser
 internal static partial class FiscalJournalParser
 {
