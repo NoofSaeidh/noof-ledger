@@ -36,6 +36,58 @@ public sealed class PostgresFixture : IAsyncLifetime
         return new LedgerDbContext(options);
     }
 
+    // Every ordinary test that is not itself about migrating gets a context on a database that is
+    // already at the latest schema, instead of re-running all 15+ migrations from an empty database.
+    // The template is shared across worktrees and this fixture never migrates it - a stale template
+    // (a worktree added a migration and forgot .\run.ps1 update-test-template) fails fast here rather
+    // than silently testing against yesterday's schema.
+    readonly Lazy<Task> templateFreshness = new(EnsureTemplateIsCurrentAsync, LazyThreadSafetyMode.ExecutionAndPublication);
+
+    internal async Task<LedgerDbContext> CreateMigratedContextAsync()
+    {
+        await templateFreshness.Value;
+
+        var connectionString = await CreateDatabaseConnectionStringAsync();
+
+        var options = new DbContextOptionsBuilder<LedgerDbContext>()
+            .UseNpgsql(connectionString)
+            .Options;
+
+        return new LedgerDbContext(options);
+    }
+
+    static async Task EnsureTemplateIsCurrentAsync()
+    {
+        var latestInAssembly = LatestMigrationInAssembly();
+        var latestAppliedToTemplate = await LatestMigrationAppliedToTemplateAsync();
+
+        TemplateFreshnessGuard.EnsureCurrent(latestInAssembly, latestAppliedToTemplate);
+    }
+
+    static string LatestMigrationInAssembly()
+    {
+        var options = new DbContextOptionsBuilder<LedgerDbContext>()
+            .UseNpgsql("Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none")
+            .Options;
+        using var db = new LedgerDbContext(options);
+        return db.Database.GetMigrations().Last();
+    }
+
+    // Pooling must be off here: CREATE DATABASE ... TEMPLATE (STRATEGY FILE_COPY) fails with
+    // "source database is being accessed by other users" against ANY live backend connected to the
+    // template, including one this process itself only pooled rather than truly closed. Confirmed by
+    // running this guard and then immediately cloning the template from the same process - a pooled
+    // connection here made every subsequent CreateMigratedContextAsync call fail with Postgres error
+    // 55006, every time, not just under contention.
+    static async Task<string?> LatestMigrationAppliedToTemplateAsync()
+    {
+        var connectionString = WithoutPooling(DatabaseSettings.For(DatabaseSettings.TemplateDatabase));
+        var options = new DbContextOptionsBuilder<LedgerDbContext>().UseNpgsql(connectionString).Options;
+        await using var db = new LedgerDbContext(options);
+        var applied = await db.Database.GetAppliedMigrationsAsync(TestContext.Current.CancellationToken);
+        return applied.LastOrDefault();
+    }
+
     // NpgsqlConnection.ConnectionString drops the password once the connection has been opened
     // (confirmed empirically, not documented anywhere obvious) - a caller that needs the
     // connection string itself, to hand to something that opens its own connection (AddNoofPersistence,
@@ -119,3 +171,17 @@ public sealed class PostgresFixture : IAsyncLifetime
 
 [CollectionDefinition("postgres")]
 public sealed class PostgresCollection : ICollectionFixture<PostgresFixture>;
+
+internal static class TemplateFreshnessGuard
+{
+    public static void EnsureCurrent(string latestInAssembly, string? latestAppliedToTemplate)
+    {
+        if (latestAppliedToTemplate == latestInAssembly)
+            return;
+
+        throw new InvalidOperationException(
+            $"noof_ledger_test_template is missing migration '{latestInAssembly}' "
+            + $"(latest applied: '{latestAppliedToTemplate ?? "none"}'). "
+            + "Run '.\\run.ps1 update-test-template' before running tests against the migrated template clone.");
+    }
+}

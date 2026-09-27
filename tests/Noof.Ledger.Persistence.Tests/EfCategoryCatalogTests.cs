@@ -1,5 +1,4 @@
 using AwesomeAssertions;
-using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Categorization;
 
@@ -21,8 +20,7 @@ public class EfCategoryCatalogTests(PostgresFixture fixture)
     [Fact]
     public async Task Active_returns_only_active_categories_with_the_parents_slug_resolved()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var parent = NewCategory(isActive: true);
         var child = NewCategory(isActive: true, parentId: parent.Id);
         var inactive = NewCategory(isActive: false);
