@@ -83,7 +83,9 @@ internal sealed class RecordActionHandler(
             return recordEcho.ComposeReceiptNeedsConfirmation(receipt);
         }
 
-        if (action == RecordAction.RecordAnyway)
+        // Only a Captured record has a CategorizeReceipt job running; a stale press on a Completed or
+        // Failed receipt must keep its final echo and buttons.
+        if (action == RecordAction.RecordAnyway && record.Status == TransactionStatus.Captured)
             return new EchoMessage(recordEcho.ComposeCategorisingReceipt(receipt.Lines.Count), []);
 
         return recordEcho.ComposeReceipt(record, receipt);

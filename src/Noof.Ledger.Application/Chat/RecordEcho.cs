@@ -39,8 +39,7 @@ internal sealed class RecordEcho : IRecordEcho
         "The Tax Administration site is unreachable right now — send a photo of the receipt instead.", []);
 
     public EchoMessage ReceiptReadFailure { get; } = new(
-        "Couldn't read that receipt. Resend the photo, paste the receipt's QR link as text, "
-        + "or resend the photo as a file so it isn't compressed.",
+        "Couldn't read that receipt. " + "Send the link from the receipt's QR code (scan it with your phone camera).",
         []);
 
     public EchoMessage ReceiptVisionNotConfigured { get; } = new(
@@ -164,8 +163,7 @@ internal sealed class RecordEcho : IRecordEcho
         new($"This receipt is a {kind.ToString().ToLowerInvariant()} — not recorded", [RecordAction.Edit]);
 
     public EchoMessage ReceiptUnreadable { get; } = new(
-        "I couldn't read this receipt reliably, so nothing was recorded. Send the photo as a file "
-        + "(uncompressed) or the link from its QR code.", []);
+        "I couldn't read this receipt reliably, so nothing was recorded. " + "Send the link from the receipt's QR code (scan it with your phone camera).", []);
 
     public EchoMessage ComposeReceiptNeedsConfirmation(ExtractedReceipt receipt, bool taxIdMalformed = false) =>
         ComposeReceiptNeedsConfirmationCore(

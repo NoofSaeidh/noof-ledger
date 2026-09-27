@@ -13,7 +13,7 @@ internal sealed class SkiaReceiptImageScaler : IReceiptImageScaler
 
     // SKSamplingOptions.Default is nearest-neighbour in SkiaSharp 4.151.1 - aliasing on exactly the
     // thin thermal-print digits the vision model must read. No phone or Telegram resampler works that
-    // way, so downscaling with it degrades the "send it uncompressed for an exact read" path itself.
+    // way, so downscaling with it would throw away exactly the detail a full-resolution file brings.
     static readonly SKSamplingOptions DownscaleSampling = new(SKFilterMode.Linear, SKMipmapMode.Linear);
 
     public ReceiptPhoto ScaleForVision(ReceiptPhoto photo)

@@ -194,6 +194,26 @@ public class RecordActionHandlerTests
     }
 
     [Fact]
+    public async Task A_stale_record_anyway_press_after_the_receipt_was_recorded_keeps_the_recorded_echo()
+    {
+        var harness = Create(status: TransactionStatus.Completed);
+        var receipt = UnconfirmedVisionReceipt();
+        harness.ReceiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(receipt);
+        harness.ReceiptStore.IsAwaitingConfirmationAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(false);
+        var query = RecordAnyway();
+
+        await harness.Handler.HandleAsync(query, query.Message!, TestContext.Current.CancellationToken);
+
+        await harness.ReceiptStore.DidNotReceiveWithAnyArgs().EnqueueCategorizationAsync(default, default, Arg.Any<CancellationToken>());
+        var expectedRecord = new CategorizationSubject(TransactionId, "", 555L, 42, "Cash", TransactionStatus.Completed,
+            new DateOnly(2026, 9, 27), new DateOnly(2026, 9, 27), Array.Empty<RecordedLine>(), CaptureKind.Photo);
+        var expected = Echo.ComposeReceipt(expectedRecord, receipt);
+        await harness.Notifier.Received(1).EditAsync(555L, 42, Arg.Is<EchoMessage>(m =>
+            m.Text == expected.Text && m.Actions.SequenceEqual(expected.Actions)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task An_unknown_target_message_does_nothing()
     {
         var editor = Substitute.For<IRecordEditor>();

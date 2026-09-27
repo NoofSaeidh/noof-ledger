@@ -565,8 +565,8 @@ public class ExtractReceiptWorkerTests
     public async Task Vision_reporting_the_photo_unreadable_fails_with_the_unreadable_echo_not_ReceiptReadFailure()
     {
         // 2026-09-27: the model's own honest "I could not read this" (readable: false) is a distinct
-        // outcome from a ModelCallException, and gets its own echo naming the fix (send as a file, or
-        // the QR link) rather than the generic ReceiptReadFailure.
+        // outcome from a ModelCallException, and gets its own echo naming the fix (the QR link) rather
+        // than the generic ReceiptReadFailure.
         var harness = Setup(ExtractJob());
         harness.Vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), Arg.Any<decimal?>(), Arg.Any<CancellationToken>())
             .Returns(new ReceiptVisionResult(null, ReceiptUnreadableReason.Blurry));

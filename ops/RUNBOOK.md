@@ -140,7 +140,7 @@ capture pipeline (receipt extraction, receipt categorisation, first-capture/corr
 voice transcription) edits the same placeholder message with a short fixed reason (never the raw
 exception, a verification URL or a `vl` payload) and roughly when it will try again, whenever an
 attempt fails but the job still has attempts left; the last attempt's failure instead shows a clear
-failure message and what to do (resend the photo, paste the QR link, or send it as a file); a later
+failure message and what to do (send the link from the receipt's QR code); a later
 success simply overwrites either with the ordinary echo.
 
 ### Manual acceptance — Phase 6 (receipts), the operator's first real receipt
