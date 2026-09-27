@@ -63,7 +63,11 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $CopilotReviewLogin = 'copilot-pull-request-reviewer[bot]'
-$CopilotQuotaPattern = '(?i)usage limit|rate.?limit|quota|unable to (review|complete)|could not (complete|finish) (the )?review|out of reviews'
+# Deliberately narrower than matching "quota" or "rate limit" as bare words - a real review's own
+# prose can legitimately discuss rate limiting or quota tracking as the PR's subject matter, and that
+# is not Copilot reporting that IT could not review. Every alternative below pairs the inability with
+# "review" or with a verb like reached/hit/exceeded/out of, so ordinary review content cannot match.
+$CopilotQuotaPattern = '(?i)unable to (review|complete (this|the) review)|could not (complete|finish) (the )?review|cannot review this|has (reached|hit|exceeded) (its|the) (usage )?(limit|quota)|out of (reviews|quota)|no (reviews|quota) (remaining|left)'
 
 function Get-RepoNameWithOwner {
     $raw = gh repo view --json owner,name 2>&1
@@ -136,6 +140,25 @@ function Get-RequestedReviewersRaw {
     return $raw | ConvertFrom-Json
 }
 
+function Get-IssueTimelineRaw {
+    param([string]$RepoNameWithOwner, [int]$Number)
+    $raw = gh api "repos/$RepoNameWithOwner/issues/$Number/timeline" --paginate 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "gh api issues/$Number/timeline failed: $raw" }
+    return , @($raw | ConvertFrom-Json)
+}
+
+# Pure. A PR can be requested from Copilot, quota out, then requested again later once quota frees up
+# - a quota message from the FIRST request must not silently satisfy the SECOND. This is the anchor:
+# only a quota message at or after this moment belongs to the request that is currently outstanding.
+function Get-LatestCopilotRequestTime {
+    param([array]$TimelineEvents)
+    $requests = @($TimelineEvents | Where-Object {
+        $_.event -eq 'review_requested' -and $_.requested_reviewer -and $_.requested_reviewer.login -match 'copilot'
+    })
+    if ($requests.Count -eq 0) { return $null }
+    return [DateTimeOffset]::Parse(($requests[-1]).created_at)
+}
+
 # Pure. Copilot's requested-reviewer login is cleared once it submits a review, so this is true only
 # while a request is genuinely outstanding right now - exactly "would waiting for Copilot ever pay off".
 function Test-CopilotRequested {
@@ -158,9 +181,15 @@ function Find-CopilotReviewForHead {
 # rather than one exact string. Checks both PR reviews and plain issue comments, since either could
 # carry it.
 function Find-CopilotQuotaMessage {
-    param([array]$Reviews, [array]$IssueComments)
-    $fromReviews = @($Reviews | Where-Object { $_.user.login -match 'copilot' -and $_.body -match $CopilotQuotaPattern })
-    $fromComments = @($IssueComments | Where-Object { $_.user.login -match 'copilot' -and $_.body -match $CopilotQuotaPattern })
+    param([array]$Reviews, [array]$IssueComments, $SinceUtc)
+    $fromReviews = @($Reviews | Where-Object {
+        $_.user.login -match 'copilot' -and $_.body -match $CopilotQuotaPattern -and
+        (-not $SinceUtc -or [DateTimeOffset]::Parse($_.submitted_at) -ge $SinceUtc)
+    })
+    $fromComments = @($IssueComments | Where-Object {
+        $_.user.login -match 'copilot' -and $_.body -match $CopilotQuotaPattern -and
+        (-not $SinceUtc -or [DateTimeOffset]::Parse($_.created_at) -ge $SinceUtc)
+    })
     # Both come back from `gh api` already in chronological order - the last element of whichever set
     # is non-empty is its most recent match. Reviews and comments carry different timestamp field
     # names (submitted_at vs. created_at), and touching a field an object lacks throws under
@@ -252,9 +281,19 @@ function Get-PrWaitOutcome {
 
 function Format-Duration {
     param($StartedAt, $CompletedAt)
+    # `gh pr checks --json` reports a still-running check's completedAt as "0001-01-01T00:00:00" (Go's
+    # zero time.Time, marshaled with no 'Z'/offset) rather than omitting it or using JSON null - not
+    # falsy, so the guard above misses it, and parsing it as LOCAL time in a positive-UTC-offset zone
+    # underflows past year 1 and throws. Reject the sentinel by prefix, and fall back to '-' on any
+    # other unparseable value rather than letting the whole command die on a cosmetic duration.
     if (-not $StartedAt -or -not $CompletedAt) { return '-' }
-    $span = [DateTimeOffset]::Parse($CompletedAt) - [DateTimeOffset]::Parse($StartedAt)
-    return "$([int]$span.TotalSeconds)s"
+    if ($StartedAt -like '0001-01-01*' -or $CompletedAt -like '0001-01-01*') { return '-' }
+    try {
+        $span = [DateTimeOffset]::Parse($CompletedAt) - [DateTimeOffset]::Parse($StartedAt)
+        return "$([int]$span.TotalSeconds)s"
+    } catch {
+        return '-'
+    }
 }
 
 function Write-Summary {
@@ -336,7 +375,8 @@ if ($MyInvocation.InvocationName -ne '.') {
             $copilotQuotaMessage = $null
             if ($copilotPending -and -not $copilotReview) {
                 $issueComments = Get-IssueCommentsRaw -RepoNameWithOwner $repoNameWithOwner -Number $Number
-                $copilotQuotaMessage = Find-CopilotQuotaMessage -Reviews $reviews -IssueComments $issueComments
+                $requestTime = Get-LatestCopilotRequestTime -TimelineEvents (Get-IssueTimelineRaw -RepoNameWithOwner $repoNameWithOwner -Number $Number)
+                $copilotQuotaMessage = Find-CopilotQuotaMessage -Reviews $reviews -IssueComments $issueComments -SinceUtc $requestTime
             }
 
             $timedOut = (Get-Date) -ge $deadline
