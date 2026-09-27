@@ -39,15 +39,77 @@ internal sealed class SkiaReceiptImageScaler : IReceiptImageScaler
         return new ReceiptPhoto(data.ToArray(), "image/jpeg");
     }
 
+    // SKBitmap.Decode ignores EXIF orientation. Telegram-compressed photos are pre-rotated so this
+    // never mattered before, but a phone photo sent as a document (the path this branch now
+    // recommends for an exact read) typically carries an orientation tag - decoding through SKCodec
+    // and applying codec.EncodedOrigin ourselves is what SKBitmap.Decode does not do.
     static SKBitmap? TryDecode(ReadOnlyMemory<byte> bytes)
     {
         try
         {
-            return SKBitmap.Decode(bytes.ToArray());
+            using var codec = SKCodec.Create(new SKMemoryStream(bytes.ToArray()));
+            if (codec is null)
+                return null;
+
+            var decoded = new SKBitmap(codec.Info.Width, codec.Info.Height);
+            var result = codec.GetPixels(decoded.Info, decoded.GetPixels());
+            if (result is not (SKCodecResult.Success or SKCodecResult.IncompleteInput))
+            {
+                decoded.Dispose();
+                return null;
+            }
+
+            return ApplyExifOrientation(decoded, codec.EncodedOrigin);
         }
         catch
         {
             return null;
         }
+    }
+
+    // Only the three rotation-only origins a camera or a scanner's own upright pass actually produces
+    // (Default, BottomRight = 180deg, RightTop/LeftBottom = 90deg) are corrected. The mirrored origins
+    // (TopRight, BottomLeft, LeftTop, RightBottom) come from a flipped scan, not a phone camera, and
+    // are not handled - docs/BACKLOG.md.
+    static SKBitmap ApplyExifOrientation(SKBitmap bitmap, SKEncodedOrigin origin)
+    {
+        SKBitmap rotated;
+        switch (origin)
+        {
+            case SKEncodedOrigin.BottomRight:
+                rotated = new SKBitmap(bitmap.Width, bitmap.Height);
+                using (var canvas = new SKCanvas(rotated))
+                {
+                    canvas.RotateDegrees(180, bitmap.Width / 2f, bitmap.Height / 2f);
+                    canvas.DrawBitmap(bitmap, 0, 0, SKSamplingOptions.Default);
+                }
+
+                break;
+            case SKEncodedOrigin.RightTop:
+                rotated = new SKBitmap(bitmap.Height, bitmap.Width);
+                using (var canvas = new SKCanvas(rotated))
+                {
+                    canvas.Translate(rotated.Width, 0);
+                    canvas.RotateDegrees(90);
+                    canvas.DrawBitmap(bitmap, 0, 0, SKSamplingOptions.Default);
+                }
+
+                break;
+            case SKEncodedOrigin.LeftBottom:
+                rotated = new SKBitmap(bitmap.Height, bitmap.Width);
+                using (var canvas = new SKCanvas(rotated))
+                {
+                    canvas.Translate(0, rotated.Height);
+                    canvas.RotateDegrees(-90);
+                    canvas.DrawBitmap(bitmap, 0, 0, SKSamplingOptions.Default);
+                }
+
+                break;
+            default:
+                return bitmap;
+        }
+
+        bitmap.Dispose();
+        return rotated;
     }
 }

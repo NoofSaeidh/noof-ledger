@@ -1159,3 +1159,9 @@ confirmation flow (both 2026-09-27) make Haiku's mistakes visible and non-destru
 requiring a stronger model outright; a model that reads more receipts correctly on the first try, or
 letting the operator pick a model per call from Settings the way `IChatClientFactory` already permits at
 the wiring level, is future work if the confirmation rate turns out to be high in real use.
+
+**`SkiaReceiptImageScaler` corrects only the three rotation-only EXIF origins** (`BottomRight` = 180deg,
+`RightTop`/`LeftBottom` = 90deg) that a phone camera or a scanner's own upright pass produce. The four
+mirrored origins (`TopRight`, `BottomLeft`, `LeftTop`, `RightBottom`) — a horizontally- or
+vertically-flipped scan, not a phone photo — are left untransformed. Not observed in production; add
+`SKCanvas.Scale` flips for these if a flipped receipt photo ever surfaces.

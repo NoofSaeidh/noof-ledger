@@ -78,6 +78,45 @@ public class SkiaReceiptImageScalerTests
             "a linear-filtered downscale of alternating black/white columns should come back grey, not pure black or white");
     }
 
+    [Fact]
+    public void A_photo_with_EXIF_orientation_6_is_rotated_upright_before_it_is_scaled()
+    {
+        // Orientation 6 ("rotate 90deg CW to display correctly") is what a phone stamps on a photo
+        // sent as an uncompressed document - Telegram-compressed photos are pre-rotated and carry no
+        // such tag. The raw sensor data here is landscape (2000x1000); once rotated upright it is
+        // portrait (1000x2000), over the limit on its height, so a correct fix scales it down to a
+        // portrait 1568-tall image. A scaler that ignores the tag keeps it landscape (1568 wide).
+        var landscapeSensorData = EncodeJpeg(2000, 1000);
+        var withOrientation6 = WithExifOrientation(landscapeSensorData, orientation: 6);
+
+        var scaled = scaler.ScaleForVision(new ReceiptPhoto(withOrientation6, "image/jpeg"));
+
+        using var bitmap = SKBitmap.Decode(scaled.Bytes.ToArray());
+        bitmap.Width.Should().BeLessThan(bitmap.Height, "orientation 6 corrected upright is portrait, not landscape");
+        bitmap.Height.Should().Be(SkiaReceiptImageScaler.MaxLongSidePixels);
+    }
+
+    static byte[] WithExifOrientation(byte[] jpeg, ushort orientation)
+    {
+        var tiff = new byte[]
+        {
+            (byte)'I', (byte)'I', 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00, // TIFF header, IFD0 at offset 8
+            0x01, 0x00, // one entry
+            0x12, 0x01, // tag 0x0112 - Orientation
+            0x03, 0x00, // type 3 - SHORT
+            0x01, 0x00, 0x00, 0x00, // count 1
+            (byte)(orientation & 0xFF), (byte)(orientation >> 8), 0x00, 0x00, // value, padded to 4 bytes
+            0x00, 0x00, 0x00, 0x00, // no next IFD
+        };
+        var exifHeader = "Exif\0\0"u8.ToArray();
+        var segmentData = exifHeader.Concat(tiff).ToArray();
+        var app1Length = (ushort)(segmentData.Length + 2);
+        var app1 = new byte[] { 0xFF, 0xE1, (byte)(app1Length >> 8), (byte)(app1Length & 0xFF) }
+            .Concat(segmentData).ToArray();
+
+        return jpeg[..2].Concat(app1).Concat(jpeg[2..]).ToArray();
+    }
+
     static byte[] EncodeJpeg(int width, int height) => Encode(width, height, SKEncodedImageFormat.Jpeg);
 
     static byte[] EncodePng(int width, int height) => Encode(width, height, SKEncodedImageFormat.Png);
