@@ -80,4 +80,18 @@ public class FiscalVerificationUrlTests
 
         stripped.Should().Be("утро обед 300\nужин 400");
     }
+
+    // Minor finding (Fable 5.1 review): FiscalQrDecoder compares the host case-insensitively
+    // (StringComparison.OrdinalIgnoreCase against uri.Host), but TryFind matched Prefix with plain
+    // Ordinal, so an upper-cased host in a pasted link would not be found and its verification URL
+    // would leak straight into a model prompt. Only the scheme+host part goes case-insensitive - the
+    // vl payload after it is base64 and stays byte-exact.
+    [Fact]
+    public void TryFind_matches_the_scheme_and_host_case_insensitively_but_keeps_the_vl_value_exact()
+    {
+        var found = VerificationUrl.TryFind("lunch HTTPS://SUF.PURS.GOV.RS/v/?vl=MiXeDCase1 today", out var url);
+
+        found.Should().BeTrue();
+        url.Should().Be("HTTPS://SUF.PURS.GOV.RS/v/?vl=MiXeDCase1");
+    }
 }

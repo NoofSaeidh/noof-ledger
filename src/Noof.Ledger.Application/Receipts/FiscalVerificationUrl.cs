@@ -15,6 +15,14 @@ internal sealed class FiscalVerificationUrl : IFiscalVerificationUrl
 
     public string PathPrefix { get; }
 
+    // TryFind matches this part (scheme+host) case-insensitively, the same way FiscalQrDecoder
+    // compares uri.Host - a pasted link's host casing is not guaranteed. restAfterOrigin (the path and
+    // the "vl=" query key) stays Ordinal, matching FiscalQrDecoder's own case-sensitive
+    // AbsolutePath.StartsWith(PathPrefix); the vl value itself is base64 and is never compared here,
+    // only copied verbatim from the source text.
+    readonly string originPrefix;
+    readonly string restAfterOrigin;
+
     public FiscalVerificationUrl(FiscalVerificationUrlOptions options)
     {
         var prefix = options.VerificationUrlPrefix;
@@ -35,6 +43,9 @@ internal sealed class FiscalVerificationUrl : IFiscalVerificationUrl
         Prefix = prefix;
         Host = uri.Host;
         PathPrefix = uri.AbsolutePath;
+
+        originPrefix = $"{uri.Scheme}://{uri.Host}";
+        restAfterOrigin = prefix[originPrefix.Length..];
     }
 
     // The one place that finds a verification link inside free text - TelegramUpdateRouter and
@@ -42,16 +53,27 @@ internal sealed class FiscalVerificationUrl : IFiscalVerificationUrl
     // exactly one copy of the "match Prefix, stop at whitespace" pattern.
     public bool TryFind(string text, out string url)
     {
-        var start = text.IndexOf(Prefix, StringComparison.Ordinal);
-        if (start < 0)
+        var searchFrom = 0;
+        while (true)
         {
-            url = "";
-            return false;
-        }
+            var originStart = text.IndexOf(originPrefix, searchFrom, StringComparison.OrdinalIgnoreCase);
+            if (originStart < 0)
+            {
+                url = "";
+                return false;
+            }
 
-        var end = text.IndexOfAny(Terminators, start);
-        url = end < 0 ? text[start..] : text[start..end];
-        return true;
+            var restStart = originStart + originPrefix.Length;
+            if (restStart + restAfterOrigin.Length <= text.Length
+                && string.CompareOrdinal(text, restStart, restAfterOrigin, 0, restAfterOrigin.Length) == 0)
+            {
+                var end = text.IndexOfAny(Terminators, originStart);
+                url = end < 0 ? text[originStart..] : text[originStart..end];
+                return true;
+            }
+
+            searchFrom = originStart + 1;
+        }
     }
 
     // Item A (Copilot, Phase 6 review): a text-link capture's RawText carries the whole verification
