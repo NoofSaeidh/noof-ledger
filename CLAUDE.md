@@ -169,8 +169,9 @@ the code that builds the echo text.
 - Test fixtures are synthetic. Real financial data never enters the repo.
 - **A fiscal receipt's verification URL, or its `vl` payload, is never logged** *(settled 2026-09-25,
   Phase 6)* — a log line or exception message names at most the `vl` value's first 8 characters.
-- **...and never in a model prompt either** *(settled 2026-09-27)* — `FiscalVerificationUrl.StripUrl`
-  removes it from a receipt's caption and correction text before either reaches `categorize_receipt`.
+- **...and never in a model prompt either** *(settled 2026-09-27)* — a full verification URL or `vl`
+  payload never reaches `record_transaction`, `categorize_receipt` or a correction's prompt.
+  `FiscalVerificationUrl.StripUrl` is the one place that strips it.
 
 ## 5. Conventions
 
