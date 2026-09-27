@@ -1084,6 +1084,23 @@ and leaves the record itself untouched (`MarkFailedAsync` only runs for a first 
 correction). The window this needs (extraction failing to finish within ~40 seconds of a correction
 arriving) is narrow — reachable only via the same race N-4 traced.
 
+**A URL-only reply to a non-receipt transaction silently becomes a plain re-read, with no
+"send the link separately" notice.** Found during the P6-URL branch's Fable 5.1 review, not built
+(minor, backlog). `CorrectionHandler.HandleEditAsync` checks the target already has a fiscal receipt
+(`IReceiptStore.GetVerificationUrlAsync`) before deciding a pasted link is a *different* receipt and
+sending `NewReceiptLinkMustBeSentSeparately` — but `TryHandleReplyAsync` (a Telegram *reply*, as
+opposed to an edit) has no such check. A reply whose text is nothing but a verification URL, to a
+transaction with no receipt row at all (an ordinary text/voice capture, or a failed link capture),
+still becomes a `Correct` job; `CategorizationWorker.CorrectionFor` strips the URL via
+`FiscalVerificationUrl.StripUrl`, gets back `null` (the "empty means none" contract), and the job
+re-runs the categoriser with `Correction = null` — an unannounced re-read, not the "here's a receipt"
+the person meant. Not built because it needs a design decision this branch's scope did not cover:
+whether a URL-only reply to a receipt-less transaction should get its own notice text (distinct from
+`NewReceiptLinkMustBeSentSeparately`, which talks about a *second* receipt), silently start extracting
+the link as this transaction's own receipt, or something else — `TryHandleReplyAsync` does not know at
+that point whether the target has a receipt, so wiring in a check is straightforward once the wording
+is decided.
+
 **The defer branch relies on `EfJobQueue`'s claim ordering, not an explicit dependency.** The same
 defer mechanism only works because `ClaimAsync` already refuses to claim a job while an earlier job for
 the same transaction is `Pending`/`Claimed` — a correction that arrives mid-extraction is therefore
