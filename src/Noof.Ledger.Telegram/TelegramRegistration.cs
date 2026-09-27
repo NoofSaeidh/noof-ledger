@@ -28,7 +28,6 @@ public static class TelegramRegistration
         services.AddSingleton<IChatNotifier, TelegramChatNotifier>();
         services.AddSingleton<IVoiceFileSource, TelegramVoiceFileSource>();
         services.AddSingleton<IReceiptPhotoSource, TelegramReceiptPhotoSource>();
-        services.AddSingleton<ReceiptLinkDetector>();
         services.AddScoped<TelegramOwnerGate>();
         services.AddScoped<TelegramUpdateOffsetStore>();
         services.AddScoped<RecordActionHandler>();
