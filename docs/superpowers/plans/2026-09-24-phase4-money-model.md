@@ -3808,7 +3808,7 @@ Then confirm nothing in `src` or `tests` still names the retired tool:
 git grep -n "record_spending" -- src tests
 ```
 
-Expect zero hits. If this prints anything, one of Steps 1–8 was missed on that file — go back and fix it before continuing; `docs/OPEN-QUESTIONS.md` and `docs/BACKLOG.md` are the only places in the repo allowed to still say `record_spending`, and this task does not touch either file (that is Task 11's job).
+Expect zero hits. If this prints anything, one of Steps 1–8 was missed on that file — go back and fix it before continuing; `docs/OPEN-QUESTIONS.md` and `docs/backlog/` are the only places in the repo allowed to still say `record_spending`, and this task does not touch either file (that is Task 11's job).
 
 ```
 dotnet test --project tests/Noof.Ledger.Ai.Tests/Noof.Ledger.Ai.Tests.csproj
@@ -6060,7 +6060,7 @@ In `src/Noof.Ledger.Host/Workers/CategorizationWorkerOptions.cs`, replace the co
 ```csharp
     // The currency whose default wallet takes a record when neither the model nor the spending's own
     // currency picks one (M3). A line that states no currency takes its wallet's currency, not this. A
-    // single hard default for now; see docs/BACKLOG.md for the deferred bot command that would set it.
+    // single hard default for now; see docs/backlog/ for the deferred bot command that would set it.
 ```
 
 Run: `dotnet test --project tests/Noof.Ledger.Host.Tests/Noof.Ledger.Host.Tests.csproj --filter CategorizationWorkerTests`
@@ -11590,7 +11590,7 @@ EOF
 - Modify: `CLAUDE.md` (status block; "The model" section; two new short rules)
 - Modify: `README.md` (status block; "still missing" list)
 - Modify: `docs/OPEN-QUESTIONS.md` (new `P4-1` entry)
-- Modify: `docs/BACKLOG.md` (new entries)
+- Modify: `docs/backlog/` (new entries)
 - Modify: `ops/RUNBOOK.md` (new `## Backups` section)
 - Test: none — documentation only, exempt from TDD (CLAUDE.md §4 *Testing*: "Exempt: migrations, DTOs, `Program.cs` wiring" plus the standing exemption every earlier phase's own closing-documentation task has used). Step 1 below is a verification run, not a test-writing step.
 
@@ -11620,7 +11620,7 @@ EOF
   ```markdown
   > **Status:** spec approved (`docs/superpowers/specs/2026-09-24-money-model.md`); **Phases 0, 0b, 1A, 1B, 1C, 1D, 2, 3 and 4 complete** — solution, EF Core model and migrations, PostgreSQL money-storage gate, cookie authentication as the sole mode, the `user set-password` verb, the loopback interlock, a Blazor Server shell, Telegram capture with a durable queue, natural-language capture, voice notes transcribed by Groq's whisper-large-v3, and now the money model: every wallet's balance — opening balance, minus spending, plus income, re-anchored by the operator's own balance statements — is exact in all five currencies (EUR, RSD, USD, RUB, KZT) under `ru-RU` and `sr-Latn-RS`. Transactions carry a `Kind` (`Expense`/`Income`/`BalanceCheck`); expense and income transactions own signed double-entry-lite `entries`; a balance statement is a `balance_checks` checkpoint; a wallet's balance is computed by the `wallet_balances` SQL view and read back by `IBalanceReadModel`, never stored. The model's answer tool is `record_transaction` (was `record_spending`) and now names a wallet and, for a balance statement, the stated amount. `/wallets` manages wallets on the dashboard; income and balance statements are ordinary messages to the bot. The app also backs itself up daily — `pg_dump -Fc` into `%LOCALAPPDATA%\NoofLedger\backups`, the newest 14 kept, every run logged to `backup_runs` — and `ops/restore-check.ps1` proves a dump restores to the same balances. `<N>` solution tests, all green — the Playwright browser tests are in the solution now, so `dotnet test --solution` runs them too and needs Chromium present. Live suites stay skipped unless `NOOF_LEDGER_LIVE_ANTHROPIC_KEY` / `NOOF_LEDGER_LIVE_GROQ_KEY` + `NOOF_LEDGER_LIVE_VOICE_FILE` are set; `ops/publish.ps1` produces a runnable host. Cross-currency conversion, transfers and receipt photos remain future phases. Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
   >
-  > Deferred **decisions** live in `docs/OPEN-QUESTIONS.md`; deferred **work** lives in `docs/BACKLOG.md`. Check both before proposing something as missing.
+  > Deferred **decisions** live in `docs/OPEN-QUESTIONS.md`; deferred **work** lives in `docs/backlog/`. Check both before proposing something as missing.
   >
   > **`noof_ledger` holds the operator's real credentials now.** Never run tests, experiments or manual checks against it, or call the live model, without an explicit request. Tests use the `noof_ledger_test_template` clones only.
   ```
@@ -11731,20 +11731,20 @@ EOF
   | M1 | A wallet's balance is derived from entries and checkpoints, never stored as a column | A cached balance drifts from what produced it the moment anything writes around it instead of through it; deriving it is the only way "exact" stays true after the code that computed it once is forgotten |
   | M3/M4 | `transactions.wallet_id` becomes nullable; the wallet is chosen when the record is read (the model names it, or the currency's default), not at capture | Capture no longer needs a wallet at all, and "no default wallet" stops being a capture-time failure — it only matters once the model has actually named a currency |
   | M6 | A balance statement is a checkpoint (`balance_checks`), not an adjustment entry | An adjustment entry would hide the operator's own correction inside the same ledger as ordinary spending; a checkpoint keeps it as what it is — a fact about reality overriding the app's own running total — and gives the dashboard a "last reconciled" date for free |
-  | M10 | Cross-currency spending is not converted; it is recorded in its own currency, shown as a separate balance line | *"курсы зависят от банка — отложи"* (operator). Inventing a rate the bank would not actually use is worse than an honest, visible second currency line — `docs/BACKLOG.md` records the deferred conversion work |
+  | M10 | Cross-currency spending is not converted; it is recorded in its own currency, shown as a separate balance line | *"курсы зависят от банка — отложи"* (operator). Inventing a rate the bank would not actually use is worse than an honest, visible second currency line — `docs/backlog/` records the deferred conversion work |
   | B2 | An external process's secret goes through its environment only, never an argument | `Process.Start` arguments are visible to anything that can list processes (Task Manager, `Get-Process`, a crash dump); an environment variable set via `ProcessStartInfo.Environment` is not |
   | B5 | `restore-check.ps1` runs against a real database only once, by the operator's own hand, with explicit permission | The script legitimately reads `noof_ledger` to compare against a restored scratch copy — never writes to or drops it — but "this script only ever reads the real ledger" is a claim worth the operator's own eyes once, not something Phase 4's automated tests should assert on his behalf against his real data |
   ```
 
-- [ ] **Step 7a: `docs/OPEN-QUESTIONS.md` / `docs/BACKLOG.md` — fix the stale `record_spending` mentions**
+- [ ] **Step 7a: `docs/OPEN-QUESTIONS.md` / `docs/backlog/` — fix the stale `record_spending` mentions**
 
-  `docs/OPEN-QUESTIONS.md:428-429` and the one `record_spending` hit in `docs/BACKLOG.md` (grep to find its exact line) still name the tool `record_spending`. Since Step 3 above renamed it to `record_transaction` in CLAUDE.md, append `(renamed to \`record_transaction\` in Phase 4)` immediately after each of those two mentions rather than rewriting the historical decision text around them — they are records of what was decided at the time, not a live spec.
+  `docs/OPEN-QUESTIONS.md:428-429` and the one `record_spending` hit in `docs/backlog/` (grep to find its exact line) still name the tool `record_spending`. Since Step 3 above renamed it to `record_transaction` in CLAUDE.md, append `(renamed to \`record_transaction\` in Phase 4)` immediately after each of those two mentions rather than rewriting the historical decision text around them — they are records of what was decided at the time, not a live spec.
 
-- [ ] **Step 7b: `docs/BACKLOG.md` — fix the stale `EfCaptureStoreTests` sentence**
+- [ ] **Step 7b: `docs/backlog/` — fix the stale `EfCaptureStoreTests` sentence**
 
-  `docs/BACKLOG.md:502` says `EfCaptureStoreTests` deletes the seeded default wallet that `WalletDefaultTests` depends on. That is no longer true after Task 1 — the helper it refers to is deleted (`plan-10-task-01.md:571` deletes the default-wallet lookup and seeding this sentence was warning about). Verify the exact current wording at that line and either delete the sentence outright or replace it with one line noting it no longer applies after Phase 4's Task 1 removed the default-wallet capture path it described.
+  `docs/backlog/:502` says `EfCaptureStoreTests` deletes the seeded default wallet that `WalletDefaultTests` depends on. That is no longer true after Task 1 — the helper it refers to is deleted (`plan-10-task-01.md:571` deletes the default-wallet lookup and seeding this sentence was warning about). Verify the exact current wording at that line and either delete the sentence outright or replace it with one line noting it no longer applies after Phase 4's Task 1 removed the default-wallet capture path it described.
 
-- [ ] **Step 8: `docs/BACKLOG.md` — deferred work**
+- [ ] **Step 8: `docs/backlog/` — deferred work**
 
   Append a new section at the end of the file:
 
@@ -11847,7 +11847,7 @@ EOF
 - [ ] **Step 10: Read back every edited file**
 
   ```powershell
-  git diff -- CLAUDE.md README.md docs/OPEN-QUESTIONS.md docs/BACKLOG.md ops/RUNBOOK.md
+  git diff -- CLAUDE.md README.md docs/OPEN-QUESTIONS.md docs/backlog/ ops/RUNBOOK.md
   ```
   Confirm no `<N>` placeholder survived (both occurrences replaced with Step 1's real number), no
   Markdown heading collided with an existing one, and the RUNBOOK insertion landed between the two
@@ -11856,7 +11856,7 @@ EOF
 - [ ] **Step 11: Commit**
 
   ```powershell
-  git add CLAUDE.md README.md docs/OPEN-QUESTIONS.md docs/BACKLOG.md ops/RUNBOOK.md
+  git add CLAUDE.md README.md docs/OPEN-QUESTIONS.md docs/backlog/ ops/RUNBOOK.md
   git commit -m "$(cat <<'EOF'
   Close Phase 4: status, the record_transaction rename, backups, and what's deferred
 
@@ -11864,7 +11864,7 @@ EOF
   rules (balances are derived, never stored; a secret never reaches an external process's arguments;
   a migration touching a column wallet_balances reads must drop and re-create the view) bind future
   phases the way the phase actually built them. docs/OPEN-QUESTIONS.md records why M1,
-  M3/M4, M6, M10, B2 and B5 were decided the way they were; docs/BACKLOG.md records cross-currency
+  M3/M4, M6, M10, B2 and B5 were decided the way they were; docs/backlog/ records cross-currency
   conversion, transfers, the same-day checkpoint edge and dump encryption as deliberately deferred,
   not forgotten. ops/RUNBOOK.md documents where backups live, how to check and restore one, and the
   one real restore-check run against noof_ledger the operator still owns.
