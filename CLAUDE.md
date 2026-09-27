@@ -34,7 +34,7 @@ policy below names.
 reasoning, never for small tasks. `low` for mechanical work.
 
 **Review policy — three tiers, three cadences, don't substitute one for another:**
-- **Per task** (inside a phase or plan): review stays on sonnet, as today. No Codex, no Fable per task.
+- **Per task** (inside a phase or plan): review runs on opus (effort medium). No Codex, no Fable per task.
 - **Per pull request: one Codex review**, a model family different from the implementer, run from the
   PR branch with the Codex CLI — the plugin's `/codex:review`/`/codex:adversarial-review` slash
   commands cannot be invoked by an agent. Never enable the plugin's stop-time review gate; it would
@@ -66,7 +66,7 @@ reasoning, never for small tasks. `low` for mechanical work.
   preference); ask the operator first on anything expensive (new design, migration, another topic,
   roughly >~50 lines) instead of starting it, proposing a backlog entry — judged by this
   single-operator local app's real risk, not completeness.
-- **Copilot fix rounds:** one round, one commit, sonnet-only review, push, then wait once (never
+- **Copilot fix rounds:** one round, one commit, opus-only review (effort medium), push, then wait once (never
   poll) for its re-review — at most 2 rounds per PR, then list what's left for the operator. No
   Codex/Fable for a Copilot round unless it touches money, secrets, a migration or the public
   surface and a stronger review is judged necessary — say why in the PR. Resolve only the threads
