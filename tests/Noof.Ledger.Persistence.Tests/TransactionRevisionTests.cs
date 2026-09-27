@@ -90,6 +90,26 @@ public class TransactionRevisionTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task A_receipts_first_categorization_is_initial_but_a_later_correction_of_it_is_not()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transactionId = await SeedTransactionAsync(db);
+        var store = new EfCategorizationStore(db, Clock);
+
+        await store.ApplyAsync(transactionId,
+            new CategorizationOutcome([Coffee(250m)], new DateOnly(2026, 9, 21), JobKind.CategorizeReceipt), TestContext.Current.CancellationToken);
+        await store.ApplyAsync(transactionId,
+            new CategorizationOutcome([Coffee(250m)], new DateOnly(2026, 9, 21), JobKind.CategorizeReceipt, "wrong category, make it transport"),
+            TestContext.Current.CancellationToken);
+
+        db.ChangeTracker.Clear();
+        var revisions = await db.TransactionRevisions.OrderBy(r => r.RevisionNumber).ToListAsync(TestContext.Current.CancellationToken);
+        revisions.Select(r => (r.RevisionNumber, r.Kind)).Should().Equal((1, RevisionKind.Initial), (2, RevisionKind.Correction));
+        revisions[1].Instruction.Should().Be("wrong category, make it transport");
+    }
+
+    [Fact]
     public async Task A_reinterpretation_is_recorded_as_an_edit()
     {
         await using var db = await fixture.CreateContextAsync();

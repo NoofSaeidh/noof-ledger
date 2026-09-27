@@ -129,6 +129,7 @@ internal static class MockDataWriter
                     CategoryId = categories[record.Lines[line].CategorySlug],
                     CategorizedBy = CategorizationAuthority.Model,
                     MerchantId = record.Lines[line].Merchant is { } merchant ? merchants[merchant] : null,
+                    Ordinal = line + 1,
                 });
             }
         }

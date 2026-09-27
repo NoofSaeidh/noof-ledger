@@ -52,7 +52,7 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
     };
 
     static LineItem NewLineItem(
-        Guid transactionId, string description, Money amount, Guid? categoryId, Guid? merchantId) => new()
+        Guid transactionId, string description, Money amount, Guid? categoryId, Guid? merchantId, int ordinal = 1) => new()
     {
         Id = Guid.NewGuid(),
         TransactionId = transactionId,
@@ -61,6 +61,7 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
         CategoryId = categoryId,
         CategorizedBy = CategorizationAuthority.Model,
         MerchantId = merchantId,
+        Ordinal = ordinal,
     };
 
     [Fact]

@@ -69,3 +69,9 @@ paths:
   by a memory dump). What it needs from DI must be dependency-free, like `DatabaseLogLevelReadySignal`:
   `DatabaseLogLevelLoader` marks it once the stored level is loaded, and `ReadyGatedBufferSink` waits
   on it (up to 5 s) before flushing the startup burst, so a stored `Off` governs that burst too.
+  `SelfLogOwnership.Claim`, called from here, resolves its connection's host identity synchronously
+  (`Dns.GetHostAddresses` for anything that is not already an IP literal) — harmless for the
+  operator's `127.0.0.1` literal today, but a host name with DNS unreachable would stall this
+  synchronous startup path until the resolver times out. `docs/BACKLOG.md` tracks the DNS-drift side
+  of this; if the database ever moves to a host name, resolve it off the startup path instead of
+  inside `Claim`.

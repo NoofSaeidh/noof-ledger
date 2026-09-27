@@ -2,13 +2,15 @@
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Receipts;
 
 namespace Noof.Ledger.Host.Workers;
 
 internal static class WorkerRegistration
 {
     public static IServiceCollection AddNoofWorkers(
-        this IServiceCollection services, CategorizationWorkerOptions options, BackupWorkerOptions backupOptions)
+        this IServiceCollection services, CategorizationWorkerOptions options, BackupWorkerOptions backupOptions,
+        TimeZoneInfo captureTimeZone)
     {
         services.AddSingleton(options);
         services.AddSingleton(backupOptions);
@@ -20,9 +22,23 @@ internal static class WorkerRegistration
             sp.GetRequiredService<IProposalMapper>(),
             sp.GetRequiredService<IMerchantScan>(),
             sp.GetRequiredService<IRecordEcho>(),
+            captureTimeZone,
             sp.GetRequiredService<IDatabaseGate>(),
             sp.GetRequiredService<IOperationTimer>(),
+            sp.GetRequiredService<IFiscalVerificationUrl>(),
             sp.GetRequiredService<ILogger<CategorizationWorker>>()));
+
+        services.AddHostedService(sp => new ReceiptCategorizationWorker(
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            sp.GetRequiredService<TimeProvider>(),
+            options,
+            CategorizationWorker.CreateWorkerId(),
+            sp.GetRequiredService<IRecordEcho>(),
+            captureTimeZone,
+            sp.GetRequiredService<IDatabaseGate>(),
+            sp.GetRequiredService<IOperationTimer>(),
+            sp.GetRequiredService<IFiscalVerificationUrl>(),
+            sp.GetRequiredService<ILogger<ReceiptCategorizationWorker>>()));
 
         services.AddHostedService(sp => new TranscriptionWorker(
             sp.GetRequiredService<IServiceScopeFactory>(),
@@ -30,9 +46,21 @@ internal static class WorkerRegistration
             options,
             CategorizationWorker.CreateWorkerId(),
             sp.GetRequiredService<IRecordEcho>(),
+            captureTimeZone,
             sp.GetRequiredService<IDatabaseGate>(),
             sp.GetRequiredService<IOperationTimer>(),
             sp.GetRequiredService<ILogger<TranscriptionWorker>>()));
+
+        services.AddHostedService(sp => new ExtractReceiptWorker(
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            sp.GetRequiredService<TimeProvider>(),
+            options,
+            CategorizationWorker.CreateWorkerId(),
+            sp.GetRequiredService<IRecordEcho>(),
+            captureTimeZone,
+            sp.GetRequiredService<IDatabaseGate>(),
+            sp.GetRequiredService<IOperationTimer>(),
+            sp.GetRequiredService<ILogger<ExtractReceiptWorker>>()));
 
         if (backupOptions.Enabled)
         {

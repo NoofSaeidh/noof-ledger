@@ -23,6 +23,12 @@ internal sealed class EfRecordEditor(LedgerDbContext db, TimeProvider timeProvid
             .Select(t => new EchoTarget(t.Id, t.BotMessageId))
             .SingleOrDefaultAsync(cancellationToken);
 
+    // A correction always queues Correct, whatever the transaction turns out to be. Whether it
+    // belongs to a receipt (and so must go to CategorizeReceipt instead of record_transaction) is
+    // decided once, at claim time, by CategorizationWorker.TryRouteToReceiptAsync (ruling F-2, Phase 6
+    // re-review) - not here, and not in EfTranscriptionStore or ReplaceRawTextAsync either. Deciding
+    // it at every enqueue site was exactly what let a voice correction (N-1) and an edited message
+    // (N-2) skip the rule a typed reply already followed.
     public async Task<bool> RequestCorrectionAsync(
         Guid transactionId, string instruction, int sourceMessageId, DateTimeOffset sentAt, CancellationToken cancellationToken) =>
         await TryQueueAsync(

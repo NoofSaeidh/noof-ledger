@@ -283,6 +283,14 @@ namespace Noof.Ledger.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("merchant_id");
 
+                    b.Property<int>("Ordinal")
+                        .HasColumnType("integer")
+                        .HasColumnName("ordinal");
+
+                    b.Property<Guid?>("ReceiptLineId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("receipt_line_id");
+
                     b.Property<Guid>("TransactionId")
                         .HasColumnType("uuid")
                         .HasColumnName("transaction_id");
@@ -309,6 +317,8 @@ namespace Noof.Ledger.Persistence.Migrations
 
                     b.HasIndex("MerchantId");
 
+                    b.HasIndex("ReceiptLineId");
+
                     b.HasIndex("TransactionId");
 
                     b.ToTable("line_items", "public");
@@ -331,7 +341,17 @@ namespace Noof.Ledger.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("kind");
 
+                    b.Property<string>("TaxId")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("tax_id");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("TaxId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_merchants_tax_id")
+                        .HasFilter("tax_id IS NOT NULL");
 
                     b.ToTable("merchants", "public");
                 });
@@ -356,6 +376,157 @@ namespace Noof.Ledger.Persistence.Migrations
                     b.HasIndex("MerchantId");
 
                     b.ToTable("merchant_aliases", "public");
+                });
+
+            modelBuilder.Entity("Noof.Ledger.Domain.Receipt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("FiscalNumber")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("fiscal_number");
+
+                    b.Property<DateTimeOffset?>("IssuedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("issued_at");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer")
+                        .HasColumnName("receipt_kind");
+
+                    b.Property<string>("LocationName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("location_name");
+
+                    b.Property<int?>("PaymentMethod")
+                        .HasColumnType("integer")
+                        .HasColumnName("payment_method");
+
+                    b.Property<decimal?>("QrTotal")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("qr_total");
+
+                    b.Property<string>("SellerAddress")
+                        .HasColumnType("text")
+                        .HasColumnName("seller_address");
+
+                    b.Property<string>("SellerName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("seller_name");
+
+                    b.Property<string>("SellerTaxId")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("seller_tax_id");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("integer")
+                        .HasColumnName("source");
+
+                    b.Property<string>("TelegramFileId")
+                        .HasColumnType("text")
+                        .HasColumnName("telegram_file_id");
+
+                    b.Property<Guid>("TransactionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("transaction_id");
+
+                    b.Property<string>("VerificationUrl")
+                        .HasColumnType("text")
+                        .HasColumnName("verification_url");
+
+                    b.ComplexProperty(typeof(Dictionary<string, object>), "Total", "Noof.Ledger.Domain.Receipt.Total#Money", b1 =>
+                        {
+                            b1.IsRequired();
+
+                            b1.Property<decimal>("Amount")
+                                .HasPrecision(19, 4)
+                                .HasColumnType("numeric(19,4)")
+                                .HasColumnName("total");
+
+                            b1.Property<string>("Currency")
+                                .IsRequired()
+                                .HasMaxLength(3)
+                                .HasColumnType("character varying(3)")
+                                .HasColumnName("currency");
+                        });
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TransactionId")
+                        .IsUnique();
+
+                    b.HasIndex("SellerTaxId", "FiscalNumber")
+                        .IsUnique()
+                        .HasDatabaseName("ix_receipts_seller_tax_id_fiscal_number")
+                        .HasFilter("seller_tax_id IS NOT NULL AND fiscal_number IS NOT NULL");
+
+                    b.ToTable("receipts", "public");
+                });
+
+            modelBuilder.Entity("Noof.Ledger.Domain.ReceiptLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("name");
+
+                    b.Property<int>("Ordinal")
+                        .HasColumnType("integer")
+                        .HasColumnName("ordinal");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("quantity");
+
+                    b.Property<Guid>("ReceiptId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("receipt_id");
+
+                    b.Property<string>("TaxLabel")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("tax_label");
+
+                    b.Property<decimal>("Total")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("total");
+
+                    b.Property<string>("Unit")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("unit");
+
+                    b.Property<decimal>("UnitPrice")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("unit_price");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReceiptId", "Ordinal")
+                        .IsUnique();
+
+                    b.ToTable("receipt_lines", "public");
                 });
 
             modelBuilder.Entity("Noof.Ledger.Domain.Transaction", b =>
@@ -405,6 +576,10 @@ namespace Noof.Ledger.Persistence.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("telegram_chat_id");
 
+                    b.Property<string>("TelegramFileId")
+                        .HasColumnType("text")
+                        .HasColumnName("telegram_file_id");
+
                     b.Property<int?>("TelegramMessageId")
                         .HasColumnType("integer")
                         .HasColumnName("telegram_message_id");
@@ -414,6 +589,10 @@ namespace Noof.Ledger.Persistence.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)")
                         .HasColumnName("time_zone_id");
+
+                    b.Property<string>("VerificationUrl")
+                        .HasColumnType("text")
+                        .HasColumnName("verification_url");
 
                     b.Property<int?>("VoiceDurationSeconds")
                         .HasColumnType("integer")
@@ -437,7 +616,7 @@ namespace Noof.Ledger.Persistence.Migrations
 
                     b.ToTable("transactions", "public", t =>
                         {
-                            t.HasCheckConstraint("ck_transactions_capture_has_content", "(capture_kind IN (0, 2) AND raw_text IS NOT NULL) OR (capture_kind = 1 AND voice_file_id IS NOT NULL)");
+                            t.HasCheckConstraint("ck_transactions_capture_has_content", "(capture_kind IN (0, 2) AND raw_text IS NOT NULL) OR (capture_kind = 1 AND voice_file_id IS NOT NULL) OR (capture_kind = 3 AND ((telegram_file_id IS NOT NULL) <> (verification_url IS NOT NULL)))");
 
                             t.HasCheckConstraint("ck_transactions_telegram_ids_match_capture_kind", "(capture_kind = 2 AND telegram_chat_id IS NULL AND telegram_message_id IS NULL) OR (capture_kind <> 2 AND telegram_chat_id IS NOT NULL AND telegram_message_id IS NOT NULL)");
                         });
@@ -475,6 +654,10 @@ namespace Noof.Ledger.Persistence.Migrations
                         .HasColumnType("character varying(3)")
                         .HasColumnName("currency");
 
+                    b.Property<int?>("DefaultForPayment")
+                        .HasColumnType("integer")
+                        .HasColumnName("default_for_payment");
+
                     b.Property<bool>("IsDefaultForCurrency")
                         .HasColumnType("boolean")
                         .HasColumnName("is_default_for_currency");
@@ -491,6 +674,11 @@ namespace Noof.Ledger.Persistence.Migrations
                         .IsUnique()
                         .HasDatabaseName("ix_wallets_one_default_per_currency")
                         .HasFilter("is_default_for_currency");
+
+                    b.HasIndex("DefaultForPayment")
+                        .IsUnique()
+                        .HasDatabaseName("ix_wallets_one_default_per_payment_method")
+                        .HasFilter("default_for_payment IS NOT NULL");
 
                     b.ToTable("wallets", "public");
                 });
@@ -732,6 +920,11 @@ namespace Noof.Ledger.Persistence.Migrations
                         .HasForeignKey("MerchantId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("Noof.Ledger.Domain.ReceiptLine", null)
+                        .WithMany()
+                        .HasForeignKey("ReceiptLineId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Noof.Ledger.Domain.Transaction", null)
                         .WithMany()
                         .HasForeignKey("TransactionId")
@@ -745,6 +938,24 @@ namespace Noof.Ledger.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("MerchantId")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Noof.Ledger.Domain.Receipt", b =>
+                {
+                    b.HasOne("Noof.Ledger.Domain.Transaction", null)
+                        .WithOne()
+                        .HasForeignKey("Noof.Ledger.Domain.Receipt", "TransactionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Noof.Ledger.Domain.ReceiptLine", b =>
+                {
+                    b.HasOne("Noof.Ledger.Domain.Receipt", null)
+                        .WithMany()
+                        .HasForeignKey("ReceiptId")
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
 

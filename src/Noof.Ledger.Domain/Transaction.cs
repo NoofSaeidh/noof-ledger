@@ -20,6 +20,13 @@ public sealed class Transaction
 
     public int? VoiceDurationSeconds { get; init; }
 
+    // A receipt photo's Telegram file id (Phase 6): enough for ExtractReceiptWorker to download it
+    // again, so the photo itself is never stored (R-4).
+    public string? TelegramFileId { get; init; }
+
+    // The fiscal QR link, when the receipt arrived as plain text naming one rather than a photo.
+    public string? VerificationUrl { get; init; }
+
     public required TransactionStatus Status { get; set; }
 
     // IANA id (e.g. "Europe/Belgrade"), stamped from Capture:TimeZone at capture.

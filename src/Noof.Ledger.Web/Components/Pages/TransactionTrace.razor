@@ -107,7 +107,7 @@ else
             var failed = trace.Events.Any(e => e.Stage == TransactionStages.StageFailed && e.FailedStage == stage);
             <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
                      Color="@(failed ? Color.Error : stageEvent is not null ? Color.Success : Color.Default)">
-                @(stage == TransactionStages.Transcribed && stageEvent is null && !failed ? $"{stage} —" : stage)
+                @(stage is TransactionStages.Transcribed or TransactionStages.Extracted && stageEvent is null && !failed ? $"{stage} —" : stage)
             </MudChip>
         }
     </div>
@@ -131,7 +131,7 @@ else
             <tbody>
                 @foreach (var e in trace.Events)
                 {
-                    <tr>
+                    <tr class="@(e.Level == LogSeverity.Warning ? "trace-row-warning" : null)">
                         <td>@FormatOffset(e.At - trace.Events[0].At)</td>
                         <td>@e.Stage</td>
                         <td>
@@ -149,6 +149,71 @@ else
                 }
             </tbody>
         </MudSimpleTable>
+    }
+
+    @if (trace.Receipt is { } receipt)
+    {
+        <div id="trace-receipt" class="mb-6">
+            <MudText HtmlTag="h2" Typo="Typo.h6" Class="mb-3">Receipt</MudText>
+
+            @if (receipt.Source == ReceiptSource.Vision && receipt.QrTotal is not null)
+            {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mb-3">
+                    The Tax Administration was unavailable; these lines were read from the photo.
+                </MudAlert>
+            }
+
+            @if (receipt.AwaitingConfirmation)
+            {
+                <MudAlert id="trace-receipt-awaiting-confirmation" Severity="Severity.Warning" Variant="Variant.Outlined" Class="mb-3">
+                    @if (receipt.Problems is { Count: > 0 } problems)
+                    {
+                        @foreach (var problem in problems)
+                        {
+                            <div>@problem</div>
+                        }
+                    }
+                    else
+                    {
+                        <div>This receipt did not look right, so it was not categorised automatically.</div>
+                    }
+                    <div>Awaiting Record anyway.</div>
+                </MudAlert>
+            }
+
+            <MudSimpleTable Dense="true" Elevation="0" Class="mb-3">
+                <tbody>
+                    <tr><td>Shop</td><td>@FormatShop(receipt)</td></tr>
+                    <tr><td>Address</td><td>@(receipt.SellerAddress ?? "—")</td></tr>
+                    <tr><td>PIB</td><td>@(receipt.SellerTaxId ?? "—")</td></tr>
+                    <tr><td>Fiscal number</td><td>@(receipt.FiscalNumber ?? "—")</td></tr>
+                    <tr><td>Issued at</td><td>@FormatIssuedAt(receipt.IssuedAt)</td></tr>
+                    <tr><td>Source</td><td>@(receipt.Source == ReceiptSource.FiscalQr ? "Tax Administration" : "Read from the photo")</td></tr>
+                    <tr><td>Payment method</td><td>@(receipt.PaymentMethod?.ToString() ?? "—")</td></tr>
+                    <tr><td>Total</td><td>@FormatMoney(receipt.Total, receipt.Currency)</td></tr>
+                    <tr><td>QR total</td><td>@(receipt.QrTotal is { } qrTotal ? FormatMoney(qrTotal, receipt.Currency) : "—")</td></tr>
+                </tbody>
+            </MudSimpleTable>
+
+            <MudSimpleTable Dense="true" Elevation="0">
+                <thead>
+                    <tr><th>#</th><th>Name</th><th>Quantity</th><th>Unit price</th><th>Total</th><th>Category</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var line in receipt.Lines)
+                    {
+                        <tr>
+                            <td>@line.Ordinal</td>
+                            <td>@line.Name</td>
+                            <td>@line.Quantity.ToString("0.####", CultureInfo.InvariantCulture)@(line.Unit is { } unit ? $" {unit}" : "")</td>
+                            <td>@FormatMoney(line.UnitPrice, receipt.Currency)</td>
+                            <td>@FormatMoney(line.Total, receipt.Currency)</td>
+                            <td>@(line.CategoryNameEn ?? "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </div>
     }
 
     <MudText HtmlTag="h2" Typo="Typo.h6" Class="mb-3">History</MudText>
@@ -201,6 +266,21 @@ else
         _ => Color.Default,
     };
 
+    static string FormatShop(ReceiptTraceView receipt) => receipt switch
+    {
+        { SellerName: { } name, LocationName: { } location } => $"{name} ({location})",
+        { SellerName: { } name } => name,
+        _ => "—",
+    };
+
+    string FormatIssuedAt(DateTimeOffset? issuedAt) =>
+        issuedAt is { } at
+            ? TimeZoneInfo.ConvertTime(at, CaptureTimeZone).ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture)
+            : "—";
+
+    static string FormatMoney(decimal amount, CurrencyCode currency) =>
+        $"{amount.ToString("N2", CultureInfo.InvariantCulture)} {currency}";
+
     static string FormatOffset(TimeSpan offset) => offset switch
     {
         { TotalSeconds: < 1 } => $"+{(int)offset.TotalMilliseconds} ms",
@@ -209,5 +289,5 @@ else
     };
 
     string FormatReceived(DateTimeOffset receivedAt) =>
-        TimeZoneInfo.ConvertTime(receivedAt, CaptureTimeZone).ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+        TimeZoneInfo.ConvertTime(receivedAt, CaptureTimeZone).ToString("yyyy-MM-dd HH:mm zzz", CultureInfo.InvariantCulture);
 }

@@ -344,8 +344,8 @@ Prerequisites: PostgreSQL reachable.
 test [fast|db|e2e|all] [-Filter <class>]
 
 fast (the default) runs every project that needs neither PostgreSQL nor a browser: Domain, Ai,
-Architecture, Telegram, Host.Tests and Demo.Tests - except the classes in Host.Tests and Demo.Tests
-tagged [Trait("Category", "Database")] (AppLogSinkTests, DashboardCultureTests,
+Architecture, Telegram, Receipts, Host.Tests and Demo.Tests - except the classes in Host.Tests and
+Demo.Tests tagged [Trait("Category", "Database")] (AppLogSinkTests, DashboardCultureTests,
 ReadyGatedBufferSinkDbTests, SecretRedactionSentinelTests; RefreshTests, MockLedgerTests), which
 create databases whenever PostgreSQL is reachable and so belong under the lock, not in fast.
 
@@ -592,6 +592,7 @@ switch ($CommandName) {
             'tests\Noof.Ledger.Ai.Tests\Noof.Ledger.Ai.Tests.csproj',
             'tests\Noof.Ledger.Architecture.Tests\Noof.Ledger.Architecture.Tests.csproj',
             'tests\Noof.Ledger.Telegram.Tests\Noof.Ledger.Telegram.Tests.csproj',
+            'tests\Noof.Ledger.Receipts.Tests\Noof.Ledger.Receipts.Tests.csproj',
             'tests\Noof.Ledger.Host.Tests\Noof.Ledger.Host.Tests.csproj',
             'tests\Noof.Ledger.Demo.Tests\Noof.Ledger.Demo.Tests.csproj'
         )

@@ -89,6 +89,20 @@ public class ProjectReferenceTests
     }
 
     [Fact]
+    public void Receipts_package_references_are_exactly_its_allowed_set()
+    {
+        Packages("Noof.Ledger.Receipts").Should().BeEquivalentTo(
+            "Microsoft.Extensions.Http",
+            // ZXing.Net.Bindings.SkiaSharp brings SkiaSharp itself transitively; the two together
+            // are how a fiscal receipt's QR is read from a photographed image (Task 2, Phase 6).
+            "ZXing.Net",
+            "ZXing.Net.Bindings.SkiaSharp",
+            // A direct reference (2026-09-27): SkiaReceiptImageScaler names SkiaSharp types itself
+            // rather than only riding along inside the ZXing binding.
+            "SkiaSharp");
+    }
+
+    [Fact]
     public void Web_has_no_program_cs()
     {
         var web = Path.Combine(RepoRoot.Find().FullName, "src", "Noof.Ledger.Web");

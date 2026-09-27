@@ -25,6 +25,8 @@ internal sealed class LedgerDbContext(DbContextOptions<LedgerDbContext> options)
     public DbSet<AppSetting> AppSettings => Set<AppSetting>();
     public DbSet<BackupRun> BackupRuns => Set<BackupRun>();
     public DbSet<AppLogEntry> AppLogs => Set<AppLogEntry>();
+    public DbSet<Receipt> Receipts => Set<Receipt>();
+    public DbSet<ReceiptLine> ReceiptLines => Set<ReceiptLine>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder builder)
     {

@@ -3,6 +3,7 @@ using Noof.Ledger.Application;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Telegram;
 
@@ -22,7 +23,7 @@ internal static class TelegramScenes
 
     public static IRecordEcho CreateEcho()
     {
-        using var services = new ServiceCollection().AddNoofApplication(new SlowOperationOptions()).BuildServiceProvider();
+        using var services = new ServiceCollection().AddNoofApplication(new SlowOperationOptions(), new FiscalVerificationUrlOptions()).BuildServiceProvider();
         return services.GetRequiredService<IRecordEcho>();
     }
 

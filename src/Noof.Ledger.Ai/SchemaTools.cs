@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.AI;
 
 namespace Noof.Ledger.Ai;
@@ -43,4 +44,19 @@ internal static class StrictTool
 
     public static bool IsStrict(this AITool tool) =>
         tool.AdditionalProperties.TryGetValue(PropertyName, out var strict) && strict is true;
+}
+
+// An anyOf, not "type": ["string", "null"] beside the enum: the Anthropic API checks every enum
+// value against the type array as a whole and rejects the tool with a 400 ("Enum value 'EUR' does
+// not match declared type '['string', 'null']'", fixed in 4161444 for record_transaction). Every
+// nullable string enum in every strict schema this assembly declares goes through this instead.
+internal static class NullableEnum
+{
+    public static JsonObject String(IEnumerable<string> values, string description) => new()
+    {
+        ["anyOf"] = new JsonArray(
+            new JsonObject { ["type"] = "string", ["enum"] = new JsonArray([.. values.Select(value => (JsonNode)value)]) },
+            new JsonObject { ["type"] = "null" }),
+        ["description"] = description,
+    };
 }

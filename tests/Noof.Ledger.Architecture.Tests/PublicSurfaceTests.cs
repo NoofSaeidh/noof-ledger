@@ -38,10 +38,12 @@ public class PublicSurfaceTests
             "CurrencyMismatchException", "Entry", "EntryRole", "JobKind", "JobStatus", "LineItem", "Merchant", "MerchantAlias",
             "MerchantKind", "MerchantName", "Money", "Transaction", "TransactionKind",
             "TransactionStatus", "Wallet",
+            "Receipt", "ReceiptLine", "ReceiptSource", "ReceiptKind", "ReceiptKindExtensions", "PaymentMethod", "WalletPaymentDefault",
         ],
         ["Noof.Ledger.Application"] =
         [
             "IOperationTimer", "OperationTiming", "SlowOperationOptions", "TimedOperations",
+            "IFiscalVerificationUrl", "FiscalVerificationUrlOptions",
             "IPasswordHasher", "IUserStore", "PasswordVerifyResult", "CapturedMessage",
             "ICaptureStore", "CategoryOption", "MerchantOption", "CategorizationRequest", "CorrectionRequest",
             "ProposedLineItem", "CategorizationProposal", "ResolvedLineItem", "CategorizedLineItem",
@@ -66,9 +68,18 @@ public class PublicSurfaceTests
             "IDatabaseLogLevelStore", "DatabaseLogLevelSetting",
             "ILogRetentionSettings", "LogRetentionDays", "IFileLogSinkInfo",
             "IDatabaseGate", "DatabaseState",
+            "ExtractedReceiptLine", "ExtractedReceipt",
+            "FiscalQrPayload", "FiscalQrDecodeResult", "FiscalFetchFailure", "FiscalFetchResult", "IQrReader",
+            "IFiscalQrDecoder", "IFiscalReceiptClient", "IReceiptVision", "ReceiptUnreadableReason", "ReceiptVisionResult",
+            "IReceiptImageScaler", "ReceiptLineToCategorize",
+            "ReceiptCategorizationRequest", "ReceiptLineCategory", "ReceiptCategorization", "IReceiptCategorizer",
+            "UnsupportedChangeKind",
+            "IReceiptFetchStatus",
+            "CapturedReceipt", "IReceiptStore", "ReceiptSaveResult", "ReceiptView", "ReceiptLineView",
+            "ReceiptPhoto", "IReceiptPhotoSource",
             "LogSeverity", "LogRow", "LogFilter", "LogPage", "LogSortOrder", "ILogQuery", "ILogRetention",
             "TransactionStages", "TransactionLogScope", "TraceEvent", "RevisionView", "TraceLineItem", "TransactionSummary",
-            "TransactionTrace", "ITransactionTrace",
+            "TransactionTrace", "ITransactionTrace", "ReceiptTraceLine", "ReceiptTraceView",
             "ILogSinkStatus",
             "IDatabaseLogLevel",
             "HealthLevel", "HealthItem", "SystemHealthReport", "ISystemHealth",
@@ -79,7 +90,7 @@ public class PublicSurfaceTests
         ["Noof.Ledger.Ai"] = ["AiRegistration"],
         ["Noof.Ledger.Telegram"] = ["TelegramRegistration"],
         ["Noof.Ledger.Fx"] = [],
-        ["Noof.Ledger.Receipts"] = [],
+        ["Noof.Ledger.Receipts"] = ["ReceiptsRegistration"],
         ["Noof.Ledger.Host"] = [],
     };
 
@@ -95,7 +106,7 @@ public class PublicSurfaceTests
     [Fact]
     public void No_public_concrete_service_crosses_an_infrastructure_boundary()
     {
-        string[] infrastructure = ["Noof.Ledger.Persistence", "Noof.Ledger.Ai", "Noof.Ledger.Telegram"];
+        string[] infrastructure = ["Noof.Ledger.Persistence", "Noof.Ledger.Ai", "Noof.Ledger.Telegram", "Noof.Ledger.Receipts"];
 
         var offenders = infrastructure
             .SelectMany(project => SourceFiles(project)
@@ -118,9 +129,9 @@ public class PublicSurfaceTests
         foreach (var project in ScannedProjects)
             Directory.Exists(ProjectRoot(project)).Should().BeTrue($"{project} must exist to be scanned");
 
-        // Fx and Receipts are legitimately empty placeholders, so "every list is non-empty" would be
-        // wrong. Domain standing in for the set proves the regex still matches real declarations - a
-        // rule whose subject set is empty passes forever and enforces nothing.
+        // Fx is a legitimately empty placeholder, so "every list is non-empty" would be wrong.
+        // Domain standing in for the set proves the regex still matches real declarations - a rule
+        // whose subject set is empty passes forever and enforces nothing.
         PublicTypesIn("Noof.Ledger.Domain").Should().NotBeEmpty();
     }
 

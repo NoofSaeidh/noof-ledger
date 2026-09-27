@@ -83,12 +83,17 @@ public sealed record MappedProposal(
     Guid WalletId = default,
     Money? StatedBalance = null);
 
-// A line ready to be written: identity resolved, slug resolved to a real row.
+// A line ready to be written: identity resolved, slug resolved to a real row. Ordinal and
+// ReceiptLineId are set only when this line comes from a receipt's own lines (Phase 6, R-2) -
+// null for every text/voice capture, which keeps the auto-numbering EfCategorizationStore already
+// did for them unchanged.
 public sealed record CategorizedLineItem(
     string Description,
     Money Amount,
     Guid CategoryId,
-    Guid? MerchantId);
+    Guid? MerchantId,
+    int? Ordinal = null,
+    Guid? ReceiptLineId = null);
 
 // Everything the worker and the echo need about one transaction: the message, where its echo lives, and the
 // record exactly as it is stored now. SentOn is the local day the message was sent - "today" for the model (D2).

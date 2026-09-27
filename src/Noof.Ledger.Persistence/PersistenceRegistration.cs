@@ -11,6 +11,7 @@ using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Editing;
 using Noof.Ledger.Application.Jobs;
+using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Application.Reporting;
 using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Application.Transcription;
@@ -23,6 +24,7 @@ using Noof.Ledger.Persistence.Categorization;
 using Noof.Ledger.Persistence.Diagnostics;
 using Noof.Ledger.Persistence.Editing;
 using Noof.Ledger.Persistence.Jobs;
+using Noof.Ledger.Persistence.Receipts;
 using Noof.Ledger.Persistence.Reporting;
 using Noof.Ledger.Persistence.Secrets;
 using Noof.Ledger.Persistence.Transcription;
@@ -84,6 +86,7 @@ public static class PersistenceRegistration
         services.AddScoped<ILogRetentionSettings, EfLogRetentionSettingsStore>();
         services.AddScoped<ILogRetention, EfLogRetention>();
         services.AddScoped<ITransactionTrace, EfTransactionTrace>();
+        services.AddScoped<IReceiptStore, EfReceiptStore>();
 
         services.AddScoped<ISystemHealthCheck, MigrationsHealthCheck>();
 

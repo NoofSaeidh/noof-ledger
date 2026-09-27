@@ -61,6 +61,18 @@ else
                 Save aliases
             </MudButton>
         </div>
+        @if (!wallet.Archived)
+        {
+            <div class="noof-wallet-row mt-4">
+                <MudText HtmlTag="label" for="@($"wallet-payment-default-{wallet.Id}")" Typo="Typo.caption" Class="mud-text-secondary">Default for</MudText>
+                <select id="@($"wallet-payment-default-{wallet.Id}")" @bind="wallet.PendingPaymentDefault"
+                        @bind:after="@(() => SetPaymentDefaultAsync(wallet))" class="noof-native-select">
+                    <option value="">None</option>
+                    <option value="@PaymentMethod.Card">Card</option>
+                    <option value="@PaymentMethod.Cash">Cash</option>
+                </select>
+            </div>
+        }
         <div class="noof-wallet-actions mt-4">
             @if (wallet.IsDefaultForCurrency)
             {
@@ -154,6 +166,7 @@ else
         public required bool Archived { get; set; }
         public string PendingName { get; set; } = string.Empty;
         public string PendingAliases { get; set; } = string.Empty;
+        public PaymentMethod? PendingPaymentDefault { get; set; }
     }
 
     List<Row> wallets = [];
@@ -189,6 +202,7 @@ else
                 Archived = wallet.Archived,
                 PendingName = wallet.Name,
                 PendingAliases = string.Join(", ", wallet.Aliases),
+                PendingPaymentDefault = wallet.DefaultForPayment,
             }),
         ];
 
@@ -299,6 +313,23 @@ else
         catch (Exception exception)
         {
             error = $"Could not make it the default: {exception.Message}";
+        }
+    }
+
+    async Task SetPaymentDefaultAsync(Row wallet)
+    {
+        error = null;
+        saved = null;
+
+        try
+        {
+            await WalletAdmin.SetPaymentDefaultAsync(wallet.Id, wallet.PendingPaymentDefault, cancellation.Token);
+            saved = "Payment default saved.";
+            await ReloadAsync();
+        }
+        catch (Exception exception)
+        {
+            error = $"Could not save the payment default: {exception.Message}";
         }
     }
 

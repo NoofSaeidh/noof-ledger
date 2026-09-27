@@ -8,7 +8,8 @@ public sealed record TransactionListFilter(
     Guid? WalletId = null,
     TransactionKind? Kind = null,
     TransactionStatus? Status = null,
-    string? Text = null);
+    string? Text = null,
+    bool ReceiptsOnly = false);
 
 public sealed record TransactionListRow(
     Guid Id,
@@ -19,7 +20,9 @@ public sealed record TransactionListRow(
     TransactionStatus Status,
     string? RawText,
     IReadOnlyList<Money> Amounts,
-    IReadOnlyList<string> Categories);
+    IReadOnlyList<string> Categories,
+    bool HasReceipt = false,
+    string? ShopName = null);
 
 public sealed record TransactionListPage(IReadOnlyList<TransactionListRow> Rows, int TotalCount);
 

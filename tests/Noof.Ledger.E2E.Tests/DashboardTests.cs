@@ -52,6 +52,7 @@ public sealed class DashboardTests(CookieModeHostFixture fixture) : PageTest, IC
                 Amount = new Money(250.00m, CurrencyCode.Rsd),
                 CategoryId = CoffeeCategoryId,
                 CategorizedBy = CategorizationAuthority.Model,
+                Ordinal = 1,
                 MerchantId = merchantId,
             });
             await db.SaveChangesAsync(cancellationToken);

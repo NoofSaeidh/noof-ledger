@@ -1,10 +1,13 @@
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Editing;
+using Noof.Ledger.Application.Receipts;
 using Telegram.Bot.Types;
 
 namespace Noof.Ledger.Telegram;
 
-internal sealed class CorrectionHandler(IRecordEditor editor, IChatNotifier chatNotifier, IRecordEcho recordEcho)
+internal sealed class CorrectionHandler(
+    IRecordEditor editor, IChatNotifier chatNotifier, IRecordEcho recordEcho, IReceiptStore receiptStore,
+    IFiscalVerificationUrl verificationUrl)
 {
     readonly EchoMessage correcting = new(recordEcho.Correcting, []);
     readonly EchoMessage transcribing = new(recordEcho.Transcribing, []);
@@ -43,11 +46,32 @@ internal sealed class CorrectionHandler(IRecordEditor editor, IChatNotifier chat
 
     public async Task HandleEditAsync(Message edited, CancellationToken cancellationToken)
     {
-        if (edited.Text is not { Length: > 0 } text)
+        // R2-5 (Phase 6 second re-review): Telegram delivers an edited photo's or document's own free
+        // text as Caption, never Text - dropping it here silently lost every receipt-photo caption
+        // edit. A voice note can carry a Caption too, but its correction text is its transcript
+        // (TryHandleVoiceReplyAsync), not a caption, so only a photo/document edit falls back to it.
+        var text = edited.Text ?? (edited.Photo is not null || edited.Document is not null ? edited.Caption : null);
+        if (text is not { Length: > 0 })
             return;
 
         if (await editor.FindByUserMessageAsync(edited.Chat.Id, edited.Id, cancellationToken) is not { } target)
             return;
+
+        // N-2 (Phase 6 re-review): a link capture's own message can be edited into a DIFFERENT fiscal
+        // receipt link - that is a new receipt, not a correction of this one, and letting it reach
+        // Reinterpret's record_transaction re-read would silently wipe the first receipt's lines.
+        // Anything else (a plain correction instruction, or the same link resent) is an ordinary edit,
+        // handled by CategorizationWorker's own claim-time routing once it reaches Reinterpret.
+        if (await receiptStore.GetVerificationUrlAsync(target.TransactionId, cancellationToken) is { Length: > 0 } originalLink
+            && verificationUrl.TryFind(text, out var editedLink)
+            && !string.Equals(editedLink, originalLink, StringComparison.Ordinal))
+        {
+            // R2-2 (Phase 6 second re-review): a chatNotifier.EditAsync here would overwrite the
+            // record's own echo - its "Recorded" summary and Cancel/Edit buttons - with this notice,
+            // for a record the notice itself says is unchanged. A separate message keeps the echo intact.
+            await chatNotifier.SendAsync(edited.Chat.Id, recordEcho.NewReceiptLinkMustBeSentSeparately.Text, cancellationToken);
+            return;
+        }
 
         if (await editor.ReplaceRawTextAsync(target.TransactionId, text, cancellationToken)
             && target.EchoMessageId is { } echoId)

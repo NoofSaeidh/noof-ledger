@@ -2,6 +2,7 @@
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Jobs;
+using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Host.Workers.CategorizationLogging;
@@ -18,8 +19,10 @@ internal sealed class CategorizationWorker(
     IProposalMapper proposalMapper,
     IMerchantScan merchantScan,
     IRecordEcho recordEcho,
+    TimeZoneInfo captureTimeZone,
     IDatabaseGate gate,
     IOperationTimer timer,
+    IFiscalVerificationUrl verificationUrl,
     ILogger<CategorizationWorker> logger)
     : BackgroundService
 {
@@ -114,28 +117,43 @@ internal sealed class CategorizationWorker(
             using var loading = timer.Start(logger, TimedOperations.DbLoadCategorizationContext);
 
             subject = await store.GetSubjectAsync(job.TransactionId, cancellationToken);
+            loading.Stop();
+
             if (subject is not { } sub)
             {
-                loading.Stop();
                 await FailTerminallyAsync(
                     jobQueue, store, notifier, job, null,
                     "the transaction this job points at no longer exists", currentStage, cancellationToken);
                 return;
             }
 
+            // The receipt-routing check (a possible hand-off write, or on the last deferral a Telegram
+            // notify) runs between the subject load and the options load rather than inside either
+            // timing - timing it as if it were either would misattribute a Slow warning to the wrong
+            // operation.
+            if (await TryRouteToReceiptAsync(scope, jobQueue, store, notifier, job, sub, cancellationToken))
+                return;
+
+            using var optionsLoading = timer.Start(logger, TimedOperations.DbLoadCategorizationOptions);
+
             var categories = await categoryCatalog.ActiveAsync(cancellationToken);
             var aliases = await merchantDirectory.AliasesAsync(cancellationToken);
-            var hints = merchantScan.Matches(sub.RawText, aliases, options.MerchantHintLimit)
+            // A link capture whose extraction failed terminally has no receipt row, so
+            // TryRouteToReceiptAsync above never intercepted it - RawText here can still be the whole
+            // fiscal verification URL, vl payload included, and that must never reach the model
+            // (CLAUDE.md, "...and never in a model prompt either").
+            var rawTextForModel = verificationUrl.StripUrl(sub.RawText) ?? "";
+            var hints = merchantScan.Matches(rawTextForModel, aliases, options.MerchantHintLimit)
                 .DistinctBy(alias => alias.MerchantId)
                 .Select(alias => new MerchantOption(alias.MerchantId, alias.DisplayName))
                 .ToList();
 
             var allMerchants = await merchantDirectory.MerchantsAsync(cancellationToken);
             var wallets = await walletDirectory.ActiveAsync(cancellationToken);
-            loading.Stop();
+            optionsLoading.Stop();
 
             var request = new CategorizationRequest(
-                sub.RawText,
+                rawTextForModel,
                 TodayFor(job, sub),
                 [.. categories.Select(category => new CategoryOption(category.Slug, category.NameEn, category.NameRu, category.ParentSlug))],
                 hints,
@@ -153,8 +171,11 @@ internal sealed class CategorizationWorker(
             // it influenced would fail to map.
             var offeredMerchantIds = allMerchants.Select(merchant => merchant.Id).ToHashSet();
 
+            var keptProposal = KeepingTheRecordsWallet(job, sub, proposal);
+            var walletsForMapping = WalletsIncludingKept(wallets, proposal, keptProposal, sub);
+
             if (!proposalMapper.TryMap(
-                KeepingTheRecordsWallet(job, sub, proposal, wallets), offeredSlugs, offeredMerchantIds, wallets,
+                keptProposal, offeredSlugs, offeredMerchantIds, walletsForMapping,
                 options.DefaultCurrency, out var mapped, out var failure))
             {
                 await FailTerminallyAsync(jobQueue, store, notifier, job, subject, failure, currentStage, cancellationToken);
@@ -261,9 +282,93 @@ internal sealed class CategorizationWorker(
         }
     }
 
-    static CorrectionRequest? CorrectionFor(CategorizationJob job, CategorizationSubject record) =>
-        job is { Kind: JobKind.Correct, Instruction: { } instruction }
-            ? new CorrectionRequest(record.OccurredOn, record.Lines, instruction)
+    // Ruling F-2 (Phase 6 re-review): the one place that decides whether a Correct or Reinterpret job
+    // belongs to a receipt, instead of that decision being duplicated at every enqueue site (queue-time
+    // special-casing in EfRecordEditor used to route a text reply but not a voice one - N-1 - or an
+    // edited message - N-2 - and had no way to know a receipt was still being extracted - N-4). A
+    // reading (Categorize) is never routed here: only a correction can name a transaction that already
+    // has a receipt.
+    static readonly TimeSpan ReceiptExtractionPendingDelay = TimeSpan.FromSeconds(5);
+
+    async Task<bool> TryRouteToReceiptAsync(
+        IServiceScope scope, IJobQueue jobQueue, ICategorizationStore store, IChatNotifier notifier,
+        CategorizationJob job, CategorizationSubject sub, CancellationToken cancellationToken)
+    {
+        if (job.Kind is not (JobKind.Correct or JobKind.Reinterpret))
+            return false;
+
+        var receiptStore = scope.ServiceProvider.GetRequiredService<IReceiptStore>();
+        var receipt = await receiptStore.GetByTransactionAsync(job.TransactionId, cancellationToken);
+
+        if (receipt is { } present && !present.Kind.IsNonMoneyKind())
+        {
+            // Correct carries the operator's words as Instruction already; Reinterpret (an edited
+            // message) carries none - the edit itself already replaced RawText, so that IS the
+            // correction text.
+            var instruction = job.Instruction ?? sub.RawText;
+            var now = timeProvider.GetUtcNow();
+            var outcome = await jobQueue.HandOffToReceiptCorrectionAsync(
+                job.Id, workerId, job.TransactionId, instruction, job.SourceMessageId, now, cancellationToken);
+
+            if (outcome == JobCompletionOutcome.NotOwned)
+                logger.JobAlreadyReclaimed(job.Id);
+            else
+                logger.HandedOffToReceiptCorrection(job.Id, job.TransactionId);
+
+            return true;
+        }
+
+        // N-4: a Photo capture whose receipt does not exist yet is still being extracted (or
+        // retrying) - EfJobQueue.ClaimAsync's own same-transaction ordering means ExtractReceipt is
+        // normally done, one way or the other, before a later Correct/Reinterpret job on the same
+        // transaction becomes claimable at all; this is the defensive twin of that guarantee; it
+        // never discards the operator's text. A pathologically long extraction outage could exhaust
+        // this job's own attempt budget before the receipt ever arrives - an accepted, narrow edge
+        // case rather than a reason to invent a second, unbounded wait mechanism here.
+        if (receipt is null && sub is { CaptureKind: CaptureKind.Photo, Status: TransactionStatus.Captured })
+        {
+            var runAfter = timeProvider.GetUtcNow() + ReceiptExtractionPendingDelay;
+            // R2-3 (Phase 6 second re-review): the same predicate the other retry paths use (see
+            // HandleModelFailureAsync) - without it, the 8th deferral quietly marks the job Failed with
+            // nobody told, breaking this method's own "never discards the operator's text" promise.
+            var isLastAttempt = job.AttemptCount >= options.MaxAttempts;
+            var outcome = await jobQueue.RetryAsync(
+                job.Id, workerId, runAfter, "the receipt for this transaction is still being extracted", cancellationToken);
+
+            if (outcome == JobCompletionOutcome.NotOwned)
+            {
+                logger.JobAlreadyReclaimed(job.Id);
+            }
+            else
+            {
+                logger.ReceiptCorrectionDeferred(job.Id, job.TransactionId);
+
+                if (isLastAttempt)
+                {
+                    logger.ReceiptCorrectionDeferralExhausted(job.Id, job.TransactionId);
+                    logger.LogStageFailed(
+                        TransactionStages.StageFailed, TransactionStages.Categorized,
+                        new InvalidOperationException("the receipt for this transaction is still being extracted"));
+                    await NotifyFailureAsync(store, notifier, sub, job, cancellationToken);
+                }
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    // Important finding (Fable 5.1 review round on this branch): a reply to any echo becomes a Correct
+    // job whose Instruction is the reply's own text, unfiltered (EfRecordEditor.RequestCorrectionAsync)
+    // - a reply that pastes a fiscal verification link ("here's the receipt https://...?vl=...") to a
+    // transaction with no receipt row (an ordinary text/voice capture, or a failed link capture) used
+    // to reach the model's prompt verbatim through here. Stripped with the same FiscalVerificationUrl
+    // every other model-facing path uses; an instruction that turns out to be nothing but the URL
+    // strips to null, and that means "no correction" rather than an empty one.
+    CorrectionRequest? CorrectionFor(CategorizationJob job, CategorizationSubject record) =>
+        job is { Kind: JobKind.Correct, Instruction: { } instruction } && verificationUrl.StripUrl(instruction) is { } stripped
+            ? new CorrectionRequest(record.OccurredOn, record.Lines, stripped)
             : null;
 
     // A correction's "today" is the reply's own send day (job.InstructionDay), not the original
@@ -281,14 +386,35 @@ internal sealed class CategorizationWorker(
     // The model is shown a correction's lines, not its wallet, so a correction that names no wallet means "leave it
     // where it is", not "the default": otherwise "нет, 300" would quietly move a Raiffeisen purchase into the RSD
     // default and both balances would drift (M1). A re-read starts from scratch and resolves the wallet afresh (M3).
+    // Kept even when that wallet has since been archived (Phase 6 re-review, N-3): archiving a wallet must not
+    // rewrite a historical record's wallet out from under it - only a first categorisation, or a correction that
+    // names a wallet itself, may fall through to the payment/currency default, which does still skip archived
+    // wallets.
     static CategorizationProposal KeepingTheRecordsWallet(
-        CategorizationJob job, CategorizationSubject record, CategorizationProposal proposal, IReadOnlyList<WalletOption> wallets) =>
-        job.Kind == JobKind.Correct
-        && proposal.WalletId is null
-        && record.WalletId is { } current
-        && wallets.Any(wallet => wallet.Id == current)
+        CategorizationJob job, CategorizationSubject record, CategorizationProposal proposal) =>
+        job.Kind == JobKind.Correct && proposal.WalletId is null && record.WalletId is { } current
             ? proposal with { WalletId = current }
             : proposal;
+
+    // ProposalMapper only accepts a WalletId that appears in the wallets it is given, because that
+    // list is also "what the model was offered": an id the model invented must fail terminally. A
+    // kept archived wallet was never offered to the model - it is a fact this worker already knows
+    // from the record, injected by KeepingTheRecordsWallet - so it is added here, not to the active
+    // list the model saw, using the currency the store already read for it
+    // (EfCategorizationStore's WalletCurrency). The gate is
+    // `proposal.WalletId is null`: only when the model itself named no wallet did the worker do the
+    // substituting, so only then is the kept wallet added on the worker's own authority. A model that
+    // names a wallet directly - including one the worker would have kept anyway - must still have
+    // named one that was actually offered, or the job fails.
+    static IReadOnlyList<WalletOption> WalletsIncludingKept(
+        IReadOnlyList<WalletOption> wallets, CategorizationProposal proposal, CategorizationProposal keptProposal,
+        CategorizationSubject record) =>
+        proposal.WalletId is null
+        && keptProposal.WalletId is { } kept
+        && !wallets.Any(wallet => wallet.Id == kept)
+        && record.WalletCurrency is { } currency
+            ? [.. wallets, new WalletOption(kept, record.WalletName, currency, [], IsDefaultForCurrency: false)]
+            : wallets;
 
     static string BuildSummary(MappedProposal mapped) =>
         mapped.Items.Count > 0
@@ -329,7 +455,8 @@ internal sealed class CategorizationWorker(
         // M-6 (Phase 5 final review): the real exception when the catch block that called here had
         // one (a bug, an unexpected EF failure) - only a mapping/lookup failure with no exception of
         // its own falls back to a synthetic one, so the trace page still shows something.
-        logger.LogStageFailed(TransactionStages.StageFailed, failedStage, exception ?? new InvalidOperationException(error));
+        var actualException = exception ?? new InvalidOperationException(error);
+        logger.LogStageFailed(TransactionStages.StageFailed, failedStage, actualException);
 
         // The same predicate EfJobQueue.RetryAsync evaluates server-side - see decision 10. This only
         // stays correct because Program.cs feeds EfJobQueue the same CategorizationWorkerOptions.MaxAttempts.
@@ -337,8 +464,39 @@ internal sealed class CategorizationWorker(
         var runAfter = timeProvider.GetUtcNow() + options.ComputeBackoff(job.AttemptCount);
         var outcome = await jobQueue.RetryAsync(job.Id, workerId, runAfter, error, cancellationToken);
 
-        if (outcome == JobCompletionOutcome.Applied && isLastAttempt)
+        if (outcome != JobCompletionOutcome.Applied)
+            return;
+
+        if (isLastAttempt)
+        {
             await NotifyFailureAsync(store, notifier, subject, job, cancellationToken);
+            return;
+        }
+
+        await ReportRetryAsync(notifier, subject, job, actualException, runAfter, cancellationToken);
+    }
+
+    static string RetryStepFor(CategorizationJob job) =>
+        job.Kind == JobKind.Categorize ? "Recording this" : "Applying your correction";
+
+    async Task ReportRetryAsync(
+        IChatNotifier notifier, CategorizationSubject? subject, CategorizationJob job, Exception exception, DateTimeOffset runAfter,
+        CancellationToken cancellationToken)
+    {
+        if (subject is not { BotMessageId: { } messageId } sub)
+            return;
+
+        var localRunAfter = TimeZoneInfo.ConvertTime(runAfter, captureTimeZone);
+        var notice = recordEcho.ComposeCategorizationRetryNotice(RetryStepFor(job), exception, localRunAfter);
+
+        try
+        {
+            await notifier.EditAsync(sub.TelegramChatId, messageId, notice, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.RetryNoticeEditFailed(ex, messageId, job.TransactionId);
+        }
     }
 
     async Task FailTerminallyAsync(

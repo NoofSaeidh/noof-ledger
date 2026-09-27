@@ -171,4 +171,64 @@ public class EfMerchantDirectoryTests(PostgresFixture fixture)
 
         merchants.Single(m => m.Id == merchantId).DisplayName.Should().Be("DM");
     }
+
+    [Fact]
+    public async Task FindByTaxIdAsync_returns_null_when_no_merchant_carries_the_pib()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var directory = new EfMerchantDirectory(db, new FakeTimeProvider());
+
+        var found = await directory.FindByTaxIdAsync($"P{Guid.NewGuid():N}"[..20], TestContext.Current.CancellationToken);
+
+        found.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task LinkTaxIdAsync_sets_the_pib_once_and_FindByTaxIdAsync_then_resolves_it()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var directory = new EfMerchantDirectory(db, new FakeTimeProvider());
+        var merchantId = await directory.LinkAliasAsync(Folded("PEKARA"), "Pekara", TestContext.Current.CancellationToken);
+        var taxId = $"P{Guid.NewGuid():N}"[..20];
+
+        await directory.LinkTaxIdAsync(merchantId, taxId, TestContext.Current.CancellationToken);
+
+        (await directory.FindByTaxIdAsync(taxId, TestContext.Current.CancellationToken)).Should().Be(merchantId);
+    }
+
+    [Fact]
+    public async Task LinkTaxIdAsync_is_write_once_a_second_call_with_a_different_pib_is_ignored()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var directory = new EfMerchantDirectory(db, new FakeTimeProvider());
+        var merchantId = await directory.LinkAliasAsync(Folded("PEKARA2"), "Pekara 2", TestContext.Current.CancellationToken);
+        var firstTaxId = $"P{Guid.NewGuid():N}"[..20];
+        var secondTaxId = $"P{Guid.NewGuid():N}"[..20];
+        await directory.LinkTaxIdAsync(merchantId, firstTaxId, TestContext.Current.CancellationToken);
+
+        await directory.LinkTaxIdAsync(merchantId, secondTaxId, TestContext.Current.CancellationToken);
+
+        (await directory.FindByTaxIdAsync(firstTaxId, TestContext.Current.CancellationToken)).Should().Be(merchantId);
+        (await directory.FindByTaxIdAsync(secondTaxId, TestContext.Current.CancellationToken)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task LinkTaxIdAsync_when_another_merchant_already_claimed_the_pib_leaves_ours_unset()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var directory = new EfMerchantDirectory(db, new FakeTimeProvider());
+        var firstMerchant = await directory.LinkAliasAsync(Folded("A"), "Shop A", TestContext.Current.CancellationToken);
+        var secondMerchant = await directory.LinkAliasAsync(Folded("B"), "Shop B", TestContext.Current.CancellationToken);
+        var taxId = $"P{Guid.NewGuid():N}"[..20];
+        await directory.LinkTaxIdAsync(firstMerchant, taxId, TestContext.Current.CancellationToken);
+
+        await directory.LinkTaxIdAsync(secondMerchant, taxId, TestContext.Current.CancellationToken);
+
+        (await directory.FindByTaxIdAsync(taxId, TestContext.Current.CancellationToken)).Should().Be(firstMerchant,
+            "the first merchant to claim a PIB keeps it; a later claim by another merchant is dropped, not fought over");
+    }
 }

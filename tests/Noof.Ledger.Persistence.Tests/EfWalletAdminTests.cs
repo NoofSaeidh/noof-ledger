@@ -249,6 +249,20 @@ public class EfWalletAdminTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task SetPaymentDefaultAsync_refuses_an_archived_wallet()
+    {
+        await using var db = await MigratedAsync();
+        var admin = Admin(db);
+        var walletId = await admin.CreateAsync(Raiffeisen(), TestContext.Current.CancellationToken);
+        await admin.ArchiveAsync(walletId, TestContext.Current.CancellationToken);
+
+        var act = () => admin.SetPaymentDefaultAsync(walletId, PaymentMethod.Card, TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        (await ReadAsync(db, walletId)).DefaultForPayment.Should().BeNull();
+    }
+
+    [Fact]
     public async Task ArchiveAsync_hides_the_wallet_gives_up_its_default_and_keeps_its_history()
     {
         await using var db = await MigratedAsync();
@@ -262,6 +276,20 @@ public class EfWalletAdminTests(PostgresFixture fixture)
         wallet.IsDefaultForCurrency.Should().BeFalse();
         (await db.BalanceChecks.AsNoTracking().CountAsync(c => c.WalletId == walletId, TestContext.Current.CancellationToken))
             .Should().Be(1, "archiving hides a wallet, it does not erase what happened in it");
+    }
+
+    [Fact]
+    public async Task ArchiveAsync_clears_the_wallets_payment_default_too()
+    {
+        await using var db = await MigratedAsync();
+        var admin = Admin(db);
+        var walletId = await admin.CreateAsync(Raiffeisen(), TestContext.Current.CancellationToken);
+        await admin.SetPaymentDefaultAsync(walletId, PaymentMethod.Card, TestContext.Current.CancellationToken);
+
+        await admin.ArchiveAsync(walletId, TestContext.Current.CancellationToken);
+
+        (await ReadAsync(db, walletId)).DefaultForPayment.Should().BeNull(
+            "an archived wallet cannot stay the payment default receipt categorization resolves to");
     }
 
     [Fact]
@@ -321,9 +349,85 @@ public class EfWalletAdminTests(PostgresFixture fixture)
 
         wallets.Select(w => w.Name).Should().Equal("Cash", "Main Wallet", "wise", "Alpha");
         wallets.Single(w => w.Id == cash).Should().BeEquivalentTo(
-            new WalletDetails(cash, "Cash", CurrencyCode.Rsd, ["наличка"], IsDefaultForCurrency: false, Archived: false));
+            new WalletDetails(cash, "Cash", CurrencyCode.Rsd, ["наличка"], IsDefaultForCurrency: false, Archived: false,
+                DefaultForPayment: null));
         wallets.Single(w => w.Id == alpha).Archived.Should().BeTrue();
         wallets.Single(w => w.Id == MainWalletId).IsDefaultForCurrency.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SetPaymentDefaultAsync_moves_the_card_default_between_two_wallets()
+    {
+        await using var db = await MigratedAsync();
+        var admin = Admin(db);
+        var raiffeisen = await admin.CreateAsync(Raiffeisen(), TestContext.Current.CancellationToken);
+        var cash = await admin.CreateAsync(Named("Cash", CurrencyCode.Rsd), TestContext.Current.CancellationToken);
+
+        await admin.SetPaymentDefaultAsync(raiffeisen, PaymentMethod.Card, TestContext.Current.CancellationToken);
+
+        (await ReadAsync(db, raiffeisen)).DefaultForPayment.Should().Be(WalletPaymentDefault.Card);
+        (await ReadAsync(db, cash)).DefaultForPayment.Should().BeNull();
+
+        await admin.SetPaymentDefaultAsync(cash, PaymentMethod.Card, TestContext.Current.CancellationToken);
+
+        (await ReadAsync(db, cash)).DefaultForPayment.Should().Be(WalletPaymentDefault.Card);
+        (await ReadAsync(db, raiffeisen)).DefaultForPayment.Should().BeNull(
+            "at most one wallet is the default for a payment method - the unique index must never be violated");
+    }
+
+    [Fact]
+    public async Task SetPaymentDefaultAsync_null_clears_the_wallets_own_default_only()
+    {
+        await using var db = await MigratedAsync();
+        var admin = Admin(db);
+        var raiffeisen = await admin.CreateAsync(Raiffeisen(), TestContext.Current.CancellationToken);
+        var cash = await admin.CreateAsync(Named("Cash", CurrencyCode.Rsd), TestContext.Current.CancellationToken);
+        await admin.SetPaymentDefaultAsync(raiffeisen, PaymentMethod.Card, TestContext.Current.CancellationToken);
+        await admin.SetPaymentDefaultAsync(cash, PaymentMethod.Cash, TestContext.Current.CancellationToken);
+
+        await admin.SetPaymentDefaultAsync(raiffeisen, null, TestContext.Current.CancellationToken);
+
+        (await ReadAsync(db, raiffeisen)).DefaultForPayment.Should().BeNull();
+        (await ReadAsync(db, cash)).DefaultForPayment.Should().Be(
+            WalletPaymentDefault.Cash, "clearing one wallet's default must not touch another's for a different method");
+    }
+
+    [Fact]
+    public async Task SetPaymentDefaultAsync_card_and_cash_defaults_are_independent()
+    {
+        await using var db = await MigratedAsync();
+        var admin = Admin(db);
+        var raiffeisen = await admin.CreateAsync(Raiffeisen(), TestContext.Current.CancellationToken);
+
+        await admin.SetPaymentDefaultAsync(raiffeisen, PaymentMethod.Card, TestContext.Current.CancellationToken);
+        await admin.SetPaymentDefaultAsync(raiffeisen, PaymentMethod.Cash, TestContext.Current.CancellationToken);
+
+        (await ReadAsync(db, raiffeisen)).DefaultForPayment.Should().Be(
+            WalletPaymentDefault.Cash, "a wallet holds at most one payment default at a time");
+    }
+
+    [Fact]
+    public async Task SetPaymentDefaultAsync_refuses_a_payment_method_that_is_not_card_or_cash()
+    {
+        await using var db = await MigratedAsync();
+        var admin = Admin(db);
+        var walletId = await admin.CreateAsync(Raiffeisen(), TestContext.Current.CancellationToken);
+
+        var act = () => admin.SetPaymentDefaultAsync(walletId, PaymentMethod.Transfer, TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<ArgumentOutOfRangeException>();
+        (await ReadAsync(db, walletId)).DefaultForPayment.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SetPaymentDefaultAsync_given_an_unknown_wallet_id_throws()
+    {
+        await using var db = await MigratedAsync();
+        var admin = Admin(db);
+
+        var act = () => admin.SetPaymentDefaultAsync(Guid.NewGuid(), PaymentMethod.Card, TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<KeyNotFoundException>();
     }
 
     [Fact]

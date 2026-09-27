@@ -9,6 +9,7 @@ public class RecordActionButtonsTests
     [InlineData(RecordAction.Cancel)]
     [InlineData(RecordAction.Edit)]
     [InlineData(RecordAction.Restore)]
+    [InlineData(RecordAction.RecordAnyway)]
     public void Every_action_survives_the_round_trip_through_callback_data(RecordAction action)
     {
         var data = RecordActionButtons.ToButton(action).CallbackData;

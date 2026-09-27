@@ -187,6 +187,52 @@ public sealed class TransactionsTests(CookieModeHostFixture fixture) : PageTest,
     }
 
     [Fact]
+    public async Task The_receipts_only_filter_shows_only_transactions_with_a_receipt_and_marks_the_shop()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var marker = Guid.NewGuid().ToString("N")[..8];
+        var walletId = await SeedWalletAsync($"Receipt filter wallet {marker}");
+        var now = DateTimeOffset.UtcNow;
+        var receiptTransactionId = Guid.NewGuid();
+        var plainTransactionId = Guid.NewGuid();
+
+        await using (var db = OpenDb())
+        {
+            db.Transactions.Add(NewTransaction(receiptTransactionId, walletId, TransactionKind.Expense, TransactionStatus.Completed,
+                $"receipt row {marker}", now));
+            db.Transactions.Add(NewTransaction(plainTransactionId, walletId, TransactionKind.Expense, TransactionStatus.Completed,
+                $"plain row {marker}", now));
+            db.Receipts.Add(new Receipt
+            {
+                Id = Guid.NewGuid(),
+                TransactionId = receiptTransactionId,
+                Source = ReceiptSource.Vision,
+                SellerName = $"Shop {marker}",
+                Total = new Money(300m, CurrencyCode.Eur),
+                Kind = ReceiptKind.Sale,
+                CreatedAt = now,
+            });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/transactions");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var grid = Page.Locator("#transactions-grid");
+        await Expect(grid).ToContainTextAsync($"receipt row {marker}");
+        await Expect(grid).ToContainTextAsync($"Shop {marker}");
+
+        await Page.GetByRole(AriaRole.Checkbox, new() { Name = "Receipts only" }).ClickAsync();
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        await Expect(grid).ToContainTextAsync($"receipt row {marker}", new() { Timeout = 10_000 });
+        await Expect(grid).Not.ToContainTextAsync($"plain row {marker}");
+    }
+
+    [Fact]
     public async Task The_quick_range_buttons_mark_the_active_range_until_a_date_is_edited_by_hand()
     {
         if (fixture.DatabaseUnavailable)

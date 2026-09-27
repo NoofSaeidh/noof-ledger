@@ -2,9 +2,9 @@
 
 Personal finance tracker. Telegram bot captures spending (text, voice, receipt photos), an LLM categorises it per line item, a local Blazor dashboard shows it across multiple wallets and currencies. C# / .NET 10, EF Core, strict TDD, local hosting, **public repo**.
 
-> **Status:** Phases 0, 0b, 1A, 1B, 1C, 1D, 2, 3, 4 and 5 complete — full detail in `docs/STATUS.md`.
-> Cross-currency conversion, transfers and receipt photos remain future phases. Rules
-> below marked *(settled)* are direct user decisions and are not up for re-litigation.
+> **Status:** Phases 0, 0b, 1A, 1B, 1C, 1D, 2, 3, 4, 5 and 6 complete — full detail in `docs/STATUS.md`.
+> Cross-currency conversion, transfers, exchange-office slips and editing receipt lines remain future
+> phases. Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
 >
 > Deferred **decisions** live in `docs/OPEN-QUESTIONS.md`; deferred **work** lives in `docs/BACKLOG.md`. Check both before proposing something as missing.
 >
@@ -77,11 +77,15 @@ register it into) — named because they are exceptions, not a licence to invent
   not rejection. Do not re-add verbatim checks or sanity bounds — `docs/OPEN-QUESTIONS.md` P2-1.
 - **A wallet's balance is derived, never stored** *(settled 2026-09-24, Phase 4)* — details in
   `.claude/rules/database.md`.
+- **A receipt's amounts and date never come from the model** *(settled 2026-09-25, Phase 6)* — the
+  fiscal QR or the vision fallback fixes them; details in `.claude/rules/receipts.md`.
 
 **Architecture**
 - Projects are split: `Domain` ← `Application` ← (`Persistence` · `Ai` · `Fx` · `Receipts` · `Telegram` · `Web`) ← `Host`.
 - `Noof.Ledger.Web` is UI only — no `DbContext`, no EF types, no `HttpClient`, no `Program.cs`. Enforced by `DisableTransitiveProjectReferences` plus an architecture test, because project references are transitive at compile time and a convention alone will not hold.
 - `Noof.Ledger.Domain` has zero NuGet references. Asserted by a test.
+- **A new NuGet package or ported code updates `THIRD-PARTY-NOTICES.md` in the same commit**, after
+  checking its licence — `.claude/rules/dependencies.md`, which loads on `Directory.Packages.props`/`*.csproj`.
 - Do not add MediatR, AutoMapper, generic repositories over `DbContext`, or CQRS scaffolding.
 - **Minimum accessibility.** A type is `internal` unless another assembly names it; a member is
   `private` unless something outside its type calls it. Tests reach internals through
@@ -142,10 +146,10 @@ Moved to `.claude/rules/logging.md` — loads automatically when you touch a `Lo
 
   | Target | Step 1 (≈p90) | Step 2 (≈p99) |
   |---|---|---|
-  | Domain, Ai, Telegram, Architecture, Host | 30000 | 120000 |
+  | Domain, Ai, Telegram, Receipts, Architecture, Host | 30000 | 120000 |
   | Persistence, filtered | 60000 | 120000 |
-  | Persistence, full | 180000 | 330000 |
-  | Full solution | 150000 | 600000 |
+  | Persistence, full (≈13 min since Phase 6) | 600000 | 600000 |
+  | Full solution (13–15 min since Phase 6) | 600000 | 600000 |
   | E2E (no data yet — recalibrate) | 180000 | 600000 |
 
 - Waiting for something you did not start (the shared test-database lock, another session): same
@@ -165,6 +169,11 @@ the code that builds the echo text.
 - Secrets are encrypted in the database and entered through the UI. Never in `appsettings.json`, never in the repo, never in a log, an exception message, or an LLM prompt.
 - `.gitignore` covers `publish/`, `artifacts/`, `*.db*`, secrets and any real receipt/voice/statement fixtures **before the first commit**.
 - Test fixtures are synthetic. Real financial data never enters the repo.
+- **A fiscal receipt's verification URL, or its `vl` payload, is never logged** *(settled 2026-09-25,
+  Phase 6)* — a log line or exception message names at most the `vl` value's first 8 characters.
+- **...and never in a model prompt either** *(settled 2026-09-27)* — a full verification URL or `vl`
+  payload never reaches `record_transaction`, `categorize_receipt` or a correction's prompt.
+  `FiscalVerificationUrl.StripUrl` is the one place that strips it.
 
 ## 5. Conventions
 

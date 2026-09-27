@@ -34,3 +34,7 @@ paths:
   `DelegatingChatClient` below it that re-forces `record_transaction` on the follow-up request: FICC
   resets a required `ToolMode` after the first round and strips every tool declaration on its own
   last iteration — verified by decompiling, not by its docs.
+- **`record_transaction` is not the only forced answer tool** *(Phase 6)*. `ChatReceiptVision`'s vision
+  fallback forces `read_receipt`, and `ChatReceiptCategorizer` forces `categorize_receipt`; both use
+  `ChatToolMode.RequireSpecific` for a single round with no `FunctionInvokingChatClient` loop, unlike
+  `record_transaction`'s multi-round `ChatCategorizer`/`DelegatingChatClient` path above.

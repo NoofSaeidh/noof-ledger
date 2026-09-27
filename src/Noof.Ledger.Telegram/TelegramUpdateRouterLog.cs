@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Domain;
+using Telegram.Bot.Types.Enums;
 
 namespace Noof.Ledger.Telegram;
 
@@ -19,4 +20,8 @@ internal static partial class TelegramUpdateRouterLog
 
     [LoggerMessage(EventId = 6001, Level = LogLevel.Debug, Message = "Rejected a /health command from a non-owner chat")]
     public static partial void LogHealthCommandRejected(this ILogger logger);
+
+    [LoggerMessage(EventId = 6002, Level = LogLevel.Information,
+        Message = "Owner message of type {MessageType} cannot be captured")]
+    public static partial void LogUnsupportedMessageType(this ILogger logger, MessageType messageType);
 }

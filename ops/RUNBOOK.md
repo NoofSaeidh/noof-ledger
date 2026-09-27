@@ -81,6 +81,89 @@ without pointing `dotnet ef` at the template one way or the other.
 5. Rate limits: 20 requests/minute on the free tier. A burst of notes is retried with backoff, not
    failed.
 
+## Receipts
+
+**Where the data lives.** Every receipt is its own row in `receipts` (one per transaction), with its
+lines in `receipt_lines` — both append-only, never edited after insert; a correction changes `line_items`
+and writes a revision as it always has, not the receipt itself. `receipts.telegram_file_id` is the only
+trace of the photo: **the photo itself is never stored**, in the database or anywhere else in the repo
+or its backups. A `pg_dump` therefore carries every receipt's numbers and lines but not the image that
+produced them.
+
+**What to expect from the bot.** Send a photo of a Serbian fiscal receipt, or paste its
+`https://suf.purs.gov.rs/v/?vl=...` QR link as plain text. A caption naming a wallet ("card", a wallet's
+own name) wins; otherwise the wallet marked default for the receipt's payment method
+(`/wallets` → "Default for card" / "Default for cash" per wallet) is used, then the currency's own
+default wallet. The echo lists every line with its category, in the receipt's own order, then the total.
+**For an exact read, send the receipt's own QR link as text** — scan the fiscal QR with the phone's own
+camera and paste the `vl=` link — **rather than a photo**; see "Send the QR's link, not a photo" below for
+why even a full-resolution photo sent as a file does not reliably decode the QR itself.
+
+**Warnings, and what they mean.** A ⚠️ line in the echo means the receipt was not read the ordinary way:
+- *"Tax Administration unavailable — lines read from the photo"* — the QR decoded fine, but
+  `suf.purs.gov.rs` did not answer; a vision model read the photo instead, and the fiscal total from the
+  QR is kept as a check against the vision total.
+- *"Read from the photo (no fiscal QR)"* — no QR code was found at all (a non-fiscal receipt, a bad
+  photo); the lines are whatever the vision model read, with nothing to check them against.
+- *"Lines add up to X, the receipt says Y"* — the lines and the receipt's own stated total disagree by
+  more than a cent, worth a second look at the photo.
+- A line saying a date or amount change was declined — a correction asked to change the receipt's own
+  date or an amount; those always come from the receipt, never from a correction, so the request was
+  noted and nothing moved.
+
+**If the Tax Administration ever moves the verification URL.** Change `Receipts:VerificationUrlPrefix`
+in `appsettings.json` (e.g. `"https://suf.purs.gov.rs/v/?vl="`) — it is the one source both the
+Telegram link detector and the fiscal QR decoder's host/path check read; a bad or missing value fails
+startup instead of silently disabling receipts.
+
+**Send the QR's link, not a photo, for an exact receipt.** Scan the fiscal QR with the phone's camera
+(or Google Lens) and send its `https://suf.purs.gov.rs/v/?vl=...` link to the bot as plain text: the
+lines, PIB and fiscal number then come exactly from the Tax Administration. A photo of the whole
+receipt almost always goes through the vision fallback instead — the fiscal QR is a version ~40 code
+(~177 modules a side), and on the operator's real photos (2026-09-27, Telegram-compressed and
+full-resolution 12 MP files alike) no decoder tried read it: ZXing.Net, zxing-cpp, OpenCV's QR detector
+and the WeChat CNN detector (`docs/OPEN-QUESTIONS.md`, Phase 6 QR entry). A close-up photo of the QR
+alone, sent as a file, is untested.
+
+**The Receipts health check** (`/diagnostics`, the dashboard tile, the bot's `/health`) turns amber for
+24 hours after any Tax Administration lookup fails, naming the time it happened, then clears itself back
+to green — it does not mean the *current* lookup is failing, only that one recently did and receipts may
+have fallen back to the photo during that window.
+
+**When the Tax Administration is down.** Nothing needs doing — every receipt still records, on the
+vision fallback, with the warning above. If it stays down for a while, the Receipts check stays amber;
+there is nothing to restart or reconfigure. Once it answers again, new receipts go back to reading their
+lines from the fiscal QR automatically.
+
+**When an attempt fails, the operator is told in Telegram, not just the log** — every
+capture pipeline (receipt extraction, receipt categorisation, first-capture/correction categorisation,
+voice transcription) edits the same placeholder message with a short fixed reason (never the raw
+exception, a verification URL or a `vl` payload) and roughly when it will try again, whenever an
+attempt fails but the job still has attempts left; the last attempt's failure instead shows a clear
+failure message and what to do (send the link from the receipt's QR code); a later
+success simply overwrites either with the ordinary echo.
+
+### Manual acceptance — Phase 6 (receipts), the operator's first real receipt
+
+**This was never tested against the real Tax Administration site or a real receipt, by design** — every
+automated test uses a synthetic `vl` payload, a hand-written journal, or a generated QR image, and the
+live suite's two receipt tests (`LiveReceiptTests`) use a synthetic image and invented lines too; nothing
+exercises the real Tax Administration site or a real receipt. This is the one check that closes that gap;
+ten minutes, no live model call unless the vision fallback triggers (a few tenths of a cent if it does).
+
+1. **Send a real fiscal receipt photo** to the bot. Compare every line, the total and the date the echo
+   shows against the paper receipt in your hand — name, amount and quantity per line, not just the
+   total.
+2. **Send the same receipt's QR link as plain text** instead (read the `vl=` URL off the printed QR, or
+   scan it with your phone first) and confirm it produces the same record.
+3. **Turn the network off** (or block `suf.purs.gov.rs` in your hosts file) and send a third receipt
+   photo. Confirm the vision fallback runs, the echo carries the *"Read from the photo"* warning, and
+   `/diagnostics` shows the Receipts check amber. Turn the network back on.
+
+Record the result here once it has been run:
+
+> _Not yet run. When it is: date, receipt shop, and pass/fail per step go here._
+
 ## Solution-wide accessibility sweep
 
 `ops/inspect.ps1` runs `dotnet jb inspectcode` (`JetBrains.ReSharper.GlobalTools`,

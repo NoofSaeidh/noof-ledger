@@ -259,6 +259,94 @@ public sealed class TransactionTraceTests(CookieModeHostFixture fixture) : PageT
     }
 
     [Fact]
+    public async Task A_text_captures_stage_strip_shows_a_dash_for_Transcribed_and_Extracted()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var transactionId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var walletId = await SeedWalletAsync();
+
+        await using (var db = OpenDb())
+        {
+            db.Transactions.Add(new Transaction
+            {
+                Id = transactionId,
+                WalletId = walletId,
+                RawText = "seeded text capture",
+                CaptureKind = CaptureKind.Manual,
+                Kind = TransactionKind.Expense,
+                Status = TransactionStatus.Completed,
+                TimeZoneId = "Europe/Belgrade",
+                OccurredAt = now,
+                OccurredOn = ZonedClock.LocalDate(now, "Europe/Belgrade"),
+                TelegramChatId = null,
+                TelegramMessageId = null,
+                CreatedAt = now,
+            });
+
+            db.AppLogs.Add(NewStageRow(transactionId, now, TransactionStages.Received, TransactionStages.ReceivedEventId));
+            db.AppLogs.Add(NewStageRow(transactionId, now.AddSeconds(1), TransactionStages.Categorized, TransactionStages.CategorizedEventId));
+
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync($"{fixture.BaseUrl}/transactions/{transactionId}/trace");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var stages = Page.Locator("#trace-stages");
+        await Expect(stages).ToContainTextAsync("Transcribed —");
+        await Expect(stages).ToContainTextAsync("Extracted —");
+    }
+
+    [Fact]
+    public async Task A_receipt_fetch_failed_event_shows_a_warning_row_on_the_timeline()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var transactionId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var walletId = await SeedWalletAsync();
+
+        await using (var db = OpenDb())
+        {
+            db.Transactions.Add(new Transaction
+            {
+                Id = transactionId,
+                WalletId = walletId,
+                RawText = null,
+                CaptureKind = CaptureKind.Photo,
+                TelegramFileId = "photo-file-trace-test",
+                Kind = TransactionKind.Expense,
+                Status = TransactionStatus.Completed,
+                TimeZoneId = "Europe/Belgrade",
+                OccurredAt = now,
+                OccurredOn = ZonedClock.LocalDate(now, "Europe/Belgrade"),
+                TelegramChatId = 333,
+                TelegramMessageId = 1,
+                CreatedAt = now,
+            });
+
+            db.AppLogs.Add(NewStageRow(transactionId, now, TransactionStages.Received, TransactionStages.ReceivedEventId));
+            db.AppLogs.Add(NewReceiptFetchFailedRow(transactionId, now.AddSeconds(1)));
+            db.AppLogs.Add(NewStageRow(transactionId, now.AddSeconds(2), TransactionStages.Extracted, TransactionStages.ExtractedEventId));
+
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync($"{fixture.BaseUrl}/transactions/{transactionId}/trace");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var warningRow = Page.Locator("#trace-timeline tr.trace-row-warning");
+        await Expect(warningRow).ToBeVisibleAsync();
+        await Expect(warningRow).ToContainTextAsync(TransactionStages.ReceiptFetchFailed);
+    }
+
+    [Fact]
     public async Task A_transaction_id_with_no_log_rows_but_a_real_transaction_shows_trace_expired()
     {
         if (fixture.DatabaseUnavailable)
@@ -293,6 +381,217 @@ public sealed class TransactionTraceTests(CookieModeHostFixture fixture) : PageT
         await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
         await Expect(Page.Locator("#trace-timeline")).ToContainTextAsync("Trace expired");
+    }
+
+    [Fact]
+    public async Task A_receipt_transaction_shows_the_receipt_section_with_a_vision_warning()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var transactionId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var walletId = await SeedWalletAsync();
+
+        await using (var db = OpenDb())
+        {
+            db.Transactions.Add(new Transaction
+            {
+                Id = transactionId,
+                WalletId = walletId,
+                RawText = "seeded receipt transaction",
+                CaptureKind = CaptureKind.Manual,
+                Kind = TransactionKind.Expense,
+                Status = TransactionStatus.Completed,
+                TimeZoneId = "Europe/Belgrade",
+                OccurredAt = now,
+                OccurredOn = ZonedClock.LocalDate(now, "Europe/Belgrade"),
+                TelegramChatId = null,
+                TelegramMessageId = null,
+                CreatedAt = now,
+            });
+
+            var receiptId = Guid.NewGuid();
+            db.Receipts.Add(new Receipt
+            {
+                Id = receiptId,
+                TransactionId = transactionId,
+                Source = ReceiptSource.Vision,
+                SellerName = "Test Market Nova 12",
+                SellerAddress = "Bulevar 1",
+                SellerTaxId = "123456789",
+                FiscalNumber = "FN-9",
+                IssuedAt = now,
+                Total = new Money(300m, CurrencyCode.Rsd),
+                Kind = ReceiptKind.Sale,
+                PaymentMethod = PaymentMethod.Card,
+                QrTotal = 305m,
+                CreatedAt = now,
+            });
+            db.ReceiptLines.Add(new ReceiptLine
+            {
+                Id = Guid.NewGuid(),
+                ReceiptId = receiptId,
+                Ordinal = 1,
+                Name = "Bread",
+                Quantity = 1m,
+                UnitPrice = 300m,
+                Total = 300m,
+            });
+
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync($"{fixture.BaseUrl}/transactions/{transactionId}/trace");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var receiptSection = Page.Locator("#trace-receipt");
+        await Expect(receiptSection).ToContainTextAsync("Test Market Nova 12");
+        await Expect(receiptSection).ToContainTextAsync("123456789");
+        await Expect(receiptSection).ToContainTextAsync("FN-9");
+        await Expect(receiptSection).ToContainTextAsync("Read from the photo");
+        await Expect(receiptSection).ToContainTextAsync("Bread");
+        await Expect(receiptSection).ToContainTextAsync("The Tax Administration was unavailable; these lines were read from the photo.");
+    }
+
+    // 2026-09-27: a vision receipt saved without enqueueing CategorizeReceipt (its lines did not add up
+    // to its total) shows its own "awaiting confirmation" alert on the trace page - the same, shared
+    // IReceiptStore.IsAwaitingConfirmationAsync RecordActionHandler's Cancel/Restore reads too, so the
+    // two views cannot drift (Fable review item 3).
+    [Fact]
+    public async Task A_captured_vision_receipt_awaiting_confirmation_shows_the_awaiting_alert()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var transactionId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var walletId = await SeedWalletAsync();
+
+        await using (var db = OpenDb())
+        {
+            db.Transactions.Add(new Transaction
+            {
+                Id = transactionId,
+                WalletId = walletId,
+                RawText = null,
+                CaptureKind = CaptureKind.Photo,
+                TelegramFileId = "photo-awaiting-confirmation",
+                Kind = TransactionKind.Expense,
+                Status = TransactionStatus.Captured,
+                TimeZoneId = "Europe/Belgrade",
+                OccurredAt = now,
+                OccurredOn = ZonedClock.LocalDate(now, "Europe/Belgrade"),
+                TelegramChatId = 444,
+                TelegramMessageId = 1,
+                CreatedAt = now,
+            });
+
+            var receiptId = Guid.NewGuid();
+            db.Receipts.Add(new Receipt
+            {
+                Id = receiptId,
+                TransactionId = transactionId,
+                Source = ReceiptSource.Vision,
+                SellerName = "Test Market Nova 12",
+                IssuedAt = now,
+                Total = new Money(500m, CurrencyCode.Rsd),
+                Kind = ReceiptKind.Sale,
+                CreatedAt = now,
+            });
+            db.ReceiptLines.Add(new ReceiptLine
+            {
+                Id = Guid.NewGuid(),
+                ReceiptId = receiptId,
+                Ordinal = 1,
+                Name = "Bread",
+                Quantity = 1m,
+                UnitPrice = 400m,
+                Total = 400m,
+            });
+            // No CategorizationJobs row: this receipt was saved without enqueueing CategorizeReceipt.
+
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync($"{fixture.BaseUrl}/transactions/{transactionId}/trace");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var alert = Page.Locator("#trace-receipt-awaiting-confirmation");
+        await Expect(alert).ToBeVisibleAsync();
+        await Expect(alert).ToContainTextAsync("Awaiting Record anyway.");
+        await Expect(alert).ToContainTextAsync("Lines add up to 400.00 RSD, the receipt says 500.00 RSD");
+    }
+
+    [Fact]
+    public async Task A_receipt_issued_at_is_shown_in_Belgrade_time_with_its_offset()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var transactionId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var issuedAtUtc = new DateTimeOffset(2026, 9, 25, 10, 30, 0, TimeSpan.Zero);
+        var walletId = await SeedWalletAsync();
+
+        await using (var db = OpenDb())
+        {
+            db.Transactions.Add(new Transaction
+            {
+                Id = transactionId,
+                WalletId = walletId,
+                RawText = "seeded receipt time transaction",
+                CaptureKind = CaptureKind.Manual,
+                Kind = TransactionKind.Expense,
+                Status = TransactionStatus.Completed,
+                TimeZoneId = "Europe/Belgrade",
+                OccurredAt = now,
+                OccurredOn = ZonedClock.LocalDate(now, "Europe/Belgrade"),
+                TelegramChatId = null,
+                TelegramMessageId = null,
+                CreatedAt = now,
+            });
+
+            var receiptId = Guid.NewGuid();
+            db.Receipts.Add(new Receipt
+            {
+                Id = receiptId,
+                TransactionId = transactionId,
+                Source = ReceiptSource.FiscalQr,
+                SellerName = "Test Market Nova 12",
+                SellerAddress = "Bulevar 1",
+                SellerTaxId = "987654321",
+                FiscalNumber = "FN-10",
+                IssuedAt = issuedAtUtc,
+                Total = new Money(300m, CurrencyCode.Rsd),
+                Kind = ReceiptKind.Sale,
+                PaymentMethod = PaymentMethod.Card,
+                QrTotal = 300m,
+                CreatedAt = now,
+            });
+            db.ReceiptLines.Add(new ReceiptLine
+            {
+                Id = Guid.NewGuid(),
+                ReceiptId = receiptId,
+                Ordinal = 1,
+                Name = "Bread",
+                Quantity = 1m,
+                UnitPrice = 300m,
+                Total = 300m,
+            });
+
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync($"{fixture.BaseUrl}/transactions/{transactionId}/trace");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var receiptSection = Page.Locator("#trace-receipt");
+        await Expect(receiptSection).ToContainTextAsync("2026-09-25 12:30:00 +02:00");
+        await Expect(receiptSection).Not.ToContainTextAsync("10:30:00 UTC");
     }
 
     [Fact]
@@ -506,6 +805,21 @@ public sealed class TransactionTraceTests(CookieModeHostFixture fixture) : PageT
         TransactionId = transactionId,
         PropertiesJson = $$"""
             {"Stage":"{{TransactionStages.StageFailed}}","FailedStage":"{{failedStage}}","EventId":{"Id":{{TransactionStages.StageFailedEventId}},"Name":"{{TransactionStages.StageFailed}}"},"TransactionId":"{{transactionId}}"}
+            """,
+    };
+
+    static AppLogEntry NewReceiptFetchFailedRow(Guid transactionId, DateTimeOffset at) => new()
+    {
+        Id = 0,
+        LoggedAt = at,
+        Level = LogSeverity.Warning,
+        Source = "TransactionTraceTests",
+        Message = $"{TransactionStages.ReceiptFetchFailed}: 504 gateway timeout (status 504)",
+        Template = "{Stage}: {Reason} (status {StatusCode})",
+        Exception = null,
+        TransactionId = transactionId,
+        PropertiesJson = $$"""
+            {"Stage":"{{TransactionStages.ReceiptFetchFailed}}","Reason":"504 gateway timeout","StatusCode":504,"EventId":{"Id":{{TransactionStages.ReceiptFetchFailedEventId}},"Name":"{{TransactionStages.ReceiptFetchFailed}}"},"TransactionId":"{{transactionId}}"}
             """,
     };
 

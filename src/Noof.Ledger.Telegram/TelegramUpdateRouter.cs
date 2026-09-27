@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Noof.Ledger.Application.Capture;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Domain;
 using Telegram.Bot.Types;
 
@@ -15,6 +16,7 @@ internal sealed class TelegramUpdateRouter(
     CorrectionHandler correctionHandler,
     IRecordEcho recordEcho,
     ISystemHealth systemHealth,
+    IFiscalVerificationUrl verificationUrl,
     ILogger<TelegramUpdateRouter> logger)
     : ITelegramUpdateRouter
 {
@@ -54,6 +56,18 @@ internal sealed class TelegramUpdateRouter(
         if (!await ownerGate.IsAllowedAsync(message.Chat.Id, cancellationToken))
             return;
 
+        if (message.Photo is { Length: > 0 } photos)
+        {
+            await HandleReceiptPhotoAsync(message, photos[^1].FileId, timeZoneId, cancellationToken);
+            return;
+        }
+
+        if (message.Document is { } document)
+        {
+            await HandleReceiptDocumentAsync(message, document, timeZoneId, cancellationToken);
+            return;
+        }
+
         if (message.Voice is { } voice)
         {
             await HandleVoiceAsync(message, voice, timeZoneId, cancellationToken);
@@ -61,11 +75,21 @@ internal sealed class TelegramUpdateRouter(
         }
 
         if (message.Text is not { Length: > 0 } text)
+        {
+            logger.LogUnsupportedMessageType(message.Type);
+            await chatNotifier.SendAsync(message.Chat.Id, recordEcho.UnsupportedMessageType, cancellationToken);
             return;
+        }
 
         if (message.ReplyToMessage is { } repliedTo
             && await correctionHandler.TryHandleReplyAsync(message, repliedTo, text, cancellationToken))
             return;
+
+        if (verificationUrl.TryFind(text, out var url))
+        {
+            await HandleReceiptLinkAsync(message, text, url, timeZoneId, cancellationToken);
+            return;
+        }
 
         // message.Date is when Telegram received it from the sender, not when we got around to
         // processing it -- an outage can queue a message for hours, and every queued message must
@@ -96,6 +120,51 @@ internal sealed class TelegramUpdateRouter(
         logger.LogReceived(TransactionStages.Received, CaptureKind.Voice, message.Chat.Id);
 
         await SendAcknowledgementAsync(message.Chat.Id, transactionId, recordEcho.Transcribing, cancellationToken);
+    }
+
+    async Task HandleReceiptPhotoAsync(Message message, string fileId, string timeZoneId, CancellationToken cancellationToken)
+    {
+        var captured = new CapturedReceipt(
+            message.Chat.Id, message.Id, new DateTimeOffset(message.Date), message.Caption, fileId, VerificationUrl: null);
+        var transactionId = await captureStore.CaptureReceiptAsync(captured, timeZoneId, cancellationToken);
+
+        using var scope = TransactionLogScope.Begin(logger, transactionId);
+        logger.LogReceived(TransactionStages.Received, CaptureKind.Photo, message.Chat.Id);
+
+        await SendAcknowledgementAsync(message.Chat.Id, transactionId, recordEcho.ReadingReceipt, cancellationToken);
+    }
+
+    // M-7 (2026-09-25 final review): every image/* MIME type used to pass here, but
+    // TelegramReceiptPhotoSource.MediaTypeFor derives the actual media type from the file's
+    // extension and defaults to image/jpeg for anything it does not recognise - so a HEIC upload
+    // (image/heic, no matching case there) passed this check, SkiaSharp could not decode it, and
+    // vision received bytes mislabelled as JPEG. Only the types that source correctly maps are
+    // accepted here.
+    static readonly HashSet<string> SupportedImageMimeTypes =
+        new(StringComparer.OrdinalIgnoreCase) { "image/jpeg", "image/png", "image/webp", "image/gif" };
+
+    async Task HandleReceiptDocumentAsync(Message message, Document document, string timeZoneId, CancellationToken cancellationToken)
+    {
+        if (document.MimeType is not { } mimeType || !SupportedImageMimeTypes.Contains(mimeType))
+        {
+            logger.LogUnsupportedMessageType(message.Type);
+            await chatNotifier.SendAsync(message.Chat.Id, recordEcho.OnlyPhotosSupported, cancellationToken);
+            return;
+        }
+
+        await HandleReceiptPhotoAsync(message, document.FileId, timeZoneId, cancellationToken);
+    }
+
+    async Task HandleReceiptLinkAsync(Message message, string text, string verificationUrl, string timeZoneId, CancellationToken cancellationToken)
+    {
+        var captured = new CapturedReceipt(
+            message.Chat.Id, message.Id, new DateTimeOffset(message.Date), text, TelegramFileId: null, verificationUrl);
+        var transactionId = await captureStore.CaptureReceiptAsync(captured, timeZoneId, cancellationToken);
+
+        using var scope = TransactionLogScope.Begin(logger, transactionId);
+        logger.LogReceived(TransactionStages.Received, CaptureKind.Photo, message.Chat.Id);
+
+        await SendAcknowledgementAsync(message.Chat.Id, transactionId, recordEcho.ReadingReceipt, cancellationToken);
     }
 
     async Task SendAcknowledgementAsync(long chatId, Guid transactionId, string text, CancellationToken cancellationToken)

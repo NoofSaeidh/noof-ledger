@@ -13,5 +13,10 @@ public interface ICaptureStore
     // idempotency on (ChatId, MessageId). The record has no text yet, and its job is a Transcribe job (V3).
     Task<Guid> CaptureVoiceAsync(CapturedVoice voice, string timeZoneId, CancellationToken cancellationToken);
 
+    // CaptureAsync for a receipt (Phase 6): no wallet either, the same single database transaction and
+    // the same idempotency on (ChatId, MessageId). The caption is stored as the transaction's raw text;
+    // its job is an ExtractReceipt job.
+    Task<Guid> CaptureReceiptAsync(CapturedReceipt receipt, string timeZoneId, CancellationToken cancellationToken);
+
     Task AttachBotMessageAsync(Guid transactionId, int botMessageId, CancellationToken cancellationToken);
 }

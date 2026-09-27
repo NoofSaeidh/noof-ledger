@@ -5,6 +5,8 @@ paths:
   - "src/Noof.Ledger.Application/Chat/**"
   - "src/Noof.Ledger.Host/Workers/CategorizationWorker*.cs"
   - "src/Noof.Ledger.Host/Workers/TranscriptionWorker*.cs"
+  - "src/Noof.Ledger.Host/Workers/ExtractReceiptWorker*.cs"
+  - "src/Noof.Ledger.Host/Workers/ReceiptCategorizationWorker*.cs"
 ---
 
 ## CLAUDE.md §4 — Bot text *(settled 2026-09-23)*
