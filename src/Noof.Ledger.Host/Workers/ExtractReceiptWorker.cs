@@ -152,6 +152,9 @@ internal sealed class ExtractReceiptWorker(
             ExtractedReceipt extracted;
             var fetchFailed = false;
             var taxIdMalformed = false;
+            // Set only on the QR-decoded-but-fetch-failed vision fallback below - the one path where a
+            // model can disagree with facts the Tax Administration's own QR already carries offline.
+            FiscalQrPayload? verifiedQrFacts = null;
 
             if (qrUrl is not null)
             {
@@ -215,6 +218,7 @@ internal sealed class ExtractReceiptWorker(
                             }
 
                             logger.LogVisionUsed("fetch failed");
+                            verifiedQrFacts = payload;
                             if (await ReadWithVisionAsync(
                                     scope, jobQueue, store, notifier, job, record, photoForFetchFailure, payload.Total, cancellationToken)
                                 is not { } visionResult)
@@ -267,6 +271,32 @@ internal sealed class ExtractReceiptWorker(
                 {
                     logger.LogModelCurrencyDiscardedForQrCurrency(extracted.Currency);
                     extracted = extracted with { Currency = CurrencyCode.Rsd };
+                }
+
+                // Copilot finding, PR #3: the decoded QR also carries the authoritative issue time and
+                // receipt kind, and composes the printed fiscal number - every one of those is a fact
+                // from the Tax Administration's own payload, never the model's guess, so they overwrite
+                // the vision answer the same way Total/Currency already do. The seller's tax id has no
+                // QR equivalent - it stays vision's own well-formed-only value.
+                if (verifiedQrFacts is { } qrFacts)
+                {
+                    if (extracted.IssuedAt != qrFacts.IssuedAt)
+                    {
+                        logger.LogModelIssuedAtDiscardedForQrIssuedAt(extracted.IssuedAt, qrFacts.IssuedAt);
+                        extracted = extracted with { IssuedAt = qrFacts.IssuedAt };
+                    }
+
+                    if (extracted.Kind != qrFacts.Kind)
+                    {
+                        logger.LogModelKindDiscardedForQrKind(extracted.Kind, qrFacts.Kind);
+                        extracted = extracted with { Kind = qrFacts.Kind };
+                    }
+
+                    if (extracted.FiscalNumber != qrFacts.FiscalNumber)
+                    {
+                        logger.LogModelFiscalNumberDiscardedForQrFiscalNumber(extracted.FiscalNumber, qrFacts.FiscalNumber);
+                        extracted = extracted with { FiscalNumber = qrFacts.FiscalNumber };
+                    }
                 }
             }
 

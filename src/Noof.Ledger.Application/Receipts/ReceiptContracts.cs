@@ -35,7 +35,13 @@ public sealed record FiscalQrPayload(
     string SignedBy,
     ReceiptKind Kind,
     long TotalCounter,
-    long TransactionTypeCounter);
+    long TransactionTypeCounter)
+{
+    // The printed fiscal number, same shape a real receipt shows and ChatReceiptVision's own
+    // FiscalNumberPattern accepts - the one place this is composed, so a QR-decoded fallback and
+    // anything else that needs it never re-derive it differently.
+    public string FiscalNumber => $"{RequestedBy}-{SignedBy}-{TotalCounter}";
+}
 
 public sealed record FiscalQrDecodeResult(FiscalQrPayload? Payload, string? Error);
 

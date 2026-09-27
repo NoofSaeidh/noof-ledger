@@ -497,6 +497,99 @@ public class ExtractReceiptWorkerTests
             Arg.Any<CancellationToken>());
     }
 
+    // Copilot finding on PR #3, ExtractReceiptWorker.cs (the QR-decoded-but-fetch-failed vision
+    // fallback): the decoded QR payload also carries the authoritative issue time and receipt kind
+    // (and the printed fiscal number, composed from RequestedBy/SignedBy/TotalCounter) - every one of
+    // those facts must overwrite the model's own guess, the same way Total/Currency already do.
+    [Fact]
+    public async Task A_vision_kind_that_disagrees_with_the_verified_QR_kind_is_normalized_to_it()
+    {
+        var harness = Setup(ExtractJob(), verificationUrl: null, telegramFileId: "photo-1");
+        harness.QrReader.Read(Arg.Any<Stream>()).Returns("https://suf.purs.gov.rs/v/?vl=abc");
+        harness.Decoder.Decode(Arg.Any<string>()).Returns(new FiscalQrDecodeResult(Payload() with { Kind = ReceiptKind.Refund }, null));
+        harness.FetchClient.FetchAsync(Arg.Any<FiscalQrPayload>(), Arg.Any<CancellationToken>())
+            .Returns(new FiscalFetchResult(null, new FiscalFetchFailure("504 gateway timeout", 504)));
+        var modelDisagrees = Extracted(ReceiptSource.Vision, qrTotal: 500m, total: 500m) with { Kind = ReceiptKind.Sale };
+        harness.Vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), 500m, Arg.Any<CancellationToken>())
+            .Returns(new ReceiptVisionResult(modelDisagrees, null));
+        var logger = new CapturingLogger<ExtractReceiptWorker>();
+
+        (await CreateWorker(harness.ScopeFactory(), logger: logger).RunTickAsync(TestContext.Current.CancellationToken))
+            .Should().Be(CategorizationTickResult.Processed);
+
+        await harness.ReceiptStore.Received(1).SaveExtractedAsync(
+            TransactionId, Arg.Is<ExtractedReceipt>(r => r.Kind == ReceiptKind.Refund),
+            Arg.Any<string?>(), enqueueCategorization: true, Arg.Any<CancellationToken>());
+        logger.Entries.Should().Contain(e =>
+            Equals(e.Properties.GetValueOrDefault("ModelKind"), ReceiptKind.Sale)
+            && Equals(e.Properties.GetValueOrDefault("QrKind"), ReceiptKind.Refund));
+    }
+
+    [Fact]
+    public async Task A_vision_issued_at_that_disagrees_with_the_verified_QR_time_is_normalized_to_it()
+    {
+        var harness = Setup(ExtractJob(), verificationUrl: null, telegramFileId: "photo-1");
+        harness.QrReader.Read(Arg.Any<Stream>()).Returns("https://suf.purs.gov.rs/v/?vl=abc");
+        var qrTime = DateTimeOffset.Parse("2026-09-27T12:17:00Z");
+        harness.Decoder.Decode(Arg.Any<string>()).Returns(new FiscalQrDecodeResult(Payload() with { IssuedAt = qrTime }, null));
+        harness.FetchClient.FetchAsync(Arg.Any<FiscalQrPayload>(), Arg.Any<CancellationToken>())
+            .Returns(new FiscalFetchResult(null, new FiscalFetchFailure("504 gateway timeout", 504)));
+        var modelDisagrees = Extracted(ReceiptSource.Vision, qrTotal: 500m, total: 500m) with
+        {
+            IssuedAt = DateTimeOffset.Parse("2024-12-23T09:00:00+01:00"),
+        };
+        harness.Vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), 500m, Arg.Any<CancellationToken>())
+            .Returns(new ReceiptVisionResult(modelDisagrees, null));
+
+        (await TickAsync(harness)).Should().Be(CategorizationTickResult.Processed);
+
+        await harness.ReceiptStore.Received(1).SaveExtractedAsync(
+            TransactionId, Arg.Is<ExtractedReceipt>(r => r.IssuedAt == qrTime),
+            Arg.Any<string?>(), enqueueCategorization: true, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_missing_vision_fiscal_number_is_filled_from_the_verified_QR_payload()
+    {
+        var harness = Setup(ExtractJob(), verificationUrl: null, telegramFileId: "photo-1");
+        harness.QrReader.Read(Arg.Any<Stream>()).Returns("https://suf.purs.gov.rs/v/?vl=abc");
+        harness.Decoder.Decode(Arg.Any<string>())
+            .Returns(new FiscalQrDecodeResult(Payload() with { RequestedBy = "REQABCDE", SignedBy = "SIG12345", TotalCounter = 42 }, null));
+        harness.FetchClient.FetchAsync(Arg.Any<FiscalQrPayload>(), Arg.Any<CancellationToken>())
+            .Returns(new FiscalFetchResult(null, new FiscalFetchFailure("504 gateway timeout", 504)));
+        var modelDisagrees = Extracted(ReceiptSource.Vision, qrTotal: 500m, total: 500m) with { FiscalNumber = null };
+        harness.Vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), 500m, Arg.Any<CancellationToken>())
+            .Returns(new ReceiptVisionResult(modelDisagrees, null));
+
+        (await TickAsync(harness)).Should().Be(CategorizationTickResult.Processed);
+
+        await harness.ReceiptStore.Received(1).SaveExtractedAsync(
+            TransactionId, Arg.Is<ExtractedReceipt>(r => r.FiscalNumber == "REQABCDE-SIG12345-42"),
+            Arg.Any<string?>(), enqueueCategorization: true, Arg.Any<CancellationToken>());
+    }
+
+    // A non-money QR kind (Copy/Training/Proforma/Advance) must persist as such even though this is
+    // the vision fallback - ReceiptCategorizationWorker's own IsNonMoneyKind routing then takes over
+    // from the saved Kind, never from what the model guessed.
+    [Fact]
+    public async Task A_QR_Copy_kind_overrides_the_models_own_guess_so_the_non_money_path_is_reached()
+    {
+        var harness = Setup(ExtractJob(), verificationUrl: null, telegramFileId: "photo-1");
+        harness.QrReader.Read(Arg.Any<Stream>()).Returns("https://suf.purs.gov.rs/v/?vl=abc");
+        harness.Decoder.Decode(Arg.Any<string>()).Returns(new FiscalQrDecodeResult(Payload() with { Kind = ReceiptKind.Copy }, null));
+        harness.FetchClient.FetchAsync(Arg.Any<FiscalQrPayload>(), Arg.Any<CancellationToken>())
+            .Returns(new FiscalFetchResult(null, new FiscalFetchFailure("504 gateway timeout", 504)));
+        var modelDisagrees = Extracted(ReceiptSource.Vision, qrTotal: 500m, total: 500m) with { Kind = ReceiptKind.Sale };
+        harness.Vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), 500m, Arg.Any<CancellationToken>())
+            .Returns(new ReceiptVisionResult(modelDisagrees, null));
+
+        (await TickAsync(harness)).Should().Be(CategorizationTickResult.Processed);
+
+        await harness.ReceiptStore.Received(1).SaveExtractedAsync(
+            TransactionId, Arg.Is<ExtractedReceipt>(r => r.Kind == ReceiptKind.Copy),
+            Arg.Any<string?>(), enqueueCategorization: true, Arg.Any<CancellationToken>());
+    }
+
     // N-6 (2026-09-25 re-review of the final review): the QR decoded fine here, so the fiscal-QR-only
     // operator (R-1/R-5, no key by design) has done nothing wrong - the Tax Administration outage may
     // last minutes. M-10's own gate treated this exactly like "no readable QR at all" and failed the

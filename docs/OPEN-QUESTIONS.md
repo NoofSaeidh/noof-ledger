@@ -692,6 +692,13 @@ the UI, is deferred: `docs/BACKLOG.md`):
    `ReceiptSource.Vision` alone. Not a file: a photo, even a full-resolution one sent as a file, does not
    reliably decode the fiscal QR either (the operator's own real-photo evidence, Phase 6 QR entry above)
    — only the link does.
+6. **Every fact a decoded QR carries wins over vision, not just Total/Currency** (Copilot finding on
+   PR #3, closed 2026-09-27): when the QR decodes but the Tax Administration fetch fails, `ExtractReceiptWorker`
+   also overwrites the vision answer's `IssuedAt`, `Kind` and `FiscalNumber` (composed as
+   `{RequestedBy}-{SignedBy}-{TotalCounter}`, `FiscalQrPayload.FiscalNumber`) with the QR's own — the
+   seller PIB has no QR equivalent and stays vision's well-formed-only value, and a non-money QR kind
+   (Copy/Training/Proforma/Advance) then takes the existing non-money path since the saved `Kind` is
+   what routes it.
 
 **The malformed-PIB-only residual.** A stored `receipts` row never carries a malformed PIB —
 `ChatReceiptVision` drops it to `null` before it is ever saved — so a replay of a still-unconfirmed job
