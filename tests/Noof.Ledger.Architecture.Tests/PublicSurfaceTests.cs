@@ -6,7 +6,8 @@ namespace Noof.Ledger.Architecture.Tests;
 // Requirement 1 of Phase 1C: "не нужно делать публичным 'на всякий случай'". A convention cannot
 // enforce that - Phase 1B shipped a README claim about [Authorize] that had already drifted. This
 // is the same fix applied to accessibility: the surface is a list, and widening it is an edit to
-// this file that a reviewer sees.
+// an allowlist file that a reviewer sees. Each assembly gets its own file under PublicSurface/ so
+// branches touching different assemblies never conflict on the same line.
 public class PublicSurfaceTests
 {
     // Razor generates `public partial class` per .razor file with no directive to change it, and
@@ -30,77 +31,15 @@ public class PublicSurfaceTests
         + @"(?<name>[A-Za-z_][A-Za-z0-9_]*)",
         RegexOptions.Multiline | RegexOptions.Compiled);
 
-    static readonly Dictionary<string, string[]> Allowed = new()
-    {
-        ["Noof.Ledger.Domain"] =
-        [
-            "AppUser", "BalanceCheck", "CaptureKind", "CategorizationAuthority", "CategorizationJob", "Category", "CurrencyCode",
-            "CurrencyMismatchException", "Entry", "EntryRole", "JobKind", "JobStatus", "LineItem", "Merchant", "MerchantAlias",
-            "MerchantKind", "MerchantName", "Money", "Transaction", "TransactionKind",
-            "TransactionStatus", "Wallet",
-            "Receipt", "ReceiptLine", "ReceiptSource", "ReceiptKind", "ReceiptKindExtensions", "PaymentMethod", "WalletPaymentDefault",
-        ],
-        ["Noof.Ledger.Application"] =
-        [
-            "IOperationTimer", "OperationTiming", "SlowOperationOptions", "TimedOperations",
-            "IFiscalVerificationUrl", "FiscalVerificationUrlOptions",
-            "IPasswordHasher", "IUserStore", "PasswordVerifyResult", "CapturedMessage",
-            "ICaptureStore", "CategoryOption", "MerchantOption", "CategorizationRequest", "CorrectionRequest",
-            "ProposedLineItem", "CategorizationProposal", "ResolvedLineItem", "CategorizedLineItem",
-            "CategorizationSubject", "RecordedLine", "CategorizationOutcome", "CategoryEntry", "MerchantAliasEntry", "ICategorizationStore",
-            "BalanceStatement",
-            "ICategorizer", "ICategoryCatalog", "IMerchantDirectory", "IMerchantScan",
-            "ModelFailureKind", "ModelCallException", "ModelCallExceptionExtensions",
-            "IModelProvider",
-            "IProposalMapper", "MappedProposal", "IChatNotifier", "IJobQueue", "JobCompletionOutcome",
-            "WalletOption", "ProposedKind",
-            "RecentLineItem", "RecentTransaction", "MonthTotal", "MonthSummary",
-            "WalletBalance", "IBalanceReadModel",
-            "ISpendingReadModel", "ProbeResult", "ISecretProbe", "ISecretStore", "SecretKeys",
-            "TransactionListFilter", "TransactionListRow", "TransactionListPage", "ITransactionList",
-            "SecretResult", "SecretState", "SecretStatus",
-            "RecordAction", "EchoMessage", "IRecordEcho",
-            "EchoTarget", "IRecordEditor", "ApplicationRegistration",
-            "ITranscriber", "ISpeechProvider", "CapturedVoice", "ITranscriptionStore", "IVoiceFileSource",
-            "IWalletDirectory",
-            "WalletDetails", "NewWallet", "IWalletAdmin",
-            "BackupRunRecord", "BackupStatus", "DumpResult", "IBackupLog", "IDatabaseDumper",
-            "IDatabaseLogLevelStore", "DatabaseLogLevelSetting",
-            "ILogRetentionSettings", "LogRetentionDays", "IFileLogSinkInfo",
-            "IDatabaseGate", "DatabaseState",
-            "ExtractedReceiptLine", "ExtractedReceipt",
-            "FiscalQrPayload", "FiscalQrDecodeResult", "FiscalFetchFailure", "FiscalFetchResult", "IQrReader",
-            "IFiscalQrDecoder", "IFiscalReceiptClient", "IReceiptVision", "ReceiptUnreadableReason", "ReceiptVisionResult",
-            "IReceiptImageScaler", "ReceiptLineToCategorize",
-            "ReceiptCategorizationRequest", "ReceiptLineCategory", "ReceiptCategorization", "IReceiptCategorizer",
-            "UnsupportedChangeKind",
-            "IReceiptFetchStatus",
-            "CapturedReceipt", "IReceiptStore", "ReceiptSaveResult", "ReceiptView", "ReceiptLineView",
-            "ReceiptPhoto", "IReceiptPhotoSource",
-            "LogSeverity", "LogRow", "LogFilter", "LogPage", "LogSortOrder", "ILogQuery", "ILogRetention",
-            "TransactionStages", "TransactionLogScope", "TraceEvent", "RevisionView", "TraceLineItem", "TransactionSummary",
-            "TransactionTrace", "ITransactionTrace", "ReceiptTraceLine", "ReceiptTraceView",
-            "ILogSinkStatus",
-            "IDatabaseLogLevel",
-            "HealthLevel", "HealthItem", "SystemHealthReport", "ISystemHealth",
-            "ISystemHealthCheck", "HealthOutcome",
-            "PollFailure", "IPollingHeartbeat",
-        ],
-        ["Noof.Ledger.Persistence"] = ["LedgerConnectionString", "PersistenceRegistration"],
-        ["Noof.Ledger.Ai"] = ["AiRegistration"],
-        ["Noof.Ledger.Telegram"] = ["TelegramRegistration"],
-        ["Noof.Ledger.Fx"] = [],
-        ["Noof.Ledger.Receipts"] = ["ReceiptsRegistration"],
-        ["Noof.Ledger.Host"] = [],
-    };
-
     [Theory]
     [MemberData(nameof(Projects))]
     public void Public_types_are_exactly_the_allowed_set(string project)
     {
-        PublicTypesIn(project).Should().BeEquivalentTo(Allowed[project],
+        var allowlistPath = AllowlistPath(project);
+
+        PublicTypesIn(project).Should().BeEquivalentTo(AllowedTypesIn(allowlistPath),
             $"the public surface of {project} is a reviewed list, not whatever accumulated; widening "
-            + "it means editing PublicSurfaceTests.Allowed, which is the point");
+            + $"it means editing {Path.GetRelativePath(RepoRoot.Find().FullName, allowlistPath)}, which is the point");
     }
 
     [Fact]
@@ -146,6 +85,14 @@ public class PublicSurfaceTests
 
     static string ProjectRoot(string project) =>
         Path.Combine(RepoRoot.Find().FullName, "src", project);
+
+    static string AllowlistPath(string project) =>
+        Path.Combine(RepoRoot.Find().FullName, "tests", "Noof.Ledger.Architecture.Tests", "PublicSurface", $"{project}.txt");
+
+    static string[] AllowedTypesIn(string allowlistPath) =>
+        [.. File.ReadAllLines(allowlistPath)
+            .Select(line => line.Trim())
+            .Where(line => line.Length > 0)];
 
     static IEnumerable<string> SourceFiles(string project) =>
         Directory.Exists(ProjectRoot(project))
