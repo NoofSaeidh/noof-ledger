@@ -102,6 +102,26 @@ public class ReceiptEchoTests
         echo.Text.Should().NotContain("⚠️");
     }
 
+    // 2026-09-27: a vision-read receipt is only ever a fallback for a photo the QR path could not
+    // read reliably - one short line pointing at a way to get an exact read next time, whether or not
+    // the lines happen to add up this time.
+    [Fact]
+    public void A_vision_read_receipt_suggests_a_file_or_the_QR_link_for_an_exact_read_next_time()
+    {
+        var echo = Echo.ComposeReceipt(Record(), Receipt(source: ReceiptSource.Vision, qrTotal: null));
+
+        echo.Text.Should().Contain(
+            "⚠️ For an exact read next time, send the receipt as a file (uncompressed) or send the link from its QR code.");
+    }
+
+    [Fact]
+    public void A_fiscal_qr_receipt_never_carries_the_send_as_a_file_hint()
+    {
+        var echo = Echo.ComposeReceipt(Record(), Receipt(source: ReceiptSource.FiscalQr));
+
+        echo.Text.Should().NotContain("send the receipt as a file");
+    }
+
     [Fact]
     public void Lines_that_disagree_with_the_receipt_total_by_more_than_a_cent_are_warned_about()
     {

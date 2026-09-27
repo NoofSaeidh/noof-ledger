@@ -186,6 +186,13 @@ internal sealed class RecordEcho : IRecordEcho
             yield return
                 $"⚠️ Lines add up to {FormatAmount(sum)} {receipt.Currency}, the receipt says {FormatAmount(receipt.Total)} {receipt.Currency}";
         }
+
+        // 2026-09-27: every vision read is a fallback the QR path could not take - worth naming a way
+        // to get an exact read next time, independent of whether this particular read happened to add up.
+        if (receipt.Source == ReceiptSource.Vision)
+        {
+            yield return "⚠️ For an exact read next time, send the receipt as a file (uncompressed) or send the link from its QR code.";
+        }
     }
 
     // R2-3 follow-up: a Captured photo is a receipt still being read, not a transcript being
