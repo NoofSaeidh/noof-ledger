@@ -55,4 +55,29 @@ public class FiscalVerificationUrlTests
         stripped.Should().NotContain("suf.purs.gov.rs");
         stripped.Should().Be("lunch and too");
     }
+
+    // Important finding (Fable 5.1 review): StripUrl used to run every message through
+    // Split(Terminators, RemoveEmptyEntries) + Join(' ') unconditionally, so a URL-free message
+    // still had its whole layout flattened to single spaces. A message with no verification URL at
+    // all must come back byte-identical.
+    [Fact]
+    public void StripUrl_returns_the_text_unchanged_when_no_url_is_found()
+    {
+        const string Text = "кофе 200\n300 такси\tбар";
+
+        var stripped = VerificationUrl.StripUrl(Text);
+
+        stripped.Should().Be(Text);
+    }
+
+    // Same finding: when a URL IS found, only the whitespace touching the removed span collapses -
+    // a newline further away, between two lines that never mentioned the URL, must survive.
+    [Fact]
+    public void StripUrl_only_normalises_whitespace_around_a_url_in_a_multiline_message()
+    {
+        var stripped = VerificationUrl.StripUrl(
+            "утро\nhttps://suf.purs.gov.rs/v/?vl=ABC\nобед 300\nужин 400");
+
+        stripped.Should().Be("утро обед 300\nужин 400");
+    }
 }

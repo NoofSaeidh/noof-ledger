@@ -1664,6 +1664,29 @@ public class CategorizationWorkerTests
             Arg.Is<CategorizationRequest>(request => !request.RawText.Contains("suf.purs.gov.rs")), Arg.Any<CancellationToken>());
     }
 
+    // IMPORTANT finding (Fable 5.1 review, this branch): FiscalVerificationUrl.StripUrl used to
+    // collapse ALL whitespace in RawText - Split(Terminators, RemoveEmptyEntries) + Join(' ') - even
+    // when it found no URL at all, so a multi-line message with no receipt link still reached
+    // record_transaction flattened onto one line, turning two unambiguous lines into an ambiguous
+    // number run ("кофе 200\n300 такси\tбар" -> "кофе 200 300 такси бар"). A URL-free RawText must
+    // reach the model byte-identical.
+    [Fact]
+    public async Task A_categorization_with_no_verification_url_sends_the_raw_text_byte_identical()
+    {
+        const string RawText = "кофе 200\n300 такси\tбар";
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject(rawText: RawText));
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine());
+        var worker = CreateWorker(ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, categorizer: categorizer),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await categorizer.Received(1).ProposeAsync(
+            Arg.Is<CategorizationRequest>(request => request.RawText == RawText), Arg.Any<CancellationToken>());
+    }
+
     // Important finding (Fable 5.1 review, item 1): a reply to any echo becomes a Correct job whose
     // Instruction is the reply's own text, unfiltered - when the target transaction has no receipt
     // row (an ordinary text/voice capture, or a failed link capture already covered above),

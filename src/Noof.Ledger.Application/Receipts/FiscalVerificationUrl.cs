@@ -56,9 +56,15 @@ internal sealed class FiscalVerificationUrl : IFiscalVerificationUrl
 
     // Item A (Copilot, Phase 6 review): a text-link capture's RawText carries the whole verification
     // URL, including the vl payload - that must never reach a model prompt. Strips every detected URL
-    // (a message can carry more than one - important finding, fix round 2), collapsing whatever
-    // whitespace they leave behind, and returns null when nothing but the URL(s) remain (so an empty
-    // caption is never sent as an empty string).
+    // (a message can carry more than one - important finding, fix round 2).
+    //
+    // IMPORTANT finding (Fable 5.1 review): this used to collapse ALL whitespace in the whole text -
+    // Split(Terminators, RemoveEmptyEntries) + Join(' ') - even when no URL was found, flattening
+    // every multi-line message onto one line before it ever reached the model. A message with no URL
+    // now comes back unchanged; when a URL is removed, only the whitespace immediately touching that
+    // span collapses (to a single space, or to nothing at the start/end of the text) - a newline
+    // between two lines that never mentioned the URL is untouched. Returns null when nothing but the
+    // URL(s) remain (so an empty caption is never sent as an empty string).
     public string? StripUrl(string? text)
     {
         if (text is null)
@@ -66,9 +72,22 @@ internal sealed class FiscalVerificationUrl : IFiscalVerificationUrl
 
         var remaining = text;
         while (TryFind(remaining, out var url))
-            remaining = remaining.Remove(remaining.IndexOf(url, StringComparison.Ordinal), url.Length);
+        {
+            var start = remaining.IndexOf(url, StringComparison.Ordinal);
+            var end = start + url.Length;
 
-        var collapsed = string.Join(' ', remaining.Split(Terminators, StringSplitOptions.RemoveEmptyEntries));
-        return collapsed.Length == 0 ? null : collapsed;
+            var trimmedStart = start;
+            while (trimmedStart > 0 && Array.IndexOf(Terminators, remaining[trimmedStart - 1]) >= 0)
+                trimmedStart--;
+
+            var trimmedEnd = end;
+            while (trimmedEnd < remaining.Length && Array.IndexOf(Terminators, remaining[trimmedEnd]) >= 0)
+                trimmedEnd++;
+
+            var joiner = trimmedStart > 0 && trimmedEnd < remaining.Length ? " " : "";
+            remaining = remaining[..trimmedStart] + joiner + remaining[trimmedEnd..];
+        }
+
+        return remaining.Length == 0 ? null : remaining;
     }
 }
