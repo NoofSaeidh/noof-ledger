@@ -37,21 +37,20 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-## Packages for reading receipt photos
+## NuGet packages
 
-These packages are referenced through NuGet. None of their code is in this repository, and their
-licences ask for nothing here. **A build that is handed to someone else** — the output of
-`ops/publish.ps1` — contains their binaries. Anyone giving one away must include:
+Packages added from Phase 6 on are listed here (`.claude/rules/dependencies.md`). Older ones are listed
+only in `Directory.Packages.props`. All of them come in through NuGet. None of their code is in this
+repository, and their licences ask for nothing here. **A build that is handed to someone else** — the
+output of `ops/publish.ps1` — contains the app's package binaries. Anyone giving one away must include:
 
-- the Apache License 2.0 text for ZXing.Net;
-- the MIT text for SkiaSharp;
-- the `THIRD-PARTY-NOTICES.txt` shipped inside `SkiaSharp.NativeAssets.*`, which covers Skia and the
-  libraries it bundles.
+- the licence text of every package in that build: the app's rows below, and the older ones in
+  `Directory.Packages.props`;
+- every notices file a row names. Today that is the `THIRD-PARTY-NOTICES.txt` inside
+  `SkiaSharp.NativeAssets.*`, which covers Skia and the libraries it bundles.
 
-| Package | Version | Licence | Project |
-|---|---|---|---|
-| ZXing.Net | 0.16.11 | Apache-2.0 | https://github.com/micjahn/ZXing.Net |
-| ZXing.Net.Bindings.SkiaSharp | 0.16.24 | Apache-2.0 | https://github.com/micjahn/ZXing.Net |
-| SkiaSharp (and `SkiaSharp.NativeAssets.*`) | 4.151.1 | MIT | https://github.com/mono/SkiaSharp |
-
-The other NuGet dependencies are listed in `Directory.Packages.props`.
+| Package | Version | Licence | Used in | Project |
+|---|---|---|---|---|
+| ZXing.Net | 0.16.11 | Apache-2.0 | app (Receipts) | https://github.com/micjahn/ZXing.Net |
+| ZXing.Net.Bindings.SkiaSharp | 0.16.24 | Apache-2.0 | app (Receipts), Receipts tests | https://github.com/micjahn/ZXing.Net |
+| SkiaSharp (and `SkiaSharp.NativeAssets.*`, which ship their own `THIRD-PARTY-NOTICES.txt`) | 4.151.1 | MIT | app (Receipts, via the binding) | https://github.com/mono/SkiaSharp |

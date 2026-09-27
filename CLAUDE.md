@@ -84,6 +84,8 @@ register it into) — named because they are exceptions, not a licence to invent
 - Projects are split: `Domain` ← `Application` ← (`Persistence` · `Ai` · `Fx` · `Receipts` · `Telegram` · `Web`) ← `Host`.
 - `Noof.Ledger.Web` is UI only — no `DbContext`, no EF types, no `HttpClient`, no `Program.cs`. Enforced by `DisableTransitiveProjectReferences` plus an architecture test, because project references are transitive at compile time and a convention alone will not hold.
 - `Noof.Ledger.Domain` has zero NuGet references. Asserted by a test.
+- **A new NuGet package or ported code updates `THIRD-PARTY-NOTICES.md` in the same commit**, after
+  checking its licence — `.claude/rules/dependencies.md`, which loads on `Directory.Packages.props`/`*.csproj`.
 - Do not add MediatR, AutoMapper, generic repositories over `DbContext`, or CQRS scaffolding.
 - **Minimum accessibility.** A type is `internal` unless another assembly names it; a member is
   `private` unless something outside its type calls it. Tests reach internals through
