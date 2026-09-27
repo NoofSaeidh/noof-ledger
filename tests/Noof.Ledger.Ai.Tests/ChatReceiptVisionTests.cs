@@ -194,6 +194,60 @@ public class ChatReceiptVisionTests
         provider.Requests.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData("123456789", "123456789")]
+    [InlineData("12345678", null)]
+    [InlineData("1234567890", null)]
+    [InlineData("PIB123456", null)]
+    [InlineData(null, null)]
+    public async Task A_printed_tax_id_is_accepted_only_when_it_is_exactly_9_digits(string? printed, string? expected)
+    {
+        var vision = new ChatReceiptVision(
+            new FixedChatClientFactory(new ScriptedChatClient().Answer(AnswerWith(sellerTaxId: printed))), NoopTimer,
+            NullLogger<ChatReceiptVision>.Instance);
+
+        var result = await vision.ReadAsync(TinyImage, "image/jpeg", null, TestContext.Current.CancellationToken);
+
+        result.Receipt!.SellerTaxId.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("2WJCQFGP-2WJCQFGP-66360", "2WJCQFGP-2WJCQFGP-66360")]
+    [InlineData("2wjcqfgp-2wjcqfgp-66360", null)]
+    [InlineData("2WJCQFGP-2WJCQFGP", null)]
+    [InlineData("not-a-fiscal-number", null)]
+    [InlineData(null, null)]
+    public async Task A_printed_fiscal_number_is_accepted_only_when_well_formed(string? printed, string? expected)
+    {
+        var vision = new ChatReceiptVision(
+            new FixedChatClientFactory(new ScriptedChatClient().Answer(AnswerWith(fiscalNumber: printed))), NoopTimer,
+            NullLogger<ChatReceiptVision>.Instance);
+
+        var result = await vision.ReadAsync(TinyImage, "image/jpeg", null, TestContext.Current.CancellationToken);
+
+        result.Receipt!.FiscalNumber.Should().Be(expected);
+    }
+
+    static FunctionCallContent AnswerWith(string? sellerTaxId = "123456789", string? fiscalNumber = null) => new(
+        "call_1", "read_receipt",
+        new Dictionary<string, object?>
+        {
+            ["readable"] = true,
+            ["unreadable_reason"] = null,
+            ["seller_name"] = "Maxi",
+            ["seller_tax_id"] = sellerTaxId,
+            ["fiscal_number"] = fiscalNumber,
+            ["issued_at"] = null,
+            ["currency"] = "RSD",
+            ["total"] = 100,
+            ["payment_method"] = null,
+            ["kind"] = "sale",
+            ["lines"] = new[]
+            {
+                new Dictionary<string, object?> { ["name"] = "Bread", ["quantity"] = 1, ["unit_price"] = 100, ["total"] = 100 },
+            },
+        });
+
     sealed class FixedChatClientFactory(IChatClient client) : IChatClientFactory
     {
         public Task<IChatClient> CreateAsync(CancellationToken cancellationToken) => Task.FromResult(client);

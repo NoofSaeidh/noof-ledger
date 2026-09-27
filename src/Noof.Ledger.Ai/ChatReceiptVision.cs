@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Noof.Ledger.Application.Categorization;
@@ -26,6 +27,13 @@ internal sealed class ChatReceiptVision(
 
     static readonly TimeZoneInfo Belgrade = TimeZoneInfo.FindSystemTimeZoneById("Europe/Belgrade");
     static readonly JsonElement ReadReceiptSchema = ReceiptVisionSchema.BuildReadReceipt();
+
+    // 2026-09-27: OCR-off-by-a-digit garbage must never collide with, or fail to collide with, a real
+    // fiscal receipt's own (seller_tax_id, fiscal_number) duplicate index - so a value the model
+    // printed but that does not match its real shape is dropped to null here rather than trusted.
+    // Never applied to a fiscal QR/SUF receipt, which reads these from the Tax Administration itself.
+    static readonly Regex TaxIdPattern = new(@"^\d{9}$", RegexOptions.Compiled);
+    static readonly Regex FiscalNumberPattern = new(@"^[A-Z0-9]{8}-[A-Z0-9]{8}-\d+$", RegexOptions.Compiled);
 
     public async Task<ReceiptVisionResult> ReadAsync(
         ReadOnlyMemory<byte> image, string mediaType, decimal? qrTotal, CancellationToken cancellationToken)
@@ -93,11 +101,11 @@ internal sealed class ChatReceiptVision(
         return new ExtractedReceipt(
             ReceiptSource.Vision,
             VerificationUrl: null,
-            payload.SellerTaxId,
+            AcceptIfWellFormed(payload.SellerTaxId, TaxIdPattern),
             payload.SellerName,
             SellerAddress: null,
             LocationName: null,
-            FiscalNumber: null,
+            AcceptIfWellFormed(payload.FiscalNumber, FiscalNumberPattern),
             ParseIssuedAt(payload.IssuedAt),
             payload.Total!.Value,
             new CurrencyCode(payload.Currency),
@@ -106,6 +114,9 @@ internal sealed class ChatReceiptVision(
             qrTotal,
             lines);
     }
+
+    static string? AcceptIfWellFormed(string? printed, Regex pattern) =>
+        printed is not null && pattern.IsMatch(printed) ? printed : null;
 
     static ReceiptUnreadableReason MapUnreadableReason(string? reason) => reason switch
     {
