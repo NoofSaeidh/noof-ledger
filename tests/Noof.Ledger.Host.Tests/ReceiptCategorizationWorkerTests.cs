@@ -2,6 +2,7 @@ using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
@@ -36,12 +37,12 @@ public class ReceiptCategorizationWorkerTests
         Guid.Parse("00000000-0000-0000-0000-000000000004"), "Wise", CurrencyCode.Rsd, [], IsDefaultForCurrency: false);
 
     static CategorizationJob Job(
-        string? instruction = null, DateTimeOffset? createdAt = null, DateTimeOffset? claimedAt = null) => new()
+        string? instruction = null, DateTimeOffset? createdAt = null, DateTimeOffset? claimedAt = null, int attemptCount = 1) => new()
     {
         Id = JobId,
         TransactionId = TransactionId,
         Status = JobStatus.Claimed,
-        AttemptCount = 1,
+        AttemptCount = attemptCount,
         Kind = JobKind.CategorizeReceipt,
         Instruction = instruction,
         RunAfter = DateTimeOffset.UtcNow,
@@ -201,11 +202,12 @@ public class ReceiptCategorizationWorkerTests
 
     static readonly AppReceipts.FiscalVerificationUrl DefaultVerificationUrl =
         new(new AppReceipts.FiscalVerificationUrlOptions { VerificationUrlPrefix = "https://suf.purs.gov.rs/v/?vl=" });
+    static readonly TimeZoneInfo Belgrade = TimeZoneInfo.FindSystemTimeZoneById("Europe/Belgrade");
 
     static ReceiptCategorizationWorker CreateWorker(
         IServiceScopeFactory scopeFactory, FakeTimeProvider time, CapturingLogger<ReceiptCategorizationWorker>? logger = null,
-        IOperationTimer? timer = null) =>
-        new(scopeFactory, time, new CategorizationWorkerOptions(), WorkerId, Echo, Utc, ReadyGate(),
+        IOperationTimer? timer = null, TimeZoneInfo? captureTimeZone = null) =>
+        new(scopeFactory, time, new CategorizationWorkerOptions(), WorkerId, Echo, captureTimeZone ?? Utc, ReadyGate(),
             timer ?? new OperationTimer(time, new SlowOperationOptions()),
             DefaultVerificationUrl,
             logger ?? new CapturingLogger<ReceiptCategorizationWorker>());
@@ -760,5 +762,89 @@ public class ReceiptCategorizationWorkerTests
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
         logger.Entries.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_transient_model_failure_retries_and_edits_the_echo_with_a_retry_notice()
+    {
+        var jobQueue = QueueWith(Job());
+        var categorizer = Substitute.For<AppReceipts.IReceiptCategorizer>();
+        categorizer.CategorizeAsync(Arg.Any<AppReceipts.ReceiptCategorizationRequest>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new ModelCallException(ModelFailureKind.Transient, "categorize_receipt did not answer"));
+        var notifier = Substitute.For<IChatNotifier>();
+        var worker = CreateWorker(ScopeFactoryFor(jobQueue, KeyPresent(), categorizer: categorizer, notifier: notifier), Time());
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await jobQueue.Received(1).RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await notifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(m =>
+            m.Text.Contains("Categorising the receipt", StringComparison.Ordinal)
+            && m.Text.Contains("the model did not answer", StringComparison.Ordinal)
+            && !m.Text.Contains("categorize_receipt did not answer", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task The_last_transient_attempt_fails_the_transaction_instead_of_sending_a_retry_notice()
+    {
+        var jobQueue = QueueWith(Job(attemptCount: new CategorizationWorkerOptions().MaxAttempts));
+        var categorizer = Substitute.For<AppReceipts.IReceiptCategorizer>();
+        categorizer.CategorizeAsync(Arg.Any<AppReceipts.ReceiptCategorizationRequest>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new ModelCallException(ModelFailureKind.Transient, "categorize_receipt did not answer"));
+        var store = DefaultStore();
+        var notifier = Substitute.For<IChatNotifier>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer, notifier: notifier), Time());
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await store.Received(1).MarkFailedAsync(TransactionId, Arg.Any<CancellationToken>());
+        await notifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(m => m.Text == Echo.Failure.Text), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_retry_notice_names_roughly_when_the_next_attempt_runs_in_the_capture_time_zone()
+    {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 25, 9, 0, 0, TimeSpan.Zero));
+        var jobQueue = QueueWith(Job());
+        var categorizer = Substitute.For<AppReceipts.IReceiptCategorizer>();
+        categorizer.CategorizeAsync(Arg.Any<AppReceipts.ReceiptCategorizationRequest>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new ModelCallException(ModelFailureKind.Transient, "categorize_receipt did not answer"));
+        var notifier = Substitute.For<IChatNotifier>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), categorizer: categorizer, notifier: notifier), time, captureTimeZone: Belgrade);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text.Contains("11:", StringComparison.Ordinal)), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_success_after_a_retried_failure_replaces_the_retry_notice_with_the_ordinary_echo()
+    {
+        var jobQueue = QueueWith(Job());
+        var categorizer = Substitute.For<AppReceipts.IReceiptCategorizer>();
+        categorizer.CategorizeAsync(Arg.Any<AppReceipts.ReceiptCategorizationRequest>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new ModelCallException(ModelFailureKind.Transient, "categorize_receipt did not answer"));
+        var store = DefaultStore();
+        var notifier = Substitute.For<IChatNotifier>();
+        var worker = CreateWorker(ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer, notifier: notifier), Time());
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+        notifier.ClearReceivedCalls();
+
+        categorizer.CategorizeAsync(Arg.Any<AppReceipts.ReceiptCategorizationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(Categorization(merchantCanonicalName: "Test Market"));
+        // EchoAsync reads the record back after ApplyAsync commits it - exactly as ApplyAsync would
+        // have already left it by the time EchoAsync runs (the same pattern this file's other
+        // EchoAsync-reads-back tests use).
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject(status: TransactionStatus.Completed));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text.StartsWith("Recorded", StringComparison.Ordinal) && !m.Text.Contains("retrying", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
     }
 }

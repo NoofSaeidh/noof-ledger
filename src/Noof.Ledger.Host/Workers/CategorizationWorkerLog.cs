@@ -39,6 +39,10 @@ internal static partial class CategorizationWorkerLog
         Message = "Failed to edit Telegram message {MessageId} to report a failed job for transaction {TransactionId}")]
     public static partial void FailureEditFailed(this ILogger logger, Exception exception, int messageId, Guid transactionId);
 
+    [LoggerMessage(EventId = 1211, Level = LogLevel.Warning,
+        Message = "Failed to edit Telegram message {MessageId} with a retry notice for transaction {TransactionId}")]
+    public static partial void RetryNoticeEditFailed(this ILogger logger, Exception exception, int messageId, Guid transactionId);
+
     [LoggerMessage(EventId = 1208, Level = LogLevel.Information,
         Message = "Job {JobId} handed off to a CategorizeReceipt correction for transaction {TransactionId}")]
     public static partial void HandedOffToReceiptCorrection(this ILogger logger, Guid jobId, Guid transactionId);

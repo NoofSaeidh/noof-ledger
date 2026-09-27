@@ -357,14 +357,43 @@ internal sealed class ReceiptCategorizationWorker(
             return;
         }
 
-        logger.LogStageFailed(TransactionStages.StageFailed, failedStage, exception ?? new InvalidOperationException(error));
+        var actualException = exception ?? new InvalidOperationException(error);
+        logger.LogStageFailed(TransactionStages.StageFailed, failedStage, actualException);
 
         var isLastAttempt = job.AttemptCount >= options.MaxAttempts;
         var runAfter = timeProvider.GetUtcNow() + options.ComputeBackoff(job.AttemptCount);
         var outcome = await jobQueue.RetryAsync(job.Id, workerId, runAfter, error, cancellationToken);
 
-        if (outcome == JobCompletionOutcome.Applied && isLastAttempt)
+        if (outcome != JobCompletionOutcome.Applied)
+            return;
+
+        if (isLastAttempt)
+        {
             await NotifyFailureAsync(store, notifier, subject, cancellationToken);
+            return;
+        }
+
+        await ReportRetryAsync(notifier, subject, actualException, runAfter, cancellationToken);
+    }
+
+    async Task ReportRetryAsync(
+        IChatNotifier notifier, CategorizationSubject? subject, Exception exception, DateTimeOffset runAfter,
+        CancellationToken cancellationToken)
+    {
+        if (subject is not { BotMessageId: { } messageId } sub)
+            return;
+
+        var localRunAfter = TimeZoneInfo.ConvertTime(runAfter, captureTimeZone);
+        var notice = recordEcho.ComposeReceiptCategorizationRetryNotice(exception, localRunAfter);
+
+        try
+        {
+            await notifier.EditAsync(sub.TelegramChatId, messageId, notice, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.RetryNoticeEditFailed(ex, messageId, sub.TransactionId);
+        }
     }
 
     async Task FailTerminallyAsync(

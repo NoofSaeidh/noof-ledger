@@ -31,6 +31,10 @@ internal static partial class ReceiptCategorizationWorkerLog
         Message = "Failed to edit Telegram message {MessageId} to report a failed job for transaction {TransactionId}")]
     public static partial void FailureEditFailed(this ILogger logger, Exception exception, int messageId, Guid transactionId);
 
+    [LoggerMessage(EventId = 1609, Level = LogLevel.Warning,
+        Message = "Failed to edit Telegram message {MessageId} with a retry notice for transaction {TransactionId}")]
+    public static partial void RetryNoticeEditFailed(this ILogger logger, Exception exception, int messageId, Guid transactionId);
+
     [LoggerMessage(EventId = 1607, Level = LogLevel.Information,
         Message = "categorize_receipt did not answer ordinal {Ordinal}; falling back to \"{FallbackSlug}\"")]
     public static partial void MissingOrdinal(this ILogger logger, int ordinal, string fallbackSlug);

@@ -3,6 +3,7 @@ using AwesomeAssertions;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Domain;
+using Npgsql;
 
 namespace Noof.Ledger.Host.Tests;
 
@@ -313,8 +314,17 @@ public class RecordEchoTests
     [Fact]
     public void A_note_that_could_not_be_transcribed_says_so_and_offers_edit()
     {
-        Echo.TranscriptionFailure.Text.Should().Be("Couldn't transcribe that voice note.");
+        Echo.TranscriptionFailure.Text.Should().Contain("Couldn't transcribe that voice note");
+        Echo.TranscriptionFailure.Text.Should().Contain("Reply to this message");
         Echo.TranscriptionFailure.Actions.Should().Equal(RecordAction.Edit);
+    }
+
+    [Fact]
+    public void A_receipt_that_could_not_be_read_says_what_to_try_instead()
+    {
+        Echo.ReceiptReadFailure.Text.Should().Contain("Couldn't read that receipt");
+        Echo.ReceiptReadFailure.Text.Should().Contain("QR link");
+        Echo.ReceiptReadFailure.Text.Should().Contain("file");
     }
 
     [Fact]
@@ -325,5 +335,17 @@ public class RecordEchoTests
         echo.Text.Should().Be(
             "Heard nothing in that voice note.\n\nRecorded — Cash · balance 0.00 RSD\n• кофе — 250.00 RSD · Food & Drink\n\nTotal: 250.00 RSD");
         echo.Actions.Should().Equal(RecordAction.Cancel, RecordAction.Edit);
+    }
+
+    [Fact]
+    public void A_retry_notice_names_the_step_the_reason_and_the_next_attempt_time()
+    {
+        var echo = Echo.ComposeReceiptExtractionRetryNotice(new NpgsqlException("connection refused"),
+            new DateTimeOffset(2026, 9, 27, 14, 32, 0, TimeSpan.FromHours(2)));
+
+        echo.Text.Should().Contain("Reading the receipt");
+        echo.Text.Should().Contain("a database error");
+        echo.Text.Should().Contain("14:32");
+        echo.Actions.Should().BeEmpty();
     }
 }

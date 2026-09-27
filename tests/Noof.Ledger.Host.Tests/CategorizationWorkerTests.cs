@@ -145,13 +145,14 @@ public class CategorizationWorkerTests
 
     static readonly AppReceipts.FiscalVerificationUrl VerificationUrl =
         new(new AppReceipts.FiscalVerificationUrlOptions { VerificationUrlPrefix = "https://suf.purs.gov.rs/v/?vl=" });
+    static readonly TimeZoneInfo Belgrade = TimeZoneInfo.FindSystemTimeZoneById("Europe/Belgrade");
 
     static CategorizationWorker CreateWorker(
         IServiceScopeFactory scopeFactory, FakeTimeProvider time, CategorizationWorkerOptions? options = null,
         IDatabaseGate? gate = null, CapturingLogger<CategorizationWorker>? logger = null, IOperationTimer? timer = null,
-        AppReceipts.FiscalVerificationUrl? verificationUrl = null) =>
+        AppReceipts.FiscalVerificationUrl? verificationUrl = null, TimeZoneInfo? captureTimeZone = null) =>
         new(scopeFactory, time, options ?? new CategorizationWorkerOptions(), WorkerId,
-            Mapper, Scan, Echo, gate ?? ReadyGate(), timer ?? new OperationTimer(time, new SlowOperationOptions()),
+            Mapper, Scan, Echo, captureTimeZone ?? Belgrade, gate ?? ReadyGate(), timer ?? new OperationTimer(time, new SlowOperationOptions()),
             verificationUrl ?? VerificationUrl,
             logger ?? new CapturingLogger<CategorizationWorker>());
 
@@ -1145,7 +1146,7 @@ public class CategorizationWorkerTests
     }
 
     [Fact]
-    public async Task A_retry_with_attempts_remaining_does_not_notify_or_mark_the_transaction_failed()
+    public async Task A_retry_with_attempts_remaining_does_not_mark_the_transaction_failed_but_edits_a_retry_notice()
     {
         var jobQueue = Substitute.For<IJobQueue>();
         jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()).Returns(Job(attemptCount: 1));
@@ -1164,7 +1165,37 @@ public class CategorizationWorkerTests
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
         await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
-        await notifier.DidNotReceive().EditAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<EchoMessage>(), Arg.Any<CancellationToken>());
+        await notifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(m =>
+            m.Text.Contains("Recording this", StringComparison.Ordinal)
+            && m.Text.Contains("the model did not answer", StringComparison.Ordinal)
+            && !m.Text.Contains("rate limited", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_retried_correction_names_the_correction_not_the_recording_in_the_retry_notice()
+    {
+        var jobQueue = Substitute.For<IJobQueue>();
+        jobQueue.ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns(Job(attemptCount: 1, kind: JobKind.Correct, instruction: "no, 300"));
+        jobQueue.RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(JobCompletionOutcome.Applied);
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(status: TransactionStatus.Completed, lines: [new RecordedLine("Bread", new Money(250m, CurrencyCode.Rsd), "groceries", "Groceries", null)]));
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new ModelCallException(ModelFailureKind.Transient, "rate limited"));
+        var notifier = Substitute.For<IChatNotifier>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer, notifier: notifier),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text.Contains("Applying your correction", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -1195,8 +1226,13 @@ public class CategorizationWorkerTests
         await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
         await store.DidNotReceive().ApplyAsync(
             Arg.Any<Guid>(), Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
-        await notifier.DidNotReceive().EditAsync(
-            Arg.Any<long>(), Arg.Any<int>(), Arg.Any<EchoMessage>(), Arg.Any<CancellationToken>());
+        // A retry notice edits the same placeholder instead of silence (ops/RUNBOOK.md's "When an
+        // attempt fails" paragraph) - a short, safe reason and roughly when it will try again, never
+        // the raw exception message.
+        await notifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(m =>
+            m.Text.Contains("the model did not answer", StringComparison.Ordinal)
+            && !m.Text.Contains("simulated network outage", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
         await jobQueue.Received(1).RetryAsync(
             JobId, WorkerId, Arg.Any<DateTimeOffset>(), "simulated network outage", Arg.Any<CancellationToken>());
 

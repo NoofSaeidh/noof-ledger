@@ -1,4 +1,5 @@
 using AwesomeAssertions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
@@ -320,7 +321,14 @@ public class ExtractReceiptWorkerTests
         await harness.Queue.Received(1).RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await harness.Queue.DidNotReceiveWithAnyArgs().FailAsync(default, default!, default!, Arg.Any<CancellationToken>());
         await harness.Store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, Arg.Any<CancellationToken>());
-        await harness.Notifier.DidNotReceiveWithAnyArgs().EditAsync(default, default, default!, Arg.Any<CancellationToken>());
+        // The 504 is wrapped into a ModelCallException naming the Tax Administration specifically
+        // (there is a photo but no key to fall back to vision) - the safe reason says so, never "504
+        // gateway timeout" itself.
+        await harness.Notifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(m =>
+            m.Text.Contains("Reading the receipt", StringComparison.Ordinal)
+            && m.Text.Contains("the Tax Administration is unreachable", StringComparison.Ordinal)
+            && !m.Text.Contains("504", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -483,18 +491,92 @@ public class ExtractReceiptWorkerTests
     }
 
     [Fact]
-    public async Task A_transient_vision_failure_retries_and_tells_nobody_yet()
+    public async Task A_transient_vision_failure_retries_and_tells_the_operator()
     {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 25, 9, 0, 0, TimeSpan.Zero));
         var harness = Setup(ExtractJob());
         harness.Vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), Arg.Any<decimal?>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new ModelCallException(ModelFailureKind.Transient, "read_receipt produced no tool call"));
 
-        await TickAsync(harness);
+        await CreateWorker(harness.ScopeFactory(), time).RunTickAsync(TestContext.Current.CancellationToken);
 
         await harness.Queue.Received(1).RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await harness.Queue.DidNotReceiveWithAnyArgs().FailAsync(default, default!, default!, Arg.Any<CancellationToken>());
         await harness.Store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, Arg.Any<CancellationToken>());
-        await harness.Notifier.DidNotReceiveWithAnyArgs().EditAsync(default, default, default!, Arg.Any<CancellationToken>());
+        await harness.Notifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(m =>
+            m.Text.Contains("Reading the receipt", StringComparison.Ordinal)
+            && m.Text.Contains("the model did not answer", StringComparison.Ordinal)
+            && !m.Text.Contains("read_receipt produced no tool call", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_failed_photo_download_names_the_reason_in_the_retry_notice()
+    {
+        var harness = Setup(ExtractJob());
+        harness.PhotoSource.DownloadAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new HttpRequestException("telegram unreachable"));
+
+        await TickAsync(harness);
+
+        await harness.Notifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(m =>
+            m.Text.Contains("the receipt photo could not be read", StringComparison.Ordinal)
+            && !m.Text.Contains("telegram unreachable", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_database_failure_saving_the_extracted_receipt_names_a_database_error_in_the_retry_notice()
+    {
+        var harness = Setup(ExtractJob());
+        harness.ReceiptStore.SaveExtractedAsync(Arg.Any<Guid>(), Arg.Any<ExtractedReceipt>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new DbUpdateException("Cannot write DateTimeOffset with Offset=02:00:00"));
+
+        await TickAsync(harness);
+
+        await harness.Notifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(m =>
+            m.Text.Contains("Reading the receipt", StringComparison.Ordinal)
+            && m.Text.Contains("a database error", StringComparison.Ordinal)
+            && !m.Text.Contains("DateTimeOffset", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_retry_notice_names_roughly_when_the_next_attempt_runs_in_the_capture_time_zone()
+    {
+        // 09:00 UTC is 11:00 in Belgrade (+02:00 in September) - the retry notice must show the
+        // capture time zone's clock, not UTC's, the same rule ExtractReceiptWorker already applies
+        // to a duplicate receipt's date.
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 25, 9, 0, 0, TimeSpan.Zero));
+        var harness = Setup(ExtractJob());
+        harness.Vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), Arg.Any<decimal?>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new ModelCallException(ModelFailureKind.Transient, "read_receipt produced no tool call"));
+
+        await CreateWorker(harness.ScopeFactory(), time, captureTimeZone: Belgrade).RunTickAsync(TestContext.Current.CancellationToken);
+
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text.Contains("11:", StringComparison.Ordinal)), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_success_after_a_retried_failure_replaces_the_retry_notice_with_the_ordinary_echo()
+    {
+        var harness = Setup(ExtractJob());
+        var worker = CreateWorker(harness.ScopeFactory());
+        harness.Vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), Arg.Any<decimal?>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new ModelCallException(ModelFailureKind.Transient, "read_receipt produced no tool call"));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+        harness.Notifier.ClearReceivedCalls();
+
+        harness.Vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), Arg.Any<decimal?>(), Arg.Any<CancellationToken>())
+            .Returns(Extracted(ReceiptSource.Vision));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text == Echo.ComposeCategorisingReceipt(1) && !m.Text.Contains("retrying", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
