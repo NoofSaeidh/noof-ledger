@@ -152,6 +152,9 @@ internal sealed class ExtractReceiptWorker(
             ExtractedReceipt extracted;
             var fetchFailed = false;
             var taxIdMalformed = false;
+            // Set only on the QR-decoded-but-fetch-failed vision fallback below - the one path where a
+            // model can disagree with facts the Tax Administration's own QR already carries offline.
+            FiscalQrPayload? verifiedQrFacts = null;
 
             if (qrUrl is not null)
             {
@@ -215,6 +218,7 @@ internal sealed class ExtractReceiptWorker(
                             }
 
                             logger.LogVisionUsed("fetch failed");
+                            verifiedQrFacts = payload;
                             if (await ReadWithVisionAsync(
                                     scope, jobQueue, store, notifier, job, record, photoForFetchFailure, payload.Total, cancellationToken)
                                 is not { } visionResult)
@@ -255,18 +259,48 @@ internal sealed class ExtractReceiptWorker(
             // from the Tax Administration's journal, not a model) must never let its own model-read total
             // survive into what gets saved, logged, or shown as the receipt's total; the model's differing
             // number is discarded here rather than recorded anywhere that could be read back as the total.
-            if (extracted is { Source: ReceiptSource.Vision, QrTotal: { } verifiedTotal })
+            if (extracted.Source == ReceiptSource.Vision && verifiedQrFacts is { } qrFacts)
             {
-                if (extracted.Total != verifiedTotal)
+                if (extracted.Total != qrFacts.Total)
                 {
-                    logger.LogModelTotalDiscardedForQrTotal(extracted.Total, verifiedTotal);
-                    extracted = extracted with { Total = verifiedTotal };
+                    logger.LogModelTotalDiscardedForQrTotal(extracted.Total, qrFacts.Total);
+                    extracted = extracted with { Total = qrFacts.Total };
                 }
 
                 if (extracted.Currency != CurrencyCode.Rsd)
                 {
                     logger.LogModelCurrencyDiscardedForQrCurrency(extracted.Currency);
                     extracted = extracted with { Currency = CurrencyCode.Rsd };
+                }
+
+                // Copilot finding, PR #3: the decoded QR also carries the authoritative issue time and
+                // receipt kind, and composes the printed fiscal number - every one of those is a fact
+                // from the Tax Administration's own payload, never the model's guess, so they overwrite
+                // the vision answer the same way Total/Currency already do. The seller's tax id has no
+                // QR equivalent - it stays vision's own well-formed-only value.
+                //
+                // The QR's own IssuedAt is a UTC instant; every other producer of ExtractedReceipt.IssuedAt
+                // (ChatReceiptVision, FiscalJournalParser, SufReceiptClient) stamps the capture time zone's
+                // own offset instead - the convention ComposeReceiptNeedsConfirmationCore's date line relies
+                // on, since it prints the value's own offset with no zone conversion. Convert through the
+                // same captureTimeZone the duplicate echo below already uses.
+                var qrIssuedAt = TimeZoneInfo.ConvertTime(qrFacts.IssuedAt, captureTimeZone);
+                if (extracted.IssuedAt != qrIssuedAt)
+                {
+                    logger.LogModelIssuedAtDiscardedForQrIssuedAt(extracted.IssuedAt, qrIssuedAt);
+                    extracted = extracted with { IssuedAt = qrIssuedAt };
+                }
+
+                if (extracted.Kind != qrFacts.Kind)
+                {
+                    logger.LogModelKindDiscardedForQrKind(extracted.Kind, qrFacts.Kind);
+                    extracted = extracted with { Kind = qrFacts.Kind };
+                }
+
+                if (extracted.FiscalNumber != qrFacts.FiscalNumber)
+                {
+                    logger.LogModelFiscalNumberDiscardedForQrFiscalNumber(extracted.FiscalNumber, qrFacts.FiscalNumber);
+                    extracted = extracted with { FiscalNumber = qrFacts.FiscalNumber };
                 }
             }
 

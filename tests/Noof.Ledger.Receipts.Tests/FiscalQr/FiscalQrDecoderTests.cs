@@ -26,6 +26,7 @@ public class FiscalQrDecoderTests
         result.Payload.Kind.Should().Be(ReceiptKind.Sale);
         result.Payload.VerificationUrl.Should().Be(url);
         result.Payload.IssuedAt.Should().Be(builder.IssuedAt);
+        result.Payload.IssuedAt.Offset.Should().Be(TimeSpan.FromHours(1), "Belgrade is UTC+1 in January");
         result.Payload.RequestedBy.Should().Be(builder.RequestedBy);
         result.Payload.SignedBy.Should().Be(builder.SignedBy);
         result.Payload.TotalCounter.Should().Be(builder.TotalCounter);

@@ -13,6 +13,8 @@ internal sealed class FiscalQrDecoder(IFiscalVerificationUrl verificationUrl) : 
     const int SignatureLength = 256;
     const int ChecksumLength = 16;
 
+    static readonly TimeZoneInfo Belgrade = TimeZoneInfo.FindSystemTimeZoneById("Europe/Belgrade");
+
     public FiscalQrDecodeResult Decode(string url)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
@@ -72,7 +74,7 @@ internal sealed class FiscalQrDecoder(IFiscalVerificationUrl verificationUrl) : 
         var payload = new FiscalQrPayload(
             VerificationUrl: verificationUrl,
             Total: totalRaw / 10000m,
-            IssuedAt: DateTimeOffset.FromUnixTimeMilliseconds(dateTimeMs),
+            IssuedAt: TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(dateTimeMs), Belgrade),
             RequestedBy: requestedBy,
             SignedBy: signedBy,
             Kind: kind,

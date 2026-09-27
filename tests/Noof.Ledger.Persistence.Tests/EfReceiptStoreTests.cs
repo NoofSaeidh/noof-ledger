@@ -146,6 +146,37 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
             "the duplicate must write nothing, not a second receipt row");
     }
 
+    // Copilot finding on PR #3: the QR-decoded-but-fetch-failed vision fallback now carries the QR's
+    // own fiscal number into ExtractedReceipt.FiscalNumber (ExtractReceiptWorker), so two such vision
+    // receipts for the same seller and QR fiscal number must collide on the duplicate index exactly
+    // like two fiscal-QR receipts already do above. This guard is against EfReceiptStore directly and
+    // did not change with that worker fix - the duplicate index and lookup already ignore Source - but
+    // it is worth pinning now that a vision receipt can carry a QR-shaped fiscal number too.
+    [Fact]
+    public async Task A_second_QR_decoded_vision_receipt_with_the_same_seller_and_QR_fiscal_number_is_a_duplicate()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var first = NewPhotoTransaction();
+        var second = NewPhotoTransaction();
+        db.Transactions.AddRange(first, second);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+        var receipt = NewExtractedReceipt(sellerTaxId: "SYN-300000003", fiscalNumber: "REQABCDE-SIG12345-42") with
+        {
+            Source = ReceiptSource.Vision,
+        };
+
+        var firstResult = await store.SaveExtractedAsync(first.Id, receipt, "photo-file-1", true, TestContext.Current.CancellationToken);
+        var secondResult = await store.SaveExtractedAsync(second.Id, receipt, "photo-file-2", true, TestContext.Current.CancellationToken);
+
+        firstResult.ReceiptId.Should().NotBeNull();
+        secondResult.ReceiptId.Should().BeNull();
+        secondResult.DuplicateOfTransactionId.Should().Be(first.Id);
+        (await db.Receipts.CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
+    }
+
     [Fact]
     public async Task A_replayed_save_for_the_same_transaction_with_a_fiscal_receipt_returns_the_existing_receipt_not_a_duplicate()
     {

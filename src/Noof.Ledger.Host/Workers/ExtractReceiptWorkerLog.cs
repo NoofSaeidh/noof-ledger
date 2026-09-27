@@ -70,4 +70,18 @@ internal static partial class ExtractReceiptWorkerLog
     [LoggerMessage(EventId = 5017, Level = LogLevel.Debug,
         Message = "Vision currency {ModelCurrency} discarded in favour of the verified QR currency RSD")]
     public static partial void LogModelCurrencyDiscardedForQrCurrency(this ILogger logger, CurrencyCode modelCurrency);
+
+    [LoggerMessage(EventId = 5018, Level = LogLevel.Debug,
+        Message = "Vision issued-at {ModelIssuedAt} discarded in favour of the verified QR issued-at {QrIssuedAt}")]
+    public static partial void LogModelIssuedAtDiscardedForQrIssuedAt(
+        this ILogger logger, DateTimeOffset? modelIssuedAt, DateTimeOffset qrIssuedAt);
+
+    [LoggerMessage(EventId = 5019, Level = LogLevel.Debug,
+        Message = "Vision kind {ModelKind} discarded in favour of the verified QR kind {QrKind}")]
+    public static partial void LogModelKindDiscardedForQrKind(this ILogger logger, ReceiptKind modelKind, ReceiptKind qrKind);
+
+    [LoggerMessage(EventId = 5020, Level = LogLevel.Debug,
+        Message = "Vision fiscal number {ModelFiscalNumber} discarded in favour of the verified QR fiscal number {QrFiscalNumber}")]
+    public static partial void LogModelFiscalNumberDiscardedForQrFiscalNumber(
+        this ILogger logger, string? modelFiscalNumber, string qrFiscalNumber);
 }
