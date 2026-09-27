@@ -11,6 +11,11 @@ internal sealed class SkiaReceiptImageScaler : IReceiptImageScaler
     internal const int MaxLongSidePixels = 1568;
     const int JpegQuality = 85;
 
+    // SKSamplingOptions.Default is nearest-neighbour in SkiaSharp 4.151.1 - aliasing on exactly the
+    // thin thermal-print digits the vision model must read. No phone or Telegram resampler works that
+    // way, so downscaling with it degrades the "send it uncompressed for an exact read" path itself.
+    static readonly SKSamplingOptions DownscaleSampling = new(SKFilterMode.Linear, SKMipmapMode.Linear);
+
     public ReceiptPhoto ScaleForVision(ReceiptPhoto photo)
     {
         using var bitmap = TryDecode(photo.Bytes);
@@ -25,7 +30,7 @@ internal sealed class SkiaReceiptImageScaler : IReceiptImageScaler
         var width = Math.Max(1, (int)Math.Round(bitmap.Width * scale));
         var height = Math.Max(1, (int)Math.Round(bitmap.Height * scale));
 
-        using var resized = bitmap.Resize(new SKImageInfo(width, height), SKSamplingOptions.Default);
+        using var resized = bitmap.Resize(new SKImageInfo(width, height), DownscaleSampling);
         if (resized is null)
             return photo;
 

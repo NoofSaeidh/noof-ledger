@@ -56,9 +56,46 @@ public class SkiaReceiptImageScalerTests
         scaled.Bytes.ToArray().Should().Equal(garbage);
     }
 
+    [Fact]
+    public void Downscaling_blends_a_fine_stripe_pattern_instead_of_aliasing_it()
+    {
+        // Exactly 2x the limit, so every output column sits on the boundary between one black and
+        // one white source column. A nearest-neighbour resize always lands on one side or the other,
+        // producing a solid black or solid white image; a linear-filtered one averages the pair into
+        // mid-grey. SkiaSharp's SKSamplingOptions.Default is nearest-neighbour in 4.151.1.
+        var original = EncodeStripes(SkiaReceiptImageScaler.MaxLongSidePixels * 2, 40);
+
+        var scaled = scaler.ScaleForVision(new ReceiptPhoto(original, "image/png"));
+
+        using var bitmap = SKBitmap.Decode(scaled.Bytes.ToArray());
+        var sampledReds = Enumerable.Range(0, bitmap.Width)
+            .Where(x => x % 97 == 0)
+            .Select(x => (int)bitmap.GetPixel(x, bitmap.Height / 2).Red)
+            .ToArray();
+        var averageRed = sampledReds.Average();
+
+        averageRed.Should().BeInRange(80, 175,
+            "a linear-filtered downscale of alternating black/white columns should come back grey, not pure black or white");
+    }
+
     static byte[] EncodeJpeg(int width, int height) => Encode(width, height, SKEncodedImageFormat.Jpeg);
 
     static byte[] EncodePng(int width, int height) => Encode(width, height, SKEncodedImageFormat.Png);
+
+    static byte[] EncodeStripes(int width, int height)
+    {
+        using var bitmap = new SKBitmap(width, height);
+        for (var x = 0; x < width; x++)
+        {
+            var color = x % 2 == 0 ? SKColors.Black : SKColors.White;
+            for (var y = 0; y < height; y++)
+                bitmap.SetPixel(x, y, color);
+        }
+
+        using var image = SKImage.FromBitmap(bitmap);
+        using var data = image.Encode(SKEncodedImageFormat.Png, 100);
+        return data.ToArray();
+    }
 
     static byte[] Encode(int width, int height, SKEncodedImageFormat format)
     {
