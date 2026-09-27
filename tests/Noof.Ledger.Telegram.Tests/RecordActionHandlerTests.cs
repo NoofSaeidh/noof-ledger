@@ -35,8 +35,9 @@ public class RecordActionHandlerTests
         receiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns((ReceiptView?)null);
         receiptStore.EnqueueCategorizationAsync(TransactionId, 42, Arg.Any<CancellationToken>()).Returns(true);
         // A RecordAnyway press only makes sense while the receipt is still awaiting confirmation
-        // (RecordActionHandler's own guard checks this before enqueueing) - true by default so the
-        // "happy path" tests below exercise a legitimate press; the malformed-scenario test overrides it.
+        // (EfReceiptStore.EnqueueCategorizationAsync's own guard checks this before enqueueing) - true
+        // by default so the "happy path" tests below exercise a legitimate press; the
+        // malformed-scenario test overrides it.
         receiptStore.IsAwaitingConfirmationAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(true);
 
         var notifier = Substitute.For<IChatNotifier>();
@@ -173,8 +174,8 @@ public class RecordActionHandlerTests
     // Cancel - EfCategorizationStore.ApplyAsync keeps a Cancelled record Cancelled but still writes its
     // line items, so the next Restore landed on a Captured record that already had lines and no job:
     // ComposeReceipt's dead-end "Reading the receipt…" with no buttons. The atomic guard now lives
-    // inside EnqueueCategorizationAsync itself (2026-09-27, item 2): the handler always calls it and
-    // treats a false result - the store's own row-locked status check failing - the same way it always
+    // inside EfReceiptStore.EnqueueCategorizationAsync itself: the handler always calls it and treats
+    // a false result - the store's own row-locked status check failing - the same way it always
     // treated "already queued".
     [Fact]
     public async Task A_stale_record_anyway_press_after_cancel_does_not_enqueue_and_re_renders_the_cancelled_echo()
