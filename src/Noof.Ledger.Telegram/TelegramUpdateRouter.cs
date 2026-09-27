@@ -15,6 +15,7 @@ internal sealed class TelegramUpdateRouter(
     CorrectionHandler correctionHandler,
     IRecordEcho recordEcho,
     ISystemHealth systemHealth,
+    ReceiptLinkDetector receiptLinkDetector,
     ILogger<TelegramUpdateRouter> logger)
     : ITelegramUpdateRouter
 {
@@ -79,7 +80,7 @@ internal sealed class TelegramUpdateRouter(
             && await correctionHandler.TryHandleReplyAsync(message, repliedTo, text, cancellationToken))
             return;
 
-        if (ReceiptLinkDetector.TryFind(text, out var verificationUrl))
+        if (receiptLinkDetector.TryFind(text, out var verificationUrl))
         {
             await HandleReceiptLinkAsync(message, text, verificationUrl, timeZoneId, cancellationToken);
             return;

@@ -108,6 +108,11 @@ default wallet. The echo lists every line with its category, in the receipt's ow
   date or an amount; those always come from the receipt, never from a correction, so the request was
   noted and nothing moved.
 
+**If the Tax Administration ever moves the verification URL.** Change `Receipts:VerificationUrlPrefix`
+in `appsettings.json` (e.g. `"https://suf.purs.gov.rs/v/?vl="`) — it is the one source both the
+Telegram link detector and the fiscal QR decoder's host/path check read; a bad or missing value fails
+startup instead of silently disabling receipts.
+
 **The Receipts health check** (`/diagnostics`, the dashboard tile, the bot's `/health`) turns amber for
 24 hours after any Tax Administration lookup fails, naming the time it happened, then clears itself back
 to green — it does not mean the *current* lookup is failing, only that one recently did and receipts may

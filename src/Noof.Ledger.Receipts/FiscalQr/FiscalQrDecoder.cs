@@ -7,22 +7,21 @@ namespace Noof.Ledger.Receipts.FiscalQr;
 
 // Byte layout ported from turanjanin/serbian-fiscal-receipts-parser (MIT):
 // https://github.com/turanjanin/serbian-fiscal-receipts-parser
-internal sealed class FiscalQrDecoder : IFiscalQrDecoder
+internal sealed class FiscalQrDecoder(FiscalVerificationUrl verificationUrl) : IFiscalQrDecoder
 {
-    const string Host = "suf.purs.gov.rs";
     const int HeaderLength = 44;
     const int SignatureLength = 256;
     const int ChecksumLength = 16;
 
-    public FiscalQrDecodeResult Decode(string verificationUrl)
+    public FiscalQrDecodeResult Decode(string url)
     {
-        if (!Uri.TryCreate(verificationUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
             return Failure("The link is not an https URL.");
 
-        if (!string.Equals(uri.Host, Host, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(uri.Host, verificationUrl.Host, StringComparison.OrdinalIgnoreCase))
             return Failure("The link is not on the Tax Administration's verification host.");
 
-        if (!uri.AbsolutePath.StartsWith("/v/", StringComparison.Ordinal))
+        if (!uri.AbsolutePath.StartsWith(verificationUrl.PathPrefix, StringComparison.Ordinal))
             return Failure("The link does not use the verification path.");
 
         var vl = ReadVlParameter(uri.Query);
@@ -39,7 +38,7 @@ internal sealed class FiscalQrDecoder : IFiscalQrDecoder
             return Failure("The vl parameter is not valid base64.");
         }
 
-        return Decode(bytes, verificationUrl);
+        return Decode(bytes, url);
     }
 
     static FiscalQrDecodeResult Decode(byte[] bytes, string verificationUrl)

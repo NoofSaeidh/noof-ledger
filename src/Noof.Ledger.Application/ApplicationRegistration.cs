@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Receipts;
 
 namespace Noof.Ledger.Application;
 
@@ -12,7 +13,10 @@ namespace Noof.Ledger.Application;
         + "Telegram can register them without naming an implementation type.")]
 public static class ApplicationRegistration
 {
-    public static IServiceCollection AddNoofApplication(this IServiceCollection services, SlowOperationOptions slowOperations)
+    public static IServiceCollection AddNoofApplication(
+        this IServiceCollection services,
+        SlowOperationOptions slowOperations,
+        FiscalVerificationUrlOptions fiscalVerificationUrlOptions)
     {
         services.AddSingleton<IProposalMapper, ProposalMapper>();
         services.AddSingleton<IMerchantScan, MerchantScan>();
@@ -20,6 +24,10 @@ public static class ApplicationRegistration
 
         services.AddSingleton(slowOperations);
         services.AddSingleton<IOperationTimer, OperationTimer>();
+
+        // Constructed here, not lazily behind DI, so a bad Receipts:VerificationUrlPrefix fails
+        // startup immediately instead of on the first message with a fiscal link.
+        services.AddSingleton(new FiscalVerificationUrl(fiscalVerificationUrlOptions));
 
         return services;
     }
