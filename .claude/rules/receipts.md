@@ -27,7 +27,9 @@ paths:
   fixed.
 - **The vision fallback must never invent what it cannot read — settled 2026-09-27.** `read_receipt`
   reports `readable`/`unreadable_reason` and a nullable `total` rather than guessing; a receipt whose
-  lines do not sum to its total (beyond a cent) or whose printed tax id is not exactly 9 digits is saved
+  lines do not sum to its total (beyond a cent) — the QR total when one decoded, since a vision total
+  that disagrees with a verified QR total is normalized to it before this check ever runs — or whose
+  printed tax id is not exactly 9 digits is saved
   but held back from `CategorizeReceipt` until the operator presses "Record anyway"
   (`RecordAction.RecordAnyway`) — never for a fiscal QR/SUF receipt, whose own numbers are trusted as
   before. A printed PIB/fiscal number is accepted into `ExtractedReceipt` only when well-formed. Full

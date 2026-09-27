@@ -706,3 +706,8 @@ value that is otherwise never stored anywhere, for a rendering-only purpose.
 interprets amounts and dates from natural speech, and the safety is the echo plus cancel/correct, exactly
 as P2-1 settled. These five decisions are additions to the *fiscal-receipt* pipeline specifically (R-6's
 "the model only categorises/reads photos" boundary), not a reversal of the capture-is-the-exception rule.
+
+**Addendum, 2026-09-27 (Copilot finding on PR #3):** when the QR decodes but the Tax Administration
+fetch fails, `ExtractReceiptWorker` now normalizes a Vision-sourced receipt's `Total` to its verified
+`QrTotal` before the mismatch check, the save and the echo, so a model total that disagreed with the QR
+can no longer reach `Receipt.Total` or be shown as it.
