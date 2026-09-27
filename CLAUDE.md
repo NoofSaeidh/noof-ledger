@@ -59,6 +59,12 @@ reasoning, never for small tasks. `low` for mechanical work.
     conflicts with *(settled)* rules and `docs/OPEN-QUESTIONS.md`, and whether the PR cut is right.
     Its findings are triaged like any review.
   - **At the end**, closing the phase or a batch of PRs.
+  - **Trial, 3 phases** *(operator, 2026-09-28)*: both Fable reviews run in parallel with a Codex
+    adversarial review of the same scope — closing: the companion script above with `--base <base>`;
+    planning: `codex exec -s read-only "<prompt naming the spec and plan paths, even under the ignored
+    .superpowers/, asking for an adversarial review of the decision>"`. An opus pass merges both lists
+    (deduped, each tagged both / Fable only / Codex only), then triages. The phase's closing notes
+    record one tally line per review (confirmed findings by tag); after the third phase the operator keeps both or drops one.
 - **Review findings are triaged, not all fixed** *(operator's decision, 2026-09-28)*, for Copilot and
   Codex alike: fix a critical finding (real bug, wrong money/balance, data loss, secret leak,
   security hole, broken build/test, *(settled)*-rule violation); reply with a sentence of reasoning
