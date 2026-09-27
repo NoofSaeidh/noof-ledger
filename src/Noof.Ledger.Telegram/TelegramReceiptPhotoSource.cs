@@ -26,7 +26,7 @@ internal sealed class TelegramReceiptPhotoSource(TelegramClientHandle clientHand
         return new ReceiptPhoto(buffer.ToArray(), MediaTypeFor(file.FilePath));
     }
 
-    static string MediaTypeFor(string? filePath) => Path.GetExtension(filePath) switch
+    static string MediaTypeFor(string? filePath) => Path.GetExtension(filePath)?.ToLowerInvariant() switch
     {
         ".png" => "image/png",
         ".webp" => "image/webp",
