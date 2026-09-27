@@ -4,6 +4,7 @@
     <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="ZXing.Net" />
     <PackageReference Include="ZXing.Net.Bindings.SkiaSharp" />
+    <PackageReference Include="SkiaSharp" />
   </ItemGroup>
 
   <ItemGroup>

@@ -53,5 +53,5 @@ output of `ops/publish.ps1` — contains the app's package binaries. Anyone givi
 |---|---|---|---|---|
 | ZXing.Net | 0.16.11 | Apache-2.0 | app (Receipts) | https://github.com/micjahn/ZXing.Net |
 | ZXing.Net.Bindings.SkiaSharp | 0.16.24 | Apache-2.0 | app (Receipts), Receipts tests | https://github.com/micjahn/ZXing.Net |
-| SkiaSharp (and `SkiaSharp.NativeAssets.*`, which ship their own `THIRD-PARTY-NOTICES.txt`) | 4.151.1 | MIT | app (Receipts, via the binding) | https://github.com/mono/SkiaSharp |
+| SkiaSharp (and `SkiaSharp.NativeAssets.*`, which ship their own `THIRD-PARTY-NOTICES.txt`) | 4.151.1 | MIT | app (Receipts, direct reference for `SkiaReceiptImageScaler`, plus via the ZXing binding) | https://github.com/mono/SkiaSharp |
 | Npgsql | 10.0.3 | PostgreSQL | tests (TestKit, as a direct reference); the app has had it since Phase 0 through `Npgsql.EntityFrameworkCore.PostgreSQL` | https://github.com/npgsql/npgsql |
