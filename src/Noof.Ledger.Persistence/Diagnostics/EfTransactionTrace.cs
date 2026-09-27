@@ -1,10 +1,20 @@
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Receipts;
+using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Persistence.Diagnostics;
 
-internal sealed class EfTransactionTrace(LedgerDbContext db) : ITransactionTrace
+// AwaitingConfirmation shares IReceiptStore.IsAwaitingConfirmationAsync with RecordActionHandler's
+// Cancel/Restore rather than re-deriving job existence inline (2026-09-27 finding: the two had drifted
+// - this one additionally required Status == Captured, so a Cancelled-but-still-unconfirmed receipt
+// showed as confirmed on the trace page while the bot's own echo still offered Restore for it). That
+// store method is deliberately status-independent - a vision receipt with no CategorizeReceipt job is
+// "awaiting" whether it is Captured or Cancelled - and the trace page, a read-only diagnostic view,
+// has no reason to narrow that any further than the one definition already uses.
+internal sealed class EfTransactionTrace(LedgerDbContext db, IReceiptStore receiptStore) : ITransactionTrace
 {
     public async Task<TransactionTrace> GetAsync(Guid transactionId, CancellationToken cancellationToken)
     {
@@ -107,6 +117,9 @@ internal sealed class EfTransactionTrace(LedgerDbContext db) : ITransactionTrace
                 categoryByReceiptLineId.TryGetValue(line.Id, out var categoryNameEn) ? categoryNameEn : null))
             .ToList();
 
+        var awaitingConfirmation = await receiptStore.IsAwaitingConfirmationAsync(transactionId, cancellationToken);
+        var problems = awaitingConfirmation ? BuildAwaitingConfirmationProblems(receiptLines, receipt.QrTotal ?? receipt.Total.Amount, receipt.Total.Currency) : [];
+
         return new ReceiptTraceView(
             receipt.Source,
             receipt.SellerName,
@@ -119,7 +132,24 @@ internal sealed class EfTransactionTrace(LedgerDbContext db) : ITransactionTrace
             receipt.Total.Amount,
             receipt.Total.Currency,
             receipt.QrTotal,
-            lines);
+            lines,
+            awaitingConfirmation,
+            problems);
+    }
+
+    // The trace page's own, Persistence-local wording for the same mismatch RecordEcho separately
+    // computes for the bot's confirmation prompt (Application, IRecordEcho.ComposeReceiptNeedsConfirmation)
+    // - deliberately not shared across that assembly boundary, since Application grants Persistence no
+    // InternalsVisibleTo today and this diagnostic sentence is not bot text. One definition here is
+    // enough: nothing else in Persistence builds this sentence.
+    static List<string> BuildAwaitingConfirmationProblems(List<ReceiptLine> lines, decimal referenceTotal, CurrencyCode currency)
+    {
+        var sum = lines.Sum(line => line.Total);
+        if (Math.Abs(sum - referenceTotal) <= 0.01m)
+            return [];
+
+        return [$"Lines add up to {sum.ToString("0.00", CultureInfo.InvariantCulture)} {currency}, "
+            + $"the receipt says {referenceTotal.ToString("0.00", CultureInfo.InvariantCulture)} {currency}"];
     }
 
     static TraceEvent? ToTraceEvent(AppLogEntry entry)

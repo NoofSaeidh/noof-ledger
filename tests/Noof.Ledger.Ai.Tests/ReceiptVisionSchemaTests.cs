@@ -23,6 +23,49 @@ public class ReceiptVisionSchemaTests
         branches[1].GetProperty("type").GetString().Should().Be("null");
     }
 
+    [Fact]
+    public void Readable_is_a_required_boolean()
+    {
+        var schema = ReceiptVisionSchema.BuildReadReceipt();
+
+        var required = schema.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ToList();
+        required.Should().Contain("readable");
+        schema.GetProperty("properties").GetProperty("readable").GetProperty("type").GetString().Should().Be("boolean");
+    }
+
+    [Fact]
+    public void Unreadable_reason_is_a_nullable_enum_expressed_as_anyOf()
+    {
+        var schema = ReceiptVisionSchema.BuildReadReceipt();
+
+        var unreadableReason = schema.GetProperty("properties").GetProperty("unreadable_reason");
+        unreadableReason.TryGetProperty("type", out _).Should().BeFalse();
+        var branches = unreadableReason.GetProperty("anyOf").EnumerateArray().ToList();
+        branches[0].GetProperty("enum").EnumerateArray().Select(e => e.GetString())
+            .Should().BeEquivalentTo(["too_small", "blurry", "not_a_receipt", "cut_off", "other"]);
+        branches[1].GetProperty("type").GetString().Should().Be("null");
+    }
+
+    [Fact]
+    public void Total_is_nullable_since_the_model_must_never_invent_a_figure_it_cannot_read()
+    {
+        var schema = ReceiptVisionSchema.BuildReadReceipt();
+
+        var total = schema.GetProperty("properties").GetProperty("total");
+        total.GetProperty("type").EnumerateArray().Select(e => e.GetString()).Should().BeEquivalentTo(["number", "null"]);
+    }
+
+    [Fact]
+    public void Fiscal_number_is_a_nullable_string_required_for_strict_mode()
+    {
+        var schema = ReceiptVisionSchema.BuildReadReceipt();
+
+        var required = schema.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ToList();
+        required.Should().Contain("fiscal_number");
+        schema.GetProperty("properties").GetProperty("fiscal_number").GetProperty("type")
+            .EnumerateArray().Select(e => e.GetString()).Should().BeEquivalentTo(["string", "null"]);
+    }
+
     // The API rejects an enum next to a type array - "Enum value 'EUR' does not match declared type
     // '['string', 'null']'" (live 400, 2026-09-25) - so every nullable enum is an anyOf instead.
     [Fact]

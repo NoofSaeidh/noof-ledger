@@ -39,8 +39,7 @@ internal sealed class RecordEcho : IRecordEcho
         "The Tax Administration site is unreachable right now — send a photo of the receipt instead.", []);
 
     public EchoMessage ReceiptReadFailure { get; } = new(
-        "Couldn't read that receipt. Resend the photo, paste the receipt's QR link as text, "
-        + "or resend the photo as a file so it isn't compressed.",
+        "Couldn't read that receipt. " + "Send the link from the receipt's QR code (scan it with your phone camera).",
         []);
 
     public EchoMessage ReceiptVisionNotConfigured { get; } = new(
@@ -163,6 +162,71 @@ internal sealed class RecordEcho : IRecordEcho
     public EchoMessage ComposeReceiptNotRecorded(ReceiptKind kind) =>
         new($"This receipt is a {kind.ToString().ToLowerInvariant()} — not recorded", [RecordAction.Edit]);
 
+    public EchoMessage ReceiptUnreadable { get; } = new(
+        "I couldn't read this receipt reliably, so nothing was recorded. " + "Send the link from the receipt's QR code (scan it with your phone camera).", []);
+
+    public EchoMessage ComposeReceiptNeedsConfirmation(ExtractedReceipt receipt, bool taxIdMalformed = false) =>
+        ComposeReceiptNeedsConfirmationCore(
+            receipt.SellerName, receipt.LocationName, receipt.IssuedAt, receipt.SellerTaxId, receipt.FiscalNumber,
+            receipt.Lines.Select(line => (line.Name, line.Total)), receipt.Currency, receipt.Total,
+            receipt.QrTotal ?? receipt.Total, taxIdMalformed);
+
+    public EchoMessage ComposeReceiptNeedsConfirmation(ReceiptView receipt, bool taxIdMalformed = false) =>
+        ComposeReceiptNeedsConfirmationCore(
+            receipt.SellerName, receipt.LocationName, receipt.IssuedAt, receipt.SellerTaxId, receipt.FiscalNumber,
+            receipt.Lines.Select(line => (line.Name, line.Total)), receipt.Currency, receipt.Total,
+            receipt.QrTotal ?? receipt.Total, taxIdMalformed);
+
+    // Owns both the mismatch arithmetic and the wording (the same split ReceiptWarnings already makes
+    // for the recorded echo), so an ExtractedReceipt fresh off the vision fallback and a ReceiptView
+    // read back later (RecordActionHandler's Cancel/Restore, ExtractReceiptWorker's own C-1 replay)
+    // produce byte-identical prompts instead of two hand-maintained copies of the same sentence.
+    static EchoMessage ComposeReceiptNeedsConfirmationCore(
+        string? sellerName, string? locationName, DateTimeOffset? issuedAt, string? sellerTaxId, string? fiscalNumber,
+        IEnumerable<(string Name, decimal Total)> receiptLines, CurrencyCode currency, decimal total, decimal referenceTotal,
+        bool taxIdMalformed)
+    {
+        var name = sellerName is { Length: > 0 } ? sellerName : "Receipt";
+        var header = locationName is { Length: > 0 } location ? $"{name} — {location}" : name;
+        var lineList = receiptLines.ToList();
+
+        List<string> lines = [$"This receipt doesn't look right — {header}"];
+        if (issuedAt is { } at)
+            lines.Add($"Date: {at.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)}");
+        if (sellerTaxId is { Length: > 0 })
+            lines.Add($"PIB: {sellerTaxId}");
+        if (fiscalNumber is { Length: > 0 })
+            lines.Add($"Fiscal #: {fiscalNumber}");
+        lines.AddRange(lineList.Select(line => $"• {line.Name} — {FormatAmount(line.Total)} {currency}"));
+        lines.Add(string.Empty);
+        lines.Add($"Total: {FormatAmount(total)} {currency}");
+        lines.Add(string.Empty);
+
+        var sum = lineList.Sum(line => line.Total);
+        if (HasMismatch(sum, referenceTotal))
+            lines.Add($"⚠️ Lines add up to {FormatAmount(sum)} {currency}, the receipt says {FormatAmount(referenceTotal)} {currency}");
+        if (taxIdMalformed)
+            lines.Add("⚠️ The printed tax id does not look like a valid PIB (9 digits)");
+
+        // 2026-09-27: this prompt only ever shows for a vision receipt (never a fiscal QR/SUF one), so
+        // it carries the same standing hint every other vision echo does (ReceiptWarnings).
+        lines.Add("⚠️ For an exact read next time, send the link from the receipt's QR code (scan it with your phone camera) instead of a photo.");
+        lines.Add(string.Empty);
+        lines.Add("Record it anyway, or cancel?");
+
+        return new(string.Join('\n', lines), [RecordAction.RecordAnyway, RecordAction.Cancel]);
+    }
+
+    static bool HasMismatch(decimal sum, decimal referenceTotal) => Math.Abs(sum - referenceTotal) > 0.01m;
+
+    public EchoMessage ComposeReceiptCancelledUnconfirmed(CategorizationSubject record, ReceiptView receipt)
+    {
+        var header = $"Cancelled — {ShopHeader(receipt)} · {record.WalletName} · balance {Balances(record)}";
+        var total = $"Total: {FormatAmount(receipt.Total)} {receipt.Currency}";
+        return new($"{header}\n{total}\n\nThis receipt was never categorised — press Restore to bring it back for confirmation.",
+            [RecordAction.Restore]);
+    }
+
     static string ShopHeader(ReceiptView receipt)
     {
         var name = receipt.SellerName is { Length: > 0 } sellerName ? sellerName : "Receipt";
@@ -206,6 +270,16 @@ internal sealed class RecordEcho : IRecordEcho
         {
             yield return
                 $"⚠️ Lines add up to {FormatAmount(sum)} {receipt.Currency}, the receipt says {FormatAmount(receipt.Total)} {receipt.Currency}";
+        }
+
+        // 2026-09-27: every vision read is a fallback the QR path could not take - worth naming a way
+        // to get an exact read next time, independent of whether this particular read happened to add
+        // up. Not "send it as a file": the operator's own real receipts (docs/OPEN-QUESTIONS.md, Phase 6
+        // QR entry) showed a photo, even a full-resolution one sent as a file, does not reliably decode
+        // the fiscal QR either - only the link, scanned by the phone's own camera, does.
+        if (receipt.Source == ReceiptSource.Vision)
+        {
+            yield return "⚠️ For an exact read next time, send the link from the receipt's QR code (scan it with your phone camera) instead of a photo.";
         }
     }
 

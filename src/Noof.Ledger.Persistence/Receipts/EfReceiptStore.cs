@@ -9,7 +9,8 @@ namespace Noof.Ledger.Persistence.Receipts;
 internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvider) : AppReceipts.IReceiptStore
 {
     public async Task<AppReceipts.ReceiptSaveResult> SaveExtractedAsync(
-        Guid transactionId, AppReceipts.ExtractedReceipt receipt, string? telegramFileId, CancellationToken cancellationToken)
+        Guid transactionId, AppReceipts.ExtractedReceipt receipt, string? telegramFileId, bool enqueueCategorization,
+        CancellationToken cancellationToken)
     {
         var receiptId = Guid.NewGuid();
 
@@ -54,19 +55,24 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
 
         // Enqueued in the same SaveChangesAsync as the receipt and its lines: a duplicate violation
         // rolls this job back with everything else, so a duplicate transaction never gets a
-        // CategorizeReceipt job of its own.
+        // CategorizeReceipt job of its own. Skipped entirely when the caller judged the receipt not to
+        // add up (2026-09-27) - the receipt and its lines are still saved below, but categorisation
+        // waits for the operator's own EnqueueCategorizationAsync ("Record anyway").
         var now = timeProvider.GetUtcNow();
-        db.CategorizationJobs.Add(new CategorizationJob
+        if (enqueueCategorization)
         {
-            Id = Guid.NewGuid(),
-            TransactionId = transactionId,
-            Kind = JobKind.CategorizeReceipt,
-            Status = JobStatus.Pending,
-            AttemptCount = 0,
-            RunAfter = now,
-            CreatedAt = now,
-            UpdatedAt = now,
-        });
+            db.CategorizationJobs.Add(new CategorizationJob
+            {
+                Id = Guid.NewGuid(),
+                TransactionId = transactionId,
+                Kind = JobKind.CategorizeReceipt,
+                Status = JobStatus.Pending,
+                AttemptCount = 0,
+                RunAfter = now,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        }
 
         try
         {
@@ -146,6 +152,48 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
             .Where(t => t.Id == transactionId)
             .Select(t => t.VerificationUrl)
             .SingleOrDefaultAsync(cancellationToken);
+
+    public async Task<bool> EnqueueCategorizationAsync(Guid transactionId, int sourceMessageId, CancellationToken cancellationToken)
+    {
+        var now = timeProvider.GetUtcNow();
+        db.CategorizationJobs.Add(new CategorizationJob
+        {
+            Id = Guid.NewGuid(),
+            TransactionId = transactionId,
+            Kind = JobKind.CategorizeReceipt,
+            Status = JobStatus.Pending,
+            AttemptCount = 0,
+            RunAfter = now,
+            CreatedAt = now,
+            UpdatedAt = now,
+            SourceMessageId = sourceMessageId,
+        });
+
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex, CategorizationJobConfiguration.SourceMessageIndex))
+        {
+            db.ChangeTracker.Clear();
+            return false;
+        }
+    }
+
+    public async Task<bool> IsAwaitingConfirmationAsync(Guid transactionId, CancellationToken cancellationToken)
+    {
+        var source = await db.Receipts.AsNoTracking()
+            .Where(r => r.TransactionId == transactionId)
+            .Select(r => (ReceiptSource?)r.Source)
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (source != ReceiptSource.Vision)
+            return false;
+
+        return !await db.CategorizationJobs.AsNoTracking()
+            .AnyAsync(job => job.TransactionId == transactionId && job.Kind == JobKind.CategorizeReceipt, cancellationToken);
+    }
 
     // EF's default naming for the one-to-one FK's auto-generated unique index (ReceiptConfiguration
     // never names it explicitly) - confirmed against the migration, not guessed.

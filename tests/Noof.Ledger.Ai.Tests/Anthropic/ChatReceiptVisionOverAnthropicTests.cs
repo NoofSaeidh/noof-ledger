@@ -84,8 +84,10 @@ public class ChatReceiptVisionOverAnthropicTests
         var (vision, handler) = Build();
         handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.ReadReceiptJsonAnswer);
 
-        var receipt = await vision.ReadAsync(TinyImage, "image/jpeg", qrTotal: 845.50m, TestContext.Current.CancellationToken);
+        var result = await vision.ReadAsync(TinyImage, "image/jpeg", qrTotal: 845.50m, TestContext.Current.CancellationToken);
 
+        result.Unreadable.Should().BeNull();
+        var receipt = result.Receipt!;
         receipt.Source.Should().Be(ReceiptSource.Vision);
         receipt.SellerName.Should().Be("Maxi");
         receipt.SellerTaxId.Should().Be("123456789");

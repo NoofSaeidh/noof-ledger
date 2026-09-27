@@ -30,9 +30,21 @@ internal static class ReceiptVisionSchema
             ["type"] = "object",
             ["additionalProperties"] = false,
             ["required"] = new JsonArray(
-                "seller_name", "seller_tax_id", "issued_at", "currency", "total", "payment_method", "kind", "lines"),
+                "readable", "unreadable_reason", "seller_name", "seller_tax_id", "fiscal_number", "issued_at",
+                "currency", "total", "payment_method", "kind", "lines"),
             ["properties"] = new JsonObject
             {
+                ["readable"] = new JsonObject
+                {
+                    ["type"] = "boolean",
+                    ["description"] =
+                        "False when the photo cannot be read reliably enough to record a receipt from it - "
+                        + "too small, blurry, cut off, or not a receipt at all. Never guess or fill in a field "
+                        + "to make an unreadable photo look readable.",
+                },
+                ["unreadable_reason"] = NullableEnum.String(
+                    ["too_small", "blurry", "not_a_receipt", "cut_off", "other"],
+                    "Why the photo could not be read, when readable is false; otherwise null."),
                 ["seller_name"] = new JsonObject
                 {
                     ["type"] = new JsonArray("string", "null"),
@@ -42,6 +54,11 @@ internal static class ReceiptVisionSchema
                 {
                     ["type"] = new JsonArray("string", "null"),
                     ["description"] = "The seller's tax id (PIB), if printed and legible; otherwise null.",
+                },
+                ["fiscal_number"] = new JsonObject
+                {
+                    ["type"] = new JsonArray("string", "null"),
+                    ["description"] = "The printed fiscal receipt number (\"ПФР број рачуна\"), if legible; otherwise null.",
                 },
                 ["issued_at"] = new JsonObject
                 {
@@ -56,7 +73,11 @@ internal static class ReceiptVisionSchema
                     ["enum"] = new JsonArray([.. CurrencyCode.Supported.Select(code => (JsonNode)code.Value)]),
                     ["description"] = "The receipt's currency. Assume RSD unless the receipt clearly states another.",
                 },
-                ["total"] = new JsonObject { ["type"] = "number", ["description"] = "The receipt's total, as printed." },
+                ["total"] = new JsonObject
+                {
+                    ["type"] = new JsonArray("number", "null"),
+                    ["description"] = "The receipt's total, as printed, or null when not legible.",
+                },
                 ["payment_method"] = NullableEnum.String(
                     ["card", "cash", "transfer", "voucher", "other", "mixed"],
                     "How the receipt says it was paid, or null when not stated."),
@@ -71,7 +92,7 @@ internal static class ReceiptVisionSchema
                     ["type"] = "array",
                     ["minItems"] = 0,
                     ["items"] = line,
-                    ["description"] = "The receipt's line items, in the order printed.",
+                    ["description"] = "The receipt's line items, in the order printed. Empty when unreadable.",
                 },
             },
         };

@@ -320,11 +320,19 @@ public class RecordEchoTests
     }
 
     [Fact]
+    public void An_unreadable_receipt_says_so_and_suggests_the_QR_link_and_offers_no_actions()
+    {
+        Echo.ReceiptUnreadable.Text.Should().Be(
+            "I couldn't read this receipt reliably, so nothing was recorded. " + "Send the link from the receipt's QR code (scan it with your phone camera).");
+        Echo.ReceiptUnreadable.Actions.Should().BeEmpty();
+    }
+
+    [Fact]
     public void A_receipt_that_could_not_be_read_says_what_to_try_instead()
     {
         Echo.ReceiptReadFailure.Text.Should().Contain("Couldn't read that receipt");
-        Echo.ReceiptReadFailure.Text.Should().Contain("QR link");
-        Echo.ReceiptReadFailure.Text.Should().Contain("file");
+        Echo.ReceiptReadFailure.Text.Should().Contain("the link from the receipt's QR code");
+        Echo.ReceiptReadFailure.Text.Should().NotContain("as a file");
     }
 
     [Fact]

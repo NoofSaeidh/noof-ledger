@@ -95,6 +95,9 @@ produced them.
 own name) wins; otherwise the wallet marked default for the receipt's payment method
 (`/wallets` → "Default for card" / "Default for cash" per wallet) is used, then the currency's own
 default wallet. The echo lists every line with its category, in the receipt's own order, then the total.
+**For an exact read, send the receipt's own QR link as text** — scan the fiscal QR with the phone's own
+camera and paste the `vl=` link — **rather than a photo**; see "Send the QR's link, not a photo" below for
+why even a full-resolution photo sent as a file does not reliably decode the QR itself.
 
 **Warnings, and what they mean.** A ⚠️ line in the echo means the receipt was not read the ordinary way:
 - *"Tax Administration unavailable — lines read from the photo"* — the QR decoded fine, but
@@ -137,7 +140,7 @@ capture pipeline (receipt extraction, receipt categorisation, first-capture/corr
 voice transcription) edits the same placeholder message with a short fixed reason (never the raw
 exception, a verification URL or a `vl` payload) and roughly when it will try again, whenever an
 attempt fails but the job still has attempts left; the last attempt's failure instead shows a clear
-failure message and what to do (resend the photo, paste the QR link, or send it as a file); a later
+failure message and what to do (send the link from the receipt's QR code); a later
 success simply overwrites either with the ordinary echo.
 
 ### Manual acceptance — Phase 6 (receipts), the operator's first real receipt

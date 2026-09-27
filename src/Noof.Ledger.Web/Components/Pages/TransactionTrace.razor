@@ -163,6 +163,24 @@ else
                 </MudAlert>
             }
 
+            @if (receipt.AwaitingConfirmation)
+            {
+                <MudAlert id="trace-receipt-awaiting-confirmation" Severity="Severity.Warning" Variant="Variant.Outlined" Class="mb-3">
+                    @if (receipt.Problems is { Count: > 0 } problems)
+                    {
+                        @foreach (var problem in problems)
+                        {
+                            <div>@problem</div>
+                        }
+                    }
+                    else
+                    {
+                        <div>This receipt did not look right, so it was not categorised automatically.</div>
+                    }
+                    <div>Awaiting Record anyway.</div>
+                </MudAlert>
+            }
+
             <MudSimpleTable Dense="true" Elevation="0" Class="mb-3">
                 <tbody>
                     <tr><td>Shop</td><td>@FormatShop(receipt)</td></tr>

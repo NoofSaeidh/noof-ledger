@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Noof.Ledger.Application.Categorization;
@@ -27,7 +28,14 @@ internal sealed class ChatReceiptVision(
     static readonly TimeZoneInfo Belgrade = TimeZoneInfo.FindSystemTimeZoneById("Europe/Belgrade");
     static readonly JsonElement ReadReceiptSchema = ReceiptVisionSchema.BuildReadReceipt();
 
-    public async Task<ExtractedReceipt> ReadAsync(
+    // 2026-09-27: OCR-off-by-a-digit garbage must never collide with, or fail to collide with, a real
+    // fiscal receipt's own (seller_tax_id, fiscal_number) duplicate index - so a value the model
+    // printed but that does not match its real shape is dropped to null here rather than trusted.
+    // Never applied to a fiscal QR/SUF receipt, which reads these from the Tax Administration itself.
+    static readonly Regex TaxIdPattern = new(@"^\d{9}$", RegexOptions.Compiled);
+    static readonly Regex FiscalNumberPattern = new(@"^[A-Z0-9]{8}-[A-Z0-9]{8}-\d+$", RegexOptions.Compiled);
+
+    public async Task<ReceiptVisionResult> ReadAsync(
         ReadOnlyMemory<byte> image, string mediaType, decimal? qrTotal, CancellationToken cancellationToken)
     {
         if (image.Length > MaxImageBytes)
@@ -63,7 +71,14 @@ internal sealed class ChatReceiptVision(
         if (payload is null)
             throw new ModelCallException(ModelFailureKind.Transient, $"{ReadReceiptName} returned an empty payload.");
 
-        return ToExtractedReceipt(payload, qrTotal);
+        // The model's own "I could not read this" (readable: false), or a contradiction - readable but
+        // no total, or readable but no lines - treated the same way rather than trusted: a receipt this
+        // layer cannot vouch for must come back as unreadable, never as a half-built ExtractedReceipt.
+        if (!payload.Readable || payload.Total is not { } total || payload.Lines.Count == 0)
+            return new ReceiptVisionResult(null, MapUnreadableReason(payload.UnreadableReason));
+
+        var taxIdMalformed = !string.IsNullOrWhiteSpace(payload.SellerTaxId) && !TaxIdPattern.IsMatch(payload.SellerTaxId.Trim());
+        return new ReceiptVisionResult(ToExtractedReceipt(payload, total, qrTotal), null, taxIdMalformed);
     }
 
     static FunctionCallContent? FindCall(ChatResponse response) =>
@@ -77,7 +92,7 @@ internal sealed class ChatReceiptVision(
     static ReadReceiptPayload? ToPayload(FunctionCallContent call) =>
         JsonSerializer.Deserialize<ReadReceiptPayload>(JsonSerializer.SerializeToElement(call.Arguments));
 
-    static ExtractedReceipt ToExtractedReceipt(ReadReceiptPayload payload, decimal? qrTotal)
+    static ExtractedReceipt ToExtractedReceipt(ReadReceiptPayload payload, decimal total, decimal? qrTotal)
     {
         var lines = payload.Lines
             .Select((line, index) => new ExtractedReceiptLine(
@@ -87,19 +102,37 @@ internal sealed class ChatReceiptVision(
         return new ExtractedReceipt(
             ReceiptSource.Vision,
             VerificationUrl: null,
-            payload.SellerTaxId,
+            AcceptIfWellFormed(payload.SellerTaxId, TaxIdPattern),
             payload.SellerName,
             SellerAddress: null,
             LocationName: null,
-            FiscalNumber: null,
+            AcceptIfWellFormed(payload.FiscalNumber, FiscalNumberPattern),
             ParseIssuedAt(payload.IssuedAt),
-            payload.Total,
+            total,
             new CurrencyCode(payload.Currency),
             payload.Kind == "refund" ? ReceiptKind.Refund : ReceiptKind.Sale,
             MapPaymentMethod(payload.PaymentMethod),
             qrTotal,
             lines);
     }
+
+    static string? AcceptIfWellFormed(string? printed, Regex pattern)
+    {
+        if (string.IsNullOrWhiteSpace(printed))
+            return null;
+
+        var trimmed = printed.Trim();
+        return pattern.IsMatch(trimmed) ? trimmed : null;
+    }
+
+    static ReceiptUnreadableReason MapUnreadableReason(string? reason) => reason switch
+    {
+        "too_small" => ReceiptUnreadableReason.TooSmall,
+        "blurry" => ReceiptUnreadableReason.Blurry,
+        "not_a_receipt" => ReceiptUnreadableReason.NotAReceipt,
+        "cut_off" => ReceiptUnreadableReason.CutOff,
+        _ => ReceiptUnreadableReason.Other,
+    };
 
     // M-1 (2026-09-25 final review): the model is strict on schema shape, not on content - a date it
     // could not phrase in ISO form must read as "no date", never throw. A FormatException here was
@@ -129,11 +162,14 @@ internal sealed class ChatReceiptVision(
     };
 
     sealed record ReadReceiptPayload(
+        [property: JsonPropertyName("readable")] bool Readable,
+        [property: JsonPropertyName("unreadable_reason")] string? UnreadableReason,
         [property: JsonPropertyName("seller_name")] string? SellerName,
         [property: JsonPropertyName("seller_tax_id")] string? SellerTaxId,
+        [property: JsonPropertyName("fiscal_number")] string? FiscalNumber,
         [property: JsonPropertyName("issued_at")] string? IssuedAt,
         [property: JsonPropertyName("currency")] string Currency,
-        [property: JsonPropertyName("total")] decimal Total,
+        [property: JsonPropertyName("total")] decimal? Total,
         [property: JsonPropertyName("payment_method")] string? PaymentMethod,
         [property: JsonPropertyName("kind")] string Kind,
         [property: JsonPropertyName("lines")] IReadOnlyList<ReadReceiptLineDto> Lines);

@@ -102,6 +102,29 @@ public class ReceiptEchoTests
         echo.Text.Should().NotContain("⚠️");
     }
 
+    // 2026-09-27: a vision-read receipt is only ever a fallback for a photo the QR path could not
+    // read reliably - one short line pointing at a way to get an exact read next time, whether or not
+    // the lines happen to add up this time. Not "send it as a file": the operator's own real receipts
+    // (docs/OPEN-QUESTIONS.md, Phase 6 QR entry) showed a photo, even a full-resolution one sent as a
+    // file, does not reliably decode the fiscal QR either - only the link, scanned by the phone's own
+    // camera, does.
+    [Fact]
+    public void A_vision_read_receipt_suggests_the_QR_link_for_an_exact_read_next_time()
+    {
+        var echo = Echo.ComposeReceipt(Record(), Receipt(source: ReceiptSource.Vision, qrTotal: null));
+
+        echo.Text.Should().Contain(
+            "⚠️ For an exact read next time, send the link from the receipt's QR code (scan it with your phone camera) instead of a photo.");
+    }
+
+    [Fact]
+    public void A_fiscal_qr_receipt_never_carries_the_exact_read_hint()
+    {
+        var echo = Echo.ComposeReceipt(Record(), Receipt(source: ReceiptSource.FiscalQr));
+
+        echo.Text.Should().NotContain("For an exact read next time");
+    }
+
     [Fact]
     public void Lines_that_disagree_with_the_receipt_total_by_more_than_a_cent_are_warned_about()
     {
@@ -212,6 +235,91 @@ public class ReceiptEchoTests
     public void No_declined_change_carries_no_note()
     {
         Echo.ComposeReceipt(Record(), Receipt(), AppReceipts.UnsupportedChangeKind.None).Text.Should().NotContain("cannot be changed here");
+    }
+
+    // 2026-09-27: Cancel on a receipt still awaiting confirmation has no categorised line items -
+    // record.Lines is empty, since CategorizeReceipt never ran. This must show the receipt's own
+    // stored total, never fall back to ComposeReceipt's "Total: " (with nothing after it) and a false
+    // "Lines add up to 0.00" mismatch warning.
+    [Fact]
+    public void A_cancelled_unconfirmed_receipt_shows_the_receipts_own_total_and_offers_only_restore()
+    {
+        var record = Record(lines: []) with { Status = TransactionStatus.Cancelled };
+
+        var echo = Echo.ComposeReceiptCancelledUnconfirmed(record, Receipt(total: 500m));
+
+        echo.Text.Should().StartWith("Cancelled — Test Market — Test Market - Centre · Cash · balance 0.00 RSD");
+        echo.Text.Should().Contain("500.00 RSD");
+        echo.Text.Should().NotContain("Total: \n", "the M-8 empty-total look must never come from this rendering");
+        echo.Text.Should().NotContain("Lines add up to");
+        echo.Actions.Should().Equal(RecordAction.Restore);
+    }
+
+    static AppReceipts.ExtractedReceipt NeedsConfirmationReceipt(
+        DateTimeOffset? issuedAt = null, string? sellerTaxId = null, string? fiscalNumber = null) => new(
+        ReceiptSource.Vision, VerificationUrl: null, sellerTaxId, "Test Market", SellerAddress: null,
+        LocationName: null, fiscalNumber, issuedAt, 500m, CurrencyCode.Rsd, ReceiptKind.Sale, PaymentMethod.Card,
+        QrTotal: null,
+        [new AppReceipts.ExtractedReceiptLine(1, "Bread", 1m, null, 400m, 400m, null)]);
+
+    // 2026-09-27 finding: every other vision echo carries the decision-5 QR hint and, where read,
+    // the date and PIB/fiscal number - the confirmation prompt is a vision echo too and showed neither.
+    [Fact]
+    public void ComposeReceiptNeedsConfirmation_carries_the_QR_hint()
+    {
+        var echo = Echo.ComposeReceiptNeedsConfirmation(NeedsConfirmationReceipt());
+
+        echo.Text.Should().Contain(
+            "⚠️ For an exact read next time, send the link from the receipt's QR code (scan it with your phone camera) instead of a photo.");
+    }
+
+    [Fact]
+    public void ComposeReceiptNeedsConfirmation_shows_the_date_PIB_and_fiscal_number_when_they_were_read()
+    {
+        var receipt = NeedsConfirmationReceipt(
+            issuedAt: new DateTimeOffset(2026, 9, 25, 9, 30, 0, TimeSpan.Zero), sellerTaxId: "123456789",
+            fiscalNumber: "2WJCQFGP-2WJCQFGP-66360");
+
+        var echo = Echo.ComposeReceiptNeedsConfirmation(receipt);
+
+        echo.Text.Should().Contain("Date: 25.09.2026");
+        echo.Text.Should().Contain("PIB: 123456789");
+        echo.Text.Should().Contain("Fiscal #: 2WJCQFGP-2WJCQFGP-66360");
+    }
+
+    [Fact]
+    public void ComposeReceiptNeedsConfirmation_omits_the_date_PIB_and_fiscal_number_when_none_were_read()
+    {
+        var echo = Echo.ComposeReceiptNeedsConfirmation(NeedsConfirmationReceipt());
+
+        echo.Text.Should().NotContain("Date:");
+        echo.Text.Should().NotContain("PIB:");
+        echo.Text.Should().NotContain("Fiscal #:");
+    }
+
+    [Fact]
+    public void ComposeReceiptNeedsConfirmation_names_a_malformed_tax_id()
+    {
+        var echo = Echo.ComposeReceiptNeedsConfirmation(NeedsConfirmationReceipt(), taxIdMalformed: true);
+
+        echo.Text.Should().Contain("⚠️ The printed tax id does not look like a valid PIB (9 digits)");
+    }
+
+    // The ReceiptView overload (RecordActionHandler's Cancel/Restore, ExtractReceiptWorker's own C-1
+    // replay) must produce the identical prompt a fresh ExtractedReceipt would have - same arithmetic,
+    // same wording, read from what was actually stored instead of a live model call.
+    [Fact]
+    public void ComposeReceiptNeedsConfirmation_from_a_stored_ReceiptView_matches_the_ExtractedReceipt_wording()
+    {
+        var view = Receipt(source: ReceiptSource.Vision, qrTotal: null, total: 500m,
+            lines: [new AppReceipts.ReceiptLineView(Guid.NewGuid(), 1, "Bread", 1m, "kom", 400m, 400m, null)]);
+
+        var echo = Echo.ComposeReceiptNeedsConfirmation(view);
+
+        echo.Text.Should().Contain("⚠️ Lines add up to 400.00 RSD, the receipt says 500.00 RSD");
+        echo.Text.Should().Contain(
+            "⚠️ For an exact read next time, send the link from the receipt's QR code (scan it with your phone camera) instead of a photo.");
+        echo.Actions.Should().Equal(RecordAction.RecordAnyway, RecordAction.Cancel);
     }
 
     [Theory]

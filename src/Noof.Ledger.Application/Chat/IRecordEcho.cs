@@ -66,4 +66,32 @@ public interface IRecordEcho
     // than a processing failure (M-4, Phase 6 final review), and Edit still lets the person record it
     // by hand as an ordinary text correction.
     EchoMessage ComposeReceiptNotRecorded(ReceiptKind kind);
+
+    // 2026-09-27: the vision fallback's own honest "I could not read this" (read_receipt's readable:
+    // false, or a total/every line it left null) - distinct from ReceiptReadFailure, which is every
+    // other terminal vision failure (no tool call, an empty payload).
+    EchoMessage ReceiptUnreadable { get; }
+
+    // 2026-09-27: a vision-read receipt ExtractReceiptWorker judged not to add up (its lines don't sum
+    // to its total, or its printed tax id is not exactly 9 digits) - never shown for a fiscal QR/SUF
+    // receipt. Shows exactly what was read and the specific problem(s), computed here (mismatch
+    // arithmetic + wording, the same job ReceiptWarnings already does for the recorded echo);
+    // RecordAction.RecordAnyway queues CategorizeReceipt, Cancel withdraws the capture.
+    EchoMessage ComposeReceiptNeedsConfirmation(ExtractedReceipt receipt, bool taxIdMalformed = false);
+
+    // The same prompt rebuilt from what was actually stored - RecordActionHandler's Cancel/Restore and
+    // ExtractReceiptWorker's own C-1 replay of a still-unconfirmed job both need to turn a stored
+    // ReceiptView back into this prompt without ever having an ExtractedReceipt to hand. A malformed
+    // printed tax id is never recoverable here (ChatReceiptVision only ever stores a well-formed one),
+    // so a replay or a Restore whose only original reason was the tax id shows this prompt with no
+    // listed problem - docs/OPEN-QUESTIONS.md P6-2.
+    EchoMessage ComposeReceiptNeedsConfirmation(ReceiptView receipt, bool taxIdMalformed = false);
+
+    // 2026-09-27: Cancel on a receipt still awaiting confirmation (IReceiptStore.IsAwaitingConfirmationAsync)
+    // has no categorised line items to show - record.Lines is empty, since CategorizeReceipt never ran.
+    // Falling back to ComposeReceipt's generic Cancelled rendering produced a "Total: " with nothing
+    // after it and a false "Lines add up to 0.00" warning; this shows the receipt's own stored total
+    // instead and offers only Restore, which RecordActionHandler routes back to
+    // ComposeReceiptNeedsConfirmation rather than the dead-end "Reading the receipt…" with no buttons.
+    EchoMessage ComposeReceiptCancelledUnconfirmed(CategorizationSubject record, ReceiptView receipt);
 }

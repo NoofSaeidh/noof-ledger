@@ -109,8 +109,20 @@ internal sealed class ExtractReceiptWorker(
                 logger.LogReceiptAlreadyExtracted(job.TransactionId);
                 if (record.Status == TransactionStatus.Captured)
                 {
-                    await EditQuietlyAsync(notifier, record,
-                        new EchoMessage(recordEcho.ComposeCategorisingReceipt(existingReceipt.Lines.Count), []), cancellationToken);
+                    // A replay landing here (C-1) after a save that skipped enqueueing CategorizeReceipt
+                    // (2026-09-27) must not claim "Categorising…" when nothing is actually running. Job
+                    // existence, not a recomputed sum-vs-total, is the derivation (shared with
+                    // RecordActionHandler's Cancel/Restore, and EfTransactionTrace's own trace-page view,
+                    // through the same IsAwaitingConfirmationAsync) - a sum-only check could not tell a
+                    // malformed-PIB-only pause apart from one already confirmed, since the PIB itself was
+                    // never stored once judged invalid (docs/OPEN-QUESTIONS.md P6-2).
+                    var stillAwaitingConfirmation = await receiptStore.IsAwaitingConfirmationAsync(job.TransactionId, cancellationToken);
+
+                    var echo = stillAwaitingConfirmation
+                        ? recordEcho.ComposeReceiptNeedsConfirmation(existingReceipt)
+                        : new EchoMessage(recordEcho.ComposeCategorisingReceipt(existingReceipt.Lines.Count), []);
+
+                    await EditQuietlyAsync(notifier, record, echo, cancellationToken);
                 }
                 await SucceedQuietlyAsync(jobQueue, job, cancellationToken);
                 return;
@@ -139,6 +151,7 @@ internal sealed class ExtractReceiptWorker(
 
             ExtractedReceipt extracted;
             var fetchFailed = false;
+            var taxIdMalformed = false;
 
             if (qrUrl is not null)
             {
@@ -153,7 +166,12 @@ internal sealed class ExtractReceiptWorker(
                             return;
 
                         logger.LogVisionUsed("decode error");
-                        extracted = await ReadWithVisionAsync(scope, photoForDecodeFailure, qrTotal: null, cancellationToken);
+                        if (await ReadWithVisionAsync(
+                                scope, jobQueue, store, notifier, job, record, photoForDecodeFailure, qrTotal: null, cancellationToken)
+                            is not { } visionResult)
+                            return;
+                        extracted = visionResult.Receipt;
+                        taxIdMalformed = visionResult.TaxIdMalformed;
                     }
                     else
                     {
@@ -197,7 +215,12 @@ internal sealed class ExtractReceiptWorker(
                             }
 
                             logger.LogVisionUsed("fetch failed");
-                            extracted = await ReadWithVisionAsync(scope, photoForFetchFailure, payload.Total, cancellationToken);
+                            if (await ReadWithVisionAsync(
+                                    scope, jobQueue, store, notifier, job, record, photoForFetchFailure, payload.Total, cancellationToken)
+                                is not { } visionResult)
+                                return;
+                            extracted = visionResult.Receipt;
+                            taxIdMalformed = visionResult.TaxIdMalformed;
                         }
                         else
                         {
@@ -214,7 +237,11 @@ internal sealed class ExtractReceiptWorker(
                     return;
 
                 logger.LogVisionUsed("no QR");
-                extracted = await ReadWithVisionAsync(scope, photoWithNoQr, qrTotal: null, cancellationToken);
+                if (await ReadWithVisionAsync(scope, jobQueue, store, notifier, job, record, photoWithNoQr, qrTotal: null, cancellationToken)
+                    is not { } visionResult)
+                    return;
+                extracted = visionResult.Receipt;
+                taxIdMalformed = visionResult.TaxIdMalformed;
             }
             else
             {
@@ -223,7 +250,16 @@ internal sealed class ExtractReceiptWorker(
                 return;
             }
 
-            var saveResult = await receiptStore.SaveExtractedAsync(job.TransactionId, extracted, telegramFileId, cancellationToken);
+            var mismatch = HasMismatch(extracted);
+
+            // 2026-09-27 (vision only - a fiscal QR/SUF receipt's own numbers are never second-guessed
+            // here): the receipt and its lines are still saved below so the echo can show exactly what
+            // was read, but categorisation waits for the operator's own "Record anyway" rather than
+            // posting a total or a tax id that might be OCR noise.
+            var needsConfirmation = extracted.Source == ReceiptSource.Vision && (mismatch || taxIdMalformed);
+
+            var saveResult = await receiptStore.SaveExtractedAsync(
+                job.TransactionId, extracted, telegramFileId, enqueueCategorization: !needsConfirmation, cancellationToken);
 
             if (saveResult.DuplicateOfTransactionId is { } duplicateId)
             {
@@ -248,12 +284,21 @@ internal sealed class ExtractReceiptWorker(
                 return;
             }
 
-            var mismatch = Math.Abs(extracted.Lines.Sum(line => line.Total) - (extracted.QrTotal ?? extracted.Total)) > 0.01m;
             logger.LogExtracted(TransactionStages.Extracted, extracted.Source, extracted.Lines.Count, extracted.Total,
                 extracted.QrTotal, mismatch, fetchFailed);
 
-            await EditQuietlyAsync(
-                notifier, record, new EchoMessage(recordEcho.ComposeCategorisingReceipt(extracted.Lines.Count), []), cancellationToken);
+            if (needsConfirmation)
+            {
+                logger.LogAwaitingConfirmation(job.TransactionId, mismatch, taxIdMalformed);
+                var echo = recordEcho.ComposeReceiptNeedsConfirmation(extracted, taxIdMalformed);
+                await EditQuietlyAsync(notifier, record, echo, cancellationToken);
+            }
+            else
+            {
+                await EditQuietlyAsync(
+                    notifier, record, new EchoMessage(recordEcho.ComposeCategorisingReceipt(extracted.Lines.Count), []), cancellationToken);
+            }
+
             await SucceedQuietlyAsync(jobQueue, job, cancellationToken);
         }
         catch (ModelCallException ex) when (ex.IsAccountLevel())
@@ -295,21 +340,29 @@ internal sealed class ExtractReceiptWorker(
         return false;
     }
 
-    async Task<ExtractedReceipt> ReadWithVisionAsync(
-        IServiceScope scope, ReceiptPhoto photo, decimal? qrTotal, CancellationToken cancellationToken)
+    // Returns null when the model itself reported the photo unreadable (or a contradiction this layer
+    // treats the same way, ReceiptVisionResult) - the caller's own null check returns without falling
+    // through to SaveExtractedAsync. This is a distinct outcome from a ModelCallException: it is the
+    // model succeeding at its one job, which is saying it could not read this photo, not a transient or
+    // terminal failure of the call itself.
+    async Task<(ExtractedReceipt Receipt, bool TaxIdMalformed)?> ReadWithVisionAsync(
+        IServiceScope scope, IJobQueue jobQueue, ICategorizationStore store, IChatNotifier notifier,
+        CategorizationJob job, CategorizationSubject record, ReceiptPhoto photo, decimal? qrTotal,
+        CancellationToken cancellationToken)
     {
         var vision = scope.ServiceProvider.GetRequiredService<IReceiptVision>();
-        var extracted = await vision.ReadAsync(photo.Bytes, photo.MediaType, qrTotal, cancellationToken);
+        var scaler = scope.ServiceProvider.GetRequiredService<IReceiptImageScaler>();
+        var scaled = scaler.ScaleForVision(photo);
+        var result = await vision.ReadAsync(scaled.Bytes, scaled.MediaType, qrTotal, cancellationToken);
 
-        // M-8 (2026-09-25 final review): ReceiptVisionSchema allows an empty lines array - the model's
-        // honest "I could not read this" - but applying zero items rendered "Total: " and a mismatch
-        // warning as if the receipt had been recorded. Caught here, before SaveExtractedAsync, so it
-        // takes the same Terminal path (fail the job, mark the transaction Failed, ReceiptReadFailure
-        // echo) as every other unreadable receipt.
-        if (extracted.Lines.Count == 0)
-            throw new ModelCallException(ModelFailureKind.Terminal, "read_receipt returned no line items.");
+        if (result.Unreadable is { } reason)
+        {
+            await FailWithEchoAsync(jobQueue, store, notifier, job, record, recordEcho.ReceiptUnreadable,
+                $"the receipt photo was not readable ({reason})", cancellationToken);
+            return null;
+        }
 
-        return extracted;
+        return (result.Receipt!, result.SellerTaxIdMalformed);
     }
 
     async Task FailWithEchoAsync(
@@ -396,4 +449,11 @@ internal sealed class ExtractReceiptWorker(
             logger.SucceedAfterHandOffFailed(ex, job.Id);
         }
     }
+
+    // This worker's own gate for whether a fresh vision read needs the operator's "Record anyway"
+    // (docs/OPEN-QUESTIONS.md P6-2) - kept private here rather than shared, since RecordEcho's
+    // ComposeReceiptNeedsConfirmation recomputes the identical one-line arithmetic itself for its own
+    // wording; there is nothing to drift between two independent decimal comparisons this small.
+    static bool HasMismatch(ExtractedReceipt extracted) =>
+        Math.Abs(extracted.Lines.Sum(line => line.Total) - (extracted.QrTotal ?? extracted.Total)) > 0.01m;
 }

@@ -2,6 +2,7 @@ using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Editing;
 using Noof.Ledger.Application.Receipts;
+using Noof.Ledger.Domain;
 using Telegram.Bot.Types;
 
 namespace Noof.Ledger.Telegram;
@@ -32,6 +33,20 @@ internal sealed class RecordActionHandler(
                 var promptId = await chatNotifier.AskAsync(echo.Chat.Id, echo.Id, recordEcho.EditPrompt, cancellationToken);
                 await editor.AttachPromptAsync(target.TransactionId, promptId, cancellationToken);
                 return;
+            case RecordAction.RecordAnyway:
+                // A stale press: the record was Cancelled (or already confirmed) between this button
+                // being shown and being pressed. Enqueueing anyway would run CategorizeReceipt on a
+                // Cancelled record - EfCategorizationStore.ApplyAsync keeps it Cancelled but still
+                // writes line items, so the next Restore would land on a Captured record that already
+                // has lines and no job, which ComposeReceipt renders as a dead-end "Reading the
+                // receipt…" with no buttons. Falling through to the refresh below re-renders whatever
+                // the record's own current state actually is instead.
+                if (await store.GetSubjectAsync(target.TransactionId, cancellationToken) is { Status: TransactionStatus.Captured }
+                    && await receiptStore.IsAwaitingConfirmationAsync(target.TransactionId, cancellationToken))
+                {
+                    await receiptStore.EnqueueCategorizationAsync(target.TransactionId, echo.Id, cancellationToken);
+                }
+                break;
             default:
                 return;
         }
@@ -41,12 +56,38 @@ internal sealed class RecordActionHandler(
         if (await store.GetSubjectAsync(target.TransactionId, cancellationToken) is not { } record)
             return;
 
-        // M-3 (Phase 6 final review): Cancel/Restore must keep the shop header and the receipt's own
-        // line order, not fall back to the generic echo just because the button, not a worker, is
-        // what re-renders it.
-        var message = await receiptStore.GetByTransactionAsync(target.TransactionId, cancellationToken) is { } receipt
-            ? recordEcho.ComposeReceipt(record, receipt)
-            : recordEcho.Compose(record);
+        var receipt = await receiptStore.GetByTransactionAsync(target.TransactionId, cancellationToken);
+        var message = await ComposeRefreshAsync(action, record, receipt, cancellationToken);
         await chatNotifier.EditAsync(echo.Chat.Id, echo.Id, message, cancellationToken);
+    }
+
+    // M-3 (Phase 6 final review): Cancel/Restore must keep the shop header and the receipt's own line
+    // order, not fall back to the generic echo just because the button, not a worker, is what
+    // re-renders it. 2026-09-27: a vision receipt with no CategorizeReceipt job yet (never confirmed,
+    // or just Cancelled before it was) has no categorised line items to show - ComposeReceipt's generic
+    // rendering reads record.Lines, which is empty, producing a false mismatch warning over an empty
+    // total (Cancel) or a dead-end "Reading the receipt…" with no buttons (Restore). Both are routed to
+    // the confirmation-aware echoes instead, and Record anyway's own refresh names the job that is now
+    // actually running rather than the receipt's original Captured wording.
+    async Task<EchoMessage> ComposeRefreshAsync(
+        RecordAction action, CategorizationSubject record, ReceiptView? receipt, CancellationToken cancellationToken)
+    {
+        if (receipt is null)
+            return recordEcho.Compose(record);
+
+        if (await receiptStore.IsAwaitingConfirmationAsync(record.TransactionId, cancellationToken))
+        {
+            if (action != RecordAction.Restore)
+                return recordEcho.ComposeReceiptCancelledUnconfirmed(record, receipt);
+
+            return recordEcho.ComposeReceiptNeedsConfirmation(receipt);
+        }
+
+        // Only a Captured record has a CategorizeReceipt job running; a stale press on a Completed or
+        // Failed receipt must keep its final echo and buttons.
+        if (action == RecordAction.RecordAnyway && record.Status == TransactionStatus.Captured)
+            return new EchoMessage(recordEcho.ComposeCategorisingReceipt(receipt.Lines.Count), []);
+
+        return recordEcho.ComposeReceipt(record, receipt);
     }
 }

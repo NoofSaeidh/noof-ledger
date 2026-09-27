@@ -6,6 +6,7 @@ using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Receipts.FiscalQr;
 using Noof.Ledger.Receipts.Qr;
 using Noof.Ledger.Receipts.Suf;
+using Noof.Ledger.Receipts.Vision;
 
 namespace Noof.Ledger.Receipts;
 
@@ -26,6 +27,7 @@ public static class ReceiptsRegistration
 
         services.AddSingleton<IFiscalQrDecoder, FiscalQrDecoder>();
         services.AddSingleton<IQrReader, ZxingQrReader>();
+        services.AddSingleton<IReceiptImageScaler, SkiaReceiptImageScaler>();
         services.AddScoped<IFiscalReceiptClient>(sp => new SufReceiptClient(
             sp.GetRequiredService<IHttpClientFactory>().CreateClient(HttpClientName),
             sp.GetRequiredService<IOperationTimer>(), sp.GetRequiredService<ILogger<SufReceiptClient>>()));

@@ -58,4 +58,8 @@ internal static partial class ExtractReceiptWorkerLog
     [LoggerMessage(EventId = TransactionStages.StageFailedEventId, EventName = TransactionStages.StageFailed, Level = LogLevel.Error,
         Message = "{Stage} at stage {FailedStage}")]
     public static partial void LogStageFailed(this ILogger logger, string stage, string failedStage, Exception exception);
+
+    [LoggerMessage(EventId = 5015, Level = LogLevel.Warning,
+        Message = "Transaction {TransactionId} saved without categorising: mismatch {Mismatch}, malformed tax id {TaxIdMalformed}")]
+    public static partial void LogAwaitingConfirmation(this ILogger logger, Guid transactionId, bool mismatch, bool taxIdMalformed);
 }

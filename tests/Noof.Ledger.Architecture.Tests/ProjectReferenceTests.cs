@@ -96,7 +96,10 @@ public class ProjectReferenceTests
             // ZXing.Net.Bindings.SkiaSharp brings SkiaSharp itself transitively; the two together
             // are how a fiscal receipt's QR is read from a photographed image (Task 2, Phase 6).
             "ZXing.Net",
-            "ZXing.Net.Bindings.SkiaSharp");
+            "ZXing.Net.Bindings.SkiaSharp",
+            // A direct reference (2026-09-27): SkiaReceiptImageScaler names SkiaSharp types itself
+            // rather than only riding along inside the ZXing binding.
+            "SkiaSharp");
     }
 
     [Fact]

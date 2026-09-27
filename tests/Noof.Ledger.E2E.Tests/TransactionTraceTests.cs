@@ -455,6 +455,76 @@ public sealed class TransactionTraceTests(CookieModeHostFixture fixture) : PageT
         await Expect(receiptSection).ToContainTextAsync("The Tax Administration was unavailable; these lines were read from the photo.");
     }
 
+    // 2026-09-27: a vision receipt saved without enqueueing CategorizeReceipt (its lines did not add up
+    // to its total) shows its own "awaiting confirmation" alert on the trace page - the same, shared
+    // IReceiptStore.IsAwaitingConfirmationAsync RecordActionHandler's Cancel/Restore reads too, so the
+    // two views cannot drift (Fable review item 3).
+    [Fact]
+    public async Task A_captured_vision_receipt_awaiting_confirmation_shows_the_awaiting_alert()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var transactionId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var walletId = await SeedWalletAsync();
+
+        await using (var db = OpenDb())
+        {
+            db.Transactions.Add(new Transaction
+            {
+                Id = transactionId,
+                WalletId = walletId,
+                RawText = null,
+                CaptureKind = CaptureKind.Photo,
+                TelegramFileId = "photo-awaiting-confirmation",
+                Kind = TransactionKind.Expense,
+                Status = TransactionStatus.Captured,
+                TimeZoneId = "Europe/Belgrade",
+                OccurredAt = now,
+                OccurredOn = ZonedClock.LocalDate(now, "Europe/Belgrade"),
+                TelegramChatId = 444,
+                TelegramMessageId = 1,
+                CreatedAt = now,
+            });
+
+            var receiptId = Guid.NewGuid();
+            db.Receipts.Add(new Receipt
+            {
+                Id = receiptId,
+                TransactionId = transactionId,
+                Source = ReceiptSource.Vision,
+                SellerName = "Test Market Nova 12",
+                IssuedAt = now,
+                Total = new Money(500m, CurrencyCode.Rsd),
+                Kind = ReceiptKind.Sale,
+                CreatedAt = now,
+            });
+            db.ReceiptLines.Add(new ReceiptLine
+            {
+                Id = Guid.NewGuid(),
+                ReceiptId = receiptId,
+                Ordinal = 1,
+                Name = "Bread",
+                Quantity = 1m,
+                UnitPrice = 400m,
+                Total = 400m,
+            });
+            // No CategorizationJobs row: this receipt was saved without enqueueing CategorizeReceipt.
+
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync($"{fixture.BaseUrl}/transactions/{transactionId}/trace");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var alert = Page.Locator("#trace-receipt-awaiting-confirmation");
+        await Expect(alert).ToBeVisibleAsync();
+        await Expect(alert).ToContainTextAsync("Awaiting Record anyway.");
+        await Expect(alert).ToContainTextAsync("Lines add up to 400.00 RSD, the receipt says 500.00 RSD");
+    }
+
     [Fact]
     public async Task A_receipt_issued_at_is_shown_in_Belgrade_time_with_its_offset()
     {
