@@ -24,13 +24,37 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
 
 **Effort levels.** Do not use high or xhigh effort for small tasks. `low` for mechanical work, `medium` for ordinary implementation, `high`/`xhigh` reserved for the architecture- and correctness-critical reasoning that justifies opus in the first place.
 
-**The final review of a completed implementation runs on Fable 5.1** (`model: "fable"`), not on the family that wrote the code. Models in one family share blind spots: a reviewer drawn from the same family tends to miss exactly what the implementer missed, and agreement between them is weak evidence. A different family is the cheapest independence available. This applies to the review that closes a phase or a plan — per-task reviews stay on sonnet.
+**Review policy — three tiers, three cadences, don't substitute one for another:**
+- **Per task** (inside a phase or plan): review stays on sonnet, as today. No Codex, no Fable per task.
+- **Per pull request: one Codex review**, a model family different from the implementer, run from the
+  PR branch with the Codex CLI — the plugin's `/codex:review`/`/codex:adversarial-review` slash
+  commands cannot be invoked by an agent. Never enable the plugin's stop-time review gate; it would
+  review on every Stop and burn the quota.
+  - `codex review --base <base-branch> -c model_reasoning_effort="medium"` for a mechanical PR — the
+    CLI rejects a PROMPT combined with `--base`, so this form takes no prompt.
+  - For a PR that makes design choices, use the plugin's companion script instead, which supports
+    both a base branch and a focus prompt: `node <path> adversarial-review --wait --base
+    <base-branch> "<focus>"` (challenge the approach, assumptions, trade-offs, failure modes — not
+    just defects); default to adversarial when unsure. Resolve `<path>` with Glob on
+    `~/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs` — the version
+    directory changes on update, never hard-code it.
+  - Run in the foreground with a 600000 ms timeout. Findings are judged, not obeyed: fix what's
+    confirmed, reply in the PR description to what's rejected and why.
+  - Codex refuses on usage limit → don't wait for the window; fall back to a sonnet review and say so
+    in the PR description.
+- **Fable 5.1 runs once**, closing a phase or a batch of PRs — never per PR, never per fix round.
+  Models in one family share blind spots; a different family is the cheapest independence available.
+- **After fixing GitHub Copilot review comments:** batch every open comment into one fix round,
+  review it with sonnet only, then push — Copilot re-reviews the PR itself. No Codex, no Fable for a
+  Copilot fix round, unless the fix touches money, secrets, a migration or the public surface and the
+  agent judges a stronger review necessary — then say why in the PR.
 
 **Anti-patterns — do not do these:**
 - Running a test suite on opus. That is a haiku task; the model is not what makes tests pass.
 - Using xhigh effort to rename a variable, fix a typo, or add a using directive.
 - Escalating to opus because a task *sounds* important. Blast radius and reversibility decide the tier, not topic gravity.
 - Re-running expensive work that is already cached or already done. Check first.
+- A Fable review per fix round or per Copilot round — this cost ~5 hours on PR #3.
 
 ## 2. Subagent usage
 
