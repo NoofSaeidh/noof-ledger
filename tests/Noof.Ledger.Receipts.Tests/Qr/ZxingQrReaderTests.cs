@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using AwesomeAssertions;
 using Noof.Ledger.Receipts.Qr;
@@ -70,6 +71,47 @@ public class ZxingQrReaderTests
 
         act.Should().NotThrow();
         act().Should().BeNull();
+    }
+
+    [Fact]
+    public void Returns_null_for_a_png_declaring_dimensions_over_the_pixel_limit_without_allocating_them()
+    {
+        // 8000x8000 (64 MP) is over UntrustedImagePixelLimit.MaxPixels but small enough that a naive
+        // decode succeeds and really allocates the declared buffer (~244 MB measured, vs a real
+        // 12 MP photo's own decode) rather than throwing - proving the guard must reject on the
+        // header alone, not rely on an allocation failure it cannot count on.
+        var png = HugeDeclaredDimensionPng.Build(declaredWidth: 8000, declaredHeight: 8000);
+        using var stream = new MemoryStream(png);
+
+        GC.Collect();
+        var before = Process.GetCurrentProcess().WorkingSet64;
+
+        var result = reader.Read(stream);
+
+        var after = Process.GetCurrentProcess().WorkingSet64;
+        result.Should().BeNull();
+        ((after - before) / 1024 / 1024).Should().BeLessThan(100,
+            "the guard must refuse based on SKCodec.Info alone and never allocate the declared 64-megapixel buffer");
+    }
+
+    [Fact]
+    public void Reads_a_qr_on_a_realistic_12_megapixel_photo_sized_canvas()
+    {
+        using var small = EncodeQr(PayloadUrl, 300);
+        using var canvas = PlaceOnLargeCanvas(small, canvasSize: 3000);
+        using var padded = PadToRectangle(canvas, width: 4000, height: 3000);
+        using var stream = ToPngStream(padded);
+
+        reader.Read(stream).Should().Be(PayloadUrl);
+    }
+
+    static SKBitmap PadToRectangle(SKBitmap source, int width, int height)
+    {
+        var padded = new SKBitmap(width, height);
+        using var skCanvas = new SKCanvas(padded);
+        skCanvas.Clear(SKColors.White);
+        skCanvas.DrawBitmap(source, (width - source.Width) / 2f, (height - source.Height) / 2f, SKSamplingOptions.Default);
+        return padded;
     }
 
     static SKBitmap EncodeQr(string content, int size)

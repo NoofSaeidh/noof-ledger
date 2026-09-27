@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using AwesomeAssertions;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Receipts.Vision;
@@ -54,6 +55,39 @@ public class SkiaReceiptImageScalerTests
         var scaled = scaler.ScaleForVision(new ReceiptPhoto(garbage, "image/jpeg"));
 
         scaled.Bytes.ToArray().Should().Equal(garbage);
+    }
+
+    [Fact]
+    public void A_png_declaring_dimensions_over_the_pixel_limit_is_returned_unchanged_without_allocating_them()
+    {
+        // 8000x8000 (64 MP) is over UntrustedImagePixelLimit.MaxPixels but small enough that a naive
+        // decode succeeds and really allocates the declared buffer (~244 MB measured) rather than
+        // throwing - proving the guard must reject on SKCodec.Info alone, not rely on an allocation
+        // failure it cannot count on.
+        var huge = HugeDeclaredDimensionPng.Build(declaredWidth: 8000, declaredHeight: 8000);
+
+        GC.Collect();
+        var before = Process.GetCurrentProcess().WorkingSet64;
+
+        var scaled = scaler.ScaleForVision(new ReceiptPhoto(huge, "image/png"));
+
+        var after = Process.GetCurrentProcess().WorkingSet64;
+        scaled.Bytes.ToArray().Should().Equal(huge);
+        scaled.MediaType.Should().Be("image/png");
+        ((after - before) / 1024 / 1024).Should().BeLessThan(100,
+            "the guard must refuse based on SKCodec.Info alone and never allocate the declared 64-megapixel buffer");
+    }
+
+    [Fact]
+    public void A_realistic_12_megapixel_photo_still_downscales_normally()
+    {
+        var original = EncodePng(4000, 3000);
+
+        var scaled = scaler.ScaleForVision(new ReceiptPhoto(original, "image/png"));
+
+        scaled.MediaType.Should().Be("image/jpeg");
+        using var bitmap = SKBitmap.Decode(scaled.Bytes.ToArray());
+        Math.Max(bitmap.Width, bitmap.Height).Should().Be(SkiaReceiptImageScaler.MaxLongSidePixels);
     }
 
     [Fact]

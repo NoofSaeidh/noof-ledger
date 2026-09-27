@@ -38,7 +38,15 @@ internal sealed class ZxingQrReader : IQrReader
             if (image.CanSeek)
                 image.Position = 0;
 
-            return SKBitmap.Decode(image);
+            using var memory = new MemoryStream();
+            image.CopyTo(memory);
+            var bytes = memory.ToArray();
+
+            using var codec = SKCodec.Create(new SKMemoryStream(bytes));
+            if (codec is null || UntrustedImagePixelLimit.Exceeds(codec.Info))
+                return null;
+
+            return SKBitmap.Decode(bytes);
         }
         catch
         {
