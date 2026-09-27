@@ -197,7 +197,7 @@ internal sealed class RecordEcho : IRecordEcho
             lines.Add($"PIB: {sellerTaxId}");
         if (fiscalNumber is { Length: > 0 })
             lines.Add($"Fiscal #: {fiscalNumber}");
-        lines.AddRange(lineList.Select(line => $"• {line.Name} — {FormatAmount(line.Total)} {currency}"));
+        lines.AddRange(CapDetailedLines(lineList, line => $"• {line.Name} — {FormatAmount(line.Total)} {currency}", MaxDetailedReceiptLines));
         lines.Add(string.Empty);
         lines.Add($"Total: {FormatAmount(total)} {currency}");
         lines.Add(string.Empty);
@@ -248,14 +248,26 @@ internal sealed class RecordEcho : IRecordEcho
         if (lines.Count <= MaxDetailedReceiptLines)
             return lines.Select(FormatLine);
 
-        var detailed = lines.Take(MaxDetailedReceiptLines).Select(FormatLine);
         var remainder = lines.Skip(MaxDetailedReceiptLines).ToList();
         var grouped = remainder
             .GroupBy(line => line.CategoryName ?? "uncategorised")
             .OrderBy(group => group.Key, StringComparer.Ordinal)
             .Select(group => $"{group.Key}: {FormatAmount(group.Sum(line => line.Amount.Amount))} {group.First().Amount.Currency}");
 
-        return [.. detailed, $"… {remainder.Count} more lines", .. grouped];
+        return [.. CapDetailedLines(lines, FormatLine, MaxDetailedReceiptLines), .. grouped];
+    }
+
+    // Shared between the recorded echo (which adds its own per-category grouping after the "… N more
+    // lines" summary) and the vision confirmation prompt (which has no categories yet - the operator
+    // still has to press Record anyway before CategorizeReceipt ever runs) - one cap, one wording for
+    // the omitted-lines line, since Telegram's 4096-character limit applies to both alike.
+    static IEnumerable<string> CapDetailedLines<T>(IReadOnlyList<T> items, Func<T, string> format, int cap)
+    {
+        if (items.Count <= cap)
+            return items.Select(format);
+
+        var omitted = items.Count - cap;
+        return [.. items.Take(cap).Select(format), $"… {omitted} more lines"];
     }
 
     static IEnumerable<string> ReceiptWarnings(IReadOnlyList<RecordedLine> lines, ReceiptView receipt)
