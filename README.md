@@ -39,7 +39,8 @@ wallets and currencies.
 > transaction's trace page.
 >
 > 1744 tests — 1731 passing, 13 skipped (they call a live model or a live voice provider and need
-> keys). One known timing race fails now and then under full-suite load (`docs/BACKLOG.md`). Browser
+> keys). One known timing race fails now and then under full-suite load
+> (`docs/backlog/loose-ends-phase-5-observability.md`). Browser
 > tests included.
 >
 > Still missing: **exchange-office slips** (Phase 7), **currency exchange** (a spend in a currency

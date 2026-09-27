@@ -8,7 +8,7 @@
 
 **Tech Stack:** .NET 10 · C# · EF Core 10 + Npgsql · PostgreSQL 18 · Anthropic 12.49.0 through `Microsoft.Extensions.AI` `IChatClient` (a forced strict tool call — `record_spending`, `list_merchants`, `canonicalize_merchant` — not structured outputs) · Telegram.Bot 22.10.3.1 · Blazor Server + MudBlazor · xUnit v3 on Microsoft Testing Platform · AwesomeAssertions · NSubstitute
 
-**Spec:** `docs/superpowers/specs/2026-09-22-natural-language-capture.md` (decisions D1–D8). It amends `docs/superpowers/specs/2026-09-19-noof-finance-design.md` §8 and §12. The decision record is `docs/OPEN-QUESTIONS.md` P2-1 and the deferred work is in `docs/BACKLOG.md`. The predecessor plan is `docs/superpowers/plans/2026-09-21-phase1b-categorisation-and-dashboard.md`.
+**Spec:** `docs/superpowers/specs/2026-09-22-natural-language-capture.md` (decisions D1–D8). It amends `docs/superpowers/specs/2026-09-19-noof-finance-design.md` §8 and §12. The decision record is `docs/OPEN-QUESTIONS.md` P2-1 and the deferred work is in `docs/backlog/`. The predecessor plan is `docs/superpowers/plans/2026-09-21-phase1b-categorisation-and-dashboard.md`.
 
 > ### ⚠ Decisions in this plan that are expensive to reverse. Read these before Task 2.
 >
@@ -79,7 +79,7 @@ The output's last line must name the new migration. Do **not** run it without `-
 ## What this plan deliberately does NOT do
 
 - **No voice.** Voice is Phase 3 and needs a speech-to-text decision first.
-- **No editing in the dashboard, and no rollback to an earlier revision.** Both are in `docs/BACKLOG.md` already. The revisions table is what makes both cheap later.
+- **No editing in the dashboard, and no rollback to an earlier revision.** Both are in `docs/backlog/` already. The revisions table is what makes both cheap later.
 - **No live-model calibration.** The prompt is written against the faked model only. Phase 11 tunes it with the operator's permission.
 - **No per-message line ordering.** See the facts table.
 - **No change to how the dashboard marks a Failed or Captured transaction.** Cancelled rows are simply absent from it (D5).
@@ -4620,7 +4620,7 @@ EOF
 ### Task 10: Close the phase
 
 **Files:**
-- Modify: `CLAUDE.md`, `README.md`, `ops/RUNBOOK.md`, `docs/BACKLOG.md`, `docs/OPEN-QUESTIONS.md`
+- Modify: `CLAUDE.md`, `README.md`, `ops/RUNBOOK.md`, `docs/backlog/`, `docs/OPEN-QUESTIONS.md`
 
 **Interfaces:**
 - Consumes: everything above.
@@ -4647,7 +4647,7 @@ Replace the status paragraph's second sentence ("Next (Phase 2): ...") with: `Sa
 
 Add a section `## After adding a migration` containing the PowerShell block from this plan's "Updating the test template", plus two sentences. The first: the E2E suite and `MoneyStorageTests` clone the template and fail with a missing-column error on a stale one. The second: `noof_ledger` is migrated only when the operator starts the host, never by hand.
 
-- [ ] **Step 5: `docs/OPEN-QUESTIONS.md` and `docs/BACKLOG.md`**
+- [ ] **Step 5: `docs/OPEN-QUESTIONS.md` and `docs/backlog/`**
 
 Grep both files first and do not duplicate. Add to `OPEN-QUESTIONS.md`, under P2-1:
 
@@ -4667,7 +4667,7 @@ and a jsonb snapshot whose amounts are decimal strings. `status_before` is what 
 Append-only by trigger; the FK is RESTRICT, so a revised transaction can never be deleted.
 ```
 
-Add to `BACKLOG.md`:
+Add to `docs/backlog/`:
 
 ```markdown
 ## Line items keep no order
@@ -4694,7 +4694,7 @@ In the existing entry "The test template can silently drift from what migrations
 - [ ] **Step 6: Leave nothing uncommitted**
 
 ```bash
-git add CLAUDE.md README.md ops/RUNBOOK.md docs/BACKLOG.md docs/OPEN-QUESTIONS.md
+git add CLAUDE.md README.md ops/RUNBOOK.md docs/backlog/ docs/OPEN-QUESTIONS.md
 git commit -m "$(cat <<'EOF'
 docs: close Phase 2 - natural-language capture, echo, cancel and correct
 

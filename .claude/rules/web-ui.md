@@ -13,7 +13,7 @@ paths:
   `SignInAsync` needs an `HttpContext`. So `MainLayout` renders statically, MudBlazor's popover,
   dialog and snackbar providers cannot work from there, and nothing may use a popover, dialog,
   snackbar, tooltip or menu. Feedback is an inline `MudAlert`. Ways out are costed in
-  `docs/BACKLOG.md`; taking one is a decision, not a convenience.
+  `docs/backlog/mudblazor-features-needing-render-mode-decision.md`; taking one is a decision, not a convenience.
 
 ## CLAUDE.md §4 — Testing: statically rendered pages and silent look failures
 
