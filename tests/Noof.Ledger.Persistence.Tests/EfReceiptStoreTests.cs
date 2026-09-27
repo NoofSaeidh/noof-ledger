@@ -332,4 +332,92 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
         second.Should().BeFalse();
         (await db.CategorizationJobs.CountAsync(j => j.TransactionId == transaction.Id, TestContext.Current.CancellationToken)).Should().Be(1);
     }
+
+    [Fact]
+    public async Task IsAwaitingConfirmationAsync_is_true_for_a_vision_receipt_saved_without_a_job()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = NewPhotoTransaction();
+        db.Transactions.Add(transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+        await store.SaveExtractedAsync(
+            transaction.Id, NewExtractedReceipt() with { Source = ReceiptSource.Vision }, "photo-file-1",
+            enqueueCategorization: false, TestContext.Current.CancellationToken);
+
+        (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken)).Should().BeTrue();
+    }
+
+    // Independent of the transaction's own status (2026-09-27): RecordActionHandler needs the same
+    // answer right after Cancel (Captured -> Cancelled, the job still never existed) as it gets before
+    // either button is pressed.
+    [Fact]
+    public async Task IsAwaitingConfirmationAsync_stays_true_after_the_transaction_is_cancelled()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = NewPhotoTransaction();
+        db.Transactions.Add(transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+        await store.SaveExtractedAsync(
+            transaction.Id, NewExtractedReceipt() with { Source = ReceiptSource.Vision }, "photo-file-1",
+            enqueueCategorization: false, TestContext.Current.CancellationToken);
+        var toCancel = await db.Transactions.SingleAsync(t => t.Id == transaction.Id, TestContext.Current.CancellationToken);
+        toCancel.Status = TransactionStatus.Cancelled;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task IsAwaitingConfirmationAsync_is_false_once_Record_anyway_has_queued_the_job()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = NewPhotoTransaction();
+        db.Transactions.Add(transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+        await store.SaveExtractedAsync(
+            transaction.Id, NewExtractedReceipt() with { Source = ReceiptSource.Vision }, "photo-file-1",
+            enqueueCategorization: false, TestContext.Current.CancellationToken);
+        await store.EnqueueCategorizationAsync(transaction.Id, 999, TestContext.Current.CancellationToken);
+
+        (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task IsAwaitingConfirmationAsync_is_false_for_a_fiscal_QR_receipt_with_no_job()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = NewPhotoTransaction();
+        db.Transactions.Add(transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+        await store.SaveExtractedAsync(
+            transaction.Id, NewExtractedReceipt(), "photo-file-1", enqueueCategorization: false, TestContext.Current.CancellationToken);
+
+        (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task IsAwaitingConfirmationAsync_is_false_when_no_receipt_exists_for_the_transaction()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = NewPhotoTransaction();
+        db.Transactions.Add(transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+
+        (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken)).Should().BeFalse();
+    }
 }

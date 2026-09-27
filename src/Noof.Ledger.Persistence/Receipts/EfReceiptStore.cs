@@ -181,6 +181,20 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
         }
     }
 
+    public async Task<bool> IsAwaitingConfirmationAsync(Guid transactionId, CancellationToken cancellationToken)
+    {
+        var source = await db.Receipts.AsNoTracking()
+            .Where(r => r.TransactionId == transactionId)
+            .Select(r => (ReceiptSource?)r.Source)
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (source != ReceiptSource.Vision)
+            return false;
+
+        return !await db.CategorizationJobs.AsNoTracking()
+            .AnyAsync(job => job.TransactionId == transactionId && job.Kind == JobKind.CategorizeReceipt, cancellationToken);
+    }
+
     // EF's default naming for the one-to-one FK's auto-generated unique index (ReceiptConfiguration
     // never names it explicitly) - confirmed against the migration, not guessed.
     const string TransactionIndex = "IX_receipts_transaction_id";

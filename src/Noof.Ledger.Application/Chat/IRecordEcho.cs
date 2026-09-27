@@ -77,4 +77,12 @@ public interface IRecordEcho
     // receipt. Shows exactly what was read and the specific problem(s); RecordAction.RecordAnyway
     // queues CategorizeReceipt, Cancel withdraws the capture.
     EchoMessage ComposeReceiptNeedsConfirmation(ExtractedReceipt receipt, IReadOnlyList<string> problems);
+
+    // 2026-09-27: Cancel on a receipt still awaiting confirmation (IReceiptStore.IsAwaitingConfirmationAsync)
+    // has no categorised line items to show - record.Lines is empty, since CategorizeReceipt never ran.
+    // Falling back to ComposeReceipt's generic Cancelled rendering produced a "Total: " with nothing
+    // after it and a false "Lines add up to 0.00" warning; this shows the receipt's own stored total
+    // instead and offers only Restore, which RecordActionHandler routes back to
+    // ComposeReceiptNeedsConfirmation rather than the dead-end "Reading the receipt…" with no buttons.
+    EchoMessage ComposeReceiptCancelledUnconfirmed(CategorizationSubject record, ReceiptView receipt);
 }

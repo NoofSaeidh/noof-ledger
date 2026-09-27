@@ -333,6 +333,7 @@ public class ExtractReceiptWorkerTests
             Guid.NewGuid(), ReceiptSource.Vision, null, "Test Market", null, null, null,
             DateTimeOffset.Parse("2026-09-25T09:00:00Z"), 500m, CurrencyCode.Rsd, ReceiptKind.Sale, PaymentMethod.Card, null,
             null, [new ReceiptLineView(Guid.NewGuid(), 1, "Bread", 1m, "kom", 400m, 400m, null)]));
+        harness.ReceiptStore.IsAwaitingConfirmationAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(true);
 
         (await TickAsync(harness)).Should().Be(CategorizationTickResult.Processed);
 
@@ -340,6 +341,28 @@ public class ExtractReceiptWorkerTests
             Arg.Is<EchoMessage>(m => m.Text.Contains("Record it anyway", StringComparison.Ordinal)),
             Arg.Any<CancellationToken>());
         await harness.Queue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
+    }
+
+    // 2026-09-27 finding: a sum-vs-total recomputation could not tell a malformed-PIB-only pause apart
+    // from one already confirmed (the lines add up fine; the PIB was the only reason). Job existence -
+    // IsAwaitingConfirmationAsync - is the derivation instead, so this replay still shows the
+    // confirmation prompt rather than falsely claiming "Categorising…" with nothing running.
+    [Fact]
+    public async Task A_replay_of_a_receipt_paused_only_for_a_malformed_PIB_still_shows_the_confirmation_echo()
+    {
+        var harness = Setup(ExtractJob(), record: WaitingReceipt() with { Status = TransactionStatus.Captured });
+        harness.ReceiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(new ReceiptView(
+            Guid.NewGuid(), ReceiptSource.Vision, null, "Test Market", null, null, null,
+            DateTimeOffset.Parse("2026-09-25T09:00:00Z"), 500m, CurrencyCode.Rsd, ReceiptKind.Sale, PaymentMethod.Card, null,
+            null, [new ReceiptLineView(Guid.NewGuid(), 1, "Bread", 1m, "kom", 500m, 500m, null)]));
+        harness.ReceiptStore.IsAwaitingConfirmationAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(true);
+
+        (await TickAsync(harness)).Should().Be(CategorizationTickResult.Processed);
+
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text.Contains("Record it anyway", StringComparison.Ordinal)
+                && !m.Text.Contains("Lines add up to", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]

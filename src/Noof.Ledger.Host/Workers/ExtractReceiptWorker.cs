@@ -1,4 +1,3 @@
-using System.Globalization;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
@@ -111,19 +110,24 @@ internal sealed class ExtractReceiptWorker(
                 if (record.Status == TransactionStatus.Captured)
                 {
                     // A replay landing here (C-1) after a save that skipped enqueueing CategorizeReceipt
-                    // (2026-09-27) must not claim "Categorising…" when nothing is actually running.
-                    // Recomputed from the stored lines/total rather than a lookup for whether that job
-                    // exists: cheaper, and exactly the same arithmetic the original save itself used. A
-                    // malformed-PIB-only reason for the original pause cannot be recovered here - the
-                    // PIB itself was never stored once judged invalid - so this replay path treats the
-                    // sum-vs-total mismatch as the one signal it can still check.
-                    var stillMismatched = existingReceipt.Source == ReceiptSource.Vision
-                        && Math.Abs(existingReceipt.Lines.Sum(line => line.Total) - (existingReceipt.QrTotal ?? existingReceipt.Total)) > 0.01m;
+                    // (2026-09-27) must not claim "Categorising…" when nothing is actually running. Job
+                    // existence, not a recomputed sum-vs-total, is the derivation (shared with
+                    // RecordActionHandler's Cancel/Restore through the same IsAwaitingConfirmationAsync)
+                    // - a sum-only check could not tell a malformed-PIB-only pause apart from one
+                    // already confirmed, since the PIB itself was never stored once judged invalid.
+                    var stillAwaitingConfirmation = await receiptStore.IsAwaitingConfirmationAsync(job.TransactionId, cancellationToken);
 
-                    var echo = stillMismatched
-                        ? recordEcho.ComposeReceiptNeedsConfirmation(
-                            ToExtractedReceipt(existingReceipt), BuildProblems(ToExtractedReceipt(existingReceipt), mismatch: true, taxIdMalformed: false))
-                        : new EchoMessage(recordEcho.ComposeCategorisingReceipt(existingReceipt.Lines.Count), []);
+                    EchoMessage echo;
+                    if (stillAwaitingConfirmation)
+                    {
+                        var replayExtracted = ReceiptConfirmation.ToExtractedReceipt(existingReceipt);
+                        echo = recordEcho.ComposeReceiptNeedsConfirmation(
+                            replayExtracted, ReceiptConfirmation.BuildProblems(replayExtracted, ReceiptConfirmation.HasMismatch(replayExtracted)));
+                    }
+                    else
+                    {
+                        echo = new EchoMessage(recordEcho.ComposeCategorisingReceipt(existingReceipt.Lines.Count), []);
+                    }
 
                     await EditQuietlyAsync(notifier, record, echo, cancellationToken);
                 }
@@ -253,7 +257,7 @@ internal sealed class ExtractReceiptWorker(
                 return;
             }
 
-            var mismatch = Math.Abs(extracted.Lines.Sum(line => line.Total) - (extracted.QrTotal ?? extracted.Total)) > 0.01m;
+            var mismatch = ReceiptConfirmation.HasMismatch(extracted);
 
             // 2026-09-27 (vision only - a fiscal QR/SUF receipt's own numbers are never second-guessed
             // here): the receipt and its lines are still saved below so the echo can show exactly what
@@ -293,7 +297,7 @@ internal sealed class ExtractReceiptWorker(
             if (needsConfirmation)
             {
                 logger.LogAwaitingConfirmation(job.TransactionId, mismatch, taxIdMalformed);
-                var echo = recordEcho.ComposeReceiptNeedsConfirmation(extracted, BuildProblems(extracted, mismatch, taxIdMalformed));
+                var echo = recordEcho.ComposeReceiptNeedsConfirmation(extracted, ReceiptConfirmation.BuildProblems(extracted, mismatch, taxIdMalformed));
                 await EditQuietlyAsync(notifier, record, echo, cancellationToken);
             }
             else
@@ -367,28 +371,6 @@ internal sealed class ExtractReceiptWorker(
 
         return (result.Receipt!, result.SellerTaxIdMalformed);
     }
-
-    static List<string> BuildProblems(ExtractedReceipt extracted, bool mismatch, bool taxIdMalformed)
-    {
-        List<string> problems = [];
-
-        if (mismatch)
-        {
-            var sum = extracted.Lines.Sum(line => line.Total).ToString("0.00", CultureInfo.InvariantCulture);
-            var total = (extracted.QrTotal ?? extracted.Total).ToString("0.00", CultureInfo.InvariantCulture);
-            problems.Add($"Lines add up to {sum} {extracted.Currency}, the receipt says {total} {extracted.Currency}");
-        }
-
-        if (taxIdMalformed)
-            problems.Add("The printed tax id does not look like a valid PIB (9 digits)");
-
-        return problems;
-    }
-
-    static ExtractedReceipt ToExtractedReceipt(ReceiptView view) => new(
-        view.Source, view.VerificationUrl, view.SellerTaxId, view.SellerName, view.SellerAddress, view.LocationName,
-        view.FiscalNumber, view.IssuedAt, view.Total, view.Currency, view.Kind, view.PaymentMethod, view.QrTotal,
-        [.. view.Lines.Select(line => new ExtractedReceiptLine(line.Ordinal, line.Name, line.Quantity, line.Unit, line.UnitPrice, line.Total, line.TaxLabel))]);
 
     async Task FailWithEchoAsync(
         IJobQueue jobQueue, ICategorizationStore store, IChatNotifier notifier, CategorizationJob job,

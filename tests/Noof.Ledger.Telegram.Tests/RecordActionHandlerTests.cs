@@ -15,13 +15,15 @@ public class RecordActionHandlerTests
     static readonly Guid TransactionId = Guid.NewGuid();
     static readonly IRecordEcho Echo = new RecordEcho();
 
-    sealed record Harness(RecordActionHandler Handler, IReceiptStore ReceiptStore, IChatNotifier Notifier);
+    sealed record Harness(RecordActionHandler Handler, IReceiptStore ReceiptStore, IChatNotifier Notifier, IRecordEditor Editor);
 
     static Harness Create(TransactionStatus status = TransactionStatus.Captured)
     {
         var editor = Substitute.For<IRecordEditor>();
         editor.FindByBotMessageAsync(555L, 42, Arg.Any<CancellationToken>())
             .Returns(new EchoTarget(TransactionId, 42));
+        editor.CancelAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(true);
+        editor.RestoreAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(true);
 
         var store = Substitute.For<ICategorizationStore>();
         store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
@@ -32,11 +34,12 @@ public class RecordActionHandlerTests
         var receiptStore = Substitute.For<IReceiptStore>();
         receiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns((ReceiptView?)null);
         receiptStore.EnqueueCategorizationAsync(TransactionId, 42, Arg.Any<CancellationToken>()).Returns(true);
+        receiptStore.IsAwaitingConfirmationAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(false);
 
         var notifier = Substitute.For<IChatNotifier>();
 
         var handler = new RecordActionHandler(editor, store, notifier, Echo, receiptStore);
-        return new Harness(handler, receiptStore, notifier);
+        return new Harness(handler, receiptStore, notifier, editor);
     }
 
     static CallbackQuery RecordAnyway() => new()
@@ -45,6 +48,25 @@ public class RecordActionHandlerTests
         Data = "record_anyway",
         Message = new Message { Id = 42, Chat = new Chat { Id = 555L } },
     };
+
+    static CallbackQuery Cancel() => new()
+    {
+        Id = "cb-1",
+        Data = "cancel",
+        Message = new Message { Id = 42, Chat = new Chat { Id = 555L } },
+    };
+
+    static CallbackQuery Restore() => new()
+    {
+        Id = "cb-1",
+        Data = "restore",
+        Message = new Message { Id = 42, Chat = new Chat { Id = 555L } },
+    };
+
+    static ReceiptView UnconfirmedVisionReceipt() => new(
+        Guid.NewGuid(), ReceiptSource.Vision, null, "Test Market", null, null, null, null, 500m, CurrencyCode.Rsd,
+        ReceiptKind.Sale, PaymentMethod.Card, null, null,
+        [new ReceiptLineView(Guid.NewGuid(), 1, "Bread", 1m, null, 123.46m, 123.46m, null)]);
 
     [Fact]
     public async Task Record_anyway_enqueues_categorisation_with_the_echo_message_id_as_the_source()
@@ -80,6 +102,67 @@ public class RecordActionHandlerTests
 
         await harness.ReceiptStore.Received(1).EnqueueCategorizationAsync(TransactionId, 42, Arg.Any<CancellationToken>());
         await harness.Notifier.Received(1).EditAsync(555L, 42, Arg.Any<EchoMessage>(), Arg.Any<CancellationToken>());
+    }
+
+    // R2-4-style dead end (2026-09-27 finding): Cancel on a vision receipt still awaiting confirmation
+    // used to fall back to the generic Cancelled rendering, which reads categorised line items that
+    // were never written (CategorizeReceipt never ran) - a false "Lines add up to 0.00" warning over an
+    // empty total.
+    [Fact]
+    public async Task Cancel_on_an_unconfirmed_vision_receipt_shows_the_receipts_own_total_not_a_false_mismatch()
+    {
+        var harness = Create();
+        var receipt = UnconfirmedVisionReceipt();
+        harness.ReceiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(receipt);
+        harness.ReceiptStore.IsAwaitingConfirmationAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(true);
+
+        await harness.Handler.HandleAsync(Cancel(), Cancel().Message!, TestContext.Current.CancellationToken);
+
+        await harness.Editor.Received(1).CancelAsync(TransactionId, Arg.Any<CancellationToken>());
+        var expectedRecord = new CategorizationSubject(TransactionId, "", 555L, 42, "Cash", TransactionStatus.Captured,
+            new DateOnly(2026, 9, 27), new DateOnly(2026, 9, 27), Array.Empty<RecordedLine>(), CaptureKind.Photo);
+        var expectedText = Echo.ComposeReceiptCancelledUnconfirmed(expectedRecord, receipt).Text;
+        await harness.Notifier.Received(1).EditAsync(555L, 42, Arg.Is<EchoMessage>(m =>
+            m.Text == expectedText && m.Actions.SequenceEqual(new[] { RecordAction.Restore })),
+            Arg.Any<CancellationToken>());
+    }
+
+    // The other half of the same dead end: Restore used to land back on ComposeReceipt's Captured
+    // branch ("Reading the receipt…", no buttons) - nothing is reading it, and both RecordAnyway and
+    // Cancel were gone for good.
+    [Fact]
+    public async Task Restore_on_an_unconfirmed_vision_receipt_re_offers_record_anyway_and_cancel()
+    {
+        var harness = Create(status: TransactionStatus.Cancelled);
+        var receipt = UnconfirmedVisionReceipt();
+        harness.ReceiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(receipt);
+        harness.ReceiptStore.IsAwaitingConfirmationAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(true);
+
+        await harness.Handler.HandleAsync(Restore(), Restore().Message!, TestContext.Current.CancellationToken);
+
+        await harness.Editor.Received(1).RestoreAsync(TransactionId, Arg.Any<CancellationToken>());
+        await harness.Notifier.Received(1).EditAsync(555L, 42, Arg.Is<EchoMessage>(m =>
+            m.Actions.SequenceEqual(new[] { RecordAction.RecordAnyway, RecordAction.Cancel })),
+            Arg.Any<CancellationToken>());
+    }
+
+    // 2026-09-27 finding: the interim render right after Record anyway showed "Reading the receipt…"
+    // (ComposeReceipt's generic Captured branch) rather than naming the job that is now actually
+    // running.
+    [Fact]
+    public async Task Record_anyway_renders_the_categorising_text_not_reading_the_receipt()
+    {
+        var harness = Create();
+        var receipt = UnconfirmedVisionReceipt();
+        harness.ReceiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(receipt);
+        harness.ReceiptStore.IsAwaitingConfirmationAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(false);
+        var query = RecordAnyway();
+
+        await harness.Handler.HandleAsync(query, query.Message!, TestContext.Current.CancellationToken);
+
+        await harness.Notifier.Received(1).EditAsync(555L, 42,
+            Arg.Is<EchoMessage>(m => m.Text == Echo.ComposeCategorisingReceipt(receipt.Lines.Count) && m.Actions.Count == 0),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]

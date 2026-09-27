@@ -184,6 +184,14 @@ internal sealed class RecordEcho : IRecordEcho
         return new(string.Join('\n', lines), [RecordAction.RecordAnyway, RecordAction.Cancel]);
     }
 
+    public EchoMessage ComposeReceiptCancelledUnconfirmed(CategorizationSubject record, ReceiptView receipt)
+    {
+        var header = $"Cancelled — {ShopHeader(receipt)} · {record.WalletName} · balance {Balances(record)}";
+        var total = $"Total: {FormatAmount(receipt.Total)} {receipt.Currency}";
+        return new($"{header}\n{total}\n\nThis receipt was never categorised — press Restore to bring it back for confirmation.",
+            [RecordAction.Restore]);
+    }
+
     static string ShopHeader(ReceiptView receipt)
     {
         var name = receipt.SellerName is { Length: > 0 } sellerName ? sellerName : "Receipt";

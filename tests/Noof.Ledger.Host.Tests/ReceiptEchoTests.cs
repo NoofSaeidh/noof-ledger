@@ -234,6 +234,24 @@ public class ReceiptEchoTests
         Echo.ComposeReceipt(Record(), Receipt(), AppReceipts.UnsupportedChangeKind.None).Text.Should().NotContain("cannot be changed here");
     }
 
+    // 2026-09-27: Cancel on a receipt still awaiting confirmation has no categorised line items -
+    // record.Lines is empty, since CategorizeReceipt never ran. This must show the receipt's own
+    // stored total, never fall back to ComposeReceipt's "Total: " (with nothing after it) and a false
+    // "Lines add up to 0.00" mismatch warning.
+    [Fact]
+    public void A_cancelled_unconfirmed_receipt_shows_the_receipts_own_total_and_offers_only_restore()
+    {
+        var record = Record(lines: []) with { Status = TransactionStatus.Cancelled };
+
+        var echo = Echo.ComposeReceiptCancelledUnconfirmed(record, Receipt(total: 500m));
+
+        echo.Text.Should().StartWith("Cancelled — Test Market — Test Market - Centre · Cash · balance 0.00 RSD");
+        echo.Text.Should().Contain("500.00 RSD");
+        echo.Text.Should().NotContain("Total: \n", "the M-8 empty-total look must never come from this rendering");
+        echo.Text.Should().NotContain("Lines add up to");
+        echo.Actions.Should().Equal(RecordAction.Restore);
+    }
+
     [Theory]
     [InlineData(ReceiptKind.Copy, "copy")]
     [InlineData(ReceiptKind.Training, "training")]

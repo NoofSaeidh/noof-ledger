@@ -44,12 +44,38 @@ internal sealed class RecordActionHandler(
         if (await store.GetSubjectAsync(target.TransactionId, cancellationToken) is not { } record)
             return;
 
-        // M-3 (Phase 6 final review): Cancel/Restore must keep the shop header and the receipt's own
-        // line order, not fall back to the generic echo just because the button, not a worker, is
-        // what re-renders it.
-        var message = await receiptStore.GetByTransactionAsync(target.TransactionId, cancellationToken) is { } receipt
-            ? recordEcho.ComposeReceipt(record, receipt)
-            : recordEcho.Compose(record);
+        var receipt = await receiptStore.GetByTransactionAsync(target.TransactionId, cancellationToken);
+        var message = await ComposeRefreshAsync(action, record, receipt, cancellationToken);
         await chatNotifier.EditAsync(echo.Chat.Id, echo.Id, message, cancellationToken);
+    }
+
+    // M-3 (Phase 6 final review): Cancel/Restore must keep the shop header and the receipt's own line
+    // order, not fall back to the generic echo just because the button, not a worker, is what
+    // re-renders it. 2026-09-27: a vision receipt with no CategorizeReceipt job yet (never confirmed,
+    // or just Cancelled before it was) has no categorised line items to show - ComposeReceipt's generic
+    // rendering reads record.Lines, which is empty, producing a false mismatch warning over an empty
+    // total (Cancel) or a dead-end "Reading the receipt…" with no buttons (Restore). Both are routed to
+    // the confirmation-aware echoes instead, and Record anyway's own refresh names the job that is now
+    // actually running rather than the receipt's original Captured wording.
+    async Task<EchoMessage> ComposeRefreshAsync(
+        RecordAction action, CategorizationSubject record, ReceiptView? receipt, CancellationToken cancellationToken)
+    {
+        if (receipt is null)
+            return recordEcho.Compose(record);
+
+        if (await receiptStore.IsAwaitingConfirmationAsync(record.TransactionId, cancellationToken))
+        {
+            if (action != RecordAction.Restore)
+                return recordEcho.ComposeReceiptCancelledUnconfirmed(record, receipt);
+
+            var extracted = ReceiptConfirmation.ToExtractedReceipt(receipt);
+            return recordEcho.ComposeReceiptNeedsConfirmation(
+                extracted, ReceiptConfirmation.BuildProblems(extracted, ReceiptConfirmation.HasMismatch(extracted)));
+        }
+
+        if (action == RecordAction.RecordAnyway)
+            return new EchoMessage(recordEcho.ComposeCategorisingReceipt(receipt.Lines.Count), []);
+
+        return recordEcho.ComposeReceipt(record, receipt);
     }
 }
