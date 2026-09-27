@@ -161,4 +161,5 @@ Domain  ←  Application  ←  Persistence · Ai · Fx · Receipts · Telegram �
 ## Licence
 
 None, deliberately. This is published to be read, not reused — default copyright applies, so no
-permission is granted to copy, modify or distribute it.
+permission is granted to copy, modify or distribute it. Third-party code and packages keep their own
+licences: `THIRD-PARTY-NOTICES.md`.
