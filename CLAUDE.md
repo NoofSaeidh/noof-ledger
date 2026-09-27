@@ -218,6 +218,11 @@ the code that builds the echo text.
 - Shared hot files (backlog entries, per-assembly allowlists) are split across PRs so parallel work
   doesn't conflict.
 
+**Waiting on CI** *(operator's decision, 2026-09-28)*
+- After pushing to a PR branch, wait for CI with one blocking `gh pr checks <n> --watch --interval 30`
+  (timeout 600000 ms) — never poll it by hand, and never guess a result before that command returns.
+- A red CI check keeps the PR in draft until it is fixed and pushed again.
+
 ## 6. Closing a phase *(settled)*
 
 When closing a phase, read and follow `docs/CLOSING-A-PHASE.md` *(settled)*.
