@@ -497,6 +497,34 @@ public class ExtractReceiptWorkerTests
             Arg.Any<CancellationToken>());
     }
 
+    // Reviewer finding, p6-qrfacts round: the QR's IssuedAt is a UTC instant; every other producer of
+    // ExtractedReceipt.IssuedAt stamps Belgrade's own offset, and the needs-confirmation echo prints
+    // the date on the value's own offset with no zone conversion (RecordEcho.ComposeReceiptNeedsConfirmationCore).
+    // A QR issued at 22:30 UTC is already 00:30 the next day in Belgrade, so the echo must say so.
+    [Fact]
+    public async Task The_needs_confirmation_echo_dates_a_QR_issued_at_by_its_Belgrade_day_not_its_UTC_day()
+    {
+        var harness = Setup(ExtractJob(), verificationUrl: null, telegramFileId: "photo-1");
+        harness.QrReader.Read(Arg.Any<Stream>()).Returns("https://suf.purs.gov.rs/v/?vl=abc");
+        var qrIssuedAt = DateTimeOffset.Parse("2026-09-26T22:30:00Z");
+        harness.Decoder.Decode(Arg.Any<string>()).Returns(new FiscalQrDecodeResult(Payload() with { Total = 600m, IssuedAt = qrIssuedAt }, null));
+        harness.FetchClient.FetchAsync(Arg.Any<FiscalQrPayload>(), Arg.Any<CancellationToken>())
+            .Returns(new FiscalFetchResult(null, new FiscalFetchFailure("504 gateway timeout", 504)));
+        var modelDisagrees = Extracted(ReceiptSource.Vision, qrTotal: 600m, total: 500m) with
+        {
+            IssuedAt = DateTimeOffset.Parse("2026-09-26T09:00:00+02:00"),
+            Lines = [new ExtractedReceiptLine(1, "Bread", 1m, "kom", 500m, 500m, null)],
+        };
+        harness.Vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), 600m, Arg.Any<CancellationToken>())
+            .Returns(new ReceiptVisionResult(modelDisagrees, null));
+
+        (await TickAsync(harness)).Should().Be(CategorizationTickResult.Processed);
+
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text.Contains("Date: 27.09.2026", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+    }
+
     // Copilot finding on PR #3, ExtractReceiptWorker.cs (the QR-decoded-but-fetch-failed vision
     // fallback): the decoded QR payload also carries the authoritative issue time and receipt kind
     // (and the printed fiscal number, composed from RequestedBy/SignedBy/TotalCounter) - every one of
@@ -540,12 +568,18 @@ public class ExtractReceiptWorkerTests
         };
         harness.Vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), 500m, Arg.Any<CancellationToken>())
             .Returns(new ReceiptVisionResult(modelDisagrees, null));
+        var logger = new CapturingLogger<ExtractReceiptWorker>();
 
-        (await TickAsync(harness)).Should().Be(CategorizationTickResult.Processed);
+        (await CreateWorker(harness.ScopeFactory(), logger: logger).RunTickAsync(TestContext.Current.CancellationToken))
+            .Should().Be(CategorizationTickResult.Processed);
 
         await harness.ReceiptStore.Received(1).SaveExtractedAsync(
             TransactionId, Arg.Is<ExtractedReceipt>(r => r.IssuedAt == qrTime),
             Arg.Any<string?>(), enqueueCategorization: true, Arg.Any<CancellationToken>());
+        logger.Entries.Should().Contain(e =>
+            e.EventId.Id == 5018
+            && Equals(e.Properties.GetValueOrDefault("ModelIssuedAt"), modelDisagrees.IssuedAt)
+            && Equals(e.Properties.GetValueOrDefault("QrIssuedAt"), qrTime));
     }
 
     [Fact]
@@ -560,12 +594,18 @@ public class ExtractReceiptWorkerTests
         var modelDisagrees = Extracted(ReceiptSource.Vision, qrTotal: 500m, total: 500m) with { FiscalNumber = null };
         harness.Vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), 500m, Arg.Any<CancellationToken>())
             .Returns(new ReceiptVisionResult(modelDisagrees, null));
+        var logger = new CapturingLogger<ExtractReceiptWorker>();
 
-        (await TickAsync(harness)).Should().Be(CategorizationTickResult.Processed);
+        (await CreateWorker(harness.ScopeFactory(), logger: logger).RunTickAsync(TestContext.Current.CancellationToken))
+            .Should().Be(CategorizationTickResult.Processed);
 
         await harness.ReceiptStore.Received(1).SaveExtractedAsync(
             TransactionId, Arg.Is<ExtractedReceipt>(r => r.FiscalNumber == "REQABCDE-SIG12345-42"),
             Arg.Any<string?>(), enqueueCategorization: true, Arg.Any<CancellationToken>());
+        logger.Entries.Should().Contain(e =>
+            e.EventId.Id == 5020
+            && Equals(e.Properties.GetValueOrDefault("ModelFiscalNumber"), null)
+            && Equals(e.Properties.GetValueOrDefault("QrFiscalNumber"), "REQABCDE-SIG12345-42"));
     }
 
     // A non-money QR kind (Copy/Training/Proforma/Advance) must persist as such even though this is

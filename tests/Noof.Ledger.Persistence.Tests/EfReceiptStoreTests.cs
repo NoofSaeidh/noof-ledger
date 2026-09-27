@@ -149,9 +149,9 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     // Copilot finding on PR #3: the QR-decoded-but-fetch-failed vision fallback now carries the QR's
     // own fiscal number into ExtractedReceipt.FiscalNumber (ExtractReceiptWorker), so two such vision
     // receipts for the same seller and QR fiscal number must collide on the duplicate index exactly
-    // like two fiscal-QR receipts already do above - previously a vision fallback's own FiscalNumber
-    // was near-always null (AcceptIfWellFormed against the model's own guess), so this path never hit
-    // the index at all.
+    // like two fiscal-QR receipts already do above. This guard is against EfReceiptStore directly and
+    // did not change with that worker fix - the duplicate index and lookup already ignore Source - but
+    // it is worth pinning now that a vision receipt can carry a QR-shaped fiscal number too.
     [Fact]
     public async Task A_second_QR_decoded_vision_receipt_with_the_same_seller_and_QR_fiscal_number_is_a_duplicate()
     {

@@ -259,12 +259,12 @@ internal sealed class ExtractReceiptWorker(
             // from the Tax Administration's journal, not a model) must never let its own model-read total
             // survive into what gets saved, logged, or shown as the receipt's total; the model's differing
             // number is discarded here rather than recorded anywhere that could be read back as the total.
-            if (extracted is { Source: ReceiptSource.Vision, QrTotal: { } verifiedTotal })
+            if (extracted.Source == ReceiptSource.Vision && verifiedQrFacts is { } qrFacts)
             {
-                if (extracted.Total != verifiedTotal)
+                if (extracted.Total != qrFacts.Total)
                 {
-                    logger.LogModelTotalDiscardedForQrTotal(extracted.Total, verifiedTotal);
-                    extracted = extracted with { Total = verifiedTotal };
+                    logger.LogModelTotalDiscardedForQrTotal(extracted.Total, qrFacts.Total);
+                    extracted = extracted with { Total = qrFacts.Total };
                 }
 
                 if (extracted.Currency != CurrencyCode.Rsd)
@@ -278,25 +278,29 @@ internal sealed class ExtractReceiptWorker(
                 // from the Tax Administration's own payload, never the model's guess, so they overwrite
                 // the vision answer the same way Total/Currency already do. The seller's tax id has no
                 // QR equivalent - it stays vision's own well-formed-only value.
-                if (verifiedQrFacts is { } qrFacts)
+                //
+                // The QR's own IssuedAt is a UTC instant; every other producer of ExtractedReceipt.IssuedAt
+                // (ChatReceiptVision, FiscalJournalParser, SufReceiptClient) stamps the capture time zone's
+                // own offset instead - the convention ComposeReceiptNeedsConfirmationCore's date line relies
+                // on, since it prints the value's own offset with no zone conversion. Convert through the
+                // same captureTimeZone the duplicate echo below already uses.
+                var qrIssuedAt = TimeZoneInfo.ConvertTime(qrFacts.IssuedAt, captureTimeZone);
+                if (extracted.IssuedAt != qrIssuedAt)
                 {
-                    if (extracted.IssuedAt != qrFacts.IssuedAt)
-                    {
-                        logger.LogModelIssuedAtDiscardedForQrIssuedAt(extracted.IssuedAt, qrFacts.IssuedAt);
-                        extracted = extracted with { IssuedAt = qrFacts.IssuedAt };
-                    }
+                    logger.LogModelIssuedAtDiscardedForQrIssuedAt(extracted.IssuedAt, qrIssuedAt);
+                    extracted = extracted with { IssuedAt = qrIssuedAt };
+                }
 
-                    if (extracted.Kind != qrFacts.Kind)
-                    {
-                        logger.LogModelKindDiscardedForQrKind(extracted.Kind, qrFacts.Kind);
-                        extracted = extracted with { Kind = qrFacts.Kind };
-                    }
+                if (extracted.Kind != qrFacts.Kind)
+                {
+                    logger.LogModelKindDiscardedForQrKind(extracted.Kind, qrFacts.Kind);
+                    extracted = extracted with { Kind = qrFacts.Kind };
+                }
 
-                    if (extracted.FiscalNumber != qrFacts.FiscalNumber)
-                    {
-                        logger.LogModelFiscalNumberDiscardedForQrFiscalNumber(extracted.FiscalNumber, qrFacts.FiscalNumber);
-                        extracted = extracted with { FiscalNumber = qrFacts.FiscalNumber };
-                    }
+                if (extracted.FiscalNumber != qrFacts.FiscalNumber)
+                {
+                    logger.LogModelFiscalNumberDiscardedForQrFiscalNumber(extracted.FiscalNumber, qrFacts.FiscalNumber);
+                    extracted = extracted with { FiscalNumber = qrFacts.FiscalNumber };
                 }
             }
 
