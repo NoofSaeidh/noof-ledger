@@ -446,7 +446,7 @@ public class ExtractReceiptWorkerTests
         harness.Decoder.Decode(Arg.Any<string>()).Returns(new FiscalQrDecodeResult(Payload() with { Total = 600m }, null));
         harness.FetchClient.FetchAsync(Arg.Any<FiscalQrPayload>(), Arg.Any<CancellationToken>())
             .Returns(new FiscalFetchResult(null, new FiscalFetchFailure("504 gateway timeout", 504)));
-        var modelDisagrees = Extracted(ReceiptSource.Vision, qrTotal: 600m, total: 600m) with
+        var modelDisagrees = Extracted(ReceiptSource.Vision, qrTotal: 600m, total: 500m) with
         {
             Lines = [new ExtractedReceiptLine(1, "Bread", 1m, "kom", 500m, 500m, null)],
         };
@@ -462,6 +462,7 @@ public class ExtractReceiptWorkerTests
         await harness.Notifier.Received(1).EditAsync(111L, 42,
             Arg.Is<EchoMessage>(m => m.Text.Contains("Record it anyway", StringComparison.Ordinal)
                 && m.Text.Contains("Lines add up to 500.00 RSD, the receipt says 600.00 RSD", StringComparison.Ordinal)
+                && m.Text.Contains("Total: 600.00 RSD", StringComparison.Ordinal)
                 && m.Actions.SequenceEqual(new[] { RecordAction.RecordAnyway, RecordAction.Cancel })),
             Arg.Any<CancellationToken>());
     }
