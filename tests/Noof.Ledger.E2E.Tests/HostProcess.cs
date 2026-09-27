@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
+using Noof.Ledger.TestKit;
 
 namespace Noof.Ledger.E2E.Tests;
 
@@ -143,29 +144,7 @@ sealed partial class HostProcess : IAsyncDisposable
         await DeleteBestEffortAsync(logToDelete);
     }
 
-    static async Task DeleteBestEffortAsync(string? path)
-    {
-        if (path is null || !Directory.Exists(path))
-            return;
-
-        const int maxAttempts = 5;
-
-        for (var attempt = 1; attempt <= maxAttempts; attempt++)
-        {
-            try
-            {
-                Directory.Delete(path, recursive: true);
-                return;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                if (attempt == maxAttempts)
-                    return;
-
-                await Task.Delay(TimeSpan.FromMilliseconds(200));
-            }
-        }
-    }
+    static Task DeleteBestEffortAsync(string? path) => BestEffortDelete.DirectoryAsync(path);
 
     void CaptureLine(object? sender, DataReceivedEventArgs e)
     {
