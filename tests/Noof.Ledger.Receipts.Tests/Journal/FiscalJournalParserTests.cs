@@ -163,6 +163,29 @@ public class FiscalJournalParserTests
         FiscalJournalParser.Parse("just some unrelated text").Should().BeNull();
     }
 
+    [Fact]
+    public void Throws_instead_of_defaulting_to_zero_when_a_cyrillic_sale_journal_has_no_total_line()
+    {
+        // Copilot review, PR #3: a journal with valid item lines but no Укупан износ (and no
+        // Укупна рефундација either) must never silently report a total of 0 - that is a parse
+        // failure, indistinguishable in severity from an unparseable amount.
+        var journalWithNoTotal = CyrillicCardJournal.Replace("Укупан износ: 329,90\r\n", "", StringComparison.Ordinal);
+
+        var act = () => FiscalJournalParser.Parse(journalWithNoTotal);
+
+        act.Should().Throw<FormatException>();
+    }
+
+    [Fact]
+    public void Throws_instead_of_defaulting_to_zero_when_a_latin_refund_journal_has_no_total_line()
+    {
+        var journalWithNoTotal = LatinMixedRefundJournal.Replace("Ukupna refundacija: 399,00\r\n", "", StringComparison.Ordinal);
+
+        var act = () => FiscalJournalParser.Parse(journalWithNoTotal);
+
+        act.Should().Throw<FormatException>();
+    }
+
     static DateTimeOffset BelgradeTime(int year, int month, int day, int hour, int minute, int second)
     {
         var belgrade = TimeZoneInfo.FindSystemTimeZoneById("Europe/Belgrade");
