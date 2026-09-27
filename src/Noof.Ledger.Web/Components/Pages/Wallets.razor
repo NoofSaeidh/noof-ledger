@@ -61,15 +61,18 @@ else
                 Save aliases
             </MudButton>
         </div>
-        <div class="noof-wallet-row mt-4">
-            <MudText HtmlTag="label" for="@($"wallet-payment-default-{wallet.Id}")" Typo="Typo.caption" Class="mud-text-secondary">Default for</MudText>
-            <select id="@($"wallet-payment-default-{wallet.Id}")" @bind="wallet.PendingPaymentDefault"
-                    @bind:after="@(() => SetPaymentDefaultAsync(wallet))" class="noof-native-select">
-                <option value="">None</option>
-                <option value="@PaymentMethod.Card">Card</option>
-                <option value="@PaymentMethod.Cash">Cash</option>
-            </select>
-        </div>
+        @if (!wallet.Archived)
+        {
+            <div class="noof-wallet-row mt-4">
+                <MudText HtmlTag="label" for="@($"wallet-payment-default-{wallet.Id}")" Typo="Typo.caption" Class="mud-text-secondary">Default for</MudText>
+                <select id="@($"wallet-payment-default-{wallet.Id}")" @bind="wallet.PendingPaymentDefault"
+                        @bind:after="@(() => SetPaymentDefaultAsync(wallet))" class="noof-native-select">
+                    <option value="">None</option>
+                    <option value="@PaymentMethod.Card">Card</option>
+                    <option value="@PaymentMethod.Cash">Cash</option>
+                </select>
+            </div>
+        }
         <div class="noof-wallet-actions mt-4">
             @if (wallet.IsDefaultForCurrency)
             {

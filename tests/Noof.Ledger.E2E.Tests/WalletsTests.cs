@@ -91,6 +91,10 @@ public sealed class WalletsTests(CookieModeHostFixture fixture) : PageTest, ICla
         await Expect(Page.Locator("#wallets-saved")).ToContainTextAsync("Archived");
         await Expect(row).ToContainTextAsync("Archived");
 
+        // Setting one is refused server-side (EfWalletAdmin.SetPaymentDefaultAsync) once archived,
+        // so the control that would silently no-op through it must not be offered any more either.
+        await Expect(Page.Locator($"#wallet-payment-default-{walletId}")).ToHaveCountAsync(0);
+
         // This wallet was RSD's only default; archiving it leaves RSD with none, and the page must say
         // so (Task 4 finding 3 pairs the mapper's failure text with this warning).
         await Expect(Page.Locator("#wallets-warning")).ToContainTextAsync("RSD");
