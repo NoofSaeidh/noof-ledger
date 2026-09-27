@@ -252,6 +252,48 @@ public class ReceiptEchoTests
         echo.Actions.Should().Equal(RecordAction.Restore);
     }
 
+    static AppReceipts.ExtractedReceipt NeedsConfirmationReceipt(
+        DateTimeOffset? issuedAt = null, string? sellerTaxId = null, string? fiscalNumber = null) => new(
+        ReceiptSource.Vision, VerificationUrl: null, sellerTaxId, "Test Market", SellerAddress: null,
+        LocationName: null, fiscalNumber, issuedAt, 500m, CurrencyCode.Rsd, ReceiptKind.Sale, PaymentMethod.Card,
+        QrTotal: null,
+        [new AppReceipts.ExtractedReceiptLine(1, "Bread", 1m, null, 400m, 400m, null)]);
+
+    // 2026-09-27 finding: every other vision echo carries the decision-5 file/QR hint and, where read,
+    // the date and PIB/fiscal number - the confirmation prompt is a vision echo too and showed neither.
+    [Fact]
+    public void ComposeReceiptNeedsConfirmation_carries_the_file_or_QR_hint()
+    {
+        var echo = Echo.ComposeReceiptNeedsConfirmation(NeedsConfirmationReceipt(), []);
+
+        echo.Text.Should().Contain(
+            "⚠️ For an exact read next time, send the receipt as a file (uncompressed) or send the link from its QR code.");
+    }
+
+    [Fact]
+    public void ComposeReceiptNeedsConfirmation_shows_the_date_PIB_and_fiscal_number_when_they_were_read()
+    {
+        var receipt = NeedsConfirmationReceipt(
+            issuedAt: new DateTimeOffset(2026, 9, 25, 9, 30, 0, TimeSpan.Zero), sellerTaxId: "123456789",
+            fiscalNumber: "2WJCQFGP-2WJCQFGP-66360");
+
+        var echo = Echo.ComposeReceiptNeedsConfirmation(receipt, []);
+
+        echo.Text.Should().Contain("Date: 25.09.2026");
+        echo.Text.Should().Contain("PIB: 123456789");
+        echo.Text.Should().Contain("Fiscal #: 2WJCQFGP-2WJCQFGP-66360");
+    }
+
+    [Fact]
+    public void ComposeReceiptNeedsConfirmation_omits_the_date_PIB_and_fiscal_number_when_none_were_read()
+    {
+        var echo = Echo.ComposeReceiptNeedsConfirmation(NeedsConfirmationReceipt(), []);
+
+        echo.Text.Should().NotContain("Date:");
+        echo.Text.Should().NotContain("PIB:");
+        echo.Text.Should().NotContain("Fiscal #:");
+    }
+
     [Theory]
     [InlineData(ReceiptKind.Copy, "copy")]
     [InlineData(ReceiptKind.Training, "training")]

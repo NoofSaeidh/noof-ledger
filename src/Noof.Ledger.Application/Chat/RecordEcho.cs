@@ -173,11 +173,20 @@ internal sealed class RecordEcho : IRecordEcho
         var header = receipt.LocationName is { Length: > 0 } location ? $"{name} — {location}" : name;
 
         List<string> lines = [$"This receipt doesn't look right — {header}"];
+        if (receipt.IssuedAt is { } issuedAt)
+            lines.Add($"Date: {issuedAt.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)}");
+        if (receipt.SellerTaxId is { Length: > 0 } sellerTaxId)
+            lines.Add($"PIB: {sellerTaxId}");
+        if (receipt.FiscalNumber is { Length: > 0 } fiscalNumber)
+            lines.Add($"Fiscal #: {fiscalNumber}");
         lines.AddRange(receipt.Lines.Select(line => $"• {line.Name} — {FormatAmount(line.Total)} {receipt.Currency}"));
         lines.Add(string.Empty);
         lines.Add($"Total: {FormatAmount(receipt.Total)} {receipt.Currency}");
         lines.Add(string.Empty);
         lines.AddRange(problems.Select(problem => $"⚠️ {problem}"));
+        // 2026-09-27: this prompt only ever shows for a vision receipt (never a fiscal QR/SUF one), so
+        // it carries the same standing hint every other vision echo does (ReceiptWarnings).
+        lines.Add("⚠️ For an exact read next time, send the receipt as a file (uncompressed) or send the link from its QR code.");
         lines.Add(string.Empty);
         lines.Add("Record it anyway, or cancel?");
 
