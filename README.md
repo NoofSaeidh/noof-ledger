@@ -1,4 +1,4 @@
-﻿# noof-ledger
+# noof-ledger
 
 A personal finance tracker, built for one person and one machine.
 
@@ -38,7 +38,7 @@ wallets and currencies.
 > hours. The photo itself is never stored — only Telegram's file id — and every step is on the
 > transaction's trace page.
 >
-> 1701 tests — 1688 passing, 13 skipped (they call a live model or a live voice provider and need
+> 1711 tests — 1698 passing, 13 skipped (they call a live model or a live voice provider and need
 > keys), none failing. Browser tests included.
 >
 > Still missing: **exchange-office slips** (Phase 7), **currency exchange** (a spend in a currency
