@@ -4,7 +4,7 @@ status: deferred
 area: hosting
 ---
 Telegram webhooks post to a small always-on function that appends to a queue; the home app drains it
-outbound over HTTPS. Full design in `OPEN-QUESTIONS.md` P1-6 — the shape, the three routes, the
+outbound over HTTPS. Full design in `docs/decisions/p1-6-capture-relay-decision.md` — the shape, the three routes, the
 `secret_token` that keeps the endpoint from being an open "add an expense" API, and the cutover order.
 
 Costs nothing at ~20 messages/day: Lambda's 1M requests and 400k GB-seconds and DynamoDB's 25 WCU/25

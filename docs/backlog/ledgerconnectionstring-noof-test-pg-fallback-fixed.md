@@ -16,7 +16,7 @@ against `categorization_jobs` before being killed. No row was inserted, deleted,
 near miss is the point.
 
 **Why it stayed dangerous until it did not.** `NOOF_TEST_PG` existing at all is deliberate
-test-suite convenience (`docs/OPEN-QUESTIONS.md` / `ops/reset-database-auth.ps1`), and the fallback
+test-suite convenience (`docs/decisions/` / `ops/reset-database-auth.ps1`), and the fallback
 chain was reasonable for a test process. The unsafe case was specifically a human launching the
 **published output** directly in a shell that happens to have that variable set — an operator with
 a real deployment normally has `ConnectionStrings:Ledger` (or the credential file) configured and

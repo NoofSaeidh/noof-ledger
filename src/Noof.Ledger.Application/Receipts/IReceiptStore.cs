@@ -70,6 +70,6 @@ public interface IReceiptStore
     // row-locked re-check. EfTransactionTrace reads the same value for the trace page, so the two views cannot
     // drift; ExtractReceiptWorker's own C-1 replay uses it in place of recomputing the mismatch
     // arithmetic, which could not tell a malformed-PIB-only pause apart from one already confirmed
-    // (docs/OPEN-QUESTIONS.md P6-2).
+    // (docs/decisions/p6-2-vision-fallback-stopped-inventing-receipts.md).
     Task<bool> IsAwaitingConfirmationAsync(Guid transactionId, CancellationToken cancellationToken);
 }

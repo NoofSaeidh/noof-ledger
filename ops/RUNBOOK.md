@@ -122,7 +122,7 @@ lines, PIB and fiscal number then come exactly from the Tax Administration. A ph
 receipt almost always goes through the vision fallback instead — the fiscal QR is a version ~40 code
 (~177 modules a side), and on the operator's real photos (2026-09-27, Telegram-compressed and
 full-resolution 12 MP files alike) no decoder tried read it: ZXing.Net, zxing-cpp, OpenCV's QR detector
-and the WeChat CNN detector (`docs/OPEN-QUESTIONS.md`, Phase 6 QR entry). A close-up photo of the QR
+and the WeChat CNN detector (`docs/decisions/p6-1-receipts-decisions.md`, Phase 6 QR entry). A close-up photo of the QR
 alone, sent as a file, is untested.
 
 **The Receipts health check** (`/diagnostics`, the dashboard tile, the bot's `/health`) turns amber for
