@@ -301,8 +301,9 @@ public class ExtractReceiptWorkerTests
         var harness = Setup(ExtractJob());
         harness.Vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), Arg.Any<decimal?>(), Arg.Any<CancellationToken>())
             .Returns(new ReceiptVisionResult(Extracted(ReceiptSource.Vision), null, KindUnclear: true));
+        var logger = new CapturingLogger<ExtractReceiptWorker>();
 
-        await TickAsync(harness);
+        await CreateWorker(harness.ScopeFactory(), logger: logger).RunTickAsync(TestContext.Current.CancellationToken);
 
         await harness.ReceiptStore.Received(1).SaveExtractedAsync(
             TransactionId, Arg.Any<ExtractedReceipt>(), Arg.Any<string?>(), enqueueCategorization: false, Arg.Any<CancellationToken>());
@@ -310,6 +311,12 @@ public class ExtractReceiptWorkerTests
             Arg.Is<EchoMessage>(m => m.Text.Contains("The receipt type could not be read", StringComparison.Ordinal)
                 && m.Actions.SequenceEqual(new[] { RecordAction.RecordAnyway, RecordAction.Cancel })),
             Arg.Any<CancellationToken>());
+        // Important finding, round-6 review: the one log line that explains a held receipt must name
+        // its reason - a receipt held only for an unclear kind previously logged "mismatch False,
+        // malformed tax id False", naming nothing.
+        logger.Entries.Should().Contain(e =>
+            e.EventId.Id == 5015
+            && Equals(e.Properties.GetValueOrDefault("KindUnclear"), true));
     }
 
     // The QR's own kind is a verified fact from the Tax Administration - it must resolve the model's
@@ -325,12 +332,18 @@ public class ExtractReceiptWorkerTests
             .Returns(new FiscalFetchResult(null, new FiscalFetchFailure("unreachable", null)));
         harness.Vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), Arg.Any<decimal?>(), Arg.Any<CancellationToken>())
             .Returns(new ReceiptVisionResult(Extracted(ReceiptSource.Vision), null, KindUnclear: true));
+        var logger = new CapturingLogger<ExtractReceiptWorker>();
 
-        (await TickAsync(harness)).Should().Be(CategorizationTickResult.Processed);
+        (await CreateWorker(harness.ScopeFactory(), logger: logger).RunTickAsync(TestContext.Current.CancellationToken))
+            .Should().Be(CategorizationTickResult.Processed);
 
         await harness.ReceiptStore.Received(1).SaveExtractedAsync(
             TransactionId, Arg.Is<ExtractedReceipt>(r => r.Kind == ReceiptKind.Sale), Arg.Any<string?>(),
             enqueueCategorization: true, Arg.Any<CancellationToken>());
+        // Minor finding, round-6 review: the vision fallback reported no kind at all here (it was
+        // unclear), so "Vision kind Sale discarded in favour of the verified QR kind Sale" would have
+        // named a discard that never happened - the two values only coincide by default.
+        logger.Entries.Should().NotContain(e => e.EventId.Id == 5019);
     }
 
     [Fact]

@@ -295,9 +295,13 @@ internal sealed class ExtractReceiptWorker(
                     extracted = extracted with { IssuedAt = qrIssuedAt };
                 }
 
-                if (extracted.Kind != qrFacts.Kind || kindUnclear)
+                if (extracted.Kind != qrFacts.Kind)
                 {
                     logger.LogModelKindDiscardedForQrKind(extracted.Kind, qrFacts.Kind);
+                }
+
+                if (extracted.Kind != qrFacts.Kind || kindUnclear)
+                {
                     extracted = extracted with { Kind = qrFacts.Kind };
                 }
 
@@ -352,7 +356,7 @@ internal sealed class ExtractReceiptWorker(
 
             if (needsConfirmation)
             {
-                logger.LogAwaitingConfirmation(job.TransactionId, mismatch, taxIdMalformed);
+                logger.LogAwaitingConfirmation(job.TransactionId, mismatch, taxIdMalformed, kindUnclear);
                 var echo = recordEcho.ComposeReceiptNeedsConfirmation(extracted, taxIdMalformed, kindUnclear);
                 await EditQuietlyAsync(notifier, record, echo, cancellationToken);
             }
