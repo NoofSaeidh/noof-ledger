@@ -248,6 +248,23 @@ public class SufReceiptClientTests
     }
 
     [Fact]
+    public async Task Reports_a_failure_instead_of_throwing_on_a_malformed_journal_amount()
+    {
+        // Copilot review, PR #3 (item C): FiscalJournalParser.Parse's ParseAmount throws
+        // FormatException on an unparseable amount. Left uncaught, ExtractReceiptWorker's generic
+        // catch treats this as a transient retry instead of taking the QR-total -> vision fallback
+        // every other fetch failure gets.
+        var malformedJournal = Journal.Replace("120,00               2       240,00", "120,00               2       1,2,3,4", StringComparison.Ordinal);
+        var handler = StubHttpMessageHandler.Returning(HttpStatusCode.OK, JsonBody(malformedJournal));
+        var client = ClientFor(handler);
+
+        var result = await client.FetchAsync(Payload, CancellationToken.None);
+
+        result.Receipt.Should().BeNull();
+        result.Failure.Should().NotBeNull();
+    }
+
+    [Fact]
     public async Task Propagates_cancellation_from_the_callers_own_token()
     {
         var handler = StubHttpMessageHandler.NeverResponding();

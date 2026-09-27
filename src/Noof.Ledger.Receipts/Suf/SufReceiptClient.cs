@@ -72,7 +72,20 @@ internal sealed partial class SufReceiptClient(
             if (parsed?.Journal is null)
                 return Failure("The Tax Administration's response had no journal.", (int)response.StatusCode);
 
-            var journal = FiscalJournalParser.Parse(parsed.Journal);
+            ParsedJournal? journal;
+            try
+            {
+                journal = FiscalJournalParser.Parse(parsed.Journal);
+            }
+            // A malformed journal (an unparseable amount, for example) must be a fetch failure like
+            // any other, not an unhandled exception - ExtractReceiptWorker's generic catch would
+            // otherwise treat it as a transient retry and skip the QR-total -> vision fallback this
+            // worker already has for every other kind of fetch failure.
+            catch (Exception exception) when (exception is FormatException or OverflowException)
+            {
+                return Failure("The Tax Administration's journal could not be parsed.", (int)response.StatusCode);
+            }
+
             if (journal is null || journal.Lines.Count == 0)
                 return Failure("The journal had no recognisable line items.", (int)response.StatusCode);
 
