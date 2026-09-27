@@ -1,4 +1,4 @@
-﻿using AwesomeAssertions;
+using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Auth;
@@ -19,8 +19,7 @@ public class EfUserStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task Round_trips_a_user()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var store = new EfUserStore(db);
 
         await store.UpsertAsync(NewUser("noof"), TestContext.Current.CancellationToken);
@@ -33,8 +32,7 @@ public class EfUserStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task Finds_a_user_regardless_of_case()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var store = new EfUserStore(db);
 
         await store.UpsertAsync(NewUser("Noof"), TestContext.Current.CancellationToken);
@@ -47,8 +45,7 @@ public class EfUserStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task Upserting_a_case_variant_updates_the_existing_user_rather_than_adding_one()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var store = new EfUserStore(db);
 
         await store.UpsertAsync(NewUser("noof"), TestContext.Current.CancellationToken);
@@ -64,8 +61,7 @@ public class EfUserStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task The_database_itself_rejects_a_duplicate_username_differing_only_by_case()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
 
         db.Users.Add(NewUser("noof"));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -80,8 +76,7 @@ public class EfUserStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task Upserting_an_existing_username_replaces_the_hash_instead_of_adding_a_row()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var store = new EfUserStore(db);
         var user = NewUser("noof");
 
@@ -97,8 +92,7 @@ public class EfUserStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task Setting_the_password_a_second_time_updates_the_same_user()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var store = new EfUserStore(db);
 
         // The CLI builds a fresh AppUser with a new Guid on every `user set-password` run,
@@ -116,8 +110,7 @@ public class EfUserStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task An_unknown_username_returns_null()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var store = new EfUserStore(db);
 
         var found = await store.FindByUsernameAsync("nobody", TestContext.Current.CancellationToken);

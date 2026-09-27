@@ -48,8 +48,7 @@ public class ReceiptSchemaTests(PostgresFixture fixture)
     [Fact]
     public async Task A_photo_row_with_both_a_file_id_and_a_verification_url_is_refused()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         db.Transactions.Add(NewPhotoTransaction("photo-1", "https://suf.purs.gov.rs/v/?vl=AbCdEf123"));
 
         (await ViolatedConstraintAsync(db)).Should().Be("ck_transactions_capture_has_content");
@@ -58,8 +57,7 @@ public class ReceiptSchemaTests(PostgresFixture fixture)
     [Fact]
     public async Task A_photo_row_with_neither_source_is_refused()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         db.Transactions.Add(NewPhotoTransaction(null, null));
 
         (await ViolatedConstraintAsync(db)).Should().Be("ck_transactions_capture_has_content");
@@ -68,8 +66,7 @@ public class ReceiptSchemaTests(PostgresFixture fixture)
     [Fact]
     public async Task A_photo_row_with_exactly_one_source_is_accepted()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         db.Transactions.Add(NewPhotoTransaction("photo-1", null));
 
         (await ViolatedConstraintAsync(db)).Should().BeNull();
@@ -157,8 +154,7 @@ public class ReceiptSchemaTests(PostgresFixture fixture)
     [Fact]
     public async Task A_second_merchant_cannot_claim_a_tax_id_already_in_use()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var taxId = $"P{Guid.NewGuid():N}"[..20];
         db.Merchants.Add(new Merchant { Id = Guid.NewGuid(), DisplayName = "First", Kind = MerchantKind.Retail, TaxId = taxId });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -174,8 +170,7 @@ public class ReceiptSchemaTests(PostgresFixture fixture)
     [Fact]
     public async Task Two_merchants_may_both_have_no_tax_id()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         db.Merchants.Add(new Merchant { Id = Guid.NewGuid(), DisplayName = "No PIB 1", Kind = MerchantKind.Retail, TaxId = null });
         db.Merchants.Add(new Merchant { Id = Guid.NewGuid(), DisplayName = "No PIB 2", Kind = MerchantKind.Retail, TaxId = null });
 

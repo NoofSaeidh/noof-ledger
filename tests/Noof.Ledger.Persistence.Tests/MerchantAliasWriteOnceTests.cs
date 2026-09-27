@@ -10,8 +10,7 @@ public class MerchantAliasWriteOnceTests(PostgresFixture fixture)
 {
     static async Task<LedgerDbContext> SeedAliasAsync(PostgresFixture fixture)
     {
-        var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var db = await fixture.CreateMigratedContextAsync();
 
         var merchant = new Merchant { Id = Guid.NewGuid(), DisplayName = "Test Merchant", Kind = MerchantKind.Retail };
         db.Merchants.Add(merchant);

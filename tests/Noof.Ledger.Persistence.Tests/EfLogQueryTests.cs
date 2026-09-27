@@ -1,5 +1,4 @@
 using AwesomeAssertions;
-using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Persistence.Diagnostics;
 
@@ -34,8 +33,7 @@ public class EfLogQueryTests(PostgresFixture fixture)
     [Fact]
     public async Task Rows_below_the_minimum_level_are_excluded()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         await SeedAsync(db,
             Row(1, LogSeverity.Debug, DateTimeOffset.Parse("2026-09-25T10:00:00Z"), "debug line"),
             Row(2, LogSeverity.Warning, DateTimeOffset.Parse("2026-09-25T10:01:00Z"), "warning line"));
@@ -50,8 +48,7 @@ public class EfLogQueryTests(PostgresFixture fixture)
     [Fact]
     public async Task From_and_to_bound_the_time_range_inclusively()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         await SeedAsync(db,
             Row(1, LogSeverity.Information, DateTimeOffset.Parse("2026-09-25T09:59:59Z"), "too early"),
             Row(2, LogSeverity.Information, DateTimeOffset.Parse("2026-09-25T10:00:00Z"), "at from"),
@@ -68,8 +65,7 @@ public class EfLogQueryTests(PostgresFixture fixture)
     [Fact]
     public async Task Text_filters_by_ILIKE_on_message_and_escapes_wildcards_literally()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         await SeedAsync(db,
             Row(1, LogSeverity.Information, DateTimeOffset.Parse("2026-09-25T10:00:00Z"), "polling FAILED for chat 100%"),
             Row(2, LogSeverity.Information, DateTimeOffset.Parse("2026-09-25T10:01:00Z"), "polling succeeded"));
@@ -83,8 +79,7 @@ public class EfLogQueryTests(PostgresFixture fixture)
     [Fact]
     public async Task Source_filters_by_prefix_so_a_namespace_narrows_to_every_logger_under_it()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         await SeedAsync(db,
             Row(1, LogSeverity.Information, DateTimeOffset.Parse("2026-09-25T10:00:00Z"), "a", source: "Noof.Ledger.Ai.Anthropic.AnthropicChatClient"),
             Row(2, LogSeverity.Information, DateTimeOffset.Parse("2026-09-25T10:01:00Z"), "b", source: "Noof.Ledger.Ai.Groq.GroqTranscriber"),
@@ -99,8 +94,7 @@ public class EfLogQueryTests(PostgresFixture fixture)
     [Fact]
     public async Task Source_filtering_escapes_ILIKE_wildcards_in_the_prefix_literally()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         await SeedAsync(db,
             Row(1, LogSeverity.Information, DateTimeOffset.Parse("2026-09-25T10:00:00Z"), "a", source: "Noof%Ledger.Weird"),
             Row(2, LogSeverity.Information, DateTimeOffset.Parse("2026-09-25T10:01:00Z"), "b", source: "NoofXLedger.Weird"));
@@ -114,8 +108,7 @@ public class EfLogQueryTests(PostgresFixture fixture)
     [Fact]
     public async Task TransactionId_filters_exactly()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         await SeedAsync(db,
             Row(1, LogSeverity.Information, DateTimeOffset.Parse("2026-09-25T10:00:00Z"), "a", transactionId: TransactionA),
             Row(2, LogSeverity.Information, DateTimeOffset.Parse("2026-09-25T10:01:00Z"), "b", transactionId: TransactionB));
@@ -129,8 +122,7 @@ public class EfLogQueryTests(PostgresFixture fixture)
     [Fact]
     public async Task Rows_are_newest_first_by_logged_at_then_id_and_TotalCount_ignores_paging()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var same = DateTimeOffset.Parse("2026-09-25T10:00:00Z");
         await SeedAsync(db,
             Row(1, LogSeverity.Information, same, "first"),
@@ -147,8 +139,7 @@ public class EfLogQueryTests(PostgresFixture fixture)
     [Fact]
     public async Task OldestFirst_reverses_the_order_and_ties_break_by_id_ascending()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var same = DateTimeOffset.Parse("2026-09-25T10:00:00Z");
         await SeedAsync(db,
             Row(1, LogSeverity.Information, same, "first"),
@@ -164,8 +155,7 @@ public class EfLogQueryTests(PostgresFixture fixture)
     [Fact]
     public async Task PageIndex_skips_the_prior_pages()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         await SeedAsync(db,
             Row(1, LogSeverity.Information, DateTimeOffset.Parse("2026-09-25T10:00:00Z"), "oldest"),
             Row(2, LogSeverity.Information, DateTimeOffset.Parse("2026-09-25T10:01:00Z"), "middle"),

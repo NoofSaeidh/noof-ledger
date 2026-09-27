@@ -1,5 +1,4 @@
 using AwesomeAssertions;
-using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Reporting;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Reporting;
@@ -76,8 +75,7 @@ public class EfTransactionListTests(PostgresFixture fixture)
     [Fact]
     public async Task Rows_are_ordered_newest_first_by_occurred_on_then_occurred_at()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var wallet = NewWallet("Cash", CurrencyCode.Eur);
         db.Wallets.Add(wallet);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -100,8 +98,7 @@ public class EfTransactionListTests(PostgresFixture fixture)
     [Fact]
     public async Task Date_range_filters_are_inclusive_on_both_ends()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var wallet = NewWallet("Cash", CurrencyCode.Eur);
         db.Wallets.Add(wallet);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -126,8 +123,7 @@ public class EfTransactionListTests(PostgresFixture fixture)
     [Fact]
     public async Task Wallet_kind_and_status_filters_each_narrow_independently()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var walletA = NewWallet("Wallet A", CurrencyCode.Eur);
         var walletB = NewWallet("Wallet B", CurrencyCode.Eur);
         db.Wallets.AddRange(walletA, walletB);
@@ -158,8 +154,7 @@ public class EfTransactionListTests(PostgresFixture fixture)
     [Fact]
     public async Task Text_filter_is_a_case_insensitive_contains_with_wildcards_escaped()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var wallet = NewWallet("Cash", CurrencyCode.Eur);
         db.Wallets.Add(wallet);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -190,8 +185,7 @@ public class EfTransactionListTests(PostgresFixture fixture)
     [Fact]
     public async Task An_empty_text_filter_does_not_hide_a_transaction_with_null_RawText()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var wallet = NewWallet("Cash", CurrencyCode.Eur);
         db.Wallets.Add(wallet);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -227,8 +221,7 @@ public class EfTransactionListTests(PostgresFixture fixture)
     [Fact]
     public async Task Paging_returns_the_requested_page_and_the_total_count_across_all_pages()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var wallet = NewWallet("Cash", CurrencyCode.Eur);
         db.Wallets.Add(wallet);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -255,8 +248,7 @@ public class EfTransactionListTests(PostgresFixture fixture)
     [Fact]
     public async Task Amounts_come_from_line_items_for_an_expense()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var wallet = NewWallet("Cash", CurrencyCode.Eur);
         var category = NewCategory("test-list-expense", "Groceries");
         db.Wallets.Add(wallet);
@@ -284,8 +276,7 @@ public class EfTransactionListTests(PostgresFixture fixture)
     [Fact]
     public async Task Amounts_come_from_entries_for_an_income()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var wallet = NewWallet("Cash", CurrencyCode.Eur);
         db.Wallets.Add(wallet);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -307,8 +298,7 @@ public class EfTransactionListTests(PostgresFixture fixture)
     [Fact]
     public async Task Amount_is_the_stated_amount_for_a_balance_check()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var wallet = NewWallet("Cash", CurrencyCode.Eur);
         db.Wallets.Add(wallet);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -341,8 +331,7 @@ public class EfTransactionListTests(PostgresFixture fixture)
     [Fact]
     public async Task A_row_with_a_receipt_reports_HasReceipt_and_the_shop_name()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var wallet = NewWallet("Cash", CurrencyCode.Rsd);
         db.Wallets.Add(wallet);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -367,8 +356,7 @@ public class EfTransactionListTests(PostgresFixture fixture)
     [Fact]
     public async Task ReceiptsOnly_filter_narrows_to_transactions_that_have_a_receipt()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var wallet = NewWallet("Cash", CurrencyCode.Rsd);
         db.Wallets.Add(wallet);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -390,8 +378,7 @@ public class EfTransactionListTests(PostgresFixture fixture)
     [Fact]
     public async Task A_transaction_with_no_wallet_yet_shows_an_empty_wallet_name()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
 
         var now = new DateTimeOffset(2026, 9, 10, 12, 0, 0, TimeSpan.Zero);
         var captured = NewTransaction(null, now, TransactionKind.Expense, TransactionStatus.Captured);

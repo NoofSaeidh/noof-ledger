@@ -21,8 +21,7 @@ public class EfWalletAdminTests(PostgresFixture fixture)
 
     async Task<LedgerDbContext> MigratedAsync()
     {
-        var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var db = await fixture.CreateMigratedContextAsync();
         return db;
     }
 

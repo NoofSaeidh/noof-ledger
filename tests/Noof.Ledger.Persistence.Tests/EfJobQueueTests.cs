@@ -85,8 +85,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
     [Fact]
     public async Task Claims_a_pending_job_that_is_due()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var queue = new EfJobQueue(db, time, maxAttempts: 8);
         var transactionId = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
@@ -108,8 +107,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
     [Fact]
     public async Task Returns_null_when_nothing_is_due()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var queue = new EfJobQueue(db, time, maxAttempts: 8);
         var transactionId = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
@@ -124,8 +122,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
     [Fact]
     public async Task Concurrent_claims_against_one_pending_job_return_it_to_exactly_one_caller()
     {
-        await using var dbA = await fixture.CreateContextAsync();
-        await dbA.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var dbA = await fixture.CreateMigratedContextAsync();
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var transactionId = await SeedTransactionAsync(dbA, time.GetUtcNow(), TestContext.Current.CancellationToken);
         dbA.CategorizationJobs.Add(NewJob(transactionId, time.GetUtcNow().AddMinutes(-1)));
@@ -157,8 +154,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
     [Fact]
     public async Task Succeeding_a_job_marks_it_succeeded()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var queue = new EfJobQueue(db, time, maxAttempts: 8);
         var transactionId = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
@@ -178,8 +174,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
     [Fact]
     public async Task Succeeding_a_job_this_worker_no_longer_owns_is_reported_as_not_owned_and_leaves_the_row_alone()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var queue = new EfJobQueue(db, time, maxAttempts: 8);
         var transactionId = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
@@ -210,8 +205,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
         // ownership guard at all and would flip the row straight back to Pending with a pushed-out
         // run_after even though worker-b had already finished it - a third worker would then claim
         // and redo work that already succeeded.
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var queue = new EfJobQueue(db, time, maxAttempts: 8);
         var transactionId = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
@@ -243,8 +237,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
     {
         // The FailAsync variant the reviewer called out: a released job's new claim must not be
         // knocked straight to Failed by the original worker's late failure report.
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var queue = new EfJobQueue(db, time, maxAttempts: 8);
         var transactionId = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
@@ -270,8 +263,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
     [Fact]
     public async Task Retrying_below_the_attempt_cap_returns_the_job_to_pending()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var queue = new EfJobQueue(db, time, maxAttempts: 2);
         var transactionId = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
@@ -295,8 +287,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
     [Fact]
     public async Task Retrying_at_the_attempt_cap_fails_the_job_terminally_instead()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var queue = new EfJobQueue(db, time, maxAttempts: 2);
         var transactionId = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
@@ -322,8 +313,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
     [Fact]
     public async Task Failing_a_job_this_worker_owns_marks_it_failed()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var queue = new EfJobQueue(db, time, maxAttempts: 8);
         var transactionId = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
@@ -344,8 +334,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
     [Fact]
     public async Task Releases_only_the_leases_that_have_actually_expired()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var queue = new EfJobQueue(db, time, maxAttempts: 8);
 
@@ -379,8 +368,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
     [Fact]
     public async Task A_later_job_for_the_same_transaction_waits_for_the_earlier_one()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var now = new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero);
         var time = new FakeTimeProvider(now);
         var queue = new EfJobQueue(db, time, maxAttempts: 8);
@@ -407,8 +395,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
     [Fact]
     public async Task A_claimed_correction_carries_its_kind_instruction_and_source_message()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var now = new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero);
         var queue = new EfJobQueue(db, new FakeTimeProvider(now), maxAttempts: 8);
         var transactionId = await SeedTransactionAsync(db, now, TestContext.Current.CancellationToken);
@@ -427,8 +414,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
     [Fact]
     public async Task A_correction_without_an_instruction_is_refused_by_the_database()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var now = new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero);
         var transactionId = await SeedTransactionAsync(db, now, TestContext.Current.CancellationToken);
         db.CategorizationJobs.Add(NewJob(transactionId, now, kind: JobKind.Correct));
@@ -445,8 +431,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
         // down with "Cannot write DateTimeOffset with Offset=02:00:00 to PostgreSQL type 'timestamp
         // with time zone'" - confirmed by reproducing it against real Postgres. That message names
         // neither the parameter nor the actual contract. This guard fires before any SQL is sent.
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var queue = new EfJobQueue(db, time, maxAttempts: 8);
         var nonUtc = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.FromHours(2));
@@ -461,8 +446,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
     [Fact]
     public async Task ReleaseExpiredLeasesAsync_rejects_a_non_UTC_now_with_a_clear_message_instead_of_an_Npgsql_failure()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var queue = new EfJobQueue(db, time, maxAttempts: 8);
         var nonUtc = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.FromHours(2));
@@ -477,8 +461,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
     [Fact]
     public async Task Claims_only_the_kinds_it_asks_for()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 24, 9, 0, 0, TimeSpan.Zero));
         var queue = new EfJobQueue(db, time, maxAttempts: 8);
         var voiceTransaction = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
@@ -500,8 +483,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
     [Fact]
     public async Task A_pending_transcription_holds_back_the_reading_queued_after_it_even_for_a_worker_that_cannot_claim_it()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 24, 9, 0, 0, TimeSpan.Zero));
         var queue = new EfJobQueue(db, time, maxAttempts: 8);
         var transactionId = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
@@ -518,8 +500,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
     [Fact]
     public async Task A_claimed_transcription_carries_its_voice_file()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 24, 9, 0, 0, TimeSpan.Zero));
         var queue = new EfJobQueue(db, time, maxAttempts: 8);
         var transactionId = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
@@ -540,8 +521,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
         // to the lease deadline as part of claiming - RunAfter would make the wait negative on every
         // job, re-claimed or not. This proves the invariant the fix relies on: CreatedAt survives a
         // release-and-reclaim cycle, so ClaimedAt - CreatedAt stays non-negative even then.
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var queue = new EfJobQueue(db, time, maxAttempts: 8);
         var transactionId = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
@@ -571,8 +551,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
     [Fact]
     public async Task Handing_off_a_claimed_job_succeeds_it_and_queues_a_CategorizeReceipt_carrying_the_instruction()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var now = new DateTimeOffset(2026, 9, 26, 9, 0, 0, TimeSpan.Zero);
         var queue = new EfJobQueue(db, new FakeTimeProvider(now), maxAttempts: 8);
         var transactionId = await SeedTransactionAsync(db, now, TestContext.Current.CancellationToken);
@@ -599,8 +578,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
     [Fact]
     public async Task ClaimNonMoneyReceiptAsync_claims_a_pending_CategorizeReceipt_job_whose_receipt_is_a_copy()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var queue = new EfJobQueue(db, time, maxAttempts: 8);
         var transactionId = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
@@ -620,8 +598,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
     [Fact]
     public async Task ClaimNonMoneyReceiptAsync_ignores_a_pending_CategorizeReceipt_job_whose_receipt_is_a_sale()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var queue = new EfJobQueue(db, time, maxAttempts: 8);
         var transactionId = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);
@@ -640,8 +617,7 @@ public class EfJobQueueTests(PostgresFixture fixture)
     [Fact]
     public async Task Handing_off_a_job_this_worker_no_longer_owns_creates_nothing()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 26, 9, 0, 0, TimeSpan.Zero));
         var queue = new EfJobQueue(db, time, maxAttempts: 8);
         var transactionId = await SeedTransactionAsync(db, time.GetUtcNow(), TestContext.Current.CancellationToken);

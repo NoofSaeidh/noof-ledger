@@ -39,8 +39,7 @@ public class EfRecordEditorTests(PostgresFixture fixture)
     [Fact]
     public async Task Finds_a_record_by_its_echo_and_nothing_by_another_message()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = await SeedAsync(db);
         var editor = new EfRecordEditor(db, Clock);
 
@@ -53,8 +52,7 @@ public class EfRecordEditorTests(PostgresFixture fixture)
     [Fact]
     public async Task Cancelling_sets_Cancelled_and_records_what_it_was_before()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = await SeedAsync(db);
         var editor = new EfRecordEditor(db, Clock);
 
@@ -71,8 +69,7 @@ public class EfRecordEditorTests(PostgresFixture fixture)
     [Fact]
     public async Task Cancelling_twice_changes_nothing_the_second_time()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = await SeedAsync(db);
         var editor = new EfRecordEditor(db, Clock);
 
@@ -86,8 +83,7 @@ public class EfRecordEditorTests(PostgresFixture fixture)
     [Fact]
     public async Task Restoring_puts_back_the_status_from_before_the_cancellation()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = await SeedAsync(db, TransactionStatus.Failed);
         var editor = new EfRecordEditor(db, Clock);
         await editor.CancelAsync(transaction.Id, TestContext.Current.CancellationToken);
@@ -104,8 +100,7 @@ public class EfRecordEditorTests(PostgresFixture fixture)
     [Fact]
     public async Task Restoring_a_record_that_is_not_cancelled_does_nothing()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = await SeedAsync(db);
 
         (await new EfRecordEditor(db, Clock).RestoreAsync(transaction.Id, TestContext.Current.CancellationToken)).Should().BeFalse();
@@ -116,8 +111,7 @@ public class EfRecordEditorTests(PostgresFixture fixture)
     [Fact]
     public async Task A_reply_to_the_edit_prompt_finds_the_record_and_its_echo()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = await SeedAsync(db);
         var editor = new EfRecordEditor(db, Clock);
 
@@ -130,8 +124,7 @@ public class EfRecordEditorTests(PostgresFixture fixture)
     [Fact]
     public async Task Finds_a_record_by_the_persons_own_message()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = await SeedAsync(db);
 
         (await new EfRecordEditor(db, Clock).FindByUserMessageAsync(111, 5, TestContext.Current.CancellationToken))
@@ -145,8 +138,7 @@ public class EfRecordEditorTests(PostgresFixture fixture)
     [Fact]
     public async Task A_correction_on_a_receipt_transaction_still_queues_an_ordinary_Correct_job()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = await SeedAsync(db);
         db.Receipts.Add(new Receipt
         {
@@ -174,8 +166,7 @@ public class EfRecordEditorTests(PostgresFixture fixture)
     [Fact]
     public async Task A_correction_is_queued_once_even_when_telegram_delivers_the_reply_twice()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = await SeedAsync(db);
         var editor = new EfRecordEditor(db, Clock);
 
@@ -194,8 +185,7 @@ public class EfRecordEditorTests(PostgresFixture fixture)
     [Fact]
     public async Task A_corrections_instruction_day_is_the_replys_own_local_day_not_the_original_messages()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = await SeedAsync(db);
         var editor = new EfRecordEditor(db, Clock);
         // 22:30 UTC on the 23rd is already past midnight in Belgrade (UTC+2 in September) - the
@@ -212,8 +202,7 @@ public class EfRecordEditorTests(PostgresFixture fixture)
     [Fact]
     public async Task An_edited_original_replaces_the_raw_text_and_queues_a_fresh_reading()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = await SeedAsync(db);
         var editor = new EfRecordEditor(db, Clock);
 
@@ -227,8 +216,7 @@ public class EfRecordEditorTests(PostgresFixture fixture)
     [Fact]
     public async Task An_edit_that_leaves_the_text_as_it_was_queues_nothing()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = await SeedAsync(db);
 
         (await new EfRecordEditor(db, Clock).ReplaceRawTextAsync(transaction.Id, "кофе 250", TestContext.Current.CancellationToken))
@@ -240,8 +228,7 @@ public class EfRecordEditorTests(PostgresFixture fixture)
     [Fact]
     public async Task A_spoken_correction_queues_its_voice_for_transcription_once()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = await SeedAsync(db);
         var editor = new EfRecordEditor(db, Clock);
         var sentAt = new DateTimeOffset(2026, 9, 23, 22, 30, 0, TimeSpan.Zero);

@@ -71,8 +71,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task SaveExtractedAsync_round_trips_the_receipt_and_its_lines_with_exact_decimals()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = NewPhotoTransaction();
         db.Transactions.Add(transaction);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -108,8 +107,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task A_receipt_issued_at_a_Belgrade_offset_is_saved_and_read_back_as_the_same_instant()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = NewPhotoTransaction();
         db.Transactions.Add(transaction);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -127,8 +125,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task A_second_receipt_with_the_same_seller_and_fiscal_number_writes_nothing_and_names_the_first_transaction()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var first = NewPhotoTransaction();
         var second = NewPhotoTransaction();
         db.Transactions.AddRange(first, second);
@@ -156,8 +153,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task A_second_QR_decoded_vision_receipt_with_the_same_seller_and_QR_fiscal_number_is_a_duplicate()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var first = NewPhotoTransaction();
         var second = NewPhotoTransaction();
         db.Transactions.AddRange(first, second);
@@ -181,8 +177,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task A_replayed_save_for_the_same_transaction_with_a_fiscal_receipt_returns_the_existing_receipt_not_a_duplicate()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = NewPhotoTransaction();
         db.Transactions.Add(transaction);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -203,8 +198,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task A_replayed_save_for_the_same_transaction_with_a_vision_receipt_returns_the_existing_receipt()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = NewPhotoTransaction();
         db.Transactions.Add(transaction);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -223,8 +217,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task GetByTransactionAsync_returns_null_when_the_transaction_has_no_receipt()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
 
         var view = await store.GetByTransactionAsync(Guid.NewGuid(), TestContext.Current.CancellationToken);
@@ -235,8 +228,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task GetTelegramFileIdAsync_returns_the_captures_own_file_id()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = NewPhotoTransaction();
         db.Transactions.Add(transaction);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -251,8 +243,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task GetVerificationUrlAsync_returns_the_captures_own_link()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = NewLinkTransaction();
         db.Transactions.Add(transaction);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -267,8 +258,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task SaveExtractedAsync_enqueues_a_CategorizeReceipt_job_for_the_transaction()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = NewPhotoTransaction();
         db.Transactions.Add(transaction);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -285,8 +275,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task A_duplicate_receipt_enqueues_no_CategorizeReceipt_job_for_the_new_transaction()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var first = NewPhotoTransaction();
         var second = NewPhotoTransaction();
         db.Transactions.AddRange(first, second);
@@ -305,8 +294,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task SaveExtractedAsync_with_enqueueCategorization_false_saves_the_receipt_but_no_job()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = NewPhotoTransaction();
         db.Transactions.Add(transaction);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -325,8 +313,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task EnqueueCategorizationAsync_queues_a_CategorizeReceipt_job_with_the_echo_message_id()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = NewPhotoTransaction();
         db.Transactions.Add(transaction);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -348,8 +335,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task EnqueueCategorizationAsync_pressed_twice_for_the_same_echo_message_is_a_no_op_the_second_time()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = NewPhotoTransaction();
         db.Transactions.Add(transaction);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -374,8 +360,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task EnqueueCategorizationAsync_returns_false_and_inserts_nothing_once_the_transaction_is_cancelled()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = NewPhotoTransaction();
         db.Transactions.Add(transaction);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -406,8 +391,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task EnqueueCategorizationAsync_blocks_on_a_concurrent_Cancel_and_then_honours_its_result()
     {
-        await using var dbA = await fixture.CreateContextAsync();
-        await dbA.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var dbA = await fixture.CreateMigratedContextAsync();
         var transaction = NewPhotoTransaction();
         dbA.Transactions.Add(transaction);
         await dbA.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -447,8 +431,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task IsAwaitingConfirmationAsync_is_true_for_a_vision_receipt_saved_without_a_job()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = NewPhotoTransaction();
         db.Transactions.Add(transaction);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -467,8 +450,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task IsAwaitingConfirmationAsync_stays_true_after_the_transaction_is_cancelled()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = NewPhotoTransaction();
         db.Transactions.Add(transaction);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -487,8 +469,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task IsAwaitingConfirmationAsync_is_false_once_Record_anyway_has_queued_the_job()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = NewPhotoTransaction();
         db.Transactions.Add(transaction);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -505,8 +486,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task IsAwaitingConfirmationAsync_is_false_for_a_fiscal_QR_receipt_with_no_job()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = NewPhotoTransaction();
         db.Transactions.Add(transaction);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -521,8 +501,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task IsAwaitingConfirmationAsync_is_false_when_no_receipt_exists_for_the_transaction()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = NewPhotoTransaction();
         db.Transactions.Add(transaction);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);

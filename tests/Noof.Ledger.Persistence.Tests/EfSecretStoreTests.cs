@@ -23,8 +23,7 @@ public class EfSecretStoreTests(PostgresFixture fixture) : IDisposable
     [Fact]
     public async Task An_unknown_key_returns_Missing()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var store = CreateStore(db);
 
         var result = await store.GetAsync("does-not-exist", TestContext.Current.CancellationToken);
@@ -35,8 +34,7 @@ public class EfSecretStoreTests(PostgresFixture fixture) : IDisposable
     [Fact]
     public async Task Setting_then_getting_round_trips_the_plaintext()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var store = CreateStore(db);
 
         await store.SetAsync(ApiKey, "sk-ant-secret", TestContext.Current.CancellationToken);
@@ -52,8 +50,7 @@ public class EfSecretStoreTests(PostgresFixture fixture) : IDisposable
         // second write silently inserted instead of updating — on the only account-recovery path
         // there was. AppSecret's primary key IS the lookup key, so there is no separate surrogate-key
         // bug possible here, but this still catches the simpler failure of a SetAsync that always inserts.
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var store = CreateStore(db);
 
         await store.SetAsync(ApiKey, "first-value", TestContext.Current.CancellationToken);
@@ -69,8 +66,7 @@ public class EfSecretStoreTests(PostgresFixture fixture) : IDisposable
     [Fact]
     public async Task Setting_the_same_key_twice_advances_updated_at_using_the_injected_clock()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
         var store = CreateStore(db, clock);
 
@@ -86,8 +82,7 @@ public class EfSecretStoreTests(PostgresFixture fixture) : IDisposable
     [Fact]
     public async Task A_hand_edited_ciphertext_column_returns_Unreadable_instead_of_throwing()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var store = CreateStore(db);
 
         await db.Database.ExecuteSqlAsync(
@@ -102,8 +97,7 @@ public class EfSecretStoreTests(PostgresFixture fixture) : IDisposable
     [Fact]
     public async Task Status_reports_missing_for_a_key_that_was_never_set()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var store = CreateStore(db);
 
         var status = await store.GetStatusAsync("never-set", TestContext.Current.CancellationToken);
@@ -118,8 +112,7 @@ public class EfSecretStoreTests(PostgresFixture fixture) : IDisposable
         var clock = new FakeTimeProvider();
         clock.SetUtcNow(new DateTimeOffset(2026, 9, 21, 10, 0, 0, TimeSpan.Zero));
 
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var store = CreateStore(db, clock);
 
         await store.SetAsync(ApiKey, "sk-whatever", TestContext.Current.CancellationToken);
@@ -133,8 +126,7 @@ public class EfSecretStoreTests(PostgresFixture fixture) : IDisposable
     [Fact]
     public async Task Status_reports_unreadable_when_the_ciphertext_will_not_decrypt()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var store = CreateStore(db);
 
         await store.SetAsync(SecretKeys.TelegramBotToken, "123456:real-looking-token", TestContext.Current.CancellationToken);
@@ -167,8 +159,7 @@ public class EfSecretStoreTests(PostgresFixture fixture) : IDisposable
     [Fact]
     public async Task Concurrent_TrySetIfMissingAsync_calls_for_the_same_key_let_exactly_one_caller_win()
     {
-        await using var dbA = await fixture.CreateContextAsync();
-        await dbA.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var dbA = await fixture.CreateMigratedContextAsync();
 
         var optionsB = new DbContextOptionsBuilder<LedgerDbContext>()
             .UseNpgsql(dbA.Database.GetConnectionString()!)

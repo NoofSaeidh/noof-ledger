@@ -9,8 +9,7 @@ public class AppLogSchemaTests(PostgresFixture fixture)
     [Fact]
     public async Task The_table_has_exactly_the_contracts_columns()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
 
         var columns = await db.Database.SqlQueryRaw<string>(
             """
@@ -35,8 +34,7 @@ public class AppLogSchemaTests(PostgresFixture fixture)
     [Fact]
     public async Task Indexes_on_logged_at_transaction_id_and_level_logged_at_all_exist()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
 
         var indexes = await db.Database.SqlQueryRaw<string>(
             """
