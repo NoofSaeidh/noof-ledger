@@ -262,6 +262,8 @@ public class SufReceiptClientTests
 
         result.Receipt.Should().BeNull();
         result.Failure.Should().NotBeNull();
+        result.Failure!.Reason.Should().Be("The Tax Administration's journal could not be parsed.",
+            "a regression back into an unhandled FormatException, or a change to the fixed reason text, must fail this test rather than pass silently");
     }
 
     [Fact]
