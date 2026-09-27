@@ -75,7 +75,7 @@ public class SlowOperationOptionsWiringTests
     {
         using var factory = Factory();
 
-        var verificationUrl = factory.Services.GetRequiredService<Noof.Ledger.Application.Receipts.FiscalVerificationUrl>();
+        var verificationUrl = factory.Services.GetRequiredService<Noof.Ledger.Application.Receipts.IFiscalVerificationUrl>();
 
         verificationUrl.Prefix.Should().Be("https://suf.purs.gov.rs/v/?vl=");
         verificationUrl.Host.Should().Be("suf.purs.gov.rs");

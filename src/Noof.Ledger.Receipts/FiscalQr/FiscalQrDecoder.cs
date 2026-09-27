@@ -7,7 +7,7 @@ namespace Noof.Ledger.Receipts.FiscalQr;
 
 // Byte layout ported from turanjanin/serbian-fiscal-receipts-parser (MIT):
 // https://github.com/turanjanin/serbian-fiscal-receipts-parser
-internal sealed class FiscalQrDecoder(FiscalVerificationUrl verificationUrl) : IFiscalQrDecoder
+internal sealed class FiscalQrDecoder(IFiscalVerificationUrl verificationUrl) : IFiscalQrDecoder
 {
     const int HeaderLength = 44;
     const int SignatureLength = 256;

@@ -6,7 +6,7 @@ namespace Noof.Ledger.Telegram;
 // caption ("lunch https://suf.purs.gov.rs/v/?vl=...") is still recognised. Decoding the link itself
 // is IFiscalQrDecoder's job (Noof.Ledger.Receipts); the match itself is FiscalVerificationUrl.TryFind
 // (Noof.Ledger.Application), so this and the model-prompt caption stripping share one pattern.
-internal sealed class ReceiptLinkDetector(FiscalVerificationUrl verificationUrl)
+internal sealed class ReceiptLinkDetector(IFiscalVerificationUrl verificationUrl)
 {
     public bool TryFind(string text, out string url) => verificationUrl.TryFind(text, out url);
 }

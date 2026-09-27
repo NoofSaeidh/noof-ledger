@@ -21,7 +21,7 @@ internal sealed class CategorizationWorker(
     IRecordEcho recordEcho,
     IDatabaseGate gate,
     IOperationTimer timer,
-    FiscalVerificationUrl verificationUrl,
+    IFiscalVerificationUrl verificationUrl,
     ILogger<CategorizationWorker> logger)
     : BackgroundService
 {

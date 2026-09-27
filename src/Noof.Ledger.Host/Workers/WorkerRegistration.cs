@@ -24,7 +24,7 @@ internal static class WorkerRegistration
             sp.GetRequiredService<IRecordEcho>(),
             sp.GetRequiredService<IDatabaseGate>(),
             sp.GetRequiredService<IOperationTimer>(),
-            sp.GetRequiredService<FiscalVerificationUrl>(),
+            sp.GetRequiredService<IFiscalVerificationUrl>(),
             sp.GetRequiredService<ILogger<CategorizationWorker>>()));
 
         services.AddHostedService(sp => new ReceiptCategorizationWorker(
@@ -36,7 +36,7 @@ internal static class WorkerRegistration
             captureTimeZone,
             sp.GetRequiredService<IDatabaseGate>(),
             sp.GetRequiredService<IOperationTimer>(),
-            sp.GetRequiredService<FiscalVerificationUrl>(),
+            sp.GetRequiredService<IFiscalVerificationUrl>(),
             sp.GetRequiredService<ILogger<ReceiptCategorizationWorker>>()));
 
         services.AddHostedService(sp => new TranscriptionWorker(

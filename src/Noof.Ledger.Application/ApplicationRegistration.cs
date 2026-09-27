@@ -27,7 +27,7 @@ public static class ApplicationRegistration
 
         // Constructed here, not lazily behind DI, so a bad Receipts:VerificationUrlPrefix fails
         // startup immediately instead of on the first message with a fiscal link.
-        services.AddSingleton(new FiscalVerificationUrl(fiscalVerificationUrlOptions));
+        services.AddSingleton<IFiscalVerificationUrl>(new FiscalVerificationUrl(fiscalVerificationUrlOptions));
 
         return services;
     }

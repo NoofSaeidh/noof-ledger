@@ -25,7 +25,7 @@ internal sealed class ReceiptCategorizationWorker(
     TimeZoneInfo captureTimeZone,
     IDatabaseGate gate,
     IOperationTimer timer,
-    FiscalVerificationUrl verificationUrl,
+    IFiscalVerificationUrl verificationUrl,
     ILogger<ReceiptCategorizationWorker> logger)
     : BackgroundService
 {

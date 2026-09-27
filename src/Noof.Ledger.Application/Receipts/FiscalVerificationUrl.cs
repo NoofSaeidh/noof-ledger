@@ -1,10 +1,11 @@
 namespace Noof.Ledger.Application.Receipts;
 
-// The one source of the Tax Administration's fiscal verification URL - ReceiptLinkDetector
-// (Noof.Ledger.Telegram) matches Prefix as a literal substring, and FiscalQrDecoder
-// (Noof.Ledger.Receipts) refuses any URL whose host or path does not match Host/PathPrefix, so a QR
-// pointing elsewhere is never treated as this Tax Administration's own receipt.
-public sealed class FiscalVerificationUrl
+// The one source of the Tax Administration's fiscal verification URL - Noof.Ledger.Telegram matches
+// Prefix as a literal substring, and FiscalQrDecoder (Noof.Ledger.Receipts) refuses any URL whose host
+// or path does not match Host/PathPrefix, so a QR pointing elsewhere is never treated as this Tax
+// Administration's own receipt. Internal: consumers across assemblies depend on IFiscalVerificationUrl,
+// registered by AddNoofApplication.
+internal sealed class FiscalVerificationUrl : IFiscalVerificationUrl
 {
     static readonly char[] Terminators = [' ', '\t', '\r', '\n'];
 
