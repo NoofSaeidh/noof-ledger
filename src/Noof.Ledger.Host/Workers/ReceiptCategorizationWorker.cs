@@ -65,11 +65,26 @@ internal sealed class ReceiptCategorizationWorker(
 
             // Checked before claiming, for CategorizationWorker's own reason: a claim spends an
             // attempt and nothing gives it back.
-            if (!await modelProvider.IsConfiguredAsync(cancellationToken))
-                return CategorizationTickResult.Idle;
+            var ordinaryClaimGated = !await modelProvider.IsConfiguredAsync(cancellationToken) || now < accountCooldownUntil;
 
-            if (now < accountCooldownUntil)
-                return CategorizationTickResult.Idle;
+            if (ordinaryClaimGated)
+            {
+                // Tried only while the ordinary claim is gated (no key configured, or inside the
+                // account cooldown): a Copy/Training/Proforma/Advance receipt is cancelled without
+                // ever calling the model (ReportNotRecordedAsync), so it must not be stuck behind
+                // IModelProvider like a money receipt. When the ordinary claim isn't gated it already
+                // covers non-money receipts too (ProcessClaimedJobAsync's IsNonMoneyKind check), so
+                // trying this claim on every tick would only add an extra UPDATE and let a non-money
+                // receipt jump the ordinary queue's run_after order.
+                using var claimNonMoney = timer.Start(logger, TimedOperations.DbClaimJob);
+                var nonMoneyJob = await jobQueue.ClaimNonMoneyReceiptAsync(workerId, options.Lease, cancellationToken);
+                claimNonMoney.Stop(onlyIfSlow: nonMoneyJob is null);
+                if (nonMoneyJob is null)
+                    return CategorizationTickResult.Idle;
+
+                await ProcessClaimedJobAsync(scope, jobQueue, nonMoneyJob, cancellationToken);
+                return CategorizationTickResult.Processed;
+            }
 
             using var claim = timer.Start(logger, TimedOperations.DbClaimJob);
             var job = await jobQueue.ClaimAsync(workerId, ClaimableKinds, options.Lease, cancellationToken);

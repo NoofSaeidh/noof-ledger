@@ -12,6 +12,16 @@ public interface IJobQueue
     Task<CategorizationJob?> ClaimAsync(
         string workerId, IReadOnlyCollection<JobKind> kinds, TimeSpan lease, CancellationToken cancellationToken);
 
+    // Claims one due CategorizeReceipt job whose receipt is a non-money kind
+    // (ReceiptKindExtensions.IsNonMoneyKind), regardless of whether a model key is configured. A
+    // Copy/Training/Proforma/Advance slip is recognised and cancelled without ever calling the model
+    // (ReceiptCategorizationWorker's own short-circuit), so gating it behind IModelProvider like every
+    // other CategorizeReceipt job left it stuck at "Categorising..." forever with no key configured.
+    // Kept separate from ClaimAsync so every other job kind, and a money receipt, keep gating on the
+    // model key exactly as before - this claim never burns an attempt on a job that would otherwise
+    // wait indefinitely for one.
+    Task<CategorizationJob?> ClaimNonMoneyReceiptAsync(string workerId, TimeSpan lease, CancellationToken cancellationToken);
+
     // Every completion verb below only affects a job that is still Claimed by this exact workerId -
     // claimed_by and status both participate in the WHERE clause. A worker whose lease was released
     // and reclaimed by someone else gets JobCompletionOutcome.NotOwned instead of silently mutating
