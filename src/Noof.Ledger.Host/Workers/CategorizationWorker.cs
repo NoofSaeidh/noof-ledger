@@ -21,6 +21,7 @@ internal sealed class CategorizationWorker(
     IRecordEcho recordEcho,
     IDatabaseGate gate,
     IOperationTimer timer,
+    FiscalVerificationUrl verificationUrl,
     ILogger<CategorizationWorker> logger)
     : BackgroundService
 {
@@ -136,7 +137,12 @@ internal sealed class CategorizationWorker(
 
             var categories = await categoryCatalog.ActiveAsync(cancellationToken);
             var aliases = await merchantDirectory.AliasesAsync(cancellationToken);
-            var hints = merchantScan.Matches(sub.RawText, aliases, options.MerchantHintLimit)
+            // A link capture whose extraction failed terminally has no receipt row, so
+            // TryRouteToReceiptAsync above never intercepted it - RawText here can still be the whole
+            // fiscal verification URL, vl payload included, and that must never reach the model
+            // (CLAUDE.md, "...and never in a model prompt either").
+            var rawTextForModel = verificationUrl.StripUrl(sub.RawText) ?? "";
+            var hints = merchantScan.Matches(rawTextForModel, aliases, options.MerchantHintLimit)
                 .DistinctBy(alias => alias.MerchantId)
                 .Select(alias => new MerchantOption(alias.MerchantId, alias.DisplayName))
                 .ToList();
@@ -146,7 +152,7 @@ internal sealed class CategorizationWorker(
             optionsLoading.Stop();
 
             var request = new CategorizationRequest(
-                sub.RawText,
+                rawTextForModel,
                 TodayFor(job, sub),
                 [.. categories.Select(category => new CategoryOption(category.Slug, category.NameEn, category.NameRu, category.ParentSlug))],
                 hints,

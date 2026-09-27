@@ -27,4 +27,17 @@ public class FiscalVerificationUrlTests
         verificationUrl.PathPrefix.Should().Be("/v/");
         verificationUrl.Prefix.Should().Be("https://suf.purs.gov.rs/v/?vl=");
     }
+
+    static readonly FiscalVerificationUrl VerificationUrl =
+        new(new FiscalVerificationUrlOptions { VerificationUrlPrefix = "https://suf.purs.gov.rs/v/?vl=" });
+
+    [Fact]
+    public void StripUrl_removes_every_verification_url_not_only_the_first()
+    {
+        var stripped = VerificationUrl.StripUrl(
+            "lunch https://suf.purs.gov.rs/v/?vl=FIRST00001 and https://suf.purs.gov.rs/v/?vl=SECOND0002 too");
+
+        stripped.Should().NotContain("suf.purs.gov.rs");
+        stripped.Should().Be("lunch and too");
+    }
 }

@@ -24,6 +24,7 @@ internal static class WorkerRegistration
             sp.GetRequiredService<IRecordEcho>(),
             sp.GetRequiredService<IDatabaseGate>(),
             sp.GetRequiredService<IOperationTimer>(),
+            sp.GetRequiredService<FiscalVerificationUrl>(),
             sp.GetRequiredService<ILogger<CategorizationWorker>>()));
 
         services.AddHostedService(sp => new ReceiptCategorizationWorker(

@@ -45,19 +45,20 @@ public sealed class FiscalVerificationUrl
     }
 
     // Item A (Copilot, Phase 6 review): a text-link capture's RawText carries the whole verification
-    // URL, including the vl payload - that must never reach a model prompt. Strips the detected URL,
-    // collapsing whatever whitespace it leaves behind, and returns null when nothing but the URL
-    // remains (so an empty caption is never sent as an empty string).
+    // URL, including the vl payload - that must never reach a model prompt. Strips every detected URL
+    // (a message can carry more than one - important finding, fix round 2), collapsing whatever
+    // whitespace they leave behind, and returns null when nothing but the URL(s) remain (so an empty
+    // caption is never sent as an empty string).
     public string? StripUrl(string? text)
     {
         if (text is null)
             return null;
 
-        if (!TryFind(text, out var url))
-            return text;
+        var remaining = text;
+        while (TryFind(remaining, out var url))
+            remaining = remaining.Remove(remaining.IndexOf(url, StringComparison.Ordinal), url.Length);
 
-        var withoutUrl = text.Remove(text.IndexOf(url, StringComparison.Ordinal), url.Length);
-        var collapsed = string.Join(' ', withoutUrl.Split(Terminators, StringSplitOptions.RemoveEmptyEntries));
+        var collapsed = string.Join(' ', remaining.Split(Terminators, StringSplitOptions.RemoveEmptyEntries));
         return collapsed.Length == 0 ? null : collapsed;
     }
 }

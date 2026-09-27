@@ -136,17 +136,23 @@ public class CategorizationWorkerTests
 
     static CategorizationSubject Subject(
         int? botMessageId = 42, string rawText = "Bread 250 RSD", DateOnly? occurredOn = null,
-        TransactionStatus status = TransactionStatus.Captured, IReadOnlyList<RecordedLine>? lines = null, Guid? walletId = null) =>
-        new(TransactionId, rawText, 111L, botMessageId, "Cash", status, SentOn, occurredOn ?? SentOn, lines ?? [], WalletId: walletId);
+        TransactionStatus status = TransactionStatus.Captured, IReadOnlyList<RecordedLine>? lines = null, Guid? walletId = null,
+        CaptureKind captureKind = CaptureKind.Text) =>
+        new(TransactionId, rawText, 111L, botMessageId, "Cash", status, SentOn, occurredOn ?? SentOn, lines ?? [], captureKind, WalletId: walletId);
 
     static CategorizationProposal OneGroceryLine(decimal amount = 250m, string currency = "RSD") =>
         new([new ProposedLineItem("Bread", amount, currency, "groceries", null, null)]);
 
+    static readonly AppReceipts.FiscalVerificationUrl VerificationUrl =
+        new(new AppReceipts.FiscalVerificationUrlOptions { VerificationUrlPrefix = "https://suf.purs.gov.rs/v/?vl=" });
+
     static CategorizationWorker CreateWorker(
         IServiceScopeFactory scopeFactory, FakeTimeProvider time, CategorizationWorkerOptions? options = null,
-        IDatabaseGate? gate = null, CapturingLogger<CategorizationWorker>? logger = null, IOperationTimer? timer = null) =>
+        IDatabaseGate? gate = null, CapturingLogger<CategorizationWorker>? logger = null, IOperationTimer? timer = null,
+        AppReceipts.FiscalVerificationUrl? verificationUrl = null) =>
         new(scopeFactory, time, options ?? new CategorizationWorkerOptions(), WorkerId,
             Mapper, Scan, Echo, gate ?? ReadyGate(), timer ?? new OperationTimer(time, new SlowOperationOptions()),
+            verificationUrl ?? VerificationUrl,
             logger ?? new CapturingLogger<CategorizationWorker>());
 
     static IDatabaseGate ReadyGate()
@@ -1605,6 +1611,57 @@ public class CategorizationWorkerTests
             Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<DateTimeOffset>(),
             Arg.Any<CancellationToken>());
         await categorizer.Received(1).ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    // Important finding, fix round 2 (Fable 5.1 review): a link capture whose extraction failed
+    // terminally has no receipt row, so TryRouteToReceiptAsync falls through and RawText - the whole
+    // verification URL, vl payload included - would otherwise reach categorize_receipt's Message
+    // field. "...and never in a model prompt either" (CLAUDE.md) is only true once this is stripped.
+    [Fact]
+    public async Task A_correction_on_a_failed_link_capture_never_sends_the_verification_url_to_the_model()
+    {
+        var jobQueue = QueueWith(Job(kind: JobKind.Correct, instruction: "actually groceries"));
+        var receiptStore = NoReceiptStore();
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(
+                rawText: "lunch https://suf.purs.gov.rs/v/?vl=A1B2C3D4E5", status: TransactionStatus.Failed,
+                captureKind: CaptureKind.Photo, lines: [StoredBread]));
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine());
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer, receiptStore: receiptStore),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await categorizer.Received(1).ProposeAsync(
+            Arg.Is<CategorizationRequest>(request => !request.RawText.Contains("suf.purs.gov.rs")), Arg.Any<CancellationToken>());
+    }
+
+    // Important finding, fix round 2: two receipt links pasted in one message are captured as one
+    // link transaction whose RawText holds both - FiscalVerificationUrl.StripUrl used to remove only
+    // the first (TryFind finds the first match), leaving the second vl reaching the model.
+    [Fact]
+    public async Task A_correction_on_a_failed_link_capture_strips_every_verification_url_not_only_the_first()
+    {
+        var jobQueue = QueueWith(Job(kind: JobKind.Correct, instruction: "actually groceries"));
+        var receiptStore = NoReceiptStore();
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(
+                rawText: "https://suf.purs.gov.rs/v/?vl=FIRST00001 https://suf.purs.gov.rs/v/?vl=SECOND0002",
+                status: TransactionStatus.Failed, captureKind: CaptureKind.Photo, lines: [StoredBread]));
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine());
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer, receiptStore: receiptStore),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await categorizer.Received(1).ProposeAsync(
+            Arg.Is<CategorizationRequest>(request => !request.RawText.Contains("suf.purs.gov.rs")), Arg.Any<CancellationToken>());
     }
 
     // N-4: EfJobQueue.ClaimAsync's own same-transaction ordering normally keeps a Correct/Reinterpret
