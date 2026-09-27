@@ -38,8 +38,9 @@ wallets and currencies.
 > hours. The photo itself is never stored — only Telegram's file id — and every step is on the
 > transaction's trace page.
 >
-> 1737 tests — 1724 passing, 13 skipped (they call a live model or a live voice provider and need
-> keys), none failing. Browser tests included.
+> 1744 tests — 1731 passing, 13 skipped (they call a live model or a live voice provider and need
+> keys). One known timing race fails now and then under full-suite load (`docs/BACKLOG.md`). Browser
+> tests included.
 >
 > Still missing: **exchange-office slips** (Phase 7), **currency exchange** (a spend in a currency
 > other than its wallet's own is recorded as-is, in its own currency, not converted), and editing a

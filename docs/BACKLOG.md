@@ -961,7 +961,11 @@ instrumenting the next time it is seen live rather than chasing from this descri
   (`LoadTimeout`) before it flushes the startup buffer at the compiled-in default, so a load slower
   than that lets the startup burst through. It passed on an immediate rerun and was not changed in
   Phase 6. It failed once more on 2026-09-26 in a full run with the checkpoint stalls above, and
-  passed in every run after the `FILE_COPY` fix. Revisit if it recurs on a healthy server.
+  passed in every run after the `FILE_COPY` fix. It recurred on 2026-09-27 in the full run after
+  Copilot round 7, on a healthy server under full-suite load, with the same row, then passed 3 of 3
+  when re-run alone. So this is a real timing race, not server degradation: the buffer times out to
+  the compiled-in default before the stored level arrives. The fix is to make `ReadyGatedBufferSink`
+  wait for the stored level, or for a definite "none stored", instead of flushing at a 5 s timeout.
 - **`SecretRedactionSentinelTests` hits an `IOException` in its cleanup — closed 2026-09-26 (Phase 6)**,
   not its assertions:
   `Directory.Delete(logDirectory)` in the `finally` runs while the host's file sink still holds
@@ -1186,3 +1190,15 @@ be missing, stale or simply wrong. The voice path (`GetInfoAndDownloadFile` into
 `MemoryStream`) has never had an equivalent check — confirmed absent from the start (`git log -S
 MaxBytes` on it is empty), not a regression. Worth the same guard once a voice note has actually been
 seen large enough to matter; no such case has shown up yet.
+
+**Copilot findings deferred at the PR #3 close** (operator, 2026-09-27: after round 7, only security
+bugs are fixed in this PR; the rest is recorded here).
+- **The trace page's summary and receipt section order a receipt's lines differently.** The summary
+  query in `EfTransactionTrace` (~:117) orders line items by `li.Id`, a random GUID, while the receipt
+  section orders by `ReceiptLine.Ordinal`. The summary should order by `li.Ordinal` too, with a
+  multi-line regression case, so both follow the receipt-order contract.
+- **`TestHostLoggingDeleteTests` assumes Windows file-sharing semantics.** On a Unix runner an open
+  file can still be unlinked, so the "directory remains while held" assertion fails. Harmless today
+  because the app and its tests run only on Windows. Make that assertion conditional on
+  `OperatingSystem.IsWindows()`, keeping the final-cleanup assertion on every OS, if the suite ever
+  runs on Linux or CI.
