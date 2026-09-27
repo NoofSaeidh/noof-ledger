@@ -2264,7 +2264,8 @@ Expected: PASS.
 - [ ] **Step 8: Generate the screenshots and look at them**
 
 Run: `.\run.ps1 screenshots` (a few minutes: build, refresh, host start, 28 pictures).
-Expected: "28 screenshot(s) changed" (20 app + 8 Telegram) plus the gallery. Open at least
+Expected: "28 screenshot(s) changed" (20 app + 8 Telegram) plus the gallery. *(As planned. Since Phase 6
+merged there are 37: 13 screens at two sizes and 11 Telegram pictures.)* Open at least
 `docs/screenshots/app/dashboard-desktop.png`, `app/transactions-phone.png`, `app/trace-desktop.png`,
 `telegram/correction.png` and `telegram/health.png` (the Read tool shows images): the dashboard shows
 six wallets with the balances from `MockLedgerTests`, the trace shows four stages and two revisions,

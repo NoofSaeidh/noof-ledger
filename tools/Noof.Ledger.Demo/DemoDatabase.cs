@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Npgsql;
 
 namespace Noof.Ledger.Demo;
@@ -7,6 +8,9 @@ internal static class DemoDatabase
     public const string Name = "noof_ledger_demo";
     public const int Port = 5264;
     const string TestDatabasePrefix = "noof_test_";
+
+    // The name goes into DROP/CREATE DATABASE as a quoted identifier, so nothing but these characters may reach it.
+    static readonly Regex TestDatabaseName = new($@"^{TestDatabasePrefix}[a-z0-9]+\z", RegexOptions.CultureInvariant);
 
     public static string DefaultCredentialFile { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NoofLedger", "db.connection");
@@ -29,7 +33,7 @@ internal static class DemoDatabase
 
     public static void EnsureDisposable(string database)
     {
-        if (database != Name && !database.StartsWith(TestDatabasePrefix, StringComparison.Ordinal))
+        if (database != Name && !TestDatabaseName.IsMatch(database))
             throw new InvalidOperationException(
                 $"Refusing to touch database '{database}': the demo tool only rebuilds {Name} or a {TestDatabasePrefix}* database.");
     }

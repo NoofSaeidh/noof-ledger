@@ -141,7 +141,7 @@ the picture changes. Phone width, device scale 2. One picture per case:
 | `expense` | `coffee 350 rsd` → the recorded echo with Cancel / Edit |
 | `multi-line` | a multi-line message with a merchant → the echo listing each line |
 | `income` | `salary 2800 eur` → the income echo |
-| `balance` | `wise balance 3050` → the balance statement echo (matches / adjusted) |
+| `balance` | `wise balance 5700` → the balance statement echo (adjusted from 5720.30) |
 | `cancel-restore` | a cancelled echo with Restore |
 | `correction` | Edit → "What should I fix?" → `no, 3900` → the corrected echo |
 | `failure` | an unreadable message → the failure echo with Edit |

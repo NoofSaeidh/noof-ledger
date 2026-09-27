@@ -6,7 +6,9 @@ internal static class DemoCommands
 {
     public static async Task<int> RefreshAsync()
     {
-        await RefreshDemoAsync(DemoPaths.ForOperator(), CancellationToken.None);
+        var paths = DemoPaths.ForOperator();
+        using var exclusive = DemoLock.Acquire(paths);
+        await RefreshDemoAsync(paths, CancellationToken.None);
         Console.WriteLine($"{DemoDatabase.Name} refreshed with the mock data.");
         return 0;
     }
@@ -14,6 +16,7 @@ internal static class DemoCommands
     public static async Task<int> StartAsync()
     {
         var paths = DemoPaths.ForOperator();
+        using var exclusive = DemoLock.Acquire(paths);
         var connectionString = await RefreshDemoAsync(paths, CancellationToken.None);
 
         using var process = Process.Start(DemoHost.StartInfo(connectionString, paths, redirect: false))

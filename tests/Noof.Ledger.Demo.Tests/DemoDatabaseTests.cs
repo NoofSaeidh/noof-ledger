@@ -21,6 +21,8 @@ public sealed class DemoDatabaseTests
     [InlineData("noof_ledger_test_template")]
     [InlineData("postgres")]
     [InlineData("noof_ledger_demo_old")]
+    [InlineData("noof_test_")]
+    [InlineData("noof_test_x\"; DROP DATABASE noof_ledger; --")]
     public void Any_other_database_is_refused(string database)
     {
         var act = () => DemoDatabase.For(Admin, database);

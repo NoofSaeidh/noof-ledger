@@ -8,6 +8,7 @@ internal static class ShotsCommand
     public static async Task<int> RunAsync()
     {
         var paths = DemoPaths.ForOperator();
+        using var exclusive = DemoLock.Acquire(paths);
         var connectionString = await DemoCommands.RefreshDemoAsync(paths, CancellationToken.None);
         await using var host = await DemoHost.StartAsync(connectionString, paths, CancellationToken.None);
 
