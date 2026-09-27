@@ -105,6 +105,25 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task A_receipt_issued_at_a_Belgrade_offset_is_saved_and_read_back_as_the_same_instant()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        var transaction = NewPhotoTransaction();
+        db.Transactions.Add(transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+        var issuedInBelgrade = new DateTimeOffset(2026, 9, 25, 12, 30, 0, TimeSpan.FromHours(2));
+
+        await store.SaveExtractedAsync(
+            transaction.Id, NewExtractedReceipt() with { IssuedAt = issuedInBelgrade }, "photo-file-1", TestContext.Current.CancellationToken);
+
+        var view = await store.GetByTransactionAsync(transaction.Id, TestContext.Current.CancellationToken);
+        view!.IssuedAt.Should().Be(issuedInBelgrade);
+    }
+
+    [Fact]
     public async Task A_second_receipt_with_the_same_seller_and_fiscal_number_writes_nothing_and_names_the_first_transaction()
     {
         await using var db = await fixture.CreateContextAsync();

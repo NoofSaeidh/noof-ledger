@@ -24,7 +24,8 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
             SellerAddress = receipt.SellerAddress,
             LocationName = receipt.LocationName,
             FiscalNumber = receipt.FiscalNumber,
-            IssuedAt = receipt.IssuedAt,
+            // Npgsql writes timestamptz only from an offset-0 value; the parsers stamp Belgrade's offset.
+            IssuedAt = receipt.IssuedAt?.ToUniversalTime(),
             Total = new Money(receipt.Total, receipt.Currency),
             Kind = receipt.Kind,
             PaymentMethod = receipt.PaymentMethod,
