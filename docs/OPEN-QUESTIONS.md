@@ -610,3 +610,31 @@ receipt, never from a correction.
   same way `HandleModelFailureAsync` does, logs Warning 1210 and a `StageFailed` row at `Categorized`, and
   calls `NotifyFailureAsync` so the operator sees the `ComposeCorrectionFailure` echo — `docs/BACKLOG.md`
   has the full mechanism.
+- **A real Serbian fiscal QR is dense — version 22, 105x105 modules** (`QrDensityProbe`, built from
+  `SyntheticQrPayloadBuilder`'s default, non-large-block payload: 796 characters of
+  `https://suf.purs.gov.rs/v/?vl=...`). At the resolution Telegram actually delivers a compressed
+  photo (≤1280px long side, JPEG ~q80) the QR occupies only 15–30% of the frame on a typical receipt
+  photo, which puts it at roughly 1.6–2.7 pixels per module — the regime that produced the production
+  "Vision used: no QR" failure. `ZxingQrReaderRealisticPhotoTests` benchmarks this with synthetic
+  photos (a receipt-shaped canvas, text-noise, the QR placed and JPEG-compressed the same way);
+  measured before any change, sweeping width fraction 14–30% (clean, no blur/rotation/lighting):
+  17/18/19/21/29/30% decoded, 14/15/16/20/22–28% did not — a chaotic, non-monotonic pattern, not a
+  clean density cliff. Four further techniques were then tried, one at a time, against every failing
+  case from that sweep plus 6 compounded cases (rotation + blur + uneven lighting together): additional
+  upscale factors (1.5x, 3x alongside the existing 2x), a `GlobalHistogramBinarizer` fallback next to
+  the default `HybridBinarizer`, a fixed contrast-stretch + grayscale pass, an unsharp-mask sharpen
+  pass, and — when `TryHarder` located enough finder-pattern result points to place one — a crop to
+  that region enlarged 4x. **None of the five moved a single case in either direction**, confirmed by
+  re-running the exact width sweep after each addition and getting the byte-identical pass/fail
+  pattern every time. Conclusion: once Telegram's JPEG has quantised a QR at this module density, the
+  information a decoder needs is already gone or already there — resizing, re-binarizing or
+  sharpening the *decoded* pixels afterwards cannot recover it, because none of those steps can add
+  information the lossy encode already discarded. `ZxingQrReader` therefore ships unchanged from
+  before this investigation (still: direct decode, then one 2x upscale of a ≤1600px-capped copy, both
+  attempts under `TryHarder`/`TryInverted`); adding the untried techniques back in was measured to cost
+  10x–20x the decode latency (0.1–0.4s → 2.5–4s per image) for zero benefit, so they were not kept.
+  `ZxingQrReaderRealisticPhotoTests` keeps the six width/rotation combinations confirmed to decode
+  reliably as a permanent regression guard on this density boundary. The practical mitigation for the
+  cases that don't decode is operational, not algorithmic: `ops/RUNBOOK.md`'s Receipts section now
+  tells the operator to send the receipt as a file (Telegram delivers image documents uncompressed) or
+  to send the QR's own link as text.

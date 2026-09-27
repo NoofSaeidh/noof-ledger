@@ -108,6 +108,12 @@ default wallet. The echo lists every line with its category, in the receipt's ow
   date or an amount; those always come from the receipt, never from a correction, so the request was
   noted and nothing moved.
 
+**If a fiscal QR is not read from a compressed photo** (Telegram's own photo compression caps the file
+it delivers at roughly 1280px on the long side, and a fiscal QR is dense enough that this sometimes
+isn't enough — see `docs/OPEN-QUESTIONS.md`'s Phase 6 QR benchmark entry for the measured limits),
+send the photo as a file instead (the bot accepts image documents, which Telegram delivers
+uncompressed), or send the QR's own `https://suf.purs.gov.rs/v/?vl=...` link as plain text.
+
 **The Receipts health check** (`/diagnostics`, the dashboard tile, the bot's `/health`) turns amber for
 24 hours after any Tax Administration lookup fails, naming the time it happened, then clears itself back
 to green — it does not mean the *current* lookup is failing, only that one recently did and receipts may
