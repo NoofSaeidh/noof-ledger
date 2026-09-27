@@ -12,6 +12,68 @@ namespace Noof.Ledger.Persistence.Tests;
 public class ReceiptSchemaTests(PostgresFixture fixture)
 {
     static readonly Guid DefaultWalletId = new("00000000-0000-0000-0000-000000000001");
+    static readonly DateTimeOffset Now = new(2026, 9, 27, 9, 0, 0, TimeSpan.Zero);
+    static int nextMessageId = 2000;
+
+    static Transaction NewPhotoTransaction(string? telegramFileId, string? verificationUrl) => new()
+    {
+        Id = Guid.NewGuid(),
+        WalletId = DefaultWalletId,
+        RawText = null,
+        CaptureKind = CaptureKind.Photo,
+        TelegramFileId = telegramFileId,
+        VerificationUrl = verificationUrl,
+        Status = TransactionStatus.Captured,
+        TimeZoneId = "Europe/Belgrade",
+        OccurredAt = Now,
+        OccurredOn = new DateOnly(2026, 9, 27),
+        TelegramChatId = 111,
+        TelegramMessageId = Interlocked.Increment(ref nextMessageId),
+        CreatedAt = Now,
+    };
+
+    static async Task<string?> ViolatedConstraintAsync(LedgerDbContext db)
+    {
+        try
+        {
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            return null;
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException postgres)
+        {
+            return postgres.ConstraintName;
+        }
+    }
+
+    [Fact]
+    public async Task A_photo_row_with_both_a_file_id_and_a_verification_url_is_refused()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        db.Transactions.Add(NewPhotoTransaction("photo-1", "https://suf.purs.gov.rs/v/?vl=AbCdEf123"));
+
+        (await ViolatedConstraintAsync(db)).Should().Be("ck_transactions_capture_has_content");
+    }
+
+    [Fact]
+    public async Task A_photo_row_with_neither_source_is_refused()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        db.Transactions.Add(NewPhotoTransaction(null, null));
+
+        (await ViolatedConstraintAsync(db)).Should().Be("ck_transactions_capture_has_content");
+    }
+
+    [Fact]
+    public async Task A_photo_row_with_exactly_one_source_is_accepted()
+    {
+        await using var db = await fixture.CreateContextAsync();
+        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        db.Transactions.Add(NewPhotoTransaction("photo-1", null));
+
+        (await ViolatedConstraintAsync(db)).Should().BeNull();
+    }
 
     [Fact]
     public async Task Migrations_create_the_receipt_tables_from_empty()

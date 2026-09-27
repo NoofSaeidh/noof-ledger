@@ -13,7 +13,7 @@ internal sealed class TransactionConfiguration : IEntityTypeConfiguration<Transa
             table.HasCheckConstraint(
                 "ck_transactions_capture_has_content",
                 "(capture_kind IN (0, 2) AND raw_text IS NOT NULL) OR (capture_kind = 1 AND voice_file_id IS NOT NULL) "
-                + "OR (capture_kind = 3 AND (telegram_file_id IS NOT NULL OR verification_url IS NOT NULL))");
+                + "OR (capture_kind = 3 AND ((telegram_file_id IS NOT NULL) <> (verification_url IS NOT NULL)))");
             table.HasCheckConstraint(
                 "ck_transactions_telegram_ids_match_capture_kind",
                 "(capture_kind = 2 AND telegram_chat_id IS NULL AND telegram_message_id IS NULL) "
