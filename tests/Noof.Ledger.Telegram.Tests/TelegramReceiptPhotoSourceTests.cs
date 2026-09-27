@@ -1,6 +1,7 @@
 using AwesomeAssertions;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
+using Noof.Ledger.Application.Categorization;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Requests;
@@ -10,6 +11,9 @@ namespace Noof.Ledger.Telegram.Tests;
 
 public class TelegramReceiptPhotoSourceTests
 {
+    const long MaxBytes = 10 * 1024 * 1024;
+    const int ChunkSize = 64 * 1024;
+
     static readonly byte[] SyntheticJpeg = "JFIF-synthetic-receipt-photo"u8.ToArray();
 
     static ITelegramBotClient ClientServing(byte[] bytes, string filePath = "photos/file_1.jpg", long? fileSize = null)
@@ -20,6 +24,38 @@ public class TelegramReceiptPhotoSourceTests
         client.DownloadFile(Arg.Any<TGFile>(), Arg.Any<Stream>(), Arg.Any<CancellationToken>())
             .Returns(call => call.Arg<Stream>().WriteAsync(bytes).AsTask());
         return client;
+    }
+
+    // Simulates what Stream.CopyToAsync actually does inside Telegram.Bot's DownloadFile: many small
+    // WriteAsync calls into the destination, not one call with the whole body - so a bound enforced
+    // only against the total buffered afterwards would already have paid for the full allocation.
+    static ITelegramBotClient ClientServingChunked(long totalBytes, long? fileSize, out Func<SizeLimitedBuffer?> capturedDestination)
+    {
+        SizeLimitedBuffer? destination = null;
+        capturedDestination = () => destination;
+
+        var client = Substitute.For<ITelegramBotClient>();
+        var file = new TGFile { FileId = "photo-1", FileUniqueId = "unique-1", FilePath = "photos/file_1.jpg", FileSize = fileSize };
+        client.SendRequest(Arg.Is<GetFileRequest>(r => r.FileId == "photo-1"), Arg.Any<CancellationToken>()).Returns(file);
+        client.DownloadFile(Arg.Any<TGFile>(), Arg.Any<Stream>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                destination = (SizeLimitedBuffer)call.Arg<Stream>();
+                return WriteInChunksAsync(destination, totalBytes, call.Arg<CancellationToken>());
+            });
+        return client;
+    }
+
+    static async Task WriteInChunksAsync(Stream destination, long totalBytes, CancellationToken cancellationToken)
+    {
+        var chunk = new byte[ChunkSize];
+        var remaining = totalBytes;
+        while (remaining > 0)
+        {
+            var toWrite = (int)Math.Min(ChunkSize, remaining);
+            await destination.WriteAsync(chunk.AsMemory(0, toWrite), cancellationToken);
+            remaining -= toWrite;
+        }
     }
 
     [Fact]
@@ -121,5 +157,48 @@ public class TelegramReceiptPhotoSourceTests
         var act = () => source.DownloadAsync("photo-1", TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<ApiRequestException>();
+    }
+
+    [Fact]
+    public async Task A_stream_with_no_reported_file_size_over_the_limit_is_rejected_without_unbounded_buffering()
+    {
+        var client = ClientServingChunked(totalBytes: 11 * 1024 * 1024, fileSize: null, out var capturedDestination);
+        var source = new TelegramReceiptPhotoSource(new TelegramClientHandle { Current = client });
+
+        var act = () => source.DownloadAsync("photo-1", TestContext.Current.CancellationToken);
+
+        var thrown = await act.Should().ThrowAsync<ModelCallException>();
+        thrown.Which.Kind.Should().Be(ModelFailureKind.Terminal);
+
+        var destination = capturedDestination();
+        destination.Should().NotBeNull();
+        destination!.Length.Should().BeLessThanOrEqualTo(MaxBytes);
+    }
+
+    [Fact]
+    public async Task A_file_size_that_understates_the_real_download_is_still_rejected()
+    {
+        var client = ClientServingChunked(totalBytes: 11 * 1024 * 1024, fileSize: 1024, out var capturedDestination);
+        var source = new TelegramReceiptPhotoSource(new TelegramClientHandle { Current = client });
+
+        var act = () => source.DownloadAsync("photo-1", TestContext.Current.CancellationToken);
+
+        var thrown = await act.Should().ThrowAsync<ModelCallException>();
+        thrown.Which.Kind.Should().Be(ModelFailureKind.Terminal);
+
+        var destination = capturedDestination();
+        destination.Should().NotBeNull();
+        destination!.Length.Should().BeLessThanOrEqualTo(MaxBytes);
+    }
+
+    [Fact]
+    public async Task A_download_exactly_at_the_limit_is_accepted()
+    {
+        var client = ClientServingChunked(totalBytes: MaxBytes, fileSize: null, out _);
+        var source = new TelegramReceiptPhotoSource(new TelegramClientHandle { Current = client });
+
+        var photo = await source.DownloadAsync("photo-1", TestContext.Current.CancellationToken);
+
+        photo.Bytes.Length.Should().Be((int)MaxBytes);
     }
 }
