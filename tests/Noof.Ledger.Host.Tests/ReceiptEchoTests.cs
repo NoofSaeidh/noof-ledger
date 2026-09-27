@@ -104,22 +104,25 @@ public class ReceiptEchoTests
 
     // 2026-09-27: a vision-read receipt is only ever a fallback for a photo the QR path could not
     // read reliably - one short line pointing at a way to get an exact read next time, whether or not
-    // the lines happen to add up this time.
+    // the lines happen to add up this time. Not "send it as a file": the operator's own real receipts
+    // (docs/OPEN-QUESTIONS.md, Phase 6 QR entry) showed a photo, even a full-resolution one sent as a
+    // file, does not reliably decode the fiscal QR either - only the link, scanned by the phone's own
+    // camera, does.
     [Fact]
-    public void A_vision_read_receipt_suggests_a_file_or_the_QR_link_for_an_exact_read_next_time()
+    public void A_vision_read_receipt_suggests_the_QR_link_for_an_exact_read_next_time()
     {
         var echo = Echo.ComposeReceipt(Record(), Receipt(source: ReceiptSource.Vision, qrTotal: null));
 
         echo.Text.Should().Contain(
-            "⚠️ For an exact read next time, send the receipt as a file (uncompressed) or send the link from its QR code.");
+            "⚠️ For an exact read next time, send the link from the receipt's QR code (scan it with your phone camera) instead of a photo.");
     }
 
     [Fact]
-    public void A_fiscal_qr_receipt_never_carries_the_send_as_a_file_hint()
+    public void A_fiscal_qr_receipt_never_carries_the_exact_read_hint()
     {
         var echo = Echo.ComposeReceipt(Record(), Receipt(source: ReceiptSource.FiscalQr));
 
-        echo.Text.Should().NotContain("send the receipt as a file");
+        echo.Text.Should().NotContain("For an exact read next time");
     }
 
     [Fact]
@@ -259,15 +262,15 @@ public class ReceiptEchoTests
         QrTotal: null,
         [new AppReceipts.ExtractedReceiptLine(1, "Bread", 1m, null, 400m, 400m, null)]);
 
-    // 2026-09-27 finding: every other vision echo carries the decision-5 file/QR hint and, where read,
+    // 2026-09-27 finding: every other vision echo carries the decision-5 QR hint and, where read,
     // the date and PIB/fiscal number - the confirmation prompt is a vision echo too and showed neither.
     [Fact]
-    public void ComposeReceiptNeedsConfirmation_carries_the_file_or_QR_hint()
+    public void ComposeReceiptNeedsConfirmation_carries_the_QR_hint()
     {
         var echo = Echo.ComposeReceiptNeedsConfirmation(NeedsConfirmationReceipt());
 
         echo.Text.Should().Contain(
-            "⚠️ For an exact read next time, send the receipt as a file (uncompressed) or send the link from its QR code.");
+            "⚠️ For an exact read next time, send the link from the receipt's QR code (scan it with your phone camera) instead of a photo.");
     }
 
     [Fact]
@@ -315,7 +318,7 @@ public class ReceiptEchoTests
 
         echo.Text.Should().Contain("⚠️ Lines add up to 400.00 RSD, the receipt says 500.00 RSD");
         echo.Text.Should().Contain(
-            "⚠️ For an exact read next time, send the receipt as a file (uncompressed) or send the link from its QR code.");
+            "⚠️ For an exact read next time, send the link from the receipt's QR code (scan it with your phone camera) instead of a photo.");
         echo.Actions.Should().Equal(RecordAction.RecordAnyway, RecordAction.Cancel);
     }
 

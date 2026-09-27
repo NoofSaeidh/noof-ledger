@@ -687,8 +687,11 @@ the UI, is deferred: `docs/BACKLOG.md`):
    `^[A-Z0-9]{8}-[A-Z0-9]{8}-\d+$`), so the existing `(seller_tax_id, fiscal_number)` duplicate index
    covers vision receipts too without risking a false match on OCR noise. Never applied to a fiscal
    QR/SUF receipt.
-5. **Echo hint.** Any vision-read receipt's echo carries one standing line suggesting a file (uncompressed)
-   or the QR link for an exact read next time — no new column, computed from `ReceiptSource.Vision` alone.
+5. **Echo hint.** Any vision-read receipt's echo carries one standing line suggesting the QR link,
+   scanned by the phone's own camera, for an exact read next time — no new column, computed from
+   `ReceiptSource.Vision` alone. Not a file: a photo, even a full-resolution one sent as a file, does not
+   reliably decode the fiscal QR either (the operator's own real-photo evidence, Phase 6 QR entry above)
+   — only the link does.
 
 **The malformed-PIB-only residual.** A stored `receipts` row never carries a malformed PIB —
 `ChatReceiptVision` drops it to `null` before it is ever saved — so a replay of a still-unconfirmed job

@@ -95,9 +95,9 @@ produced them.
 own name) wins; otherwise the wallet marked default for the receipt's payment method
 (`/wallets` → "Default for card" / "Default for cash" per wallet) is used, then the currency's own
 default wallet. The echo lists every line with its category, in the receipt's own order, then the total.
-**For the most reliable read, send the receipt's own QR link as text (read the `vl=` URL off the printed
-QR); if only a photo is available, send it as a file rather than a compressed photo** — Telegram's own
-photo compression is what most often leaves a receipt too degraded for the vision fallback to read.
+**For an exact read, send the receipt's own QR link as text** — scan the fiscal QR with the phone's own
+camera and paste the `vl=` link — **rather than a photo**; see "Send the QR's link, not a photo" below for
+why even a full-resolution photo sent as a file does not reliably decode the QR itself.
 
 **Warnings, and what they mean.** A ⚠️ line in the echo means the receipt was not read the ordinary way:
 - *"Tax Administration unavailable — lines read from the photo"* — the QR decoded fine, but
