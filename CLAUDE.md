@@ -14,15 +14,24 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
 
 ## 1. Model and effort policy
 
-**Default to the cheapest model that can do the job correctly.** Escalate on demonstrated need, not on suspicion that a task might be hard. Cost discipline is a standing requirement, not a preference.
+**The kind of work picks the model, named on every dispatch** — Agent `model`, Workflow per-stage
+`model` *(operator's decision, 2026-09-28)*. Sonnet proved weak wherever judgment or self-checking
+was needed (it reported "0 references left" with one remaining, and over-built a hook under an
+adversarial review), so cost is kept down by handing mechanical work down, not by defaulting to the
+cheapest tier.
 
-| Tier | Use for | Examples |
-|---|---|---|
-| **haiku** | Mechanical, deterministic, verifiable-at-a-glance work | Running tests and reporting pass/fail · running builds · file/dir listings · grep sweeps · renames · formatting · dependency version lookups · reading a log for a known string · scaffolding boilerplate from an explicit template |
-| **sonnet** | Analysis, review, and most implementation | Writing and modifying code · reading and explaining a subsystem · code review · test authoring · adversarial fact-checking · research against known docs · debugging a localised failure |
-| **opus** | Only genuinely hard reasoning with wide blast radius | Cross-cutting architecture decisions · synthesising many conflicting sources · designing a schema or seam that is expensive to reverse · diagnosing a bug that resisted sonnet |
+| Model | Use for |
+|---|---|
+| **opus** | Anything with judgment: implementing behaviour · design and planning · triaging review findings · investigations that end in a conclusion or recommendation · rules and docs that encode decisions · verifying a subagent's factual claims |
+| **sonnet** | Mechanical work with a fully specified recipe: moving/splitting files by a given scheme · sweeping references · renames · boilerplate from an explicit template. A recipe that leaves a decision open is judgment — opus. |
+| **haiku** | Running tests or builds and reporting pass/fail · reading a log for a known string · listings |
 
-**Effort levels.** Do not use high or xhigh effort for small tasks. `low` for mechanical work, `medium` for ordinary implementation, `high`/`xhigh` reserved for the architecture- and correctness-critical reasoning that justifies opus in the first place.
+The operator's global default model is Opus, so a dispatch without `model` runs on Opus: fine for
+judgment work, but sonnet and haiku work must name its model. Reviews use the models the review
+policy below names.
+
+**Effort levels.** Opus at `medium`; `high`/`xhigh` only for architecture- and correctness-critical
+reasoning, never for small tasks. `low` for mechanical work.
 
 **Review policy — three tiers, three cadences, don't substitute one for another:**
 - **Per task** (inside a phase or plan): review stays on sonnet, as today. No Codex, no Fable per task.
@@ -42,8 +51,14 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
     confirmed, reply in the PR description to what's rejected and why.
   - Codex refuses on usage limit → don't wait for the window; fall back to a sonnet review and say so
     in the PR description.
-- **Fable 5.1 runs once**, closing a phase or a batch of PRs — never per PR, never per fix round.
-  Models in one family share blind spots; a different family is the cheapest independence available.
+- **Fable 5.1 runs twice per phase** *(operator's decision, 2026-09-28)* — never per PR, never per
+  fix round. Models in one family share blind spots; a different family is the cheapest independence
+  available.
+  - **At planning**, once, after the phase's spec and plan are written and before implementation
+    starts. It reviews the decision, not code: alternatives considered, risks and failure modes,
+    conflicts with *(settled)* rules and `docs/OPEN-QUESTIONS.md`, and whether the PR cut is right.
+    Its findings are triaged like any review.
+  - **At the end**, closing the phase or a batch of PRs.
 - **Review findings are triaged, not all fixed** *(operator's decision, 2026-09-28)*, for Copilot and
   Codex alike: fix a critical finding (real bug, wrong money/balance, data loss, secret leak,
   security hole, broken build/test, *(settled)*-rule violation); reply with a sentence of reasoning
@@ -58,19 +73,21 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
   you replied to or fixed, by id, never "resolve all unresolved" (hides new comments).
 
 **Anti-patterns — do not do these:**
-- Running a test suite on opus. That is a haiku task; the model is not what makes tests pass.
+- Running a test suite on opus — including by dispatching it without `model`. That is a haiku task;
+  the model is not what makes tests pass.
 - Using xhigh effort to rename a variable, fix a typo, or add a using directive.
-- Escalating to opus because a task *sounds* important. Blast radius and reversibility decide the tier, not topic gravity.
+- Choosing the model by how important a task *sounds*. A rename in money code is still sonnet; a
+  judgment call in a small doc is still opus. The kind of work decides.
 - Re-running expensive work that is already cached or already done. Check first.
 - A Fable review per fix round or per Copilot round — this cost ~5 hours on PR #3.
 
 ## 2. Subagent usage
 
-**Delegate aggressively, and delegate downward.** Any task that is self-contained, produces a summarisable result, and does not need this conversation's full context should go to a subagent on the cheapest adequate tier.
+**Delegate aggressively, and delegate downward.** Any task that is self-contained, produces a summarisable result, and does not need this conversation's full context should go to a subagent on the model §1 names for that kind of work.
 
 - **Always delegate:** multi-file searches, "find where X is defined", test runs, build verification, reading a large file to answer one question, independent research, per-file review passes.
 - **Parallelise:** independent work goes out in one message as multiple subagents, not sequentially.
-- **Workflows:** for fan-out work, set `model` per stage — haiku for mechanical stages, sonnet for research and verification, opus only for final synthesis. Never let a whole workflow inherit opus by default.
+- **Workflows:** for fan-out work, set `model` per stage by §1 — haiku for test/build stages, sonnet for recipe-driven mechanical stages, opus for research, verification and synthesis. A mechanical stage left without `model` inherits Opus.
 - **Keep the conclusion, not the transcript.** A subagent's job is to return the answer, not to dump file contents back into the main context.
 
 ## 3. Code style
