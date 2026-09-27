@@ -51,7 +51,7 @@ internal sealed class EfJobQueue(LedgerDbContext db, TimeProvider timeProvider, 
     }
 
     static readonly int[] NonMoneyReceiptKinds =
-        [(int)ReceiptKind.Copy, (int)ReceiptKind.Training, (int)ReceiptKind.Proforma, (int)ReceiptKind.Advance];
+        [.. Enum.GetValues<ReceiptKind>().Where(kind => kind.IsNonMoneyKind()).Select(kind => (int)kind)];
 
     public async Task<CategorizationJob?> ClaimNonMoneyReceiptAsync(string workerId, TimeSpan lease, CancellationToken cancellationToken)
     {
