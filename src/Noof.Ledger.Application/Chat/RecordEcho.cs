@@ -138,6 +138,10 @@ internal sealed class RecordEcho : IRecordEcho
     public EchoMessage ComposeReceiptNotRecorded(ReceiptKind kind) =>
         new($"This receipt is a {kind.ToString().ToLowerInvariant()} — not recorded", [RecordAction.Edit]);
 
+    public EchoMessage ReceiptUnreadable { get; } = new(
+        "I couldn't read this receipt reliably, so nothing was recorded. Send the photo as a file "
+        + "(uncompressed) or the link from its QR code.", []);
+
     static string ShopHeader(ReceiptView receipt)
     {
         var name = receipt.SellerName is { Length: > 0 } sellerName ? sellerName : "Receipt";

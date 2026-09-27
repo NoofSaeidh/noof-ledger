@@ -37,10 +37,20 @@ public sealed class LiveReceiptTests
         var vision = new ChatReceiptVision(
             CreateFactory(apiKey), new OperationTimer(TimeProvider.System, new SlowOperationOptions()), NullLogger<ChatReceiptVision>.Instance);
 
-        var receipt = await vision.ReadAsync(SyntheticReceiptPng, "image/png", null, TestContext.Current.CancellationToken);
+        var result = await vision.ReadAsync(SyntheticReceiptPng, "image/png", null, TestContext.Current.CancellationToken);
 
-        receipt.Source.Should().Be(ReceiptSource.Vision);
-        receipt.Kind.Should().BeOneOf(ReceiptKind.Sale, ReceiptKind.Refund);
+        // 2026-09-27: the prompt now tells the model to report unreadable rather than invent a
+        // plausible-looking receipt - an all-white image is exactly the case that should trigger it,
+        // so both outcomes are a pass here; only a half-built result (one without the other) is a bug.
+        if (result.Receipt is { } receipt)
+        {
+            receipt.Source.Should().Be(ReceiptSource.Vision);
+            receipt.Kind.Should().BeOneOf(ReceiptKind.Sale, ReceiptKind.Refund);
+        }
+        else
+        {
+            result.Unreadable.Should().NotBeNull();
+        }
     }
 
     [Fact]

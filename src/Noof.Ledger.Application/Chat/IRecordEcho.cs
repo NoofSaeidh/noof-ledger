@@ -56,4 +56,9 @@ public interface IRecordEcho
     // than a processing failure (M-4, Phase 6 final review), and Edit still lets the person record it
     // by hand as an ordinary text correction.
     EchoMessage ComposeReceiptNotRecorded(ReceiptKind kind);
+
+    // 2026-09-27: the vision fallback's own honest "I could not read this" (read_receipt's readable:
+    // false, or a total/every line it left null) - distinct from ReceiptReadFailure, which is every
+    // other terminal vision failure (no tool call, an empty payload).
+    EchoMessage ReceiptUnreadable { get; }
 }

@@ -318,6 +318,15 @@ public class RecordEchoTests
     }
 
     [Fact]
+    public void An_unreadable_receipt_says_so_and_suggests_a_file_or_the_QR_link_and_offers_no_actions()
+    {
+        Echo.ReceiptUnreadable.Text.Should().Be(
+            "I couldn't read this receipt reliably, so nothing was recorded. Send the photo as a file "
+            + "(uncompressed) or the link from its QR code.");
+        Echo.ReceiptUnreadable.Actions.Should().BeEmpty();
+    }
+
+    [Fact]
     public void Hearing_nothing_in_a_spoken_correction_shows_the_record_unchanged_below()
     {
         var echo = Echo.ComposeHeardNothing(Record());

@@ -153,7 +153,11 @@ internal sealed class ExtractReceiptWorker(
                             return;
 
                         logger.LogVisionUsed("decode error");
-                        extracted = await ReadWithVisionAsync(scope, photoForDecodeFailure, qrTotal: null, cancellationToken);
+                        if (await ReadWithVisionAsync(
+                                scope, jobQueue, store, notifier, job, record, photoForDecodeFailure, qrTotal: null, cancellationToken)
+                            is not { } visionReceipt)
+                            return;
+                        extracted = visionReceipt;
                     }
                     else
                     {
@@ -197,7 +201,11 @@ internal sealed class ExtractReceiptWorker(
                             }
 
                             logger.LogVisionUsed("fetch failed");
-                            extracted = await ReadWithVisionAsync(scope, photoForFetchFailure, payload.Total, cancellationToken);
+                            if (await ReadWithVisionAsync(
+                                    scope, jobQueue, store, notifier, job, record, photoForFetchFailure, payload.Total, cancellationToken)
+                                is not { } visionReceipt)
+                                return;
+                            extracted = visionReceipt;
                         }
                         else
                         {
@@ -214,7 +222,10 @@ internal sealed class ExtractReceiptWorker(
                     return;
 
                 logger.LogVisionUsed("no QR");
-                extracted = await ReadWithVisionAsync(scope, photoWithNoQr, qrTotal: null, cancellationToken);
+                if (await ReadWithVisionAsync(scope, jobQueue, store, notifier, job, record, photoWithNoQr, qrTotal: null, cancellationToken)
+                    is not { } visionReceipt)
+                    return;
+                extracted = visionReceipt;
             }
             else
             {
@@ -295,21 +306,29 @@ internal sealed class ExtractReceiptWorker(
         return false;
     }
 
-    async Task<ExtractedReceipt> ReadWithVisionAsync(
-        IServiceScope scope, ReceiptPhoto photo, decimal? qrTotal, CancellationToken cancellationToken)
+    // Returns null when the model itself reported the photo unreadable (or a contradiction this layer
+    // treats the same way, ReceiptVisionResult) - the caller's own null check returns without falling
+    // through to SaveExtractedAsync. This is a distinct outcome from a ModelCallException: it is the
+    // model succeeding at its one job, which is saying it could not read this photo, not a transient or
+    // terminal failure of the call itself.
+    async Task<ExtractedReceipt?> ReadWithVisionAsync(
+        IServiceScope scope, IJobQueue jobQueue, ICategorizationStore store, IChatNotifier notifier,
+        CategorizationJob job, CategorizationSubject record, ReceiptPhoto photo, decimal? qrTotal,
+        CancellationToken cancellationToken)
     {
         var vision = scope.ServiceProvider.GetRequiredService<IReceiptVision>();
-        var extracted = await vision.ReadAsync(photo.Bytes, photo.MediaType, qrTotal, cancellationToken);
+        var scaler = scope.ServiceProvider.GetRequiredService<IReceiptImageScaler>();
+        var scaled = scaler.ScaleForVision(photo);
+        var result = await vision.ReadAsync(scaled.Bytes, scaled.MediaType, qrTotal, cancellationToken);
 
-        // M-8 (2026-09-25 final review): ReceiptVisionSchema allows an empty lines array - the model's
-        // honest "I could not read this" - but applying zero items rendered "Total: " and a mismatch
-        // warning as if the receipt had been recorded. Caught here, before SaveExtractedAsync, so it
-        // takes the same Terminal path (fail the job, mark the transaction Failed, ReceiptReadFailure
-        // echo) as every other unreadable receipt.
-        if (extracted.Lines.Count == 0)
-            throw new ModelCallException(ModelFailureKind.Terminal, "read_receipt returned no line items.");
+        if (result.Unreadable is { } reason)
+        {
+            await FailWithEchoAsync(jobQueue, store, notifier, job, record, recordEcho.ReceiptUnreadable,
+                $"the receipt photo was not readable ({reason})", cancellationToken);
+            return null;
+        }
 
-        return extracted;
+        return result.Receipt;
     }
 
     async Task FailWithEchoAsync(

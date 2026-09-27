@@ -28,7 +28,8 @@ public class ExtractReceiptWorkerTests
     sealed record Harness(
         IJobQueue Queue, ICategorizationStore Store, IReceiptStore ReceiptStore, IRecordEditor RecordEditor,
         IChatNotifier Notifier, IReceiptPhotoSource PhotoSource, IQrReader QrReader, IFiscalQrDecoder Decoder,
-        IFiscalReceiptClient FetchClient, IReceiptVision Vision, IReceiptFetchStatus FetchStatus, IModelProvider ModelProvider)
+        IFiscalReceiptClient FetchClient, IReceiptVision Vision, IReceiptFetchStatus FetchStatus, IModelProvider ModelProvider,
+        IReceiptImageScaler Scaler)
     {
         public IServiceScopeFactory ScopeFactory()
         {
@@ -45,6 +46,7 @@ public class ExtractReceiptWorkerTests
             provider.GetService(typeof(IReceiptVision)).Returns(Vision);
             provider.GetService(typeof(IReceiptFetchStatus)).Returns(FetchStatus);
             provider.GetService(typeof(IModelProvider)).Returns(ModelProvider);
+            provider.GetService(typeof(IReceiptImageScaler)).Returns(Scaler);
 
             var scope = Substitute.For<IServiceScope>();
             scope.ServiceProvider.Returns(provider);
@@ -109,13 +111,16 @@ public class ExtractReceiptWorkerTests
 
         var vision = Substitute.For<IReceiptVision>();
         vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), Arg.Any<decimal?>(), Arg.Any<CancellationToken>())
-            .Returns(Extracted(ReceiptSource.Vision));
+            .Returns(new ReceiptVisionResult(Extracted(ReceiptSource.Vision), null));
 
         var modelProvider = Substitute.For<IModelProvider>();
         modelProvider.IsConfiguredAsync(Arg.Any<CancellationToken>()).Returns(true);
 
+        var scaler = Substitute.For<IReceiptImageScaler>();
+        scaler.ScaleForVision(Arg.Any<ReceiptPhoto>()).Returns(callInfo => callInfo.Arg<ReceiptPhoto>());
+
         return new Harness(queue, store, receiptStore, recordEditor, Substitute.For<IChatNotifier>(), photoSource, qrReader, decoder,
-            fetchClient, vision, Substitute.For<IReceiptFetchStatus>(), modelProvider);
+            fetchClient, vision, Substitute.For<IReceiptFetchStatus>(), modelProvider, scaler);
     }
 
     static readonly TimeZoneInfo Belgrade = TimeZoneInfo.FindSystemTimeZoneById("Europe/Belgrade");
@@ -449,14 +454,14 @@ public class ExtractReceiptWorkerTests
     }
 
     [Fact]
-    public async Task Vision_returning_zero_lines_is_a_failed_extraction_not_an_empty_record()
+    public async Task Vision_reporting_the_photo_unreadable_fails_with_the_unreadable_echo_not_ReceiptReadFailure()
     {
-        // M-8 (2026-09-25 final review): ReceiptVisionSchema allows an empty lines array (the model's
-        // honest "I could not read this"), but applying zero items used to succeed the job and render
-        // "Total: " with a mismatch warning instead of a clear failure.
+        // 2026-09-27: the model's own honest "I could not read this" (readable: false) is a distinct
+        // outcome from a ModelCallException, and gets its own echo naming the fix (send as a file, or
+        // the QR link) rather than the generic ReceiptReadFailure.
         var harness = Setup(ExtractJob());
         harness.Vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), Arg.Any<decimal?>(), Arg.Any<CancellationToken>())
-            .Returns(Extracted(ReceiptSource.Vision) with { Lines = [] });
+            .Returns(new ReceiptVisionResult(null, ReceiptUnreadableReason.Blurry));
 
         await TickAsync(harness);
 
@@ -464,7 +469,40 @@ public class ExtractReceiptWorkerTests
         await harness.Queue.Received(1).FailAsync(JobId, WorkerId, Arg.Any<string>(), Arg.Any<CancellationToken>());
         await harness.Store.Received(1).MarkFailedAsync(TransactionId, Arg.Any<CancellationToken>());
         await harness.Notifier.Received(1).EditAsync(111L, 42,
-            Arg.Is<EchoMessage>(m => m.Text == Echo.ReceiptReadFailure.Text), Arg.Any<CancellationToken>());
+            Arg.Is<EchoMessage>(m => m.Text == Echo.ReceiptUnreadable.Text), Arg.Any<CancellationToken>());
+    }
+
+    // M-8 (2026-09-25 final review), superseded 2026-09-27: ReceiptVisionSchema allows an empty lines
+    // array (the model's honest "I could not read this"), but applying zero items used to succeed the
+    // job and render "Total: " with a mismatch warning instead of a clear failure. ChatReceiptVision
+    // itself now maps a readable-but-empty answer to ReceiptVisionResult.Unreadable, so this exercises
+    // the worker's own handling of that mapped result rather than a raw ExtractedReceipt.
+    [Fact]
+    public async Task Vision_returning_zero_lines_is_reported_as_unreadable_not_an_empty_record()
+    {
+        var harness = Setup(ExtractJob());
+        harness.Vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), Arg.Any<decimal?>(), Arg.Any<CancellationToken>())
+            .Returns(new ReceiptVisionResult(null, ReceiptUnreadableReason.Other));
+
+        await TickAsync(harness);
+
+        await harness.ReceiptStore.DidNotReceiveWithAnyArgs().SaveExtractedAsync(default, default!, default, Arg.Any<CancellationToken>());
+        await harness.Queue.Received(1).FailAsync(JobId, WorkerId, Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await harness.Store.Received(1).MarkFailedAsync(TransactionId, Arg.Any<CancellationToken>());
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text == Echo.ReceiptUnreadable.Text), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task The_photo_is_scaled_before_it_reaches_vision()
+    {
+        var harness = Setup(ExtractJob());
+        var scaledPhoto = new ReceiptPhoto(new byte[] { 9, 9, 9 }, "image/jpeg");
+        harness.Scaler.ScaleForVision(Arg.Any<ReceiptPhoto>()).Returns(scaledPhoto);
+
+        await TickAsync(harness);
+
+        await harness.Vision.Received(1).ReadAsync(scaledPhoto.Bytes, "image/jpeg", null, Arg.Any<CancellationToken>());
     }
 
     [Fact]

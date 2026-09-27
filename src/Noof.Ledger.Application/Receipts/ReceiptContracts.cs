@@ -58,9 +58,19 @@ public interface IFiscalReceiptClient
     Task<FiscalFetchResult> FetchAsync(FiscalQrPayload payload, CancellationToken cancellationToken);
 }
 
+// Why the model could not read the photo reliably enough to record a receipt from it - reported by
+// read_receipt itself (2026-09-27) rather than invented: a receipt it cannot read must say so, never
+// approximate one.
+public enum ReceiptUnreadableReason { TooSmall, Blurry, NotAReceipt, CutOff, Other }
+
+// Shaped like FiscalFetchResult: exactly one of the two is set. Receipt is null when the model
+// reported the photo unreadable, or when it reported readable but left the total or every line
+// missing - a contradiction this layer treats the same as an honest "unreadable" rather than trust.
+public sealed record ReceiptVisionResult(ExtractedReceipt? Receipt, ReceiptUnreadableReason? Unreadable);
+
 public interface IReceiptVision
 {
-    Task<ExtractedReceipt> ReadAsync(
+    Task<ReceiptVisionResult> ReadAsync(
         ReadOnlyMemory<byte> image, string mediaType, decimal? qrTotal, CancellationToken cancellationToken);
 }
 

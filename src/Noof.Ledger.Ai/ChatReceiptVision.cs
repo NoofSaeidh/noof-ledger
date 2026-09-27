@@ -27,7 +27,7 @@ internal sealed class ChatReceiptVision(
     static readonly TimeZoneInfo Belgrade = TimeZoneInfo.FindSystemTimeZoneById("Europe/Belgrade");
     static readonly JsonElement ReadReceiptSchema = ReceiptVisionSchema.BuildReadReceipt();
 
-    public async Task<ExtractedReceipt> ReadAsync(
+    public async Task<ReceiptVisionResult> ReadAsync(
         ReadOnlyMemory<byte> image, string mediaType, decimal? qrTotal, CancellationToken cancellationToken)
     {
         if (image.Length > MaxImageBytes)
@@ -63,7 +63,13 @@ internal sealed class ChatReceiptVision(
         if (payload is null)
             throw new ModelCallException(ModelFailureKind.Transient, $"{ReadReceiptName} returned an empty payload.");
 
-        return ToExtractedReceipt(payload, qrTotal);
+        // The model's own "I could not read this" (readable: false), or a contradiction - readable but
+        // no total, or readable but no lines - treated the same way rather than trusted: a receipt this
+        // layer cannot vouch for must come back as unreadable, never as a half-built ExtractedReceipt.
+        if (!payload.Readable || payload.Total is null || payload.Lines.Count == 0)
+            return new ReceiptVisionResult(null, MapUnreadableReason(payload.UnreadableReason));
+
+        return new ReceiptVisionResult(ToExtractedReceipt(payload, qrTotal), null);
     }
 
     static FunctionCallContent? FindCall(ChatResponse response) =>
@@ -93,13 +99,22 @@ internal sealed class ChatReceiptVision(
             LocationName: null,
             FiscalNumber: null,
             ParseIssuedAt(payload.IssuedAt),
-            payload.Total,
+            payload.Total!.Value,
             new CurrencyCode(payload.Currency),
             payload.Kind == "refund" ? ReceiptKind.Refund : ReceiptKind.Sale,
             MapPaymentMethod(payload.PaymentMethod),
             qrTotal,
             lines);
     }
+
+    static ReceiptUnreadableReason MapUnreadableReason(string? reason) => reason switch
+    {
+        "too_small" => ReceiptUnreadableReason.TooSmall,
+        "blurry" => ReceiptUnreadableReason.Blurry,
+        "not_a_receipt" => ReceiptUnreadableReason.NotAReceipt,
+        "cut_off" => ReceiptUnreadableReason.CutOff,
+        _ => ReceiptUnreadableReason.Other,
+    };
 
     // M-1 (2026-09-25 final review): the model is strict on schema shape, not on content - a date it
     // could not phrase in ISO form must read as "no date", never throw. A FormatException here was
@@ -129,11 +144,14 @@ internal sealed class ChatReceiptVision(
     };
 
     sealed record ReadReceiptPayload(
+        [property: JsonPropertyName("readable")] bool Readable,
+        [property: JsonPropertyName("unreadable_reason")] string? UnreadableReason,
         [property: JsonPropertyName("seller_name")] string? SellerName,
         [property: JsonPropertyName("seller_tax_id")] string? SellerTaxId,
+        [property: JsonPropertyName("fiscal_number")] string? FiscalNumber,
         [property: JsonPropertyName("issued_at")] string? IssuedAt,
         [property: JsonPropertyName("currency")] string Currency,
-        [property: JsonPropertyName("total")] decimal Total,
+        [property: JsonPropertyName("total")] decimal? Total,
         [property: JsonPropertyName("payment_method")] string? PaymentMethod,
         [property: JsonPropertyName("kind")] string Kind,
         [property: JsonPropertyName("lines")] IReadOnlyList<ReadReceiptLineDto> Lines);
