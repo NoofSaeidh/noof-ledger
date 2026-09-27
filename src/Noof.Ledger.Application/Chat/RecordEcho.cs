@@ -28,6 +28,9 @@ internal sealed class RecordEcho : IRecordEcho
     public string ReadingReceipt => "Reading the receipt…";
     public string OnlyPhotosSupported => "Only photos of receipts are supported.";
 
+    public string UnsupportedMessageType =>
+        "I can only read text, voice notes, receipt photos, or a receipt's QR link.";
+
     public EchoMessage NotAFiscalReceiptLink { get; } = new("This does not look like a fiscal receipt link.", []);
 
     public EchoMessage ReceiptFetchUnreachableLinkOnly { get; } = new(
