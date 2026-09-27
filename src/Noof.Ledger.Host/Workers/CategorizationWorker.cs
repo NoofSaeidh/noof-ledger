@@ -449,9 +449,8 @@ internal sealed class CategorizationWorker(
         if (subject is not { BotMessageId: { } messageId } sub)
             return;
 
-        var reason = SafeFailureReason.Describe(exception, FailureArea.Categorization);
         var localRunAfter = TimeZoneInfo.ConvertTime(runAfter, captureTimeZone);
-        var notice = recordEcho.ComposeRetryNotice(RetryStepFor(job), reason, localRunAfter);
+        var notice = recordEcho.ComposeCategorizationRetryNotice(RetryStepFor(job), exception, localRunAfter);
 
         try
         {

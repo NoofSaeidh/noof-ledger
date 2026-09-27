@@ -20,7 +20,7 @@ internal sealed class RecordEcho : IRecordEcho
     public EchoMessage HeardNothing { get; } = new("Heard nothing in that voice note.", [RecordAction.Edit]);
 
     public EchoMessage TranscriptionFailure { get; } = new(
-        "Couldn't transcribe that voice note after several tries. Reply to this message and type what to record.",
+        "Couldn't transcribe that voice note. Reply to this message and type what to record.",
         [RecordAction.Edit]);
 
     public EchoMessage Failure { get; } = new(
@@ -39,7 +39,7 @@ internal sealed class RecordEcho : IRecordEcho
         "The Tax Administration site is unreachable right now — send a photo of the receipt instead.", []);
 
     public EchoMessage ReceiptReadFailure { get; } = new(
-        "Couldn't read that receipt after several tries. Resend the photo, paste the receipt's QR link as text, "
+        "Couldn't read that receipt. Resend the photo, paste the receipt's QR link as text, "
         + "or resend the photo as a file so it isn't compressed.",
         []);
 
@@ -80,8 +80,25 @@ internal sealed class RecordEcho : IRecordEcho
         return current with { Text = $"Could not apply that correction — the record is unchanged.\n\n{current.Text}" };
     }
 
-    public EchoMessage ComposeRetryNotice(string step, string reason, DateTimeOffset nextAttemptLocal) =>
-        new($"⚠️ {step} hit a problem ({reason}) — retrying around {nextAttemptLocal:HH:mm}.", []);
+    const string ReceiptExtractionStep = "Reading the receipt";
+    const string ReceiptCategorizationStep = "Categorising the receipt";
+
+    public EchoMessage ComposeCategorizationRetryNotice(string step, Exception failure, DateTimeOffset nextAttemptLocal) =>
+        ComposeRetryNotice(step, SafeFailureReason.Describe(failure, FailureArea.Categorization), nextAttemptLocal);
+
+    public EchoMessage ComposeReceiptCategorizationRetryNotice(Exception failure, DateTimeOffset nextAttemptLocal) =>
+        ComposeRetryNotice(
+            ReceiptCategorizationStep, SafeFailureReason.Describe(failure, FailureArea.ReceiptCategorization), nextAttemptLocal);
+
+    public EchoMessage ComposeReceiptExtractionRetryNotice(Exception failure, DateTimeOffset nextAttemptLocal) =>
+        ComposeRetryNotice(ReceiptExtractionStep, SafeFailureReason.Describe(failure, FailureArea.ReceiptExtraction), nextAttemptLocal);
+
+    public EchoMessage ComposeTranscriptionRetryNotice(string step, Exception failure, DateTimeOffset nextAttemptLocal) =>
+        ComposeRetryNotice(step, SafeFailureReason.Describe(failure, FailureArea.Transcription), nextAttemptLocal);
+
+    static EchoMessage ComposeRetryNotice(string step, string reason, DateTimeOffset nextAttemptLocal) =>
+        new($"⚠️ {step} hit a problem ({reason}) — retrying around {nextAttemptLocal.ToString("HH:mm", CultureInfo.InvariantCulture)}.",
+            []);
 
     public string ComposeCategorisingReceipt(int lineCount) =>
         $"Categorising {lineCount} line{(lineCount == 1 ? "" : "s")}…";

@@ -211,9 +211,8 @@ internal sealed class TranscriptionWorker(
             return;
 
         var step = IsCorrection(job) ? "Transcribing your correction" : "Transcribing the voice note";
-        var reason = SafeFailureReason.Describe(exception, FailureArea.Transcription);
         var localRunAfter = TimeZoneInfo.ConvertTime(runAfter, captureTimeZone);
-        var notice = recordEcho.ComposeRetryNotice(step, reason, localRunAfter);
+        var notice = recordEcho.ComposeTranscriptionRetryNotice(step, exception, localRunAfter);
         await EditQuietlyAsync(notifier, record, notice, cancellationToken);
     }
 

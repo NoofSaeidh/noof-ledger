@@ -1,6 +1,8 @@
 using AwesomeAssertions;
+using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
+using Npgsql;
 
 namespace Noof.Ledger.Host.Tests;
 
@@ -25,9 +27,25 @@ public class SafeFailureReasonTests
     }
 
     [Fact]
-    public void A_database_driver_exception_is_a_database_error_by_its_type_name_alone()
+    public void A_Npgsql_exception_is_a_database_error_by_its_type_name_alone()
     {
-        var exception = new Npgsql.FakeNpgsqlException("connection refused");
+        var exception = new NpgsqlException("connection refused");
+
+        SafeFailureReason.Describe(exception, FailureArea.Categorization).Should().Be(SafeFailureReason.DatabaseError);
+    }
+
+    [Fact]
+    public void An_EF_Core_save_failure_is_a_database_error_by_its_type_name_alone()
+    {
+        var exception = new DbUpdateException("Cannot write DateTimeOffset with Offset=02:00:00");
+
+        SafeFailureReason.Describe(exception, FailureArea.Categorization).Should().Be(SafeFailureReason.DatabaseError);
+    }
+
+    [Fact]
+    public void A_concurrency_conflict_on_save_is_still_a_database_error()
+    {
+        var exception = new DbUpdateConcurrencyException("another writer changed this row first");
 
         SafeFailureReason.Describe(exception, FailureArea.Categorization).Should().Be(SafeFailureReason.DatabaseError);
     }

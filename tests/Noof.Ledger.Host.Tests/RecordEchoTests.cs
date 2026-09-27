@@ -3,6 +3,7 @@ using AwesomeAssertions;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Domain;
+using Npgsql;
 
 namespace Noof.Ledger.Host.Tests;
 
@@ -339,7 +340,7 @@ public class RecordEchoTests
     [Fact]
     public void A_retry_notice_names_the_step_the_reason_and_the_next_attempt_time()
     {
-        var echo = Echo.ComposeRetryNotice("Reading the receipt", SafeFailureReason.DatabaseError,
+        var echo = Echo.ComposeReceiptExtractionRetryNotice(new NpgsqlException("connection refused"),
             new DateTimeOffset(2026, 9, 27, 14, 32, 0, TimeSpan.FromHours(2)));
 
         echo.Text.Should().Contain("Reading the receipt");

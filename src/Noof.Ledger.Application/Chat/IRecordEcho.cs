@@ -37,10 +37,15 @@ public interface IRecordEcho
     EchoMessage ComposeCorrectionFailure(CategorizationSubject record);
     EchoMessage ComposeHeardNothing(CategorizationSubject record);
 
-    // A failed attempt that will still be retried (CLAUDE.md Phase 6b: never a raw exception message
-    // - reason is one of SafeFailureReason's fixed categories). nextAttemptLocal is already converted
-    // to the capture time zone by the caller; this only formats it.
-    EchoMessage ComposeRetryNotice(string step, string reason, DateTimeOffset nextAttemptLocal);
+    // A failed attempt that will still be retried (ops/RUNBOOK.md's "When an attempt fails"
+    // paragraph: never a raw exception message - the failure is classified into one of a fixed set
+    // of safe categories internally, per pipeline, so no caller outside this assembly ever needs to
+    // name that classification). nextAttemptLocal is already converted to the capture time zone by
+    // the caller; these only format it.
+    EchoMessage ComposeCategorizationRetryNotice(string step, Exception failure, DateTimeOffset nextAttemptLocal);
+    EchoMessage ComposeReceiptCategorizationRetryNotice(Exception failure, DateTimeOffset nextAttemptLocal);
+    EchoMessage ComposeReceiptExtractionRetryNotice(Exception failure, DateTimeOffset nextAttemptLocal);
+    EchoMessage ComposeTranscriptionRetryNotice(string step, Exception failure, DateTimeOffset nextAttemptLocal);
     string ComposeCategorisingReceipt(int lineCount);
     // originalCancelled (M-11, Phase 6 final review): the duplicate index ignores status, so a
     // receipt whose earlier transaction was Cancelled is rejected forever unless this says Restore

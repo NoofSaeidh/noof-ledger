@@ -5,7 +5,7 @@ namespace Noof.Ledger.Application.Chat;
 // Which pipeline classified the failure - only enough context to pick a sensible fallback category
 // when the exception itself is not one of the ones this can name (ModelCallException, a database
 // driver type).
-public enum FailureArea
+internal enum FailureArea
 {
     Categorization,
     ReceiptCategorization,
@@ -22,7 +22,7 @@ public enum FailureArea
 // deliberately by ExtractReceiptWorker when a fetch failure leaves no key to fall back on), so it is
 // told apart by matching that one known, hand-written phrase - never by pattern-matching an
 // upstream provider's own error text.
-public static class SafeFailureReason
+internal static class SafeFailureReason
 {
     public const string DatabaseError = "a database error";
     public const string ModelDidNotAnswer = "the model did not answer";
@@ -45,9 +45,11 @@ public static class SafeFailureReason
     static bool IsTaxAdministrationOutage(Exception exception) =>
         exception.Message.Contains("Tax Administration", StringComparison.OrdinalIgnoreCase);
 
+    // "DbUpdate" (not "DbUpdateException") also catches DbUpdateConcurrencyException, whose FullName
+    // does not contain "DbUpdateException" as a substring even though it derives from it.
     static bool IsDatabaseError(Exception exception)
     {
         var typeName = exception.GetType().FullName ?? string.Empty;
-        return typeName.Contains("Npgsql", StringComparison.Ordinal) || typeName.Contains("DbUpdateException", StringComparison.Ordinal);
+        return typeName.Contains("Npgsql", StringComparison.Ordinal) || typeName.Contains("DbUpdate", StringComparison.Ordinal);
     }
 }

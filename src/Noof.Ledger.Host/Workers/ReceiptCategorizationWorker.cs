@@ -340,8 +340,6 @@ internal sealed class ReceiptCategorizationWorker(
         }
     }
 
-    const string ReceiptCategorizationStep = "Categorising the receipt";
-
     async Task HandleModelFailureAsync(
         IJobQueue jobQueue, ICategorizationStore store, IChatNotifier notifier,
         CategorizationJob job, CategorizationSubject? subject, ModelFailureKind kind, string error, string failedStage,
@@ -379,9 +377,8 @@ internal sealed class ReceiptCategorizationWorker(
         if (subject is not { BotMessageId: { } messageId } sub)
             return;
 
-        var reason = SafeFailureReason.Describe(exception, FailureArea.ReceiptCategorization);
         var localRunAfter = TimeZoneInfo.ConvertTime(runAfter, captureTimeZone);
-        var notice = recordEcho.ComposeRetryNotice(ReceiptCategorizationStep, reason, localRunAfter);
+        var notice = recordEcho.ComposeReceiptCategorizationRetryNotice(exception, localRunAfter);
 
         try
         {

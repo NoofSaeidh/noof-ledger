@@ -1222,8 +1222,9 @@ public class CategorizationWorkerTests
         await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
         await store.DidNotReceive().ApplyAsync(
             Arg.Any<Guid>(), Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
-        // A retry notice edits the same placeholder instead of silence (CLAUDE.md Phase 6b) - a
-        // short, safe reason and roughly when it will try again, never the raw exception message.
+        // A retry notice edits the same placeholder instead of silence (ops/RUNBOOK.md's "When an
+        // attempt fails" paragraph) - a short, safe reason and roughly when it will try again, never
+        // the raw exception message.
         await notifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(m =>
             m.Text.Contains("the model did not answer", StringComparison.Ordinal)
             && !m.Text.Contains("simulated network outage", StringComparison.Ordinal)),

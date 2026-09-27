@@ -325,8 +325,6 @@ internal sealed class ExtractReceiptWorker(
         await EditQuietlyAsync(notifier, record, echo, cancellationToken);
     }
 
-    const string ReceiptExtractionStep = "Reading the receipt";
-
     async Task HandleModelFailureAsync(
         IJobQueue jobQueue, ICategorizationStore store, IChatNotifier notifier, CategorizationJob job,
         CategorizationSubject? record, ModelFailureKind kind, string error, Exception exception, CancellationToken cancellationToken)
@@ -354,9 +352,8 @@ internal sealed class ExtractReceiptWorker(
         if (record is null)
             return;
 
-        var reason = SafeFailureReason.Describe(exception, FailureArea.ReceiptExtraction);
         var localRunAfter = TimeZoneInfo.ConvertTime(runAfter, captureTimeZone);
-        var notice = recordEcho.ComposeRetryNotice(ReceiptExtractionStep, reason, localRunAfter);
+        var notice = recordEcho.ComposeReceiptExtractionRetryNotice(exception, localRunAfter);
         await EditQuietlyAsync(notifier, record, notice, cancellationToken);
     }
 

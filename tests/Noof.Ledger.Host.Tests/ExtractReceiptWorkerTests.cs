@@ -1,4 +1,5 @@
 using AwesomeAssertions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
@@ -521,6 +522,22 @@ public class ExtractReceiptWorkerTests
         await harness.Notifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(m =>
             m.Text.Contains("the receipt photo could not be read", StringComparison.Ordinal)
             && !m.Text.Contains("telegram unreachable", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_database_failure_saving_the_extracted_receipt_names_a_database_error_in_the_retry_notice()
+    {
+        var harness = Setup(ExtractJob());
+        harness.ReceiptStore.SaveExtractedAsync(Arg.Any<Guid>(), Arg.Any<ExtractedReceipt>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new DbUpdateException("Cannot write DateTimeOffset with Offset=02:00:00"));
+
+        await TickAsync(harness);
+
+        await harness.Notifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(m =>
+            m.Text.Contains("Reading the receipt", StringComparison.Ordinal)
+            && m.Text.Contains("a database error", StringComparison.Ordinal)
+            && !m.Text.Contains("DateTimeOffset", StringComparison.Ordinal)),
             Arg.Any<CancellationToken>());
     }
 
