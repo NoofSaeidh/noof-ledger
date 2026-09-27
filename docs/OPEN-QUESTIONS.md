@@ -690,6 +690,15 @@ the UI, is deferred: `docs/BACKLOG.md`):
 5. **Echo hint.** Any vision-read receipt's echo carries one standing line suggesting a file (uncompressed)
    or the QR link for an exact read next time — no new column, computed from `ReceiptSource.Vision` alone.
 
+**The malformed-PIB-only residual.** A stored `receipts` row never carries a malformed PIB —
+`ChatReceiptVision` drops it to `null` before it is ever saved — so a replay of a still-unconfirmed job
+(`ExtractReceiptWorker`'s own C-1 path) or the operator's Cancel/Restore of one (`RecordActionHandler`)
+cannot recover *why* it is awaiting confirmation when a malformed tax id was the only reason: the
+confirmation prompt reappears with no listed problem, just "This receipt doesn't look right … Record it
+anyway, or cancel?" The receipt's own lines and total are still shown in full, so the operator can still
+judge it against the paper in hand; accepted rather than fixed, since fixing it would mean persisting a
+value that is otherwise never stored anywhere, for a rendering-only purpose.
+
 **P2-1 is unchanged by any of this.** Text and voice capture still have no validation layer — the model
 interprets amounts and dates from natural speech, and the safety is the echo plus cancel/correct, exactly
 as P2-1 settled. These five decisions are additions to the *fiscal-receipt* pipeline specifically (R-6's
