@@ -8,7 +8,7 @@
 
 **Tech Stack:** .NET 10 · C# · EF Core 10 + Npgsql · PostgreSQL 18 · **Anthropic 12.49.0** (official C# SDK, MIT, GA), consumed through **`Microsoft.Extensions.AI.Abstractions` 10.5.1** (`IChatClient`) rather than the SDK's native `Messages.Create` surface · Telegram.Bot 22.10.3.1 · Blazor Server (RCL + Host) · xUnit v3 on Microsoft Testing Platform · AwesomeAssertions · NSubstitute
 
-**Spec:** `docs/superpowers/specs/2026-09-19-noof-finance-design.md` · decisions in `docs/OPEN-QUESTIONS.md` ("Phase 1 decisions — taken 2026-09-21") · deferred work in `docs/BACKLOG.md` · predecessor plan `docs/superpowers/plans/2026-09-21-phase1a-capture-and-storage.md`
+**Spec:** `docs/superpowers/specs/2026-09-19-noof-finance-design.md` · decisions in `docs/OPEN-QUESTIONS.md` ("Phase 1 decisions — taken 2026-09-21") · deferred work in `docs/backlog/` · predecessor plan `docs/superpowers/plans/2026-09-21-phase1a-capture-and-storage.md`
 
 ## Global Constraints
 
@@ -23,7 +23,7 @@
 - **File-scoped namespaces.** `IDE0161` and `TreatWarningsAsErrors` are compile errors.
 - **Central Package Management.** An inline `Version=` is NU1008. `NuGetAuditMode=all` with `NU1903`/`NU1904` as errors.
 - **Never seed a test with `DateTimeOffset.UtcNow` and then assert exact equality against a value read back from PostgreSQL.** `timestamptz` keeps microseconds; a .NET tick is 100ns. A timestamp whose final tick digit is non-zero is truncated on the round trip, so the assertion fails most of the time but not always — the worst kind of flake. Seed from a fixed literal, or compare with `BeCloseTo`. This plan shipped the defect twice before it was caught.
-- **`TimeProvider` everywhere time is read inside the host.** Tests advance a `FakeTimeProvider` rather than sleeping. There is exactly one existing exception, verified by grep: `src/Noof.Ledger.Host/Cli/UserCommand.cs:64` calls `DateTimeOffset.UtcNow`, because the CLI verb short-circuits before `WebApplication.CreateBuilder` and has no container to resolve a `TimeProvider` from. Do not "fix" it in this phase and do not copy it either; it is recorded in `docs/BACKLOG.md` by Task 9.
+- **`TimeProvider` everywhere time is read inside the host.** Tests advance a `FakeTimeProvider` rather than sleeping. There is exactly one existing exception, verified by grep: `src/Noof.Ledger.Host/Cli/UserCommand.cs:64` calls `DateTimeOffset.UtcNow`, because the CLI verb short-circuits before `WebApplication.CreateBuilder` and has no container to resolve a `TimeProvider` from. Do not "fix" it in this phase and do not copy it either; it is recorded in `docs/backlog/` by Task 9.
 - **`global.json` must keep `{"test":{"runner":"Microsoft.Testing.Platform"}}`.** Positional test paths are rejected; use `--project` or `--solution`. The solution file is `NoofLedger.slnx`.
 - **Build output is `artifacts/bin/<project>/<config>/`**, not `bin/Debug/net10.0/` — `Directory.Build.props` sets `ArtifactsPath` to a repo-root `artifacts/`. Any relative path climbing out of `AppContext.BaseDirectory` needs **four** `..`, not three.
 - **Do not add** MediatR, AutoMapper, generic repositories over `DbContext`, CQRS scaffolding, or a second model-provider SDK.
@@ -66,7 +66,7 @@ Stating these prevents a well-meaning implementer from building them and a revie
 - **No parser, tokenizer or currency-alias table.** Extraction is the model's job, by user decision. `QuotedAmount` verifies and parses a quote; it does not find one.
 - **No prompt caching.** See the fact table: it cannot engage at our prompt size.
 - **No temperature, top_p or top_k.** See the fact table.
-- **No category management UI**, no per-line-item correction UI, no merge inbox for near-duplicate merchants. All three are in `docs/BACKLOG.md`. The schema supports every operation they need.
+- **No category management UI**, no per-line-item correction UI, no merge inbox for near-duplicate merchants. All three are in `docs/backlog/`. The schema supports every operation they need.
 - **No FX conversion and no cross-currency totals.** The dashboard groups by currency and never adds two of them together. Money model is Phase 2.
 - **Merchant canonicalisation is NOT batched into the categorisation call, and that is a knowing deviation from spec §11.** The spec says the model canonicalises "only on a miss, in the same batched call as categorisation" — which was written when extraction was deterministic and the raw merchant string was therefore known *before* any model call. With LLM extraction (decision P1-4) it is not: nothing knows the merchant text until the model has read the message, so "the same call" cannot also be conditioned on a miss. The operator chose the separate-request shape explicitly: check locally first, offer a local hit to the model as an option, and send a second request only when nothing matched. **The cost, stated plainly: a message naming N merchants the alias table has never seen costs 1 + N calls, not 1.** At this application's volume that is cents, and every one of those N writes a permanent alias row that makes the next sighting a primary-key lookup with no model call at all — so the cost is paid once per merchant that ever exists, not once per message. `CategorizationWorkerOptions` caps canonicalisation calls per job so a pathological message cannot fan out; see Task 7.
 - **No `getMe` probe for the Telegram token.** Only the Anthropic key gets a Test button this phase (Task 8); the Telegram equivalent is recorded in the backlog by that task.
@@ -6779,7 +6779,7 @@ git commit -m "feat(web): dashboard reads ISpendingReadModel, Anthropic key gets
 - Modify: `NoofLedger.slnx`
 - Modify: `tests/Noof.Ledger.Host.Tests/CategorizationWorkerTests.cs` — the flat path Task 7 actually creates, not a `Workers/` subfolder
 - Modify: `CLAUDE.md`
-- Modify: `docs/BACKLOG.md`
+- Modify: `docs/backlog/`
 
 **Interfaces:**
 - Consumes: `IJobQueue` (`Noof.Ledger.Application.Jobs`, five members: `ClaimAsync`, `SucceedAsync`, `RetryAsync`, `FailAsync`, `ReleaseExpiredLeasesAsync` — fixed by Phase 1A Task 7), `IChatNotifier` (`Noof.Ledger.Application.Chat`: `SendAsync(long, string, CancellationToken)`, `EditAsync(long, int, string, CancellationToken)` — fixed by Phase 1A Task 8), and every port in this plan's own contract section (`ICategorizer`, `ICategorizationStore`, `ProposalVerification`, `ModelCallException`). `CategorizationWorker` itself is consumed, not produced, here — its constructor and tick entry point are whatever the earlier task that builds it fixed; see the CONTRACT GAP note.
@@ -6880,7 +6880,7 @@ Expected: **green**. Same non-red-first shape as Step 1 — both facts are true 
 
 > **Candidates considered and rejected for this step.**
 >
-> - **"No production file under `src/` contains `DateTimeOffset.UtcNow`."** This is real, and it is not hypothetical: `src/Noof.Ledger.Host/Cli/UserCommand.cs:64` (`CreatedAt = DateTimeOffset.UtcNow` when the `user set-password` verb creates the operator row) already violates it, verified by `grep -rn "DateTimeOffset.UtcNow" src/`. That makes it the *strongest* candidate in one sense — a test built from it would catch a real, standing violation, not just a theoretical one — but it is rejected from **this** step for two reasons. First, it has nothing to do with keeping the model out of places it must never reach, which is the concern this step exists to close; it is a general `TimeProvider` convention, a different rule entirely. Second, fixing it means threading a `TimeProvider` through `UserCommand.RunAsync` — a real code change to a file this plan's contract never lists, in a phase already large enough. Silently leaving a known violation out of a test that claims to guard the rule is worse than not writing the test, so it is **not added here**; it is written into `docs/BACKLOG.md` in Part 4 with the exact file and line so it is not lost.
+> - **"No production file under `src/` contains `DateTimeOffset.UtcNow`."** This is real, and it is not hypothetical: `src/Noof.Ledger.Host/Cli/UserCommand.cs:64` (`CreatedAt = DateTimeOffset.UtcNow` when the `user set-password` verb creates the operator row) already violates it, verified by `grep -rn "DateTimeOffset.UtcNow" src/`. That makes it the *strongest* candidate in one sense — a test built from it would catch a real, standing violation, not just a theoretical one — but it is rejected from **this** step for two reasons. First, it has nothing to do with keeping the model out of places it must never reach, which is the concern this step exists to close; it is a general `TimeProvider` convention, a different rule entirely. Second, fixing it means threading a `TimeProvider` through `UserCommand.RunAsync` — a real code change to a file this plan's contract never lists, in a phase already large enough. Silently leaving a known violation out of a test that claims to guard the rule is worse than not writing the test, so it is **not added here**; it is written into `docs/backlog/` in Part 4 with the exact file and line so it is not lost.
 > - **"`QuotedAmount.TryResolve` is the only place a `Money` may be constructed from model output," asserted across all of `src/`.** Rejected at that scope: `Money` is constructed legitimately throughout the domain from sources that have nothing to do with the model — wallet balances, FX rows, the seed data in `Noof.Ledger.Persistence`. A whole-`src` grep for `new Money(` would fail immediately on code this rule was never meant to touch, which is exactly the kind of test that gets deleted in frustration rather than fixed. Scoped to `Noof.Ledger.Ai` and `Noof.Ledger.Host/Workers` — the only two places a model-derived `Money` could legitimately appear — it becomes exactly the same shape of rule as the Anthropic-namespace check above and is genuinely cheap, so it is **kept**, just narrowed, as `Only_QuotedAmount_constructs_a_Money_inside_the_categorization_pipeline` above.
 
 Run: `dotnet test --project tests/Noof.Ledger.Architecture.Tests/Noof.Ledger.Architecture.Tests.csproj`
@@ -7024,7 +7024,7 @@ Expected: both green. **Write down the actual `succeeded:` counts from the outpu
 Run: `powershell -ExecutionPolicy Bypass -File ops/publish.ps1`
 Expected: it builds in `Release`, runs `dotnet test --solution NoofLedger.slnx` itself (the script's own gate — this is the same suite Step 8 already ran; a second green run here is confirmation the script's gate is not silently broken, not new information), and produces `publish/Noof.Ledger.Host.dll`. Launch it once — `dotnet publish/Noof.Ledger.Host.dll` from the `publish/` directory — and confirm it starts and serves `/` before stopping it.
 
-> **INCIDENT, recorded rather than hidden.** Publish's `appsettings.json` ships `ConnectionStrings:Ledger` empty by design. `LedgerConnectionString.Resolve` (`src/Noof.Ledger.Persistence/LedgerConnectionString.cs`) falls back, in order, to `ConnectionStrings:Ledger` → the `NOOF_TEST_PG` environment variable (rewriting its `Database=postgres` to `Database=noof_ledger`, the `DefaultDatabase` constant) → the credential file. This implementer's shell had `NOOF_TEST_PG` set ambiently (unrelated dev-environment state, not set by this task), so launching the published host with no explicit connection string silently resolved to the real **`noof_ledger`** database — the one name this task was told never to touch. The process was killed within seconds of being noticed. The queries it ran were the dashboard's own read-only `SELECT`s plus repeated `UPDATE categorization_jobs SET status = 0, claimed_at = NULL, claimed_by = NULL, updated_at = @now WHERE status = 1 AND run_after <= @now` — `CategorizationWorker`'s ordinary, idempotent `ReleaseExpiredLeasesAsync`, ticking once per second because the Anthropic key is absent from that database's `app_secret` (`Idle` branch, no back-off). No `INSERT`/`DELETE`/`DROP` occurred. Left as a live landmine for the next person to launch the publish output locally with `NOOF_TEST_PG` set — worth a `docs/BACKLOG.md` entry or a safer default, but out of this task's scope to fix.
+> **INCIDENT, recorded rather than hidden.** Publish's `appsettings.json` ships `ConnectionStrings:Ledger` empty by design. `LedgerConnectionString.Resolve` (`src/Noof.Ledger.Persistence/LedgerConnectionString.cs`) falls back, in order, to `ConnectionStrings:Ledger` → the `NOOF_TEST_PG` environment variable (rewriting its `Database=postgres` to `Database=noof_ledger`, the `DefaultDatabase` constant) → the credential file. This implementer's shell had `NOOF_TEST_PG` set ambiently (unrelated dev-environment state, not set by this task), so launching the published host with no explicit connection string silently resolved to the real **`noof_ledger`** database — the one name this task was told never to touch. The process was killed within seconds of being noticed. The queries it ran were the dashboard's own read-only `SELECT`s plus repeated `UPDATE categorization_jobs SET status = 0, claimed_at = NULL, claimed_by = NULL, updated_at = @now WHERE status = 1 AND run_after <= @now` — `CategorizationWorker`'s ordinary, idempotent `ReleaseExpiredLeasesAsync`, ticking once per second because the Anthropic key is absent from that database's `app_secret` (`Idle` branch, no back-off). No `INSERT`/`DELETE`/`DROP` occurred. Left as a live landmine for the next person to launch the publish output locally with `NOOF_TEST_PG` set — worth a `docs/backlog/` entry or a safer default, but out of this task's scope to fix.
 
 - [x] **Step 10: Update `CLAUDE.md`'s status line**
 
@@ -7044,12 +7044,12 @@ with:
 
 Substitute `<SUCCEEDED-COUNT-FROM-STEP-8>` and `<E2E-COUNT-FROM-STEP-8>` with the actual numbers written down in Step 8 — never a guessed or remembered figure. Phase 2's description is taken verbatim from spec §12's phase table row `2 | Money model | Balances exact across all five currencies under ru-RU and sr-Latn-RS. A backup restored successfully at least once.` — the next row after Phase 1 in that table, since Phases 1A and 1B together are this repository's split of the spec's single Phase 1.
 
-- [x] **Step 11: `docs/OPEN-QUESTIONS.md` and `docs/BACKLOG.md` — checked, not assumed**
+- [x] **Step 11: `docs/OPEN-QUESTIONS.md` and `docs/backlog/` — checked, not assumed**
 
 Checked directly against both files as they stand (not reproduced from memory of what this plan's own earlier sections claim):
 
-- **`docs/OPEN-QUESTIONS.md`: no new entry.** Everything this phase defers is deferred *work* whose decision is already made (per `BACKLOG.md`'s own header, which draws that line), not an undecided *question* — so it belongs in `BACKLOG.md`, matching how this phase's own "What this plan deliberately does NOT do" section already frames every one of its deferrals. Do not add anything here.
-- **The Telegram `getMe` probe.** `docs/BACKLOG.md` was grepped for `getme` (case-insensitive) and has no entry — despite this plan's own "What this plan deliberately does NOT do" section stating *"the Telegram equivalent is recorded in the backlog by that task"* (Task 8). **Add it now if Task 8 has not already added it by the time this task runs** — grep first, do not duplicate. Entry to add, matching this file's existing format (title, **Wanted**, **Why it is not scheduled**, one short closing paragraph):
+- **`docs/OPEN-QUESTIONS.md`: no new entry.** Everything this phase defers is deferred *work* whose decision is already made (per `docs/backlog/`'s own header, which draws that line), not an undecided *question* — so it belongs in `docs/backlog/`, matching how this phase's own "What this plan deliberately does NOT do" section already frames every one of its deferrals. Do not add anything here.
+- **The Telegram `getMe` probe.** `docs/backlog/` was grepped for `getme` (case-insensitive) and has no entry — despite this plan's own "What this plan deliberately does NOT do" section stating *"the Telegram equivalent is recorded in the backlog by that task"* (Task 8). **Add it now if Task 8 has not already added it by the time this task runs** — grep first, do not duplicate. Entry to add, matching this file's existing format (title, **Wanted**, **Why it is not scheduled**, one short closing paragraph):
 
   ```markdown
   ## A Test button for the Telegram bot token
@@ -7065,7 +7065,7 @@ Checked directly against both files as they stand (not reproduced from memory of
   ordinary work for any later phase.
   ```
 
-- **The merchant merge inbox.** `docs/BACKLOG.md` was grepped for `merge`/`duplicate`/`alias` and has **no entry**, despite this phase's own "What this plan deliberately does NOT do" section claiming *"All three are in `docs/BACKLOG.md`"* (category management, per-line-item correction, and the merge inbox). Two of the three are there; **the merge inbox is not — that claim was wrong, and this step corrects it** rather than trusting it. Add:
+- **The merchant merge inbox.** `docs/backlog/` was grepped for `merge`/`duplicate`/`alias` and has **no entry**, despite this phase's own "What this plan deliberately does NOT do" section claiming *"All three are in `docs/backlog/`"* (category management, per-line-item correction, and the merge inbox). Two of the three are there; **the merge inbox is not — that claim was wrong, and this step corrects it** rather than trusting it. Add:
 
   ```markdown
   ## Merchant merge inbox for near-duplicate aliases
@@ -7084,7 +7084,7 @@ Checked directly against both files as they stand (not reproduced from memory of
   database edit.
   ```
 
-- **Per-line-item category correction, category management UI.** Both grepped, both present in `docs/BACKLOG.md` already, unchanged since before this phase. No edit needed — verified, not duplicated.
+- **Per-line-item category correction, category management UI.** Both grepped, both present in `docs/backlog/` already, unchanged since before this phase. No edit needed — verified, not duplicated.
 
 - [x] **Step 12: Commit**
 
@@ -7102,7 +7102,7 @@ EOF
 ```
 
 ```bash
-git add CLAUDE.md docs/BACKLOG.md
+git add CLAUDE.md docs/backlog/
 git commit -m "$(cat <<'EOF'
 docs: close Phase 1B — update status, record the getMe probe and merge inbox as backlog
 

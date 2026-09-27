@@ -62,7 +62,7 @@ paths:
   Warning 90, Error 90, Fatal 90 days; `EfLogRetention` reads the stored value, falling back to these.
   Changes on that page take effect only on **Save**, never on a field's own `@bind:after` — the same
   pattern as `Secrets.razor` — matching decision (b): no setting in this feature autosaves on change.
-  `transaction_revisions` retention is explicitly not part of this — `docs/BACKLOG.md`.
+  `transaction_revisions` retention is explicitly not part of this — `docs/backlog/loose-ends-phase-5-observability.md`.
 - **`LoggingSetup.Configure` never resolves a service whose construction needs `ILogger<T>`.** It runs
   while the `ILoggerFactory` singleton is itself being built, so such a resolution re-enters that
   construction on the same thread and the host hangs (a hung `WebApplicationFactory` test, confirmed
@@ -72,6 +72,6 @@ paths:
   `SelfLogOwnership.Claim`, called from here, resolves its connection's host identity synchronously
   (`Dns.GetHostAddresses` for anything that is not already an IP literal) — harmless for the
   operator's `127.0.0.1` literal today, but a host name with DNS unreachable would stall this
-  synchronous startup path until the resolver times out. `docs/BACKLOG.md` tracks the DNS-drift side
+  synchronous startup path until the resolver times out. `docs/backlog/loose-ends-phase-5-observability.md` tracks the DNS-drift side
   of this; if the database ever moves to a host name, resolve it off the startup path instead of
   inside `Claim`.

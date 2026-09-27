@@ -6,7 +6,7 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
 > Cross-currency conversion, transfers, exchange-office slips and editing receipt lines remain future
 > phases. Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
 >
-> Deferred **decisions** live in `docs/OPEN-QUESTIONS.md`; deferred **work** lives in `docs/BACKLOG.md`. Check both before proposing something as missing.
+> Deferred **decisions** live in `docs/OPEN-QUESTIONS.md`; deferred **work** lives in `docs/backlog/`. Check both before proposing something as missing.
 >
 > **`noof_ledger` holds the operator's real credentials now.** Never run tests, experiments or manual checks against it, or call the live model, without an explicit request. Tests use the `noof_ledger_test_template` clones only.
 

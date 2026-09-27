@@ -48,7 +48,7 @@ Each of these was settled while writing this plan, several of them by measuremen
 - **EF migration classes stay `public`.** EF scaffolds them that way and rewrites them on the next scaffold. `CLAUDE.md` already exempts their generated companions from code style; the allowlist test excludes `Migrations/` for the same reason.
 - **The Host keeps Razor, authentication, endpoint and data-protection wiring.** Those are composition-root concerns, and `AddRazorComponents` is not even available inside a Razor class library with no ASP.NET Core framework reference. Requirement 3 is about services, not about emptying `Program.cs` for its own sake.
 - **`TimeZoneInfo` becomes a registered singleton**, alongside the existing `AddSingleton(TimeProvider.System)`. Today the read model's zone is threaded through a hand-written three-argument lambda in `Program.cs`; registering the zone once deletes that lambda and removes a parameter from `AddNoofPersistence`.
-- **`Microsoft.CodeAnalysis.PublicApiAnalyzers` is not adopted.** It locks member-level surface at build time, which is attractive, but it needs a hand-maintained `PublicAPI.Unshipped.txt` per project — several hundred lines for `Domain` plus `Application` — and at type level it duplicates what Task 1 does in the house style with no package at all. Task 9 records it in `docs/BACKLOG.md` with this reasoning so it is not re-proposed as new.
+- **`Microsoft.CodeAnalysis.PublicApiAnalyzers` is not adopted.** It locks member-level surface at build time, which is attractive, but it needs a hand-maintained `PublicAPI.Unshipped.txt` per project — several hundred lines for `Domain` plus `Application` — and at type level it duplicates what Task 1 does in the house style with no package at all. Task 9 records it in `docs/backlog/` with this reasoning so it is not re-proposed as new.
 - **`AnalysisMode=All` is not adopted.** Measured, not guessed: a full rebuild with `-p:AnalysisMode=All` emitted **842 distinct warnings across 31 rules** — 376 `CA1707` (underscores in names: our deliberate test-naming convention), 258 `CA2007` (`ConfigureAwait`, meaningless in an app with no synchronization context), 61 `CA2000`, 28 `CA1062` (argument-null boilerplate `CLAUDE.md` §3 forbids). Adopting it would mean suppressing most of the rulebook and calling the remainder strictness. Task 6 enables a named list instead, and Task 9 banks the measurement so nobody re-proposes the blanket switch blind.
 - **`CA1812` ("avoid uninstantiated internal classes") is not enabled.** It flags internal types never constructed inside their own assembly — which is every DI-registered service this phase is about to make internal. False positives all the way down.
 - **`CA1515`'s reach must be widened by hand.** It defaults to executable output kinds only, so on a class library it is silent. `.editorconfig` needs `dotnet_code_quality.CA1515.output_kind = ConsoleApplication, DynamicallyLinkedLibrary` or the rule does nothing for `Persistence`, `Ai` and `Telegram` — the three assemblies this phase is mostly about.
@@ -102,7 +102,7 @@ New files, and what each owns:
 | `.config/dotnet-tools.json` | Pins `JetBrains.ReSharper.GlobalTools` so `ops/inspect.ps1` is reproducible. |
 | `ops/inspect.ps1` | Runs `jb inspectcode`, parses the report, fails on ERROR-severity findings. |
 
-Modified: every `src/**/*.cs` whose accessibility changes, `src/Noof.Ledger.Host/Program.cs`, three infrastructure `.csproj` files (packages + `InternalsVisibleTo`), `tests/Noof.Ledger.Architecture.Tests/ProjectReferenceTests.cs` (the package allowlists it asserts), `.editorconfig`, `CLAUDE.md`, `README.md`, `docs/BACKLOG.md`, `ops/RUNBOOK.md`, `.gitignore`.
+Modified: every `src/**/*.cs` whose accessibility changes, `src/Noof.Ledger.Host/Program.cs`, three infrastructure `.csproj` files (packages + `InternalsVisibleTo`), `tests/Noof.Ledger.Architecture.Tests/ProjectReferenceTests.cs` (the package allowlists it asserts), `.editorconfig`, `CLAUDE.md`, `README.md`, `docs/backlog/`, `ops/RUNBOOK.md`, `.gitignore`.
 
 ---
 
@@ -1028,7 +1028,7 @@ dotnet_code_quality.CA1515.output_kind = ConsoleApplication, DynamicallyLinkedLi
 dotnet_diagnostic.CA1852.severity = error
 
 # Cheap correctness rules that the AnalysisMode=All measurement showed cost fewer than a handful of
-# fixes each. Enabled by name rather than by turning on the whole rulebook - see docs/BACKLOG.md.
+# fixes each. Enabled by name rather than by turning on the whole rulebook - see docs/backlog/.
 dotnet_diagnostic.CA1862.severity = error
 dotnet_diagnostic.CA1861.severity = error
 dotnet_diagnostic.CA2263.severity = error
@@ -1239,7 +1239,7 @@ A useful debugging aid if severities look wrong: `--dumpIssuesTypes` (`-it`) pri
 
 - **If it runs:** inspect `artifacts/inspect/report.xml` yourself, correct the XPath and attribute names in the script to match what the tool actually emits, and re-run until the script's output agrees with the report.
 - **If `.slnx` is rejected:** try pointing it at the individual `.csproj` files instead and adjust the script.
-- **If it cannot be made to work at all:** do not fake it. Delete `ops/inspect.ps1` and `.config/dotnet-tools.json`, keep `NoofLedger.sln.DotSettings` (which still gives every Rider user the rules), and record the failure with its exact error in `docs/BACKLOG.md` under a heading naming the tool and version. Then note in your report that Task 8 must be done by reading Rider's own inspection results instead.
+- **If it cannot be made to work at all:** do not fake it. Delete `ops/inspect.ps1` and `.config/dotnet-tools.json`, keep `NoofLedger.sln.DotSettings` (which still gives every Rider user the rules), and record the failure with its exact error in `docs/backlog/` under a heading naming the tool and version. Then note in your report that Task 8 must be done by reading Rider's own inspection results instead.
 
 Add `artifacts/` to `.gitignore` if not already there — it is, per `CLAUDE.md`, but confirm.
 
@@ -1308,7 +1308,7 @@ git commit -m "refactor: narrow every member the solution-wide sweep could prove
 `CLAUDE.md` §6: a phase is finished when the next person can pick it up without rediscovering what it cost.
 
 **Files:**
-- Modify: `CLAUDE.md`, `README.md`, `docs/BACKLOG.md`, `ops/RUNBOOK.md`
+- Modify: `CLAUDE.md`, `README.md`, `docs/backlog/`, `ops/RUNBOOK.md`
 
 - [ ] **Step 1: Write the rule that outlived the phase into `CLAUDE.md`**
 
@@ -1333,7 +1333,7 @@ Add to §4 under **Architecture**, keeping it to three lines — `CLAUDE.md` is 
 
 The README's status block describes what works. Phase 1C changed no behaviour, so most of it stays true — but if it describes the project layout or claims anything about extensibility, check it against the tree. A public README that claims a guarantee the code stopped providing is worse than no README.
 
-- [ ] **Step 4: Bank the measurements in `docs/BACKLOG.md`**
+- [ ] **Step 4: Bank the measurements in `docs/backlog/`**
 
 Three entries, each with enough reasoning that nobody re-proposes it as new:
 
