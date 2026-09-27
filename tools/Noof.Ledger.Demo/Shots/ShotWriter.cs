@@ -6,11 +6,14 @@ internal sealed class ShotWriter(string screenshotsRoot, string sendRoot)
 {
     const int MaxSliceDevicePixels = 4000;
     readonly List<string> changed = [];
+    readonly List<string> saved = [];
 
     public IReadOnlyList<string> Changed => changed;
+    public IReadOnlyList<string> Saved => saved;
 
     public async Task SaveAsync(IPage page, string relativePath, Viewport viewport, string? hideCss)
     {
+        saved.Add(relativePath);
         var png = await page.ScreenshotAsync(Options(hideCss));
         if (!ShotFiles.WriteImageIfChanged(Path.Combine(screenshotsRoot, relativePath), png))
             return;

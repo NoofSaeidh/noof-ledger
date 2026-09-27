@@ -29,6 +29,18 @@ Do not edit by hand; a change to what the app shows regenerates them.
 
 <img src="app/trace-failed-desktop.png" width="640" alt="A failed transaction's trace, desktop"> <img src="app/trace-failed-phone.png" width="200" alt="A failed transaction's trace, phone">
 
+### A receipt's trace
+
+<img src="app/trace-receipt-desktop.png" width="640" alt="A receipt's trace, desktop"> <img src="app/trace-receipt-phone.png" width="200" alt="A receipt's trace, phone">
+
+### A receipt read from the photo
+
+<img src="app/trace-receipt-vision-desktop.png" width="640" alt="A receipt read from the photo, desktop"> <img src="app/trace-receipt-vision-phone.png" width="200" alt="A receipt read from the photo, phone">
+
+### A receipt waiting for Record anyway
+
+<img src="app/trace-receipt-check-desktop.png" width="640" alt="A receipt waiting for Record anyway, desktop"> <img src="app/trace-receipt-check-phone.png" width="200" alt="A receipt waiting for Record anyway, phone">
+
 ### Diagnostics
 
 <img src="app/diagnostics-desktop.png" width="640" alt="Diagnostics, desktop"> <img src="app/diagnostics-phone.png" width="200" alt="Diagnostics, phone">
@@ -51,9 +63,9 @@ Do not edit by hand; a change to what the app shows regenerates them.
 
 <img src="telegram/expense.png" width="300" alt="Expense">
 
-### Receipt with a merchant
+### Several items with a merchant
 
-<img src="telegram/receipt.png" width="300" alt="Receipt with a merchant">
+<img src="telegram/multi-line.png" width="300" alt="Several items with a merchant">
 
 ### Income
 
@@ -74,6 +86,18 @@ Do not edit by hand; a change to what the app shows regenerates them.
 ### A message it could not read
 
 <img src="telegram/failure.png" width="300" alt="A message it could not read">
+
+### A receipt photo, read from its fiscal QR
+
+<img src="telegram/receipt-qr.png" width="300" alt="A receipt photo, read from its fiscal QR">
+
+### The tax site was down, so the lines were read from the photo
+
+<img src="telegram/receipt-vision.png" width="300" alt="The tax site was down, so the lines were read from the photo">
+
+### A receipt that doesn't add up
+
+<img src="telegram/receipt-check.png" width="300" alt="A receipt that doesn't add up">
 
 ### /health
 

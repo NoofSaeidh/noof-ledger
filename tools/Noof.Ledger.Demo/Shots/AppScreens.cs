@@ -23,13 +23,17 @@ internal static class AppScreens
         new("transactions", "Transactions", "/transactions", "#transactions-grid"),
         new("trace", "Transaction trace", $"/transactions/{MockData.TracedTransactionId}/trace", "#trace-timeline"),
         new("trace-failed", "A failed transaction's trace", $"/transactions/{MockData.FailedTransactionId}/trace", "#trace-timeline"),
+        new("trace-receipt", "A receipt's trace", $"/transactions/{MockData.ReceiptTransactionId}/trace", "#trace-receipt"),
+        new("trace-receipt-vision", "A receipt read from the photo", $"/transactions/{MockData.VisionReceiptTransactionId}/trace", "#trace-receipt"),
+        new("trace-receipt-check", "A receipt waiting for Record anyway",
+            $"/transactions/{MockData.UnconfirmedReceiptTransactionId}/trace", "#trace-receipt-awaiting-confirmation"),
         new("diagnostics", "Diagnostics", "/diagnostics", "#diagnostics-checks", Prepare: HideFreeDiskSpaceAsync),
-        new("logs", "Logs", "/diagnostics/logs", "#logs-grid", Prepare: FilterLogsToTheMockMonthAsync),
+        new("logs", "Logs", "/diagnostics/logs", "#logs-grid", Prepare: FilterLogsToTheMockWindowAsync),
         new("log-settings", "Log settings", "/diagnostics/logs/settings", "#retention-verbose"),
         new("secrets", "Secrets", "/settings/secrets", "#status-anthropic-api-key"),
     ];
 
-    static async Task FilterLogsToTheMockMonthAsync(IPage page)
+    static async Task FilterLogsToTheMockWindowAsync(IPage page)
     {
         await FillAndLeaveAsync(page, "#logs-filter-from", $"{MockData.LogWindowStart:yyyy-MM-dd}T00:00");
         await FillAndLeaveAsync(page, "#logs-filter-to", $"{MockData.LogWindowEnd:yyyy-MM-dd}T00:00");

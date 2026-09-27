@@ -23,10 +23,11 @@ internal static class ShotsCommand
         await AppShots.CaptureAsync(browser, writer);
         await TelegramShots.CaptureAsync(browser, writer, scenes);
 
+        var removed = ShotFiles.RemoveStale(RepoPaths.Screenshots, writer.Saved);
         var galleryChanged = ShotFiles.WriteIfChanged(
             Path.Combine(RepoPaths.Screenshots, "README.md"), Encoding.UTF8.GetBytes(Gallery.Render(AppScreens.All, scenes)));
 
-        Report(writer.Changed, galleryChanged);
+        Report(writer.Changed, removed, galleryChanged);
         return 0;
     }
 
@@ -43,9 +44,12 @@ internal static class ShotsCommand
         }
     }
 
-    static void Report(IReadOnlyList<string> changed, bool galleryChanged)
+    static void Report(IReadOnlyList<string> changed, IReadOnlyList<string> removed, bool galleryChanged)
     {
-        if (changed.Count == 0 && !galleryChanged)
+        foreach (var path in removed)
+            Console.WriteLine($"Removed {path}: no screen or scene takes it any more.");
+
+        if (changed.Count == 0 && removed.Count == 0 && !galleryChanged)
         {
             Console.WriteLine("No screenshot changed.");
             return;

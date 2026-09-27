@@ -474,7 +474,10 @@ any current directory.
 - Only one demo at a time: both commands refuse while something listens on 5264.
 - The mock data is dated in the current month (fixed days 1–20, clock pinned to the 20th at 18:00
   UTC), because the dashboard's "This month" follows the real calendar. The pictures therefore change
-  once a month, when the dates roll over, and otherwise only when the app does. A feature that adds
+  once a month, when the dates roll over, and otherwise only when the app does. The Logs picture
+  alone shows the last three days of the previous month, so the host's own rows, logged at the real
+  now, never fall into it; the demo saves a 60/90-day log retention so the host's prune, a minute
+  after it starts, keeps every mock row. A feature that adds
   something visible adds mock data for it, a screen in `Shots/AppScreens.cs` or a scene in
   `Shots/TelegramScenes.cs`, and then regenerates the pictures.
 - Chromium missing: the command prints the `playwright.ps1 install chromium` line to run.

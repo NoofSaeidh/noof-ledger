@@ -39,4 +39,13 @@ public sealed class TelegramChatPageTests
         html.Should().Contain("<div class=\"quote\">What should I fix?</div>");
         html.Should().NotContain("second line");
     }
+
+    [Fact]
+    public void A_photo_is_drawn_as_a_receipt_and_an_empty_caption_leaves_no_text()
+    {
+        var html = TelegramChatPage.Render(new ChatScene("x", "X", [new ChatBubble(ChatSide.Operator, "", "09:00", Photo: true)]));
+
+        html.Should().Contain("class=\"photo\"");
+        html.Should().NotContain("class=\"text\"");
+    }
 }

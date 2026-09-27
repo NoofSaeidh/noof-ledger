@@ -84,4 +84,19 @@ public sealed class ShotFilesTests
         slices.Select(part => part.Y).Should().Equal(ys);
         slices.Select(part => part.Height).Should().Equal(heights);
     }
+
+    [Fact]
+    public void A_picture_no_screen_or_scene_takes_any_more_is_removed_and_the_rest_are_kept()
+    {
+        var root = Directory.CreateTempSubdirectory("noof-shots-").FullName;
+        foreach (var name in new[] { "app/dashboard-phone.png", "telegram/receipt.png", "telegram/receipt-qr.png", "README.md" })
+            ShotFiles.WriteIfChanged(Path.Combine(root, name), [1]);
+
+        var removed = ShotFiles.RemoveStale(root, ["app/dashboard-phone.png", "telegram/receipt-qr.png"]);
+
+        removed.Should().Equal("telegram/receipt.png");
+        File.Exists(Path.Combine(root, "telegram", "receipt.png")).Should().BeFalse();
+        File.Exists(Path.Combine(root, "telegram", "receipt-qr.png")).Should().BeTrue();
+        File.Exists(Path.Combine(root, "README.md")).Should().BeTrue();
+    }
 }

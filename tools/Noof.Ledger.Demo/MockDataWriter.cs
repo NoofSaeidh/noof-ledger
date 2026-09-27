@@ -25,6 +25,9 @@ internal static class MockDataWriter
             await WriteRecordAsync(db, MockData.Records[index], index + 1, wallets, categories, merchants, cancellationToken);
 
         await WriteTraceAsync(db, cancellationToken);
+        await WriteReceiptTracesAsync(db, cancellationToken);
+        await WriteLogRowsAsync(db, cancellationToken);
+        await services.GetRequiredService<ILogRetentionSettings>().SaveAsync(MockData.LogRetention, cancellationToken);
         await WriteUserAsync(services, cancellationToken);
         await WriteSecretsAsync(services.GetRequiredService<ISecretStore>(), cancellationToken);
         await WriteBackupRunAsync(db, cancellationToken);
@@ -46,6 +49,9 @@ internal static class MockDataWriter
                 .Where(transaction => transaction.WalletId == id && transaction.Kind == TransactionKind.BalanceCheck)
                 .ExecuteUpdateAsync(set => set.SetProperty(transaction => transaction.OccurredAt, openedAt), cancellationToken);
 
+            if (wallet.PaymentDefault is { } payment)
+                await admin.SetPaymentDefaultAsync(id, payment, cancellationToken);
+
             if (wallet.Archived)
                 await admin.ArchiveAsync(id, cancellationToken);
 
@@ -63,7 +69,7 @@ internal static class MockDataWriter
         var ids = names.Select((name, index) => (name, id: MockData.Id(800 + index))).ToDictionary(pair => pair.name, pair => pair.id);
         foreach (var (name, id) in ids)
         {
-            db.Merchants.Add(new Merchant { Id = id, DisplayName = name, Kind = MerchantKind.Retail });
+            db.Merchants.Add(new Merchant { Id = id, DisplayName = name, Kind = MerchantKind.Retail, TaxId = RecordedTaxIdOf(name) });
             db.MerchantAliases.Add(new MerchantAlias { Folded = MerchantName.Fold(name), MerchantId = id, CreatedAt = MockData.Now });
         }
 
@@ -71,12 +77,19 @@ internal static class MockDataWriter
         return ids;
     }
 
+    // The app learns a merchant's tax id from the first receipt categorised under it.
+    static string? RecordedTaxIdOf(string merchant) =>
+        MockData.Records
+            .Where(record => record is { Status: TransactionStatus.Completed, Receipt: not null })
+            .Select(record => record.Receipt!)
+            .FirstOrDefault(receipt => receipt.SellerName == merchant)?.SellerTaxId;
+
     static async Task WriteRecordAsync(
         LedgerDbContext db, MockRecord record, int messageId, Dictionary<string, Guid> wallets,
         Dictionary<string, Guid> categories, Dictionary<string, Guid> merchants, CancellationToken cancellationToken)
     {
-        var walletId = wallets[record.Wallet];
-        var currency = MockData.Wallets.Single(wallet => wallet.Name == record.Wallet).Currency;
+        Guid? walletId = record.Wallet is { } wallet ? wallets[wallet] : null;
+        var currency = record.Receipt is null ? MockData.Wallets.Single(candidate => candidate.Name == record.Wallet).Currency : CurrencyCode.Rsd;
         var occurredAt = ZonedClock.StartOfDay(record.Day, MockData.TimeZoneId).AddHours(12).AddMinutes(messageId);
         var transaction = new Transaction
         {
@@ -84,7 +97,8 @@ internal static class MockDataWriter
             WalletId = walletId,
             Kind = record.Kind,
             RawText = record.RawText,
-            CaptureKind = CaptureKind.Text,
+            CaptureKind = record.Receipt is null ? CaptureKind.Text : CaptureKind.Photo,
+            TelegramFileId = record.Receipt is null ? null : $"demo-photo-{messageId}",
             Status = record.Status,
             TimeZoneId = MockData.TimeZoneId,
             OccurredAt = occurredAt,
@@ -95,13 +109,14 @@ internal static class MockDataWriter
             CreatedAt = occurredAt,
         };
         db.Transactions.Add(transaction);
+        var receiptLineIds = record.Receipt is { } receipt ? AddReceipt(db, transaction, receipt, messageId) : [];
 
         if (record is { Kind: TransactionKind.BalanceCheck, Stated: { } stated, ComputedBefore: { } computedBefore })
         {
             db.BalanceChecks.Add(new BalanceCheck
             {
                 TransactionId = transaction.Id,
-                WalletId = walletId,
+                WalletId = wallets[record.Wallet!],
                 Stated = new Money(stated, currency),
                 ComputedBefore = computedBefore,
             });
@@ -113,7 +128,7 @@ internal static class MockDataWriter
             {
                 Id = MockData.Id(1000 + messageId),
                 TransactionId = transaction.Id,
-                WalletId = walletId,
+                WalletId = wallets[record.Wallet!],
                 Amount = new Money(record.Kind == TransactionKind.Income ? total : -total, currency),
                 Role = EntryRole.Principal,
             });
@@ -130,6 +145,7 @@ internal static class MockDataWriter
                     CategorizedBy = CategorizationAuthority.Model,
                     MerchantId = record.Lines[line].Merchant is { } merchant ? merchants[merchant] : null,
                     Ordinal = line + 1,
+                    ReceiptLineId = receiptLineIds.Count > 0 ? receiptLineIds[line] : null,
                 });
             }
         }
@@ -150,6 +166,62 @@ internal static class MockDataWriter
         }
     }
 
+    static List<Guid> AddReceipt(LedgerDbContext db, Transaction transaction, MockReceipt receipt, int messageId)
+    {
+        var receiptId = MockData.Id(4000 + messageId);
+        db.Receipts.Add(new Receipt
+        {
+            Id = receiptId,
+            TransactionId = transaction.Id,
+            Source = receipt.Source,
+            SellerTaxId = receipt.SellerTaxId,
+            SellerName = receipt.SellerName,
+            SellerAddress = receipt.SellerAddress,
+            LocationName = receipt.LocationName,
+            FiscalNumber = receipt.FiscalNumber,
+            IssuedAt = receipt.IssuedAt,
+            Total = new Money(receipt.Total, CurrencyCode.Rsd),
+            Kind = ReceiptKind.Sale,
+            PaymentMethod = receipt.Payment,
+            QrTotal = receipt.QrTotal,
+            TelegramFileId = transaction.TelegramFileId,
+            CreatedAt = transaction.OccurredAt.AddSeconds(3),
+        });
+
+        var lineIds = receipt.Lines.Select((_, index) => MockData.Id(3000 + messageId * 10 + index)).ToList();
+        db.ReceiptLines.AddRange(receipt.Lines.Select((line, index) => new ReceiptLine
+        {
+            Id = lineIds[index],
+            ReceiptId = receiptId,
+            Ordinal = index + 1,
+            Name = line.Name,
+            Quantity = line.Quantity,
+            Unit = line.Unit,
+            UnitPrice = line.UnitPrice,
+            Total = line.Total,
+        }));
+
+        // A receipt read from the photo counts as confirmed only once its CategorizeReceipt job exists.
+        AddSucceededJob(db, transaction, JobKind.ExtractReceipt, MockData.Id(5000 + messageId * 10));
+        if (transaction.Status == TransactionStatus.Completed)
+            AddSucceededJob(db, transaction, JobKind.CategorizeReceipt, MockData.Id(5000 + messageId * 10 + 1));
+
+        return lineIds;
+    }
+
+    static void AddSucceededJob(LedgerDbContext db, Transaction transaction, JobKind kind, Guid id) =>
+        db.CategorizationJobs.Add(new CategorizationJob
+        {
+            Id = id,
+            TransactionId = transaction.Id,
+            Kind = kind,
+            Status = JobStatus.Succeeded,
+            AttemptCount = 1,
+            RunAfter = transaction.OccurredAt,
+            CreatedAt = transaction.OccurredAt,
+            UpdatedAt = transaction.OccurredAt.AddSeconds(5),
+        });
+
     static async Task WriteTraceAsync(LedgerDbContext db, CancellationToken cancellationToken)
     {
         var traced = await db.Transactions.SingleAsync(transaction => transaction.Id == MockData.TracedTransactionId, cancellationToken);
@@ -161,13 +233,43 @@ internal static class MockDataWriter
             Stage(traced.Id, traced.OccurredAt.AddMilliseconds(1520), "Noof.Ledger.Host.Workers.CategorizationWorker", TransactionStages.Persisted, TransactionStages.PersistedEventId),
             Stage(traced.Id, traced.OccurredAt.AddMilliseconds(1690), "Noof.Ledger.Telegram.TelegramChatNotifier", TransactionStages.Replied, TransactionStages.RepliedEventId),
             Stage(failed.Id, failed.OccurredAt, "Noof.Ledger.Telegram.TelegramUpdateRouter", TransactionStages.Received, TransactionStages.ReceivedEventId),
-            StageFailed(failed.Id, failed.OccurredAt.AddMilliseconds(2300), TransactionStages.Categorized),
-            Row(MockData.At(19, 9, 0), LogSeverity.Debug, "Noof.Ledger.Telegram.TelegramPollingService", "Polled Telegram: 1 update"),
-            Row(MockData.At(19, 9, 5), LogSeverity.Information, "Noof.Ledger.Host.Workers.BackupWorker", $"Backup finished: noof_ledger-{MockData.At(19, 9, 5):yyyyMMdd}.dump"),
-            Row(MockData.At(19, 14, 30), LogSeverity.Warning, "Noof.Ledger.Ai", "Model call took 31.2 s, over its 30 s threshold"),
-            Row(MockData.At(20, 8, 15), LogSeverity.Error, "Noof.Ledger.Ai", "Categorisation call failed",
-                "System.TimeoutException: The operation timed out after 00:00:30."));
+            StageFailed(failed.Id, failed.OccurredAt.AddMilliseconds(2300), TransactionStages.Categorized));
 
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    static async Task WriteReceiptTracesAsync(LedgerDbContext db, CancellationToken cancellationToken)
+    {
+        const string Router = "Noof.Ledger.Telegram.TelegramUpdateRouter";
+        const string Extractor = "Noof.Ledger.Host.Workers.ExtractReceiptWorker";
+        const string Categorizer = "Noof.Ledger.Host.Workers.CategorizationWorker";
+        const string Notifier = "Noof.Ledger.Telegram.TelegramChatNotifier";
+
+        var qr = await db.Transactions.SingleAsync(transaction => transaction.Id == MockData.ReceiptTransactionId, cancellationToken);
+        var vision = await db.Transactions.SingleAsync(transaction => transaction.Id == MockData.VisionReceiptTransactionId, cancellationToken);
+        var unconfirmed = await db.Transactions.SingleAsync(transaction => transaction.Id == MockData.UnconfirmedReceiptTransactionId, cancellationToken);
+
+        db.AppLogs.AddRange(
+            Stage(qr.Id, qr.OccurredAt, Router, TransactionStages.Received, TransactionStages.ReceivedEventId),
+            Stage(qr.Id, qr.OccurredAt.AddMilliseconds(2140), Extractor, TransactionStages.Extracted, TransactionStages.ExtractedEventId),
+            Stage(qr.Id, qr.OccurredAt.AddMilliseconds(4310), Categorizer, TransactionStages.Categorized, TransactionStages.CategorizedEventId),
+            Stage(qr.Id, qr.OccurredAt.AddMilliseconds(4380), Categorizer, TransactionStages.Persisted, TransactionStages.PersistedEventId),
+            Stage(qr.Id, qr.OccurredAt.AddMilliseconds(4560), Notifier, TransactionStages.Replied, TransactionStages.RepliedEventId),
+            Stage(vision.Id, vision.OccurredAt, Router, TransactionStages.Received, TransactionStages.ReceivedEventId),
+            ReceiptFetchFailed(vision.Id, vision.OccurredAt.AddMilliseconds(10200)),
+            Stage(vision.Id, vision.OccurredAt.AddMilliseconds(17850), Extractor, TransactionStages.Extracted, TransactionStages.ExtractedEventId),
+            Stage(vision.Id, vision.OccurredAt.AddMilliseconds(20120), Categorizer, TransactionStages.Categorized, TransactionStages.CategorizedEventId),
+            Stage(vision.Id, vision.OccurredAt.AddMilliseconds(20190), Categorizer, TransactionStages.Persisted, TransactionStages.PersistedEventId),
+            Stage(vision.Id, vision.OccurredAt.AddMilliseconds(20400), Notifier, TransactionStages.Replied, TransactionStages.RepliedEventId),
+            Stage(unconfirmed.Id, unconfirmed.OccurredAt, Router, TransactionStages.Received, TransactionStages.ReceivedEventId),
+            Stage(unconfirmed.Id, unconfirmed.OccurredAt.AddMilliseconds(6480), Extractor, TransactionStages.Extracted, TransactionStages.ExtractedEventId));
+
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    static async Task WriteLogRowsAsync(LedgerDbContext db, CancellationToken cancellationToken)
+    {
+        db.AppLogs.AddRange(MockData.LogRows.Select(row => Row(row.At, row.Level, row.Source, row.Message, row.Exception)));
         await db.SaveChangesAsync(cancellationToken);
     }
 
@@ -194,6 +296,18 @@ internal static class MockDataWriter
         Exception = "Noof.Ledger.Application.Categorization.ModelCallException: the message could not be read as an amount",
         TransactionId = transactionId,
         PropertiesJson = $$"""{"Stage":"{{TransactionStages.StageFailed}}","FailedStage":"{{failedStage}}","EventId":{"Id":{{TransactionStages.StageFailedEventId}},"Name":"{{TransactionStages.StageFailed}}"},"TransactionId":"{{transactionId}}"}""",
+    };
+
+    static AppLogEntry ReceiptFetchFailed(Guid transactionId, DateTimeOffset at) => new()
+    {
+        Id = 0,
+        LoggedAt = at,
+        Level = LogSeverity.Warning,
+        Source = "Noof.Ledger.Host.Workers.ExtractReceiptWorker",
+        Message = $"{TransactionStages.ReceiptFetchFailed}: the Tax Administration site did not answer (status 503)",
+        Template = "{Stage}: {Reason} (status {StatusCode})",
+        TransactionId = transactionId,
+        PropertiesJson = $$"""{"Stage":"{{TransactionStages.ReceiptFetchFailed}}","Reason":"the Tax Administration site did not answer","StatusCode":503,"EventId":{"Id":{{TransactionStages.ReceiptFetchFailedEventId}},"Name":"{{TransactionStages.ReceiptFetchFailed}}"},"TransactionId":"{{transactionId}}"}""",
     };
 
     static AppLogEntry Row(DateTimeOffset at, LogSeverity level, string source, string message, string? exception = null) => new()

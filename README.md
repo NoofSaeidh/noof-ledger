@@ -142,7 +142,7 @@ Taken from the demo database's mock data by `.\run.ps1 screenshots`; every image
 
 <img src="docs/screenshots/app/transactions-desktop.png" width="640" alt="Transactions, desktop">
 
-<img src="docs/screenshots/telegram/receipt.png" width="260" alt="A receipt in Telegram"> <img src="docs/screenshots/telegram/correction.png" width="260" alt="Fixing a mistake in Telegram">
+<img src="docs/screenshots/telegram/receipt-qr.png" width="260" alt="A receipt photo in Telegram"> <img src="docs/screenshots/telegram/correction.png" width="260" alt="Fixing a mistake in Telegram">
 
 ## Running it
 

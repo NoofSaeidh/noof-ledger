@@ -43,7 +43,7 @@ internal static class DemoDatabase
         {
             await admin.OpenAsync(cancellationToken);
             await ExecuteAsync(admin, $"DROP DATABASE IF EXISTS \"{database}\" WITH (FORCE)", cancellationToken);
-            await ExecuteAsync(admin, $"CREATE DATABASE \"{database}\"", cancellationToken);
+            await ExecuteAsync(admin, $"CREATE DATABASE \"{database}\" STRATEGY FILE_COPY", cancellationToken);
         }
 
         await using var target = new NpgsqlConnection(For(adminConnectionString, database));
@@ -51,21 +51,12 @@ internal static class DemoDatabase
         await ExecuteAsync(target, "CREATE EXTENSION IF NOT EXISTS pg_trgm; CREATE EXTENSION IF NOT EXISTS unaccent;", cancellationToken);
     }
 
-    public static async Task DropAsync(string adminConnectionString, string database, CancellationToken cancellationToken)
-    {
-        EnsureDisposable(database);
-        NpgsqlConnection.ClearAllPools();
-
-        await using var admin = new NpgsqlConnection(adminConnectionString);
-        await admin.OpenAsync(cancellationToken);
-        await ExecuteAsync(admin, $"DROP DATABASE IF EXISTS \"{database}\" WITH (FORCE)", cancellationToken);
-    }
-
-    // CREATE and DROP DATABASE wait for a checkpoint, and on a server shared with a parallel session's
-    // test runs that wait has been seen past two minutes.
+    // DROP DATABASE waits for a checkpoint, which must fsync every database created under the default
+    // WAL_LOG strategy since the last one - FILE_COPY keeps this one out of it, as TestKit's
+    // DatabaseSettings does for the test clones. The timeout matches its admin command budget.
     static async Task ExecuteAsync(NpgsqlConnection connection, string sql, CancellationToken cancellationToken)
     {
-        await using var command = new NpgsqlCommand(sql, connection) { CommandTimeout = 600 };
+        await using var command = new NpgsqlCommand(sql, connection) { CommandTimeout = 120 };
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 }

@@ -27,7 +27,7 @@ public sealed class DemoTestDatabase : IAsyncLifetime
     public async ValueTask DisposeAsync()
     {
         if (!Unavailable)
-            await DemoDatabase.DropAsync(Admin, Name, CancellationToken.None);
+            await DatabaseSettings.DropDatabaseAsync(Name, CancellationToken.None);
 
         Directory.Delete(Paths.Root, recursive: true);
     }

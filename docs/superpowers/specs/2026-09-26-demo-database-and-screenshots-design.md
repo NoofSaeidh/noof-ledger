@@ -83,6 +83,10 @@ loopback-only site, documented in `ops/RUNBOOK.md`, not a secret.
   merchants; salary and freelance income; a balance check that matches and one that re-anchors.
 - One completed transaction with a full trace (stages, a correction revision) and one failed
   transaction, with log rows at every level for the Logs page.
+- Receipts *(added when Phase 6 merged, 2026-09-28)*: one from a fiscal QR and one read from the photo
+  while the tax site was down, both recorded into Raiffeisen (the wallet marked default for card), and
+  one read from a photo whose lines don't add up, waiting for Record anyway. Cash (USD) is the
+  default for cash payments.
 - No transaction waiting for the model: with fake AI keys the worker would call Anthropic with them.
 - Secrets: `anthropic-api-key` and `groq-api-key` set to `demo-not-a-real-key`; one successful
   `backup_runs` row. That row is the one thing dated at refresh time, not in the fixed window, because
@@ -111,14 +115,17 @@ ids the E2E tests already wait on:
 | `transactions` | `/transactions` | `#transactions-grid` |
 | `trace` | `/transactions/<completed id>/trace` | `#trace-timeline` |
 | `trace-failed` | `/transactions/<failed id>/trace` | `#trace-timeline` |
+| `trace-receipt` | a fiscal-QR receipt's trace | `#trace-receipt` |
+| `trace-receipt-vision` | a receipt read from the photo while the tax site was down | `#trace-receipt` |
+| `trace-receipt-check` | a receipt waiting for Record anyway | `#trace-receipt-awaiting-confirmation` |
 | `diagnostics` | `/diagnostics` | `#diagnostics-checks` |
-| `logs` | `/diagnostics/logs`, filtered to the mock window | `#logs-grid` |
+| `logs` | `/diagnostics/logs`, filtered to the mock log window (the previous month's last three days) | `#logs-grid` |
 | `log-settings` | `/diagnostics/logs/settings` | `#retention-verbose` |
 | `secrets` | `/settings/secrets` | `#status-anthropic-api-key` |
 
 **Stable output.** Anything that shows the real current time is pinned before the shot, so an
-unchanged screen gives a byte-identical file: the Logs page is filtered to the mock data's dates (the
-host's own startup rows fall outside them), the new-wallet form's date is set to a fixed date, and
+unchanged screen gives a byte-identical file: the Logs page is filtered to a window that closes at the
+month's first midnight (the host's own startup rows, logged at the real now, fall outside it), the new-wallet form's date is set to a fixed date, and
 any remaining live value (a check's duration, a "checked at" time) is hidden with Playwright's
 screenshot `Style`. The plan's last task proves it: two runs in a row leave `git status` clean.
 
@@ -132,12 +139,15 @@ the picture changes. Phone width, device scale 2. One picture per case:
 | Picture | Shows |
 |---|---|
 | `expense` | `coffee 350 rsd` → the recorded echo with Cancel / Edit |
-| `receipt` | a multi-line message with a merchant → the echo listing each line |
+| `multi-line` | a multi-line message with a merchant → the echo listing each line |
 | `income` | `salary 2800 eur` → the income echo |
 | `balance` | `wise balance 3050` → the balance statement echo (matches / adjusted) |
 | `cancel-restore` | a cancelled echo with Restore |
 | `correction` | Edit → "What should I fix?" → `no, 3900` → the corrected echo |
 | `failure` | an unreadable message → the failure echo with Edit |
+| `receipt-qr` | a receipt photo (drawn, never a real one) → the echo with the shop and every line |
+| `receipt-vision` | a photo read by vision because the tax site was down → the echo with its warnings |
+| `receipt-check` | a photo whose lines don't add up → the prompt with Record anyway / Cancel |
 | `health` | `/health` → the health reply |
 
 **Output** (committed):
@@ -191,6 +201,6 @@ One bullet in `CLAUDE.md` §5 Conventions, which every session reads:
 
 ## Out of scope
 
-A working fake Telegram or fake model; voice notes and receipt photos in the pictures (receipts
-after Phase 6 lands — the rule then adds them); pixel-diff regression testing; screenshots of
+A working fake Telegram or fake model; voice notes in the pictures (receipts were added when Phase 6
+merged); pixel-diff regression testing; screenshots of
 `noof_ledger`.

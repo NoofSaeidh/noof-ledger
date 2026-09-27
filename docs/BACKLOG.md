@@ -1210,5 +1210,5 @@ The operator cut the demo back to a database with mock data and screenshots
 re-proposes it as new: a live fake Telegram chat driving the real bot through a fake Bot API; a
 rule-based fake model so the demo could categorise messages; seeding by replaying a conversation
 through the app instead of writing mock rows; labelled before/after screenshot runs (git history does
-that now); pixel-diff regression tests (`Verify.Playwright`). Voice notes and receipt photos have no
-pictures yet — receipts once Phase 6 lands.
+that now); pixel-diff regression tests (`Verify.Playwright`). Voice notes have no pictures yet;
+receipts got theirs when Phase 6 merged (a drawn photo, never a real one).

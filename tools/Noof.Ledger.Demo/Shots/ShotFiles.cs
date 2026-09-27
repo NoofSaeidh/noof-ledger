@@ -23,6 +23,20 @@ internal static class ShotFiles
     public static bool WriteImageIfChanged(string path, byte[] png) =>
         !(File.Exists(path) && LookTheSame(File.ReadAllBytes(path), png)) && WriteIfChanged(path, png);
 
+    public static IReadOnlyList<string> RemoveStale(string root, IReadOnlyCollection<string> current)
+    {
+        var stale = Directory.EnumerateFiles(root, "*.png", SearchOption.AllDirectories)
+            .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/'))
+            .Where(path => !current.Contains(path))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        foreach (var path in stale)
+            File.Delete(Path.Combine(root, path));
+
+        return stale;
+    }
+
     public static IReadOnlyList<(int Y, int Height)> Slices(int pageHeight, int sliceHeight) =>
         [.. Enumerable.Range(0, (pageHeight + sliceHeight - 1) / sliceHeight)
             .Select(index => (index * sliceHeight, Math.Min(sliceHeight, pageHeight - index * sliceHeight)))];
