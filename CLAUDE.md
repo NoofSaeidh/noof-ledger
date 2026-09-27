@@ -205,6 +205,18 @@ the code that builds the echo text.
 - Prefer deterministic C# over an LLM call wherever both would work.
 - When a decision is expensive to reverse (schema, storage encoding, a seam), stop and flag it rather than choosing quietly.
 
+**Pull requests are small** *(operator's decision, 2026-09-28)*
+- One topic per PR — a phase is a series of PRs, not one; the plan cuts it into PR-sized tasks up
+  front and names the PR boundaries.
+- Stop and propose a split (operator decides) past ~500 changed lines excluding generated files
+  (migrations' `.Designer.cs`, the model snapshot, `schema.expected.sql`), or past one of §4's
+  split assemblies per PR (e.g. touching both Persistence and Web).
+- Mechanical moves/renames get their own PR, separate from behaviour changes.
+- Independent PRs branch from `master`; a PR needing another's changes is stacked on it (base = that
+  branch), never merged into it.
+- Shared hot files (backlog entries, per-assembly allowlists) are split across PRs so parallel work
+  doesn't conflict.
+
 ## 6. Closing a phase *(settled)*
 
 When closing a phase, read and follow `docs/CLOSING-A-PHASE.md` *(settled)*.
