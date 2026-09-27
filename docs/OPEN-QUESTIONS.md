@@ -610,3 +610,42 @@ receipt, never from a correction.
   same way `HandleModelFailureAsync` does, logs Warning 1210 and a `StageFailed` row at `Categorized`, and
   calls `NotifyFailureAsync` so the operator sees the `ComposeCorrectionFailure` echo — `docs/BACKLOG.md`
   has the full mechanism.
+
+### P6-2 — Vision fallback stopped inventing receipts (2026-09-27)
+
+Production evidence, 2026-09-27: Telegram-compressed receipt photos (and even files) reaching the vision
+fallback (`read_receipt` on Haiku) produced whole invented receipts — a real 4-line 1570.96 RSD cash
+receipt came back as "BISIBONSKA ŠTAMPA 110 RSD, 1 line", again as "МИНИСТЕРЕЛНИ 110 RSD" with an invented
+PIB, another as "MAXI HOLDING 2322 RSD, 16 lines" whose lines summed to 7664, and one took the capture's
+own location line for the PIB and the capture time for the issue time — every one recorded as an expense.
+Duplicates went uncaught because vision returned no fiscal number at all. The operator's five decisions,
+taken before implementation, all settled — the model stays Haiku (a separate model, and choosing one in
+the UI, is deferred: `docs/BACKLOG.md`):
+
+1. **Do not invent.** `read_receipt` lets every field come back null when it is not legible, adds
+   `readable`/`unreadable_reason` (`too_small`, `blurry`, `not_a_receipt`, `cut_off`, `other`) and a
+   nullable `total`. `IReceiptVision.ReadAsync` returns `ReceiptVisionResult` (shaped like
+   `FiscalFetchResult`) rather than a bare `ExtractedReceipt`, so an unreadable photo is a distinct,
+   honest outcome, not a half-built record. The one deliberate default kept from before: assume RSD
+   unless another currency is clearly printed — every other field must be read, never guessed.
+2. **Do not record when it does not add up — vision receipts only, never a fiscal QR/SUF receipt.** A
+   receipt whose lines do not sum to its total beyond a cent, or whose printed tax id is not exactly 9
+   digits, is still saved (so the echo shows exactly what was read) but `CategorizeReceipt` is not
+   enqueued until the operator presses the new "Record anyway" button (`RecordAction.RecordAnyway`),
+   which reuses the transaction's own `SourceMessageId` unique index for idempotency — the same pattern
+   `EfRecordEditor` already uses for a redelivered correction.
+3. **Large files.** `IReceiptImageScaler` (`SkiaReceiptImageScaler`, SkiaSharp) downscales a photo to a
+   1568px long side and re-encodes it as JPEG immediately before the vision call; the QR reader keeps
+   reading a capture's original bytes.
+4. **Duplicates.** `read_receipt` also returns the printed fiscal number and PIB; `ChatReceiptVision`
+   accepts either into `ExtractedReceipt` only when it is well-formed (PIB `^\d{9}$`, fiscal number
+   `^[A-Z0-9]{8}-[A-Z0-9]{8}-\d+$`), so the existing `(seller_tax_id, fiscal_number)` duplicate index
+   covers vision receipts too without risking a false match on OCR noise. Never applied to a fiscal
+   QR/SUF receipt.
+5. **Echo hint.** Any vision-read receipt's echo carries one standing line suggesting a file (uncompressed)
+   or the QR link for an exact read next time — no new column, computed from `ReceiptSource.Vision` alone.
+
+**P2-1 is unchanged by any of this.** Text and voice capture still have no validation layer — the model
+interprets amounts and dates from natural speech, and the safety is the echo plus cancel/correct, exactly
+as P2-1 settled. These five decisions are additions to the *fiscal-receipt* pipeline specifically (R-6's
+"the model only categorises/reads photos" boundary), not a reversal of the capture-is-the-exception rule.

@@ -1129,3 +1129,16 @@ removes every model-authored line regardless of whether it carries a `ReceiptLin
 replacement lines a text correction builds never set one. The `receipts`/`receipt_lines` rows themselves
 are untouched — only the `line_items` ↔ `receipt_lines` link and the original receipt ordering are lost
 on a corrected line. Documented, not fixed, by the same task that built the link.
+
+**A separate, stronger model for `read_receipt`, and choosing a model in the UI — deferred by the
+operator, 2026-09-27.** `read_receipt` stays on Haiku for now, same as every other tool call. Evidence
+this was considered rather than overlooked: production reads on 2026-09-27 (before the "do not invent"
+prompt and schema fix that day, `.claude/rules/receipts.md`) showed Haiku fabricating whole receipts from
+low-quality photos — a real 4-line 1570.96 RSD cash receipt read back as "BISIBONSKA ŠTAMPA 110 RSD, 1
+line", then as "МИНИСТЕРЕЛНИ 110 RSD" with an invented PIB, another as "MAXI HOLDING 2322 RSD, 16 lines"
+whose lines summed to 7664, and one that took the capture's own location line for the PIB and the
+capture time for the issue time. The `readable`/`unreadable_reason` fix and the "Record anyway"
+confirmation flow (both 2026-09-27) make Haiku's mistakes visible and non-destructive rather than
+requiring a stronger model outright; a model that reads more receipts correctly on the first try, or
+letting the operator pick a model per call from Settings the way `IChatClientFactory` already permits at
+the wiring level, is future work if the confirmation rate turns out to be high in real use.
