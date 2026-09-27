@@ -671,7 +671,8 @@ the UI, is deferred: `docs/BACKLOG.md`):
    nullable `total`. `IReceiptVision.ReadAsync` returns `ReceiptVisionResult` (shaped like
    `FiscalFetchResult`) rather than a bare `ExtractedReceipt`, so an unreadable photo is a distinct,
    honest outcome, not a half-built record. The one deliberate default kept from before: assume RSD
-   unless another currency is clearly printed — every other field must be read, never guessed.
+   unless another currency is clearly printed, since Serbian fiscal receipts print RSD and a legible
+   receipt showing no other currency is one — every other field must be read, never guessed.
 2. **Do not record when it does not add up — vision receipts only, never a fiscal QR/SUF receipt.** A
    receipt whose lines do not sum to its total beyond a cent, or whose printed tax id is not exactly 9
    digits, is still saved (so the echo shows exactly what was read) but `CategorizeReceipt` is not

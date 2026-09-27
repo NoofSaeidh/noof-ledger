@@ -9,7 +9,8 @@ internal static class ReceiptVisionPrompt
     // for photos that were not legible. This is now the one rule that matters more than completeness:
     // report only what you can actually read, leave everything else null, and say the photo is
     // unreadable rather than fill in or approximate a field. The one deliberate default kept from
-    // before is the currency assumption below - explicit, and the only guess this prompt still allows.
+    // before is the currency assumption below - explicit, and the only guess this prompt still allows:
+    // Serbian fiscal receipts print RSD, so a legible receipt with no other currency shown is RSD.
     public const string Instruction =
         "Read this photograph of a shop receipt. Report only what is legible; never guess, fill in, or "
         + "approximate a field you cannot actually read. If the photo is too small, blurry, cut off, or "
