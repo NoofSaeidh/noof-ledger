@@ -610,31 +610,37 @@ receipt, never from a correction.
   same way `HandleModelFailureAsync` does, logs Warning 1210 and a `StageFailed` row at `Categorized`, and
   calls `NotifyFailureAsync` so the operator sees the `ComposeCorrectionFailure` echo — `docs/BACKLOG.md`
   has the full mechanism.
-- **A real Serbian fiscal QR is dense — version 22, 105x105 modules** (`QrDensityProbe`, built from
+- **A real Serbian fiscal QR is dense — version 22, 105x105 modules** (`QrDensityTests`, built from
   `SyntheticQrPayloadBuilder`'s default, non-large-block payload: 796 characters of
   `https://suf.purs.gov.rs/v/?vl=...`). At the resolution Telegram actually delivers a compressed
   photo (≤1280px long side, JPEG ~q80) the QR occupies only 15–30% of the frame on a typical receipt
-  photo, which puts it at roughly 1.6–2.7 pixels per module — the regime that produced the production
-  "Vision used: no QR" failure. `ZxingQrReaderRealisticPhotoTests` benchmarks this with synthetic
-  photos (a receipt-shaped canvas, text-noise, the QR placed and JPEG-compressed the same way);
-  measured before any change, sweeping width fraction 14–30% (clean, no blur/rotation/lighting):
-  17/18/19/21/29/30% decoded, 14/15/16/20/22–28% did not — a chaotic, non-monotonic pattern, not a
-  clean density cliff. Four further techniques were then tried, one at a time, against every failing
-  case from that sweep plus 6 compounded cases (rotation + blur + uneven lighting together): additional
-  upscale factors (1.5x, 3x alongside the existing 2x), a `GlobalHistogramBinarizer` fallback next to
-  the default `HybridBinarizer`, a fixed contrast-stretch + grayscale pass, an unsharp-mask sharpen
-  pass, and — when `TryHarder` located enough finder-pattern result points to place one — a crop to
-  that region enlarged 4x. **None of the five moved a single case in either direction**, confirmed by
-  re-running the exact width sweep after each addition and getting the byte-identical pass/fail
-  pattern every time. Conclusion: once Telegram's JPEG has quantised a QR at this module density, the
-  information a decoder needs is already gone or already there — resizing, re-binarizing or
-  sharpening the *decoded* pixels afterwards cannot recover it, because none of those steps can add
-  information the lossy encode already discarded. `ZxingQrReader` therefore ships unchanged from
-  before this investigation (still: direct decode, then one 2x upscale of a ≤1600px-capped copy, both
-  attempts under `TryHarder`/`TryInverted`); adding the untried techniques back in was measured to cost
-  10x–20x the decode latency (0.1–0.4s → 2.5–4s per image) for zero benefit, so they were not kept.
-  `ZxingQrReaderRealisticPhotoTests` keeps the six width/rotation combinations confirmed to decode
-  reliably as a permanent regression guard on this density boundary. The practical mitigation for the
-  cases that don't decode is operational, not algorithmic: `ops/RUNBOOK.md`'s Receipts section now
-  tells the operator to send the receipt as a file (Telegram delivers image documents uncompressed) or
-  to send the QR's own link as text.
+  photo, which puts it at roughly 1–5 pixels per module depending on the exact crop — the regime that
+  produced the production "Vision used: no QR" failure. `ZxingQrReaderRealisticPhotoTests` benchmarks
+  this with synthetic photos (a receipt-shaped canvas, text-noise, the QR placed and JPEG-compressed
+  the same way). **The benchmark's own downscale must use a filtered resampler.**
+  `SKBitmap.Resize`'s `SKSamplingOptions.Default` is nearest-neighbour in SkiaSharp 4.151.1
+  (`Filter=Nearest, Mipmap=None`, confirmed by printing it) — no phone or Telegram resampler works
+  this way. A first pass of this benchmark used `SKSamplingOptions.Default` for its 2400→1280
+  downscale and reported a "chaotic, non-monotonic" pass/fail sweep (17/18/19/21/29/30% decoded,
+  everything else did not) as proof that nothing past that point could move a single case; that
+  pattern was the benchmark's own nearest-neighbour aliasing on a pixel-perfect QR, not JPEG
+  quantisation — re-running the identical sweep with `SKSamplingOptions(SKFilterMode.Linear,
+  SKMipmapMode.Linear)` for the downscale alone raises the same benchmark, same reader, to 9/17 clean
+  + 1/6 compounded (10/23 total, up from 8/23), a different pass set. With that filtered benchmark in
+  place, giving `ZxingQrReader`'s own 2x upscale (`src/Noof.Ledger.Receipts/Qr/ZxingQrReader.cs`) a
+  linear filter instead of nearest (which was pixel-duplication, so it added nothing a binarizer could
+  use) is a measured, strict improvement: 17/23 (13/17 clean + 4/6 compounded), a superset of every
+  case the nearest-nearest baseline passed, at 118 ms average vs 175 ms before — the fix ships.
+  Corrected conclusion: nearest-neighbour resampling anywhere in this pipeline destroys exactly the
+  sub-pixel information a phone's own bilinear resize preserves; a decoder given filtered pixels *can*
+  recover more than one given nearest-neighbour pixels, so "nothing afterwards can help" was an
+  artefact of the benchmark, not a property of JPEG quantisation. `ZxingQrReaderRealisticPhotoTests`
+  now pins six cases from the filtered sweep: two that already decoded before this fix (a regression
+  guard) and four that only decode with the reader's linear upscale (the improvement this change
+  ships). The four further techniques tried in the same investigation — additional upscale factors,
+  a `GlobalHistogramBinarizer` fallback, a contrast-stretch/grayscale pass, an unsharp-mask sharpen,
+  and a finder-pattern crop — were tried only against the nearest-neighbour benchmark and were not
+  re-tried after this fix; whether any of them helps further, now that the benchmark itself is
+  trustworthy, is open. The practical mitigation for cases that still don't decode remains
+  operational: `ops/RUNBOOK.md`'s Receipts section tells the operator to send the receipt as a file
+  (Telegram delivers image documents uncompressed) or to send the QR's own link as text.

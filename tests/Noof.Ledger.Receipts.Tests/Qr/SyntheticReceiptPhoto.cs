@@ -20,12 +20,11 @@ internal sealed record SyntheticReceiptPhotoOptions
 
 internal static class SyntheticReceiptPhoto
 {
-    const int PortraitWidthFraction75Percent = 3;
-    const int PortraitHeightFraction100Percent = 4;
+    static readonly SKSamplingOptions DownscaleSampling = new(SKFilterMode.Linear, SKMipmapMode.Linear);
 
     public static byte[] Build(SyntheticReceiptPhotoOptions options)
     {
-        var width = options.SourceLongSide * PortraitWidthFraction75Percent / PortraitHeightFraction100Percent;
+        var width = options.SourceLongSide * 3 / 4;
         var height = options.SourceLongSide;
 
         using var canvas = new SKBitmap(width, height);
@@ -47,12 +46,10 @@ internal static class SyntheticReceiptPhoto
                 DrawUnevenLighting(skCanvas, width, height);
         }
 
-        var rotated = options.RotationDegrees == 0 ? canvas.Copy() : Rotate(canvas, options.RotationDegrees);
-        using var blurred = options.BlurSigma > 0 ? Blur(rotated, options.BlurSigma) : rotated;
-        if (!ReferenceEquals(blurred, rotated))
-            rotated.Dispose();
+        using var rotated = options.RotationDegrees == 0 ? canvas.Copy() : Rotate(canvas, options.RotationDegrees);
+        using var blurred = options.BlurSigma > 0 ? Blur(rotated, options.BlurSigma) : null;
 
-        using var downscaled = Downscale(blurred, options.TargetLongSide);
+        using var downscaled = Downscale(blurred ?? rotated, options.TargetLongSide);
         return EncodeJpeg(downscaled, options.JpegQuality);
     }
 
@@ -134,7 +131,7 @@ internal static class SyntheticReceiptPhoto
         var scale = targetLongSide / (double)longestSide;
         var width = Math.Max(1, (int)(source.Width * scale));
         var height = Math.Max(1, (int)(source.Height * scale));
-        return source.Resize(new SKImageInfo(width, height), SKSamplingOptions.Default);
+        return source.Resize(new SKImageInfo(width, height), DownscaleSampling);
     }
 
     static byte[] EncodeJpeg(SKBitmap bitmap, int quality)

@@ -9,7 +9,7 @@ namespace Noof.Ledger.Receipts.Tests.Qr;
 // SyntheticQrPayloadBuilder's field sizes (and therefore to how dense the benchmark photos in
 // ZxingQrReaderRealisticPhotoTests are) does not silently drift without anyone noticing. See the
 // Phase 6 QR benchmark entry in docs/OPEN-QUESTIONS.md for why this density matters.
-public class QrDensityProbe
+public class QrDensityTests
 {
     [Fact]
     public void The_realistic_payload_renders_as_a_dense_version_22_qr()
