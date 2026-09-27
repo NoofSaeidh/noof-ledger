@@ -44,10 +44,18 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
     in the PR description.
 - **Fable 5.1 runs once**, closing a phase or a batch of PRs — never per PR, never per fix round.
   Models in one family share blind spots; a different family is the cheapest independence available.
-- **After fixing GitHub Copilot review comments:** batch every open comment into one fix round,
-  review it with sonnet only, then push — Copilot re-reviews the PR itself. No Codex, no Fable for a
-  Copilot fix round, unless the fix touches money, secrets, a migration or the public surface and the
-  agent judges a stronger review necessary — then say why in the PR.
+- **Review findings are triaged, not all fixed** *(operator's decision, 2026-09-28)*, for Copilot and
+  Codex alike: fix a critical finding (real bug, wrong money/balance, data loss, secret leak,
+  security hole, broken build/test, *(settled)*-rule violation); reply with a sentence of reasoning
+  and don't change code for a non-critical one (style, naming, nits, speculative hardening,
+  preference); ask the operator first on anything expensive (new design, migration, another topic,
+  roughly >~50 lines) instead of starting it, proposing a `docs/BACKLOG.md` entry — judged by this
+  single-operator local app's real risk, not completeness.
+- **Copilot fix rounds:** one round, one commit, sonnet-only review, push, then wait once (never
+  poll) for its re-review — at most 2 rounds per PR, then list what's left for the operator. No
+  Codex/Fable for a Copilot round unless it touches money, secrets, a migration or the public
+  surface and a stronger review is judged necessary — say why in the PR. Resolve only the threads
+  you replied to or fixed, by id, never "resolve all unresolved" (hides new comments).
 
 **Anti-patterns — do not do these:**
 - Running a test suite on opus. That is a haiku task; the model is not what makes tests pass.
