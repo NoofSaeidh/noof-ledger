@@ -255,8 +255,10 @@ else
         _ => "—",
     };
 
-    static string FormatIssuedAt(DateTimeOffset? issuedAt) =>
-        issuedAt is { } at ? at.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture) : "—";
+    string FormatIssuedAt(DateTimeOffset? issuedAt) =>
+        issuedAt is { } at
+            ? TimeZoneInfo.ConvertTime(at, CaptureTimeZone).ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture)
+            : "—";
 
     static string FormatMoney(decimal amount, CurrencyCode currency) =>
         $"{amount.ToString("N2", CultureInfo.InvariantCulture)} {currency}";
