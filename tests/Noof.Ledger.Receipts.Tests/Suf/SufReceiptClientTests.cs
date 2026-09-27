@@ -248,6 +248,24 @@ public class SufReceiptClientTests
     }
 
     [Fact]
+    public async Task Reports_a_failure_instead_of_throwing_on_a_journal_missing_its_total_line()
+    {
+        // Copilot review, PR #3: a journal with valid item lines but no Укупан износ/Ukupan iznos
+        // (or refund equivalent) must take the same malformed-journal path as an unparseable
+        // amount, never silently report a total of 0.
+        var journalWithNoTotal = Journal.Replace("Укупан износ: 329,90", "", StringComparison.Ordinal);
+        var handler = StubHttpMessageHandler.Returning(HttpStatusCode.OK, JsonBody(journalWithNoTotal));
+        var client = ClientFor(handler);
+
+        var result = await client.FetchAsync(Payload, CancellationToken.None);
+
+        result.Receipt.Should().BeNull();
+        result.Failure.Should().NotBeNull();
+        result.Failure!.Reason.Should().Be("The Tax Administration's journal could not be parsed.",
+            "a missing total line is a malformed journal, not a fetch that must be retried");
+    }
+
+    [Fact]
     public async Task Reports_a_failure_instead_of_throwing_on_a_malformed_journal_amount()
     {
         // Copilot review, PR #3 (item C): FiscalJournalParser.Parse's ParseAmount throws

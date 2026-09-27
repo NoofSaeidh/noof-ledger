@@ -174,7 +174,13 @@ internal static partial class FiscalJournalParser
             return ParseAmount(refund);
 
         var sale = payment.GetValueOrDefault("Укупан износ") ?? payment.GetValueOrDefault("Ukupan iznos");
-        return sale is not null ? ParseAmount(sale) : 0m;
+        if (sale is not null)
+            return ParseAmount(sale);
+
+        // A journal with valid item lines but neither total key is a malformed journal, not a
+        // receipt worth 0 - SufReceiptClient already turns this shape of exception into the same
+        // fixed-reason FiscalFetchFailure it uses for an unparseable amount (Copilot review, PR #3).
+        throw new FormatException("The journal had no Укупан износ/Ukupan iznos or refund total line.");
     }
 
     static PaymentMethod? ParsePaymentMethod(Dictionary<string, string> payment)
