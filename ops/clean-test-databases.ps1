@@ -21,7 +21,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 
-$Protected = @('noof_ledger', 'noof_ledger_test_template', 'postgres', 'template0', 'template1')
+$Protected = @('noof_ledger', 'noof_ledger_test_template', 'noof_ledger_demo', 'postgres', 'template0', 'template1')
 
 function Get-AdminConnectionString {
     if ($env:NOOF_TEST_PG) { return $env:NOOF_TEST_PG }

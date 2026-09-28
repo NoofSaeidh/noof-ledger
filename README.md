@@ -134,6 +134,17 @@ decides the rest: `MainLayout` renders statically, MudBlazor's popover, dialog a
 providers cannot work from there, and so nothing in the app uses a popover, dialog, snackbar,
 tooltip or menu. Feedback is an inline alert. An inert provider is worse than an absent one.
 
+## Screenshots
+
+Taken from the demo database's mock data by `.\run.ps1 screenshots`; every image is in
+[docs/screenshots](docs/screenshots/README.md), and git history shows how each screen changed.
+
+<img src="docs/screenshots/app/dashboard-desktop.png" width="640" alt="Dashboard, desktop"> <img src="docs/screenshots/app/dashboard-phone.png" width="200" alt="Dashboard, phone">
+
+<img src="docs/screenshots/app/transactions-desktop.png" width="640" alt="Transactions, desktop">
+
+<img src="docs/screenshots/telegram/receipt-qr.png" width="260" alt="A receipt photo in Telegram"> <img src="docs/screenshots/telegram/correction.png" width="260" alt="Fixing a mistake in Telegram">
+
 ## Running it
 
 Requires .NET 10 SDK and PostgreSQL 18.
@@ -142,6 +153,7 @@ Requires .NET 10 SDK and PostgreSQL 18.
 .\run.ps1 db-auth-reset             # one-time: creates databases, writes a credential outside the repo
 .\run.ps1 test all                  # or `.\run.ps1 test fast` for the quick, no-database subset
 .\run.ps1 start                     # dotnet run, in Production - the same behaviour as the published exe
+.\run.ps1 demo                      # the app on mock data at 127.0.0.1:5264 (demo / demo), nothing to configure
 ```
 
 `run.ps1` in the repo root is the one entry point for launching and operating the app — run

@@ -454,6 +454,34 @@ separate debugging sessions. `Program.cs` now sets the content root from
 `AppContext.BaseDirectory` instead, so `run.ps1 start-published` (and a real deployment) works from
 any current directory.
 
+## Demo database and screenshots
+
+- `.\run.ps1 demo` rebuilds `noof_ledger_demo` from this branch's migrations, fills it with the mock
+  data in `tools/Noof.Ledger.Demo/MockData.cs`, and runs the real host on it at
+  http://127.0.0.1:5264 until Ctrl+C. Sign in as `demo` / `demo`. `.\run.ps1 demo refresh` only
+  rebuilds the database. Every run starts from fresh mock data; nothing clicked in the demo survives
+  the next one.
+- `.\run.ps1 screenshots` does the same refresh, starts the host, and writes `docs/screenshots/`
+  (app pages at phone and desktop size, the bot's replies as Telegram-style pictures, and a gallery
+  `README.md`). An image is rewritten only when it visibly changed — Chromium repaints a few pixels one
+  colour level apart between identical runs, and that is ignored. The changed ones are listed and
+  copied as phone-sized JPEG slices into `artifacts/screenshots/`.
+- The demo's files: `%LOCALAPPDATA%\NoofLedger\demo\logs` and `...\demo\dp-keys` (its own key ring).
+  Backups are off; a mock "backup succeeded" row keeps the Backups check green. The Telegram token is
+  left empty on purpose — a fake one would make the host call Telegram every 5 seconds — so
+  Diagnostics shows Telegram as not configured. The AI keys are fake and never used: the mock data
+  queues nothing for the model.
+- Only one demo at a time: both commands refuse while something listens on 5264.
+- The mock data is dated in the current month (fixed days 1–20, clock pinned to the 20th at 18:00
+  UTC), because the dashboard's "This month" follows the real calendar. The pictures therefore change
+  once a month, when the dates roll over, and otherwise only when the app does. The Logs picture
+  alone shows the last three days of the previous month, so the host's own rows, logged at the real
+  now, never fall into it; the demo saves a 60/90-day log retention so the host's prune, a minute
+  after it starts, keeps every mock row. A feature that adds
+  something visible adds mock data for it, a screen in `Shots/AppScreens.cs` or a scene in
+  `Shots/TelegramScenes.cs`, and then regenerates the pictures.
+- Chromium missing: the command prints the `playwright.ps1 install chromium` line to run.
+
 ## Manual acceptance — the end-to-end check no test can do
 
 The automated suite never talks to Telegram or to Anthropic. Everything between

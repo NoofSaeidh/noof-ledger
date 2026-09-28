@@ -54,4 +54,6 @@ output of `ops/publish.ps1` — contains the app's package binaries. Anyone givi
 | ZXing.Net | 0.16.11 | Apache-2.0 | app (Receipts) | https://github.com/micjahn/ZXing.Net |
 | ZXing.Net.Bindings.SkiaSharp | 0.16.24 | Apache-2.0 | app (Receipts), Receipts tests | https://github.com/micjahn/ZXing.Net |
 | SkiaSharp (and `SkiaSharp.NativeAssets.*`, which ship their own `THIRD-PARTY-NOTICES.txt`) | 4.151.1 | MIT | app (Receipts, direct reference for `SkiaReceiptImageScaler`, plus via the ZXing binding) | https://github.com/mono/SkiaSharp |
+| Microsoft.Playwright (its bundled Node driver ships `.playwright/node/LICENSE`, `.playwright/package/LICENSE`, `NOTICE` and `ThirdPartyNotices.txt`) | 1.62.0 | MIT | tooling only (`tools/Noof.Ledger.Demo` screenshots); the E2E tests had it before through `Microsoft.Playwright.Xunit.v3` | https://github.com/microsoft/playwright-dotnet |
+| System.Drawing.Common (ships `LICENSE.TXT` and `THIRD-PARTY-NOTICES.TXT`; pulls in `Microsoft.Win32.SystemEvents`, MIT) | 9.0.16 | MIT | tooling only (`tools/Noof.Ledger.Demo`, comparing screenshots) | https://github.com/dotnet/winforms |
 | Npgsql | 10.0.3 | PostgreSQL | tests (TestKit, as a direct reference); the app has had it since Phase 0 through `Npgsql.EntityFrameworkCore.PostgreSQL` | https://github.com/npgsql/npgsql |

@@ -49,3 +49,5 @@
 > runnable host. **`run.ps1` in the repo root is the one entry point for launching and operating the
 > app** (`.\run.ps1 help`) — `dotnet run` and the published exe now behave the same. Cross-currency
 > conversion, transfers, exchange-office slips and editing receipt lines remain future phases.
+> `.\run.ps1 demo` runs the app on a mock-data database with nothing to configure, and
+> `.\run.ps1 screenshots` keeps `docs/screenshots/` current.

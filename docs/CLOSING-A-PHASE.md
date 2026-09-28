@@ -21,5 +21,7 @@ agent, with none of this conversation — can pick it up without rediscovering w
 - **Correct what has gone stale**, starting with `docs/STATUS.md` (and the one-line status in
   `CLAUDE.md`) and `README.md`. A public README that understates the project by two phases, or
   claims a guarantee the code stopped providing, is worse than no README — someone trusts it.
+- **The screenshots are current.** Run `.\run.ps1 screenshots`; if anything changed, commit it and send
+  the changed images to the operator.
 - **Leave nothing uncommitted.** Working tree clean, every documentation change committed alongside
   the work it describes, and the branch integrated or explicitly left open by the operator's choice.
