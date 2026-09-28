@@ -1,4 +1,5 @@
 using Microsoft.Playwright;
+using Noof.Ledger.Application.Diagnostics;
 
 namespace Noof.Ledger.Demo.Shots;
 
@@ -37,6 +38,36 @@ internal static class AppScreens
     {
         await FillAndLeaveAsync(page, "#logs-filter-from", $"{MockData.LogWindowStart:yyyy-MM-dd}T00:00");
         await FillAndLeaveAsync(page, "#logs-filter-to", $"{MockData.LogWindowEnd:yyyy-MM-dd}T00:00");
+        await WaitForOnlyTheMockLogRowsAsync(page);
+    }
+
+    // The grid reloads over the circuit, which network idle does not wait for. Until it has, the page
+    // may show the host's own startup rows, and those name this machine's log directory.
+    static async Task WaitForOnlyTheMockLogRowsAsync(IPage page)
+    {
+        var expected = MockData.LogRows.Count(row => row.Level >= LogSeverity.Information);
+        try
+        {
+            await page.WaitForFunctionAsync(
+                """
+                ([expected, from, to]) => {
+                    const loggedAt = [...document.querySelectorAll('#logs-grid tbody tr')]
+                        .map(row => row.cells[0]?.textContent.trim() ?? '')
+                        .filter(text => text !== '');
+                    return loggedAt.length === expected && loggedAt.every(text => text >= from && text < to);
+                }
+                """,
+                new object[] { expected, $"{MockData.LogWindowStart:yyyy-MM-dd}", $"{MockData.LogWindowEnd:yyyy-MM-dd}" },
+                new PageWaitForFunctionOptions { Timeout = 15_000 });
+        }
+        catch (TimeoutException)
+        {
+            var shown = await page.EvaluateAsync<string[]>(
+                "() => [...document.querySelectorAll('#logs-grid tbody tr')].map(row => row.cells[0]?.textContent.trim() ?? '').filter(text => text !== '')");
+            throw new InvalidOperationException(
+                $"The Logs page never showed just the {expected} mock rows between {MockData.LogWindowStart:yyyy-MM-dd} "
+                + $"and {MockData.LogWindowEnd:yyyy-MM-dd} (it shows rows logged at: {string.Join(", ", shown)}); its picture was not taken.");
+        }
     }
 
     // A focused field would be photographed with its focus ring and selection.
