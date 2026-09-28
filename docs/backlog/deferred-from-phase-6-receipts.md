@@ -5,8 +5,7 @@ area: other
 since: 2026-09-26
 ---
 Recorded 2026-09-26 closing Phase 6. Named explicitly out of scope by the spec, or found and parked
-during implementation and its two closing reviews (Fable 5.1, `final-review.md`/`final-rereview.md`/
-`final-rereview-2.md`).
+during implementation and its closing review and two re-reviews (Fable 5.1).
 
 **Exchange-office slips (Phase 7, R-1).** A currency exchange receipt is a different shape entirely — no
 line items, no category per line, a rate instead — and belongs with whichever phase finally builds
@@ -82,7 +81,7 @@ untested — `CategorizationWorkerTests` covers the deferred branch directly —
 rarely exercised is an ordering guarantee owned by a different class, worth knowing before either one
 changes independently.
 
-**Items carried from `final-rereview-2.md`, all now fixed:**
+**Items carried from the phase's second closing re-review (R2-n), all now fixed:**
 
 - **R2-2 (minor), fixed.** The N-2 refusal (an edited link capture that would re-file as a different
   receipt) used to overwrite the transaction's own echo with a bare refusal notice, dropping the

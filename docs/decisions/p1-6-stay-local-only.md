@@ -30,7 +30,8 @@ So none of the three remaining options is worth its price today:
 
 **What remains true and unchanged:** the 24-hour limitation recorded in **P1-5** is still live. A machine
 off for longer than a day still loses the messages sent in that window. That is now an accepted,
-documented limitation rather than a problem being solved — and the mitigations are in `docs/BACKLOG.md`,
+documented limitation rather than a problem being solved — and the mitigations are in `docs/backlog/` (four options, starting with
+`docs/backlog/wake-the-machine-on-a-schedule.md`),
 ready to pick up when the product is actually in daily use and the gap is felt rather than imagined.
 
 **Order of work is unaffected:** Phase 1B was always first, and remains so.

@@ -40,10 +40,10 @@
 > `pg_dump -Fc` into `%LOCALAPPDATA%\NoofLedger\backups`, the newest 14 kept, every run logged to
 > `backup_runs` — and `ops/restore-check.ps1` proves a dump restores to the same balances, checked so
 > far against a template clone; the one check against the live ledger itself is the operator's to run
-> (`ops/RUNBOOK.md`). **1744 solution tests — 1731 passing, 13 live-only tests skipped** in the latest
-> full `dotnet test --solution` run (2026-09-27); its one failure was the known
-> `DatabaseLogLevelDbTests` startup-burst timing race (`docs/backlog/loose-ends-phase-5-observability.md`), which passed 3 of 3 alone —
-> the Playwright browser tests are in the solution now, so `dotnet test --solution` runs them too and
+> (`ops/RUNBOOK.md`). The full `dotnet test --solution` suite passes, with the live-only tests
+> skipped, apart from one known timing race — `DatabaseLogLevelDbTests`' startup burst
+> (`docs/backlog/loose-ends-phase-5-observability.md`) — which fails now and then under full-suite load
+> and passes alone; the Playwright browser tests are in the solution now, so `dotnet test --solution` runs them too and
 > needs Chromium present. Live suites stay skipped unless `NOOF_LEDGER_LIVE_ANTHROPIC_KEY` /
 > `NOOF_LEDGER_LIVE_GROQ_KEY` + `NOOF_LEDGER_LIVE_VOICE_FILE` are set; `ops/publish.ps1` produces a
 > runnable host. **`run.ps1` in the repo root is the one entry point for launching and operating the

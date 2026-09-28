@@ -68,7 +68,7 @@ receipt, never from a correction.
   materialises — one budget to reason about, not two. Fixed in the phase's second re-review (R2-3):
   exhausting that budget on the defer branch used to fail silently; it now computes `isLastAttempt` the
   same way `HandleModelFailureAsync` does, logs Warning 1210 and a `StageFailed` row at `Categorized`, and
-  calls `NotifyFailureAsync` so the operator sees the `ComposeCorrectionFailure` echo — `docs/BACKLOG.md`
+  calls `NotifyFailureAsync` so the operator sees the `ComposeCorrectionFailure` echo — `docs/backlog/deferred-from-phase-6-receipts.md`
   has the full mechanism.
 - **The synthetic fiscal QR is dense — version 22, 105x105 modules** (`QrDensityTests`, built from
   `SyntheticQrPayloadBuilder`'s default, non-large-block payload: 796 characters of

@@ -17,7 +17,7 @@ out by measurement**, so the next person should not start from either:
   entry about the template's missing trigger — so the experiment paid for itself anyway.)
 
 What is known: `CREATE DATABASE ... TEMPLATE` costs **240ms** measured serially, `DROP` about
-**50ms**, and there are 135 tests. That accounts for roughly 32 of the 108 seconds. **The other 76
+**50ms**, and there were 135 tests then. That accounts for roughly 32 of the 108 seconds. **The other 76
 seconds are unaccounted for.** The next step is to instrument one test end to end — database
 creation, migration, EF model build, the test body, teardown — rather than guessing again.
 

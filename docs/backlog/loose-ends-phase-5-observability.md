@@ -79,6 +79,14 @@ Telegram, worker and health paths named in the verbose logging design, but not: 
 model token usage (`IOperationTimer` measures wall-clock time, not tokens — a separate metric).
 Add any of these if a slow path shows up that the existing timings do not explain.
 
+**Npgsql does not log through the app's `ILoggerFactory` — checked once, not guarded (Phase 5, V9/V12;
+decision O-15 in `docs/decisions/p5-2-phase5-followups.md`).** At database level Debug, after a real
+`DbContext` round trip, no `app_log` row carried a source starting with `Npgsql`, so no
+`Serilog:MinimumLevel:Override:Npgsql` entry exists. A test asserting "0 rows" could never go red, so
+none was kept. After an EF Core or Npgsql upgrade, repeat the check by hand (set the database level
+to Debug, load any page that reads the database, query `app_log` for an `Npgsql` source); if rows
+appear, adding an override is a decision, not a silent flood.
+
 **Timing rows inside the trace timeline itself were considered and rejected for Phase 5.** Timing
 events carry a `TransactionId` but no `Stage`, and `/transactions/{id}/trace` is built only from
 Stage rows (`EfTransactionTrace`) — mixing timing rows into that view would clutter the one page meant

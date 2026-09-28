@@ -14,7 +14,7 @@ PIB, another as "MAXI HOLDING 2322 RSD, 16 lines" whose lines summed to 7664, an
 own location line for the PIB and the capture time for the issue time — every one recorded as an expense.
 Duplicates went uncaught because vision returned no fiscal number at all. The operator's five decisions,
 taken before implementation, all settled — the model stays Haiku (a separate model, and choosing one in
-the UI, is deferred: `docs/BACKLOG.md`):
+the UI, is deferred: `docs/backlog/deferred-from-phase-6-receipts.md`):
 
 1. **Do not invent.** `read_receipt` lets every field come back null when it is not legible, adds
    `readable`/`unreadable_reason` (`too_small`, `blurry`, `not_a_receipt`, `cut_off`, `other`) and a
