@@ -14,5 +14,5 @@ capture; receipts stay later (Phase 6).
 
 Answered. Voice never depended on wallets — it rode along with receipts. It is the operator's main
 capture path, so it follows directly after natural-language capture
-(`docs/superpowers/specs/2026-09-22-natural-language-capture.md`). Receipts keep their dependency on
+(`docs/specs/2026-09-22-natural-language-capture.md`). Receipts keep their dependency on
 the money model.

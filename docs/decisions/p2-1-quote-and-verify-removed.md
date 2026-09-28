@@ -17,7 +17,7 @@ main use case. The model now interprets amounts and dates freely; the bot echoes
 with **Отменить** / **Изменить**; a reply in free text corrects it; every state is kept in
 `transaction_revisions`. The CLAUDE.md money rule keeps its force for reports, totals and balances,
 and no longer applies to capture. Full design:
-`docs/superpowers/specs/2026-09-22-natural-language-capture.md`.
+`docs/specs/2026-09-22-natural-language-capture.md`.
 
 **Do not re-propose a validation layer on capture** — evidence spans, verbatim checks or sanity bounds
 — without the operator asking. It was considered and refused in favour of cheap undo.

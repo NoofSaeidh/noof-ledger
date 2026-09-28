@@ -10,7 +10,7 @@ using Noof.Ledger.Host.Workers.ExtractReceiptLogging;
 namespace Noof.Ledger.Host.Workers;
 
 // Claims only ExtractReceipt jobs. Photo or link -> QR (offline) -> the Tax Administration -> vision,
-// every degraded step visible on the trace (docs/superpowers/specs/2026-09-25-receipts-design.md §2).
+// every degraded step visible on the trace (docs/specs/2026-09-25-receipts-design.md §2).
 internal sealed class ExtractReceiptWorker(
     IServiceScopeFactory scopeFactory,
     TimeProvider timeProvider,
