@@ -1,5 +1,5 @@
 ---
-title: The test template can silently drift from what migrations produce — fixed 2026-09-22
+title: The test template can silently drift from what migrations produce — fixed for Persistence 2026-09-28; shared template still unguarded
 status: deferred
 area: persistence
 since: 2026-09-22
@@ -13,9 +13,16 @@ the TRUNCATE guard while every freshly created database had it. Found by acciden
 `MerchantAliasWriteOnceTests.Truncating_the_alias_table_is_rejected_by_the_database` fail — a true
 positive from an experiment that was measuring something else entirely.
 
-Both databases were dropped and recreated from migrations, and `.claude/rules/database.md` now
-carries the rule that caused it. What is still missing is a guard: nothing compares the template
-against a freshly migrated database, so the next drift will be found the same way — by luck. A test that migrates a
-scratch database and diffs `pg_dump --schema-only` against the template would close it, at the cost
-of one full migration run per suite execution. Phase 2 added the runbook step "After adding a
-migration" and a Database rule; the drift guard itself is still missing.
+**Persistence.Tests: fixed 2026-09-28.** It no longer clones the shared template. The
+`MigratedTemplate` assembly fixture migrates a private `noof_test_tpl_*` database from empty once per
+run and every clone copies that, so it cannot lag the migrations. `MigratedTemplateTests` compares a
+clone's migration history, columns, constraints, indexes, triggers, views and functions with a
+freshly migrated database. Run against the shared template the day it was written, that test failed:
+the shared template carried the `pg_trgm` and `unaccent` extensions, which no migration creates — the
+migration-id guard it replaced had passed all along.
+
+**Still open: the E2E suite and the `Category=Database` Host.Tests classes** clone the shared
+template, and nothing checks it. The follow-up is the same move for them: build one migrated
+`noof_test_tpl_*`-style template per test run (or per fixture) through a TestKit helper, clone that,
+and retire `update-test-template` and the shared template once no suite names it. Cost: one full
+migration per run for each of those suites.

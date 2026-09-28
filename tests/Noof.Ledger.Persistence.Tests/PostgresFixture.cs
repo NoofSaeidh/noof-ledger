@@ -5,7 +5,7 @@ using Noof.Ledger.TestKit;
 
 namespace Noof.Ledger.Persistence.Tests;
 
-public sealed class PostgresFixture : IAsyncLifetime
+public sealed class PostgresFixture(MigratedTemplate template) : IAsyncLifetime
 {
     // A List<string> here was a real defect, not a style point: Add runs from however many tests
     // xunit.runner.json lets run at once, List<T> is not thread safe, and a lost entry is a database
@@ -37,12 +37,8 @@ public sealed class PostgresFixture : IAsyncLifetime
     }
 
     // Every ordinary test that is not itself about migrating gets a context on a database that is
-    // already at the latest schema, instead of re-running all 15+ migrations from an empty database.
-    // The template is shared across worktrees and this fixture never migrates it - a stale template
-    // (a worktree added a migration and forgot .\run.ps1 update-test-template) fails fast here rather
-    // than silently testing against yesterday's schema.
-    readonly Lazy<Task> templateFreshness = new(EnsureTemplateIsCurrentAsync, LazyThreadSafetyMode.ExecutionAndPublication);
-
+    // already at the latest schema: a clone of this run's MigratedTemplate, instead of re-running
+    // every migration from an empty database per test.
     internal async Task<LedgerDbContext> CreateMigratedContextAsync()
     {
         var connectionString = await CreateDatabaseConnectionStringAsync();
@@ -54,54 +50,19 @@ public sealed class PostgresFixture : IAsyncLifetime
         return new LedgerDbContext(options);
     }
 
-    static async Task EnsureTemplateIsCurrentAsync()
-    {
-        var inAssembly = MigrationsInAssembly();
-        var appliedToTemplate = await MigrationsAppliedToTemplateAsync();
-
-        TemplateFreshnessGuard.EnsureCurrent(inAssembly, appliedToTemplate);
-    }
-
-    static IReadOnlyList<string> MigrationsInAssembly()
-    {
-        var options = new DbContextOptionsBuilder<LedgerDbContext>()
-            .UseNpgsql("Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none")
-            .Options;
-        using var db = new LedgerDbContext(options);
-        return [.. db.Database.GetMigrations()];
-    }
-
-    // Pooling must be off here: CREATE DATABASE ... TEMPLATE (STRATEGY FILE_COPY) fails with
-    // "source database is being accessed by other users" against ANY live backend connected to the
-    // template, including one this process itself only pooled rather than truly closed. Confirmed by
-    // running this guard and then immediately cloning the template from the same process - a pooled
-    // connection here made every subsequent CreateMigratedContextAsync call fail with Postgres error
-    // 55006, every time, not just under contention.
-    static async Task<IReadOnlyList<string>> MigrationsAppliedToTemplateAsync()
-    {
-        var connectionString = WithoutPooling(DatabaseSettings.For(DatabaseSettings.TemplateDatabase));
-        var options = new DbContextOptionsBuilder<LedgerDbContext>().UseNpgsql(connectionString).Options;
-        await using var db = new LedgerDbContext(options);
-        var applied = await db.Database.GetAppliedMigrationsAsync(TestContext.Current.CancellationToken);
-        return [.. applied];
-    }
-
     // NpgsqlConnection.ConnectionString drops the password once the connection has been opened
     // (confirmed empirically, not documented anywhere obvious) - a caller that needs the
     // connection string itself, to hand to something that opens its own connection (AddNoofPersistence,
     // a published host process), must capture it before opening, which CreateDatabaseAsync's open
     // NpgsqlConnection can no longer provide after the fact. This is that string, from the same
     // full-schema clone CreateDatabaseAsync itself opens.
-    // Every clone waits for the freshness guard, not only CreateMigratedContextAsync's: tests run in
-    // parallel (parallelMode "all"), and a clone started while the guard's connection to the
-    // template is still open fails with 55006 "source database is being accessed by other users".
     public async Task<string> CreateDatabaseConnectionStringAsync()
     {
-        await templateFreshness.Value;
+        var source = await template.NameAsync();
 
         var name = $"noof_test_{Guid.NewGuid():N}";
 
-        await DatabaseSettings.CreateDatabaseFromTemplateAsync(name, TestContext.Current.CancellationToken);
+        await DatabaseSettings.CreateDatabaseFromTemplateAsync(name, source, TestContext.Current.CancellationToken);
 
         created.Add(name);
 
@@ -128,7 +89,7 @@ public sealed class PostgresFixture : IAsyncLifetime
     // exhausted and CREATE/OPEN calls started failing with 53300. Disabling pooling here makes
     // Dispose() close the socket immediately, so the connection count depends on what is running
     // concurrently, not on how many tests have run since the collection started.
-    static string WithoutPooling(string connectionString) =>
+    internal static string WithoutPooling(string connectionString) =>
         new NpgsqlConnectionStringBuilder(connectionString) { Pooling = false }.ConnectionString;
 
     public async ValueTask DisposeAsync()
@@ -180,25 +141,3 @@ public sealed class PostgresCollection : ICollectionFixture<PostgresFixture>;
 // DisableParallelization collection alone, after every parallel one has finished.
 [CollectionDefinition("postgres-serial", DisableParallelization = true)]
 public sealed class SerialPostgresCollection : ICollectionFixture<PostgresFixture>;
-
-internal static class TemplateFreshnessGuard
-{
-    // Comparing only the latest id is not enough: two histories can share the same latest migration
-    // while differing somewhere earlier (a rebase, a migration reverted and re-added under a
-    // different name in another worktree) - a template like that would pass a latest-only check
-    // while still not matching this assembly's schema. The full ordered sequence is the only thing
-    // that actually proves "this template is what these migrations produce".
-    public static void EnsureCurrent(IReadOnlyList<string> migrationsInAssembly, IReadOnlyList<string> migrationsAppliedToTemplate)
-    {
-        if (migrationsAppliedToTemplate.SequenceEqual(migrationsInAssembly))
-            return;
-
-        var latestInAssembly = migrationsInAssembly.Count > 0 ? migrationsInAssembly[^1] : "none";
-        var latestApplied = migrationsAppliedToTemplate.Count > 0 ? migrationsAppliedToTemplate[^1] : "none";
-
-        throw new InvalidOperationException(
-            $"noof_ledger_test_template's applied migrations do not match the assembly's "
-            + $"(latest in assembly: '{latestInAssembly}', latest applied to template: '{latestApplied}'). "
-            + "Run '.\\run.ps1 update-test-template' before running tests against the migrated template clone.");
-    }
-}
