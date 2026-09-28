@@ -11,9 +11,9 @@ gate: it waits until the `build-and-fast-tests` check run (the job in .github/wo
 every other check run for the PR's current head SHA have completed, or -TimeoutMinutes passes. The
 check runs are read by that SHA, not through `gh pr checks`. A required check GitHub has not
 registered yet - routine for a few seconds right after a push - counts as still running, never as
-"no CI"; only a repo with no workflow file at all treats "no checks" as done. The head SHA is read
-again at the end of every poll, and a poll the head moved under (a push during the wait) reports
-nothing - it keeps waiting on the new head instead.
+"no CI"; only a repo with no workflow file at all treats "no checks" as done. Before any verdict the
+head SHA is read once more, after everything the summary reports, and a poll the head moved under (a
+push during the wait) reports nothing - it keeps waiting on the new head instead.
 
 Copilot is optional, not a default gate - the operator's Copilot quota runs out, so most PRs never
 get a Copilot review at all. This only waits on Copilot when Copilot is actually pending on the PR:
@@ -448,18 +448,29 @@ if ($MyInvocation.InvocationName -ne '.') {
                 $copilotQuotaMessage = Find-CopilotQuotaMessage -Reviews $reviews -IssueComments $issueComments -SinceUtc $requestTime
             }
 
-            $latest = Get-PrSnapshot -Number $Number
-            $headMoved = $latest.headRefOid -ne $pr.headRefOid
-            $timedOut = (Get-Date) -ge $deadline
-            $outcome = Get-PrWaitOutcome -ChecksStatus $checksSummary.Status -CopilotPending $copilotPending `
-                -CopilotFound ([bool]$copilotReview) -CopilotQuotaHit ([bool]$copilotQuotaMessage) `
-                -IsDraft $pr.isDraft -TimedOut $timedOut -HeadMoved $headMoved `
-                -Conflicting ($latest.mergeable -eq 'CONFLICTING')
-            if ($outcome -ne 'keep-polling') { break }
+            $verdict = @{
+                ChecksStatus    = $checksSummary.Status
+                CopilotPending  = $copilotPending
+                CopilotFound    = [bool]$copilotReview
+                CopilotQuotaHit = [bool]$copilotQuotaMessage
+                IsDraft         = $pr.isDraft
+                TimedOut        = (Get-Date) -ge $deadline
+                Conflicting     = $pr.mergeable -eq 'CONFLICTING'
+            }
+            $headMoved = $false
+            $outcome = Get-PrWaitOutcome @verdict -HeadMoved $false
+            if ($outcome -ne 'keep-polling') {
+                # The last thing read before a verdict is the head itself, after everything the summary
+                # reports - so a push while any of that was being read can never leave a verdict
+                # standing for the commit it replaced.
+                $threads = Get-ReviewThreadsRaw -Owner $owner -Repo $repo -Number $Number
+                $headMoved = (Get-PrSnapshot -Number $Number).headRefOid -ne $pr.headRefOid
+                if ($headMoved) { $outcome = Get-PrWaitOutcome @verdict -HeadMoved $true }
+                if ($outcome -ne 'keep-polling') { break }
+            }
             Start-Sleep -Seconds (Get-PollDelaySeconds -Remaining ($deadline - (Get-Date)) -PollSeconds $PollSeconds)
         }
 
-        $threads = Get-ReviewThreadsRaw -Owner $owner -Repo $repo -Number $Number
         $unreplied = ConvertTo-UnrepliedUnresolvedComments -Threads $threads
 
         Write-Summary -Pr $pr -ChecksSummary $checksSummary -CopilotReview $copilotReview `
