@@ -45,8 +45,6 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     internal async Task<LedgerDbContext> CreateMigratedContextAsync()
     {
-        await templateFreshness.Value;
-
         var connectionString = await CreateDatabaseConnectionStringAsync();
 
         var options = new DbContextOptionsBuilder<LedgerDbContext>()
@@ -94,8 +92,13 @@ public sealed class PostgresFixture : IAsyncLifetime
     // a published host process), must capture it before opening, which CreateDatabaseAsync's open
     // NpgsqlConnection can no longer provide after the fact. This is that string, from the same
     // full-schema clone CreateDatabaseAsync itself opens.
+    // Every clone waits for the freshness guard, not only CreateMigratedContextAsync's: tests run in
+    // parallel (parallelMode "all"), and a clone started while the guard's connection to the
+    // template is still open fails with 55006 "source database is being accessed by other users".
     public async Task<string> CreateDatabaseConnectionStringAsync()
     {
+        await templateFreshness.Value;
+
         var name = $"noof_test_{Guid.NewGuid():N}";
 
         await DatabaseSettings.CreateDatabaseFromTemplateAsync(name, TestContext.Current.CancellationToken);
