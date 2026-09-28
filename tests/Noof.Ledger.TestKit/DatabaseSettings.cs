@@ -5,7 +5,7 @@ namespace Noof.Ledger.TestKit;
 public static class DatabaseSettings
 {
     // Every DROP DATABASE forces a checkpoint and waits for it. Under the default WAL_LOG strategy a
-    // new database's ~300 files are written through shared buffers, so that checkpoint must fsync
+    // new database's hundreds of files are written through shared buffers, so that checkpoint must fsync
     // every database created since the last one and still alive - with 40 live clones one CHECKPOINT
     // took 42.6s under WAL_LOG and 0.17s under FILE_COPY, which copies and fsyncs the files in the
     // creating backend instead. That is what made full-suite drops outlast 120s (Phase 6), with or

@@ -38,8 +38,8 @@ wallets and currencies.
 > hours. The photo itself is never stored — only Telegram's file id — and every step is on the
 > transaction's trace page.
 >
-> 1744 tests — 1731 passing, 13 skipped (they call a live model or a live voice provider and need
-> keys). One known timing race fails now and then under full-suite load
+> The test suite passes; the tests that call a live model or a live voice provider are skipped
+> unless their keys are set. One known timing race fails now and then under full-suite load
 > (`docs/backlog/loose-ends-phase-5-observability.md`). Browser
 > tests included.
 >

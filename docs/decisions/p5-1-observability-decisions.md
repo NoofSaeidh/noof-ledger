@@ -29,7 +29,7 @@ DPAPI-protected password file, Q1) was not touched by this phase and stays open,
 whichever phase finally does the credential-storage rework.
 
 **The Phase 1B closing review's open question — "does any dependency throw an
-`OperationCanceledException` that is not our stopping token?" (`docs/BACKLOG.md`, "Two things the
+`OperationCanceledException` that is not our stopping token?" (`docs/backlog/dependency-operationcanceledexception-not-our-token.md`, "Two things the
 closing review flagged and could not settle") — is *not* settled by Phase 5.** Every hosted loop now
 catches non-cancellation exceptions per tick (`CLAUDE.md` §4, Architecture), but the filter is still
 `ex is not OperationCanceledException` — the same shape as before, just applied to more workers. A

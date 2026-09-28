@@ -33,52 +33,24 @@ policy below names.
 **Effort levels.** Opus at `medium`; `high`/`xhigh` only for architecture- and correctness-critical
 reasoning, never for small tasks. `low` for mechanical work.
 
-**Review policy — three tiers, three cadences, don't substitute one for another:**
-- **Per task** (inside a phase or plan): review runs on opus (effort medium). No Codex, no Fable per task.
-- **Per pull request: one Codex review**, a model family different from the implementer, run from the
-  PR branch with the Codex CLI — the plugin's `/codex:review`/`/codex:adversarial-review` slash
-  commands cannot be invoked by an agent. Never enable the plugin's stop-time review gate; it would
-  review on every Stop and burn the quota.
-  - `codex review --base <base-branch> -c model_reasoning_effort="medium"` for a mechanical PR — the
-    CLI rejects a PROMPT combined with `--base`, so this form takes no prompt.
-  - For a PR that makes design choices, use the plugin's companion script instead, which supports
-    both a base branch and a focus prompt: `node <path> adversarial-review --wait --base
-    <base-branch> "<focus>"` (challenge the approach, assumptions, trade-offs, failure modes — not
-    just defects); default to adversarial when unsure. Resolve `<path>` with Glob on
-    `~/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs` — the version
-    directory changes on update, never hard-code it.
-  - Run in the foreground with a 600000 ms timeout. Findings are judged, not obeyed: fix what's
-    confirmed, reply in the PR description to what's rejected and why.
-  - Codex refuses on usage limit → don't wait for the window; fall back to an opus review and say so
-    in the PR description.
-- **Fable 5.1 runs twice per phase** *(operator's decision, 2026-09-28)* — never per PR, never per
-  fix round. Models in one family share blind spots; a different family is the cheapest independence
-  available.
-  - **At planning**, once, after the phase's spec and plan are written and before implementation
-    starts. It reviews the decision, not code: alternatives considered, risks and failure modes,
-    conflicts with *(settled)* rules and `docs/decisions/`, and whether the PR cut is right.
-    Its findings are triaged like any review.
-  - **At the end**, closing the phase or a batch of PRs.
-  - **Trial, 3 phases** *(operator, 2026-09-28)*: both Fable reviews run in parallel with a Codex
-    adversarial review of the same scope — closing: the companion script above with `--base <base>`;
-    planning: `codex exec -s read-only "<prompt naming the spec and plan paths, even under the ignored
-    .superpowers/, asking for an adversarial review of the decision>"`. An opus pass merges both lists
-    (deduped, each tagged both / Fable only / Codex only), then triages. The phase's closing notes
-    record one tally line per review (confirmed findings by tag); after the third phase the operator keeps both or drops one.
-- **Review findings are triaged, not all fixed** *(operator's decision, 2026-09-28)*, for Copilot and
-  Codex alike: fix a critical finding (real bug, wrong money/balance, data loss, secret leak,
-  security hole, broken build/test, *(settled)*-rule violation); reply with a sentence of reasoning
-  and don't change code for a non-critical one (style, naming, nits, speculative hardening,
-  preference); ask the operator first on anything expensive (new design, migration, another topic,
-  roughly >~50 lines) instead of starting it, proposing a backlog entry — judged by this
-  single-operator local app's real risk, not completeness.
-- **Copilot is optional** — its quota runs out, so CI and the per-PR Codex review are the gate and
-  nothing waits for Copilot. When a Copilot review does arrive, handle it as below.
-- **Copilot fix rounds:** one round, one commit, opus-only review (effort medium), push — at most 2
-  rounds per PR, then list what's left for the operator. No
-  Codex/Fable for a Copilot round unless it touches money, secrets, a migration or the public
-  surface and a stronger review is judged necessary — say why in the PR. Resolve only the threads
-  you replied to or fixed, by id, never "resolve all unresolved" (hides new comments).
+**Reviews — three cadences, don't substitute one for another** *(operator's decisions, 2026-09-28)*.
+How to run each, and the trial tally, are in `docs/REVIEWS.md`.
+- **Per task** inside a phase or plan: opus, effort medium. No Codex, no Fable per task.
+- **Per PR:** one Codex review, a family different from the implementer — plain for a mechanical PR,
+  adversarial for one that makes design choices or when unsure. Codex at its usage limit → an opus
+  review, said so in the PR. Never enable the Codex plugin's stop-time review gate.
+- **Per phase:** Fable 5.1 twice — at planning (reviews the decision before implementation starts)
+  and at the close of the phase or a batch of PRs; never per PR or per fix round. Trial for 3 phases:
+  each runs in parallel with a Codex adversarial review of the same scope, tallied per review.
+- **Findings are triaged, not all fixed**, for Copilot and Codex alike: fix a critical finding (real
+  bug, wrong money/balance, data loss, secret leak, security hole, broken build/test,
+  *(settled)*-rule violation); reply with a sentence of reasoning and don't change code for a
+  non-critical one (style, naming, nits, speculative hardening, preference); ask the operator first
+  on anything expensive (new design, migration, another topic, roughly >~50 lines) instead of starting
+  it, proposing a backlog entry — judged by this single-operator local app's real risk, not completeness.
+- **Copilot is optional** — CI and the per-PR Codex review are the gate; nothing waits for Copilot.
+  When one arrives: Copilot fix rounds per `docs/REVIEWS.md`, at most 2 per PR, then list what's left
+  for the operator. Resolve only the threads you replied to or fixed, by id.
 
 **Anti-patterns — do not do these:**
 - Running a test suite on opus — including by dispatching it without `model`. That is a haiku task;
@@ -207,7 +179,7 @@ Moved to `.claude/rules/logging.md` — loads automatically when you touch a `Lo
   | Domain, Ai, Telegram, Receipts, Architecture, Host | 30000 | 120000 |
   | Persistence, filtered | 60000 | 120000 |
   | Persistence, full (≈2.5 min since parallel tests, 2026-09-28) | 240000 | 600000 |
-  | Full solution (13–15 min since Phase 6) | 600000 | 600000 |
+  | Full solution (estimate, not yet measured: E2E ≈3 min dominates since Persistence full fell to ≈2.5 min) | 420000 | 600000 |
   | E2E (no data yet — recalibrate) | 180000 | 600000 |
 
 - Waiting for something you did not start (the shared test-database lock, another session): same
@@ -246,8 +218,10 @@ the code that builds the echo text.
   go together — e.g. several rules about how agents work are one PR, never a PR per paragraph of
   CLAUDE.md. A follow-up that belongs to an open PR goes into that PR, not a new one.
 - Stop and propose a split (operator decides) past ~500 changed lines excluding generated files
-  (migrations' `.Designer.cs`, the model snapshot, `schema.expected.sql`), or past one of §4's
-  split assemblies per PR (e.g. touching both Persistence and Web).
+  (migrations' `.Designer.cs`, the model snapshot, `schema.expected.sql`), or past one *leaf*
+  assembly. A PR may touch `Domain`/`Application`, the one leaf assembly that implements the change
+  (`Persistence`, `Ai`, `Fx`, `Receipts`, `Telegram` or `Web`) and its `Host` wiring, with their
+  tests; a second leaf assembly (e.g. Persistence and Web) is the signal to propose a split.
 - Mechanical moves/renames get their own PR, separate from behaviour changes.
 - Independent PRs branch from `master`; a PR needing another's changes is stacked on it (base = that
   branch), never merged into it.
@@ -287,6 +261,11 @@ When closing a phase, read and follow `docs/CLOSING-A-PHASE.md` *(settled)*.
   `docs/superpowers/plans`, the superpowers skills' default.
 - Committed code and docs never link to a git-ignored document — nobody else can open it. Put the
   finding itself in the comment or move it into one of the places above.
+- **No volatile counts in documents or comments** — test counts, pass/skip tallies, numbers of
+  files/entries/lines/tests and similar figures that go stale as the code changes. Say what is true
+  without the number (e.g. "the full suite passes"), or let the tool report it. Dated measurements
+  recorded as evidence for a decision (e.g. in `docs/decisions/`, or the review-trial tally) are
+  history, not status, and may stay.
 
 Keep this file short: path-specific rules go in `.claude/rules/` with `paths:` frontmatter, anything longer in `docs/`.
 A path-scoped rule loads when a matching file is read, not when a shell command touches one — after

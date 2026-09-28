@@ -23,5 +23,5 @@ paths:
   200 while still showing what it rendered before the change.
 - **A look that fails silently needs a test that reads what the app serves, not the source.** The
   theme once emitted `font-family: 'system-ui, -apple-system, ...'` — one quoted name no machine
-  has — and every page rendered in Times New Roman while all 482 tests passed. `ShellSourceTests`
+  has — and every page rendered in Times New Roman while the whole suite passed. `ShellSourceTests`
   and `ThemeTests` are that detector; a source-text assertion could not have been.
