@@ -45,8 +45,10 @@ this is a public repository.
 ## After adding a migration
 
 Any new EF Core migration must be applied to `noof_ledger_test_template` right after it builds, or
-the E2E suite and `MoneyStorageTests` fail with a missing-column error the next time they clone it —
-that failure is how you notice this step was skipped. `noof_ledger` itself is migrated only when the
+the E2E suite and the `Category=Database` Host.Tests classes fail with a missing-column error the
+next time they clone it — that failure is how you notice this step was skipped.
+`Noof.Ledger.Persistence.Tests` does not use this template: it migrates its own from empty once
+per run. `noof_ledger` itself is migrated only when the
 operator starts the host (`Database:MigrateOnStartup`), never by hand.
 
 ```powershell

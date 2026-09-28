@@ -38,4 +38,5 @@ paths:
   own clone: one that touches anything process- or server-wide (environment variables, the template
   itself, server settings, a machine-wide process count) goes in a `DisableParallelization`
   collection — `ProcessEnvironmentCollection`, or `"postgres-serial"` when it needs clones — and
-  every clone path awaits the template freshness guard first.
+  every clone goes through `PostgresFixture`, which awaits the per-run `MigratedTemplate` first: a
+  clone started while anything is still connected to its template fails with 55006.

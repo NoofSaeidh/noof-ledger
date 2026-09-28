@@ -34,14 +34,18 @@ public static class DatabaseSettings
         return connection;
     }
 
-    public static string CreateFromTemplateSql(string name) =>
-        $"CREATE DATABASE \"{name}\" TEMPLATE {TemplateDatabase} STRATEGY FILE_COPY";
+    public static string CreateFromTemplateSql(string name) => CreateFromTemplateSql(name, TemplateDatabase);
 
-    public static string CreateEmptySql(string name) =>
-        $"CREATE DATABASE \"{name}\" STRATEGY FILE_COPY";
+    public static string CreateFromTemplateSql(string name, string template) =>
+        $"CREATE DATABASE \"{name}\" TEMPLATE {template} STRATEGY FILE_COPY";
+
+    public static string CreateEmptySql(string name) => CreateFromTemplateSql(name, "template0");
 
     public static Task CreateDatabaseFromTemplateAsync(string name, CancellationToken cancellationToken) =>
-        ExecuteAdminDdlAsync(CreateFromTemplateSql(name), cancellationToken);
+        CreateDatabaseFromTemplateAsync(name, TemplateDatabase, cancellationToken);
+
+    public static Task CreateDatabaseFromTemplateAsync(string name, string template, CancellationToken cancellationToken) =>
+        ExecuteAdminDdlAsync(CreateFromTemplateSql(name, template), cancellationToken);
 
     public static Task CreateEmptyDatabaseAsync(string name, CancellationToken cancellationToken) =>
         ExecuteAdminDdlAsync(CreateEmptySql(name), cancellationToken);

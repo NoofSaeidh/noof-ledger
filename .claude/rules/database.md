@@ -28,10 +28,17 @@ paths:
   `merchant_aliases_no_truncate` trigger to an existing migration, and `noof_ledger` and the test
   template went on for a phase without the TRUNCATE guard the README promised, while every freshly
   created database had it.
-- **After adding a migration, run `.\run.ps1 update-test-template`** (or the command it runs, in
-  `ops/RUNBOOK.md` under "After adding a migration"). The E2E suite clones the template and fails on
-  a stale one; never run `dotnet ef database update` bare or with `--connection` — both resolve
-  `noof_ledger` — point it at the template via `NOOF_LEDGER_EF_CONNECTION` instead.
+- **Two test templates.** `Persistence.Tests` never touches `noof_ledger_test_template`: its
+  `MigratedTemplate` assembly fixture migrates a private `noof_test_tpl_*` database from empty once
+  per run, every Persistence clone copies that, and `MigratedTemplateTests` compares a clone with a
+  freshly migrated database. The E2E suite and the `Category=Database` Host.Tests classes still clone
+  the shared `noof_ledger_test_template`, which is only ever migrated forward and checked by nothing —
+  so **after adding a migration, run `.\run.ps1 update-test-template`** (or the command it runs, in
+  `ops/RUNBOOK.md` under "After adding a migration"). Nothing fails cleanly on a stale one: fixtures
+  that migrate on start bring their clone forward, the rest hit missing columns, and an edit to an
+  applied migration is invisible to all of them. Never run `dotnet ef database update` bare or with
+  `--connection` — both resolve `noof_ledger` — point it at the template via
+  `NOOF_LEDGER_EF_CONNECTION` instead.
 - **`transaction_revisions` is append-only** (a trigger refuses `UPDATE`/`DELETE`/`TRUNCATE`). Any
   code that changes a record writes a revision inside the same database transaction, through
   `RevisionLog.AppendAsync`.

@@ -4,8 +4,9 @@
 Drops throwaway test databases left behind by an interrupted or failed test run.
 
 .DESCRIPTION
-The test suites create one database per test - noof_test_* from Noof.Ledger.Persistence.Tests and
-noof_e2e_* from Noof.Ledger.E2E.Tests - and drop them when the run finishes. A run killed partway
+The test suites create one database per test - noof_test_* from Noof.Ledger.Persistence.Tests (plus
+one noof_test_tpl_* per run, the migrated template its clones copy) and noof_e2e_* from
+Noof.Ledger.E2E.Tests - and drop them when the run finishes. A run killed partway
 through, or a drop that times out on a Postgres checkpoint, leaves them behind. They are harmless
 but unbounded: 166 had accumulated before this script existed.
 
