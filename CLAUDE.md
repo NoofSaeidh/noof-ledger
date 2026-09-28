@@ -6,7 +6,7 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
 > Cross-currency conversion, transfers, exchange-office slips and editing receipt lines remain future
 > phases. Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
 >
-> Deferred **decisions** live in `docs/OPEN-QUESTIONS.md`; deferred **work** lives in `docs/backlog/`. Check both before proposing something as missing.
+> Deferred **decisions** live in `docs/decisions/`; deferred **work** lives in `docs/backlog/`. Check both before proposing something as missing.
 >
 > **`noof_ledger` holds the operator's real credentials now.** Never run tests, experiments or manual checks against it, or call the live model, without an explicit request. Tests use the `noof_ledger_test_template` clones only.
 
@@ -56,7 +56,7 @@ reasoning, never for small tasks. `low` for mechanical work.
   available.
   - **At planning**, once, after the phase's spec and plan are written and before implementation
     starts. It reviews the decision, not code: alternatives considered, risks and failure modes,
-    conflicts with *(settled)* rules and `docs/OPEN-QUESTIONS.md`, and whether the PR cut is right.
+    conflicts with *(settled)* rules and `docs/decisions/`, and whether the PR cut is right.
     Its findings are triaged like any review.
   - **At the end**, closing the phase or a batch of PRs.
   - **Trial, 3 phases** *(operator, 2026-09-28)*: both Fable reviews run in parallel with a Codex
@@ -131,7 +131,7 @@ register it into) — named because they are exceptions, not a licence to invent
 - Reports, totals and balances are computed by C#; the LLM only phrases figures C# computed.
 - **Capture is the exception** *(settled 2026-09-22)*: the model interprets amounts and dates from
   natural speech with no validation layer. The safety is the echo in Telegram plus cancel and correct,
-  not rejection. Do not re-add verbatim checks or sanity bounds — `docs/OPEN-QUESTIONS.md` P2-1.
+  not rejection. Do not re-add verbatim checks or sanity bounds — `docs/decisions/p2-1-quote-and-verify-removed.md`.
 - **A wallet's balance is derived, never stored** *(settled 2026-09-24, Phase 4)* — details in
   `.claude/rules/database.md`.
 - **A receipt's amounts and date never come from the model** *(settled 2026-09-25, Phase 6)* — the

@@ -296,7 +296,7 @@ public class CategorizationWorkerTests
         // The defect this guards against: a purchase captured Monday (SentOn) corrected on
         // Wednesday with "это было позавчера" must resolve позавчера from Wednesday, not from the
         // original Monday capture - otherwise every relative word in a correction is off by
-        // however long the correction waited (docs/OPEN-QUESTIONS.md P2-2).
+        // however long the correction waited (docs/decisions/p2-2-correction-today-anchor.md).
         var instructionDay = new DateOnly(2026, 9, 23);
         var store = Substitute.For<ICategorizationStore>();
         store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())

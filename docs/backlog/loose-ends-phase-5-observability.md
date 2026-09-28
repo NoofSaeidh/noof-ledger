@@ -95,7 +95,7 @@ from leaking request/response bodies (which could carry secrets) into the log pi
 but the gap is real and cheap to close whenever `Noof.Ledger.Ai/Groq` is next touched.
 
 **FX freshness check arrives with the FX phase.** The observability spec named this out of scope
-because there is no FX rate source yet (`docs/OPEN-QUESTIONS.md` Q4) — nothing to check the freshness
+because there is no FX rate source yet (`docs/decisions/q4-fx-rate-source.md`) — nothing to check the freshness
 of. Add it alongside whichever phase builds currency conversion.
 
 **Playwright cannot drive a native `datetime-local` widget in headless Chromium**, so

@@ -11,7 +11,7 @@ namespace Noof.Ledger.Receipts.Tests.Qr;
 // <=1280px-long-side JPEG of a fiscal receipt with the QR occupying a modest fraction of the frame -
 // which is what exposed the "Vision used: no QR" production failure a low-density synthetic QR never
 // would. See the measured before/after table in this change's commit message and
-// docs/OPEN-QUESTIONS.md: the benchmark's own downscale must use a filtered resampler
+// docs/decisions/p6-1-receipts-decisions.md: the benchmark's own downscale must use a filtered resampler
 // (SKFilterMode.Linear + SKMipmapMode.Linear) rather than SkiaSharp's nearest-neighbour default, or
 // the pass/fail pattern below reflects the benchmark's own aliasing rather than what a phone or
 // Telegram's real resampler produces. Under that filtered downscale, giving ZxingQrReader's own 2x

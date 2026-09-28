@@ -1,6 +1,6 @@
 # Backlog — future improvements
 
-Work that is wanted but deliberately not scheduled. Distinct from `OPEN-QUESTIONS.md`, which holds
+Work that is wanted but deliberately not scheduled. Distinct from `docs/decisions/`, which holds
 deferred *decisions*; this holds deferred *work* whose decision is already made.
 
 Nothing here blocks any phase. An item leaves this folder only by being written into a phase plan.

@@ -17,7 +17,7 @@ public interface IRecordEditor
 
     // False when this exact reply is already queued: Telegram redelivers an update whose handling failed partway.
     // sentAt is the correction reply's own send instant, so the model's "today" for this correction is the
-    // reply's local day, not the original message's (docs/OPEN-QUESTIONS.md P2-2).
+    // reply's local day, not the original message's (docs/decisions/p2-2-correction-today-anchor.md).
     Task<bool> RequestCorrectionAsync(
         Guid transactionId, string instruction, int sourceMessageId, DateTimeOffset sentAt, CancellationToken cancellationToken);
 

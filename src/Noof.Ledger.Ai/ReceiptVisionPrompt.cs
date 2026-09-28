@@ -11,7 +11,7 @@ internal static class ReceiptVisionPrompt
     // unreadable rather than fill in or approximate a field. This prompt asks for no default at all -
     // the one deliberate default kept from before (RSD when no currency is printed) lives in C#, in
     // ChatReceiptVision's own mapping from a null currency, since Serbian fiscal receipts print RSD
-    // and a legible receipt showing no other currency is one; docs/OPEN-QUESTIONS.md P6-2.
+    // and a legible receipt showing no other currency is one; docs/decisions/p6-2-vision-fallback-stopped-inventing-receipts.md.
     public const string Instruction =
         "Read this photograph of a shop receipt. Report only what is legible; never guess, fill in, or "
         + "approximate a field you cannot actually read. If the photo is too small, blurry, cut off, or "

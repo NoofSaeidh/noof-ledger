@@ -12,6 +12,6 @@ circuit. `AddCascadingAuthenticationState` alone does not revalidate it, and the
 secrets.
 
 **Status.** Flagged by the Phase 1 readiness audit and never investigated. Belongs with the hardening
-phase recorded in `OPEN-QUESTIONS.md`. Cookie authentication is the only mode now
-(`docs/OPEN-QUESTIONS.md`, A1/A2 SUPERSEDED), so this is no longer conditional on a mode switch — it
+phase recorded in `docs/decisions/p1-2-postgres-credential-deferred.md`. Cookie authentication is the only mode now
+(`docs/decisions/cookie-auth-only-mode.md`), so this is no longer conditional on a mode switch — it
 applies today.

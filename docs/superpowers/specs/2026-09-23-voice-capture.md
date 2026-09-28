@@ -14,7 +14,7 @@ exists and is reused unchanged.
 ## Decisions
 
 **V1 — Speech-to-text is Groq's hosted `whisper-large-v3`.** Operator's choice, 2026-09-23, after a
-comparison of Groq, OpenAI, AWS and Azure (summarised in `docs/OPEN-QUESTIONS.md` P3-1). Why Groq:
+comparison of Groq, OpenAI, AWS and Azure (summarised in `docs/decisions/p3-1-speech-to-text-provider.md` P3-1). Why Groq:
 
 - It accepts Telegram's OGG/Opus as uploaded, so there is no audio decoder in this codebase. The file
   must be named `.ogg`: Telegram's own `.oga` name is rejected with 400.
@@ -118,7 +118,7 @@ operator presses Test. The key never appears in a log, an exception message or a
 
 ## Documentation that closes the phase
 
-- `docs/OPEN-QUESTIONS.md`: P3-1, the provider decision, with the comparison and its sources. P3-2, a
+- `docs/decisions/`: P3-1, the provider decision, with the comparison and its sources. P3-2, a
   finding from the same research: per Bedrock's documentation (to be checked against Anthropic's own
   before recording), Claude Opus 5.5, Fable 5.1 and Mythos 5.1 reject a forced `tool_choice` with 400.
   The app runs `claude-haiku-4-5`, so nothing breaks today, but Phase 2's forced strict tool call rules
