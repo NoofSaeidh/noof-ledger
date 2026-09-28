@@ -175,6 +175,12 @@ public sealed class PostgresFixture : IAsyncLifetime
 [CollectionDefinition("postgres")]
 public sealed class PostgresCollection : ICollectionFixture<PostgresFixture>;
 
+// For a test that observes something machine-wide - PgDumpDatabaseDumperTests counts every pg_dump
+// process - and so cannot share the run with parallel tests that start their own. xUnit runs a
+// DisableParallelization collection alone, after every parallel one has finished.
+[CollectionDefinition("postgres-serial", DisableParallelization = true)]
+public sealed class SerialPostgresCollection : ICollectionFixture<PostgresFixture>;
+
 internal static class TemplateFreshnessGuard
 {
     // Comparing only the latest id is not enough: two histories can share the same latest migration

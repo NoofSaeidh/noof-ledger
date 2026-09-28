@@ -36,5 +36,6 @@ paths:
   ~20 server connections. `maxParallelThreads` alone did nothing — xUnit never parallelises within a
   collection in `collections` mode, and every database test shares that one. So a test owns only its
   own clone: one that touches anything process- or server-wide (environment variables, the template
-  itself, server settings) goes in a `DisableParallelization` collection like
-  `ProcessEnvironmentCollection`, and every clone path awaits the template freshness guard first.
+  itself, server settings, a machine-wide process count) goes in a `DisableParallelization`
+  collection — `ProcessEnvironmentCollection`, or `"postgres-serial"` when it needs clones — and
+  every clone path awaits the template freshness guard first.
