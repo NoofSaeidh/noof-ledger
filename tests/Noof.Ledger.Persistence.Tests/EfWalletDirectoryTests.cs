@@ -27,8 +27,7 @@ public class EfWalletDirectoryTests(PostgresFixture fixture)
     [Fact]
     public async Task Active_offers_every_wallet_that_is_not_archived_ordered_by_name()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var wise = NewWallet("Wise EUR", CurrencyCode.Eur, isDefaultForCurrency: true, aliases: ["wise", "вайз"]);
         var cash = NewWallet("Cash", CurrencyCode.Rsd, aliases: ["налик"]);
         // Named to sort first, so a directory that forgot the archived filter fails on the order as well.
@@ -53,8 +52,7 @@ public class EfWalletDirectoryTests(PostgresFixture fixture)
     [Fact]
     public async Task DefaultForPaymentAsync_returns_the_wallet_marked_default_for_card()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var cardWallet = NewWallet("Card Wallet", CurrencyCode.Rsd);
         cardWallet.DefaultForPayment = WalletPaymentDefault.Card;
         db.Wallets.Add(cardWallet);
@@ -70,8 +68,7 @@ public class EfWalletDirectoryTests(PostgresFixture fixture)
     [Fact]
     public async Task DefaultForPaymentAsync_ignores_an_archived_wallet()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var archivedCardWallet = NewWallet("Closed Card Wallet", CurrencyCode.Rsd, archived: true);
         archivedCardWallet.DefaultForPayment = WalletPaymentDefault.Card;
         db.Wallets.Add(archivedCardWallet);
@@ -88,8 +85,7 @@ public class EfWalletDirectoryTests(PostgresFixture fixture)
     [Fact]
     public async Task DefaultForPaymentAsync_returns_null_when_no_wallet_is_marked_default_for_cash()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
 
         var walletId = await new EfWalletDirectory(db)
             .DefaultForPaymentAsync(PaymentMethod.Cash, TestContext.Current.CancellationToken);
@@ -115,8 +111,7 @@ public class EfWalletDirectoryTests(PostgresFixture fixture)
     [Fact]
     public async Task Only_one_wallet_may_be_the_default_for_a_given_payment_method()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var first = NewWallet("First Card Wallet", CurrencyCode.Rsd);
         first.DefaultForPayment = WalletPaymentDefault.Card;
         db.Wallets.Add(first);

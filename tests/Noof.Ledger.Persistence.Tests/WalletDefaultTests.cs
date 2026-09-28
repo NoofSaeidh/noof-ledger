@@ -23,8 +23,7 @@ public class WalletDefaultTests(PostgresFixture fixture)
     [Fact]
     public async Task The_seeded_main_wallet_is_the_RSD_default()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
 
         var main = await db.Wallets.AsNoTracking().SingleAsync(w => w.Id == MainWalletId, TestContext.Current.CancellationToken);
 
@@ -37,8 +36,7 @@ public class WalletDefaultTests(PostgresFixture fixture)
     [Fact]
     public async Task A_second_default_for_the_same_currency_is_rejected_by_the_database()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         db.Wallets.Add(NewWallet(CurrencyCode.Rsd, isDefaultForCurrency: true));
 
         var act = async () => await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -52,8 +50,7 @@ public class WalletDefaultTests(PostgresFixture fixture)
     [Fact]
     public async Task A_default_for_another_currency_is_accepted()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         db.Wallets.Add(NewWallet(CurrencyCode.Eur, isDefaultForCurrency: true));
 
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -64,8 +61,7 @@ public class WalletDefaultTests(PostgresFixture fixture)
     [Fact]
     public async Task A_second_non_default_wallet_in_the_same_currency_is_accepted()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         db.Wallets.Add(NewWallet(CurrencyCode.Rsd, isDefaultForCurrency: false));
 
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -76,8 +72,7 @@ public class WalletDefaultTests(PostgresFixture fixture)
     [Fact]
     public async Task A_wallet_keeps_its_aliases_in_order_and_is_stamped_when_it_is_created()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var wallet = NewWallet(CurrencyCode.Rsd, isDefaultForCurrency: false, "райф", "raiffeisen");
         db.Wallets.Add(wallet);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
