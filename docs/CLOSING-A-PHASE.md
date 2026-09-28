@@ -8,6 +8,9 @@ agent, with none of this conversation — can pick it up without rediscovering w
   `docs/decisions/` (one file per decision). Work deliberately not done goes in
   `docs/backlog/` (one file per item) with enough reasoning that nobody re-proposes it as new. A repeatable procedure
   goes in `ops/RUNBOOK.md` or a skill. If it changes how someone should work, it is not optional.
+- **Phase plans and progress logs live in the git-ignored `.superpowers/`** (the superpowers
+  plugin's default `docs/superpowers/plans` must not be used here); what outlives a phase goes to
+  `docs/decisions/`, `docs/backlog/`, `docs/specs/`, rules or the runbook. Specs live in `docs/specs/`.
 - **Only what generalises.** A defect fixed inside the phase is in the commit that fixed it; that
   is where it belongs. Promote a lesson there only when it would otherwise be paid for twice —
   the PostgreSQL microsecond flake earned its line by shipping twice before anyone noticed.

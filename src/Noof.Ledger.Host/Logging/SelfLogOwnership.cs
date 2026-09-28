@@ -9,8 +9,7 @@ namespace Noof.Ledger.Host.Logging;
 // Serilog.Debugging.SelfLog.Enable replaces the process's one self-log delegate outright - it does
 // not compose across hosts, and a Postgres sink failure is asynchronous, so nothing tells a later
 // host apart from an earlier one just by which one happens to be "current" when the failure
-// surfaces. SelfLogSinkFailureTests reproduced this as a flake
-// (docs/superpowers/sdd/2026-09-25-phase6-receipts/fix-fd-report.md); writing every raw SelfLog
+// surfaces. SelfLogSinkFailureTests reproduced this as a flake; writing every raw SelfLog
 // message to a file while reproducing it showed the actual source: an *orphaned* host - almost
 // certainly the throwaway host WebApplicationFactory's HostFactoryResolver builds and discards to
 // probe a minimal-hosting Program.cs before building the real one - is never disposed, so its own

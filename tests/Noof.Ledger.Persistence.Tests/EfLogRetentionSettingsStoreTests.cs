@@ -16,8 +16,7 @@ public class EfLogRetentionSettingsStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task With_nothing_saved_GetAsync_returns_the_C_sharp_defaults()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
 
         var days = await StoreFor(db).GetAsync(TestContext.Current.CancellationToken);
 
@@ -27,8 +26,7 @@ public class EfLogRetentionSettingsStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task Save_then_get_round_trips_every_level()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var store = StoreFor(db);
         var saved = new LogRetentionDays(Verbose: 2, Debug: 3, Information: 45, Warning: 100, Error: 120, Fatal: 365);
 
@@ -41,8 +39,7 @@ public class EfLogRetentionSettingsStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task A_second_save_replaces_the_first()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var store = StoreFor(db);
 
         await store.SaveAsync(new LogRetentionDays(2, 2, 2, 2, 2, 2), TestContext.Current.CancellationToken);
@@ -58,8 +55,7 @@ public class EfLogRetentionSettingsStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task A_stored_row_with_an_out_of_range_member_falls_back_to_Default_for_just_that_level()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var partialRow = """{"Verbose":2,"Debug":3,"Information":45,"Warning":-5}""";
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"""

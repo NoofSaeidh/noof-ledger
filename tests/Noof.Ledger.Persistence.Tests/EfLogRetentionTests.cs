@@ -37,8 +37,7 @@ public class EfLogRetentionTests(PostgresFixture fixture)
     [InlineData(LogSeverity.Debug)]
     public async Task Verbose_and_debug_older_than_the_default_one_day_window_are_pruned_but_not_exactly_at_the_boundary(LogSeverity level)
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         db.AppLogs.AddRange(
             Row(1, level, Now.AddDays(-1).AddSeconds(1)), // just inside 1 day: kept
             Row(2, level, Now.AddDays(-1).AddSeconds(-1))); // just past 1 day: pruned
@@ -57,8 +56,7 @@ public class EfLogRetentionTests(PostgresFixture fixture)
     [InlineData(LogSeverity.Fatal, 90)]
     public async Task Information_and_above_older_than_their_default_window_are_pruned_but_not_exactly_at_the_boundary(LogSeverity level, int windowDays)
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         db.AppLogs.AddRange(
             Row(1, level, Now.AddDays(-windowDays).AddSeconds(1)),
             Row(2, level, Now.AddDays(-windowDays).AddSeconds(-1)));
@@ -73,8 +71,7 @@ public class EfLogRetentionTests(PostgresFixture fixture)
     [Fact]
     public async Task Each_level_is_pruned_by_its_own_window_not_a_shared_one()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         // Two days old: past Debug's default one-day window, well inside Information's default
         // thirty-day window - proves each level's cutoff is computed and applied independently, not
         // one shared cutoff for the whole table.
@@ -92,8 +89,7 @@ public class EfLogRetentionTests(PostgresFixture fixture)
     [Fact]
     public async Task A_configured_window_overrides_the_default_for_that_level_only()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         db.AppLogs.AddRange(
             Row(1, LogSeverity.Warning, Now.AddDays(-10)),
             Row(2, LogSeverity.Error, Now.AddDays(-10)));

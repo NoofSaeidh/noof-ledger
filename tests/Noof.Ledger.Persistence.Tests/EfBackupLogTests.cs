@@ -1,5 +1,4 @@
 using AwesomeAssertions;
-using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Backup;
 using Noof.Ledger.Persistence.Backup;
 
@@ -13,8 +12,7 @@ public class EfBackupLogTests(PostgresFixture fixture)
     [Fact]
     public async Task A_run_that_never_happened_reports_no_success_and_no_failure()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var log = new EfBackupLog(db);
 
         var status = await log.StatusAsync(TestContext.Current.CancellationToken);
@@ -25,8 +23,7 @@ public class EfBackupLogTests(PostgresFixture fixture)
     [Fact]
     public async Task A_successful_run_is_the_last_success_and_not_a_failure()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var log = new EfBackupLog(db);
 
         await log.RecordAsync(new BackupRunRecord(T0, T0.AddMinutes(1), true, "noof_ledger-20260924-030000.dump", 4096, null),
@@ -39,8 +36,7 @@ public class EfBackupLogTests(PostgresFixture fixture)
     [Fact]
     public async Task A_failure_after_an_earlier_success_keeps_the_success_but_reports_the_failure()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var log = new EfBackupLog(db);
 
         await log.RecordAsync(new BackupRunRecord(T0, T0.AddMinutes(1), true, "noof_ledger-20260924-030000.dump", 4096, null),

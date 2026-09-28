@@ -74,8 +74,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task ApplyAsync_writes_model_authored_lines_and_completes_the_transaction()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var (transactionId, categoryId, merchantId) = await SeedAsync(db, TestContext.Current.CancellationToken);
         var store = new EfCategorizationStore(db, Clock);
         var items = new[] { new CategorizedLineItem("Coffee", new Money(3.50m, CurrencyCode.Eur), categoryId, merchantId) };
@@ -99,8 +98,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task ApplyAsync_replaces_a_previous_model_authored_line_rather_than_appending_to_it()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var (transactionId, categoryId, merchantId) = await SeedAsync(db, TestContext.Current.CancellationToken);
         db.LineItems.Add(new LineItem
         {
@@ -129,8 +127,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task ApplyAsync_leaves_a_user_authored_line_untouched()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var (transactionId, categoryId, merchantId) = await SeedAsync(db, TestContext.Current.CancellationToken);
         var userLineId = Guid.NewGuid();
         db.LineItems.Add(new LineItem
@@ -163,8 +160,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task ApplyAsync_writes_a_receipt_line_s_ordinal_and_receipt_line_id_and_moves_the_wallet_balance_by_the_total()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var wallet = NewWallet("Cash", CurrencyCode.Rsd);
         var transaction = NewTransaction(wallet.Id);
         var category = NewCategory();
@@ -225,8 +221,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
         // UPDATE as the first statement inside ApplyAsync's transaction makes the second caller
         // wait for the first to commit, then see (and replace) its rows, the same way
         // EfJobQueueTests' concurrent-claim test proves SKIP LOCKED serializes ClaimAsync.
-        await using var dbA = await fixture.CreateContextAsync();
-        await dbA.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var dbA = await fixture.CreateMigratedContextAsync();
         var (transactionId, categoryId, merchantId) = await SeedAsync(dbA, TestContext.Current.CancellationToken);
 
         var connectionString = dbA.Database.GetConnectionString();
@@ -253,8 +248,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task ApplyAsync_is_idempotent_applying_the_same_result_twice_leaves_the_same_rows()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var (transactionId, categoryId, merchantId) = await SeedAsync(db, TestContext.Current.CancellationToken);
         var store = new EfCategorizationStore(db, Clock);
         var items = new[]
@@ -316,8 +310,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task GetSubjectAsync_returns_the_record_as_stored_with_its_lines()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var wallet = NewWallet("Main Wallet");
         // 22:30 UTC is 00:30 the next day in Belgrade: SentOn is the Belgrade day, OccurredOn is what is stored.
         var transaction = NewTransaction(wallet.Id, chatId: 777, messageId: 5,
@@ -357,8 +350,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task ApplyAsync_stores_the_day_the_outcome_names()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var (transactionId, categoryId, _) = await SeedAsync(db, TestContext.Current.CancellationToken);
         var store = new EfCategorizationStore(db, Clock);
         var items = new[] { new CategorizedLineItem("Coffee", new Money(3.50m, CurrencyCode.Eur), categoryId, null) };
@@ -373,8 +365,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task GetSubjectAsync_returns_null_when_the_transaction_is_gone()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var store = new EfCategorizationStore(db, Clock);
 
         var subject = await store.GetSubjectAsync(Guid.NewGuid(), TestContext.Current.CancellationToken);
@@ -385,8 +376,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task GetSubjectAsync_names_no_wallet_for_a_capture_that_has_not_been_read_yet()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = NewTransaction(SeededDefaultWalletId);
         transaction.WalletId = null;
         db.Transactions.Add(transaction);
@@ -401,8 +391,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task MarkFailedAsync_sets_status_to_failed_and_nothing_else()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var wallet = NewWallet();
         var transaction = NewTransaction(wallet.Id);
         db.Wallets.Add(wallet);
@@ -444,8 +433,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task A_voice_capture_with_no_transcript_reads_back_as_voice_with_empty_text()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = VoiceAwaitingTranscript();
         db.Transactions.Add(transaction);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -460,8 +448,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task A_record_with_no_transcript_still_gets_a_revision()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = VoiceAwaitingTranscript();
         db.Transactions.Add(transaction);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -480,8 +467,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task GetSubjectAsync_reads_a_capture_that_has_no_wallet_yet_with_an_empty_wallet_name()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = NewTransaction(walletId: null, chatId: 777, messageId: 9,
             occurredAt: new DateTimeOffset(2026, 9, 21, 10, 0, 0, TimeSpan.Zero), occurredOn: new DateOnly(2026, 9, 21));
         db.Transactions.Add(transaction);
@@ -500,8 +486,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task GetSubjectAsync_fills_kind_wallet_currency_balance_and_the_statement_for_a_balance_check()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var wallet = new Wallet
         {
             Id = Guid.NewGuid(),
@@ -539,8 +524,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task GetSubjectAsync_reports_no_balance_row_as_an_empty_list()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var wallet = new Wallet
         {
             Id = Guid.NewGuid(),
@@ -568,8 +552,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task GetSubjectAsync_maps_a_manual_record_with_no_chat_to_chat_zero()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var opening = new Transaction
         {
             Id = Guid.NewGuid(),

@@ -1,8 +1,8 @@
 # Status
 
-> **Status:** spec approved (`docs/superpowers/specs/2026-09-24-money-model.md`,
-> `docs/superpowers/specs/2026-09-24-observability-design.md`,
-> `docs/superpowers/specs/2026-09-25-receipts-design.md`); **Phases 0, 0b, 1A, 1B, 1C, 1D, 2, 3, 4, 5
+> **Status:** spec approved (`docs/specs/2026-09-24-money-model.md`,
+> `docs/specs/2026-09-24-observability-design.md`,
+> `docs/specs/2026-09-25-receipts-design.md`); **Phases 0, 0b, 1A, 1B, 1C, 1D, 2, 3, 4, 5
 > and 6 complete** — solution, EF Core model and migrations, PostgreSQL money-storage gate, cookie
 > authentication as the sole mode, the `user set-password` verb, the loopback interlock, a Blazor
 > Server shell, Telegram capture with a durable queue, natural-language capture, voice notes

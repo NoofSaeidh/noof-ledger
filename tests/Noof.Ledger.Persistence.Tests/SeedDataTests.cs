@@ -10,8 +10,7 @@ public class SeedDataTests(PostgresFixture fixture)
     [Fact]
     public async Task Exactly_one_wallet_is_seeded()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
 
         (await db.Wallets.CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
     }
@@ -19,8 +18,7 @@ public class SeedDataTests(PostgresFixture fixture)
     [Fact]
     public async Task The_starting_category_tree_has_top_level_and_sub_categories()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
 
         var categories = await db.Categories.ToListAsync(TestContext.Current.CancellationToken);
 
@@ -32,8 +30,7 @@ public class SeedDataTests(PostgresFixture fixture)
     [Fact]
     public async Task Coffee_lands_in_a_seeded_category()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
 
         var coffee = await db.Categories.SingleAsync(c => c.NameRu == "Кофе", TestContext.Current.CancellationToken);
 
@@ -43,8 +40,7 @@ public class SeedDataTests(PostgresFixture fixture)
     [Fact]
     public async Task Reapplying_the_seed_insert_leaves_the_row_counts_unchanged()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
 
         var categoryCountBefore = await db.Categories.CountAsync(TestContext.Current.CancellationToken);
 
@@ -66,8 +62,7 @@ public class SeedDataTests(PostgresFixture fixture)
     [Fact]
     public async Task An_operators_rename_survives_the_seed_insert_running_again()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
 
         var coffee = await db.Categories.SingleAsync(c => c.Slug == "coffee", TestContext.Current.CancellationToken);
         coffee.NameEn = "Espresso Bar";
@@ -88,8 +83,7 @@ public class SeedDataTests(PostgresFixture fixture)
     [Fact]
     public async Task Income_has_its_own_categories_under_an_income_parent()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
 
         var categories = await db.Categories.AsNoTracking().ToListAsync(TestContext.Current.CancellationToken);
         var income = categories.Single(c => c.Slug == "income");
@@ -103,8 +97,7 @@ public class SeedDataTests(PostgresFixture fixture)
     [Fact]
     public async Task Reapplying_the_income_seed_changes_nothing_and_keeps_an_operators_rename()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var salary = await db.Categories.SingleAsync(c => c.Slug == "salary", TestContext.Current.CancellationToken);
         salary.NameEn = "Paycheck";
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);

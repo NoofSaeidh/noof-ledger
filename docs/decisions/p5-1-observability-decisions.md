@@ -8,7 +8,7 @@ related: [p1-2-postgres-credential-deferred]
 ---
 
 Taken during the observability spec conversation; full detail in
-`docs/superpowers/specs/2026-09-24-observability-design.md`. Rules that bind future work live in
+`docs/specs/2026-09-24-observability-design.md`. Rules that bind future work live in
 `CLAUDE.md` and `.claude/rules/`; reasoning is recorded here.
 
 | # | Decision | Reasoning |

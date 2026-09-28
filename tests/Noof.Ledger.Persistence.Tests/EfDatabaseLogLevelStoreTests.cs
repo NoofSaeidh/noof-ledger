@@ -17,8 +17,7 @@ public class EfDatabaseLogLevelStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task No_row_gives_null()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
 
         var setting = await StoreFor(db, Now).GetAsync(TestContext.Current.CancellationToken);
 
@@ -28,8 +27,7 @@ public class EfDatabaseLogLevelStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task Save_then_get_returns_the_saved_level()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var store = StoreFor(db, Now);
 
         await store.SaveAsync(DatabaseLogLevelSetting.For(LogSeverity.Debug), TestContext.Current.CancellationToken);
@@ -41,8 +39,7 @@ public class EfDatabaseLogLevelStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task Save_Off_then_get_returns_Off()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var store = StoreFor(db, Now);
 
         await store.SaveAsync(DatabaseLogLevelSetting.Off, TestContext.Current.CancellationToken);
@@ -55,8 +52,7 @@ public class EfDatabaseLogLevelStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task A_second_save_updates_the_same_row()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var later = Now.AddHours(1);
 
         await StoreFor(db, Now).SaveAsync(DatabaseLogLevelSetting.For(LogSeverity.Debug), TestContext.Current.CancellationToken);
@@ -73,8 +69,7 @@ public class EfDatabaseLogLevelStoreTests(PostgresFixture fixture)
     [InlineData("7")]
     public async Task A_stored_value_that_is_not_Off_or_a_defined_level_gives_null(string value)
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         db.AppSettings.Add(new() { Key = "logging.database-minimum-level", Value = value, UpdatedAt = Now });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 

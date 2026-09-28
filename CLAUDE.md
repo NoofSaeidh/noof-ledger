@@ -206,7 +206,7 @@ Moved to `.claude/rules/logging.md` — loads automatically when you touch a `Lo
   |---|---|---|
   | Domain, Ai, Telegram, Receipts, Architecture, Host | 30000 | 120000 |
   | Persistence, filtered | 60000 | 120000 |
-  | Persistence, full (≈13 min since Phase 6) | 600000 | 600000 |
+  | Persistence, full (≈2.5 min since parallel tests, 2026-09-28) | 240000 | 600000 |
   | Full solution (13–15 min since Phase 6) | 600000 | 600000 |
   | E2E (no data yet — recalibrate) | 180000 | 600000 |
 
@@ -283,6 +283,15 @@ the code that builds the echo text.
 ## 6. Closing a phase *(settled)*
 
 When closing a phase, read and follow `docs/CLOSING-A-PHASE.md` *(settled)*.
+
+**Where documents go** *(operator's decision, 2026-09-28)*
+- Decisions → `docs/decisions/`, deferred work → `docs/backlog/` (one file per item in both);
+  designs/specs → `docs/specs/`; current state → `docs/STATUS.md`; repeatable procedures →
+  `ops/RUNBOOK.md`; rules that bind future work → this file or `.claude/rules/`.
+- Plans, progress logs and review reports are scratch in the git-ignored `.superpowers/` — never
+  `docs/superpowers/plans`, the superpowers skills' default.
+- Committed code and docs never link to a git-ignored document — nobody else can open it. Put the
+  finding itself in the comment or move it into one of the places above.
 
 Keep this file short: path-specific rules go in `.claude/rules/` with `paths:` frontmatter, anything longer in `docs/`.
 A path-scoped rule loads when a matching file is read, not when a shell command touches one — after

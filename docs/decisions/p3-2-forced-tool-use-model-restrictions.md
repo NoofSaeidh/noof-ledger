@@ -16,6 +16,6 @@ section) carries a table naming the identical three models — *"Claude Opus 5.5
 Claude Mythos 5.1"* — with the restriction *"`any` and `tool` return a 400 error"* and the recommended
 replacement *"`auto` with strict tool use ... or structured outputs."* The app runs
 `claude-haiku-4-5`, so nothing breaks today, but Phase 2's forced strict tool call (`tool_choice`
-any/tool, `docs/superpowers/specs/2026-09-19-noof-finance-design.md` and `.claude/rules/model.md`)
+any/tool, `docs/specs/2026-09-19-noof-finance-design.md` and `.claude/rules/model.md`)
 cannot run on Claude Opus 5.5, Fable 5.1 or Mythos 5.1. Moving to one of them is a design change to the answer
 contract — `auto` plus strict tools, or structured outputs — not a model-id change.

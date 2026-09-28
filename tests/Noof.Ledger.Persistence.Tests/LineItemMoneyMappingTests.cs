@@ -27,8 +27,7 @@ public class LineItemMoneyMappingTests(PostgresFixture fixture)
     [Fact]
     public async Task An_amount_round_trips_exactly_through_a_real_line_item()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
 
         var wallet = NewWallet();
         var transaction = NewTransaction(wallet.Id);
@@ -55,8 +54,7 @@ public class LineItemMoneyMappingTests(PostgresFixture fixture)
     [Fact]
     public async Task More_than_four_decimal_places_is_rounded_not_rejected()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
 
         var wallet = NewWallet();
         var transaction = NewTransaction(wallet.Id);

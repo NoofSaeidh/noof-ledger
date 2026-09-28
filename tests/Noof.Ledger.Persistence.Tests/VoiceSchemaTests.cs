@@ -62,8 +62,7 @@ public class VoiceSchemaTests(PostgresFixture fixture)
     [Fact]
     public async Task A_text_capture_without_text_is_refused()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         db.Transactions.Add(NewTransaction(CaptureKind.Text, rawText: null, voiceFileId: null));
 
         (await ViolatedConstraintAsync(db)).Should().Be("ck_transactions_capture_has_content");
@@ -72,8 +71,7 @@ public class VoiceSchemaTests(PostgresFixture fixture)
     [Fact]
     public async Task A_voice_capture_without_a_voice_file_is_refused()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         db.Transactions.Add(NewTransaction(CaptureKind.Voice, rawText: null, voiceFileId: null));
 
         (await ViolatedConstraintAsync(db)).Should().Be("ck_transactions_capture_has_content");
@@ -82,8 +80,7 @@ public class VoiceSchemaTests(PostgresFixture fixture)
     [Fact]
     public async Task A_voice_capture_awaiting_its_transcript_is_accepted()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = NewTransaction(CaptureKind.Voice, rawText: null, voiceFileId: "voice-file-1");
         db.Transactions.Add(transaction);
 
@@ -100,8 +97,7 @@ public class VoiceSchemaTests(PostgresFixture fixture)
     [Fact]
     public async Task A_transcription_job_without_a_voice_file_is_refused()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = NewTransaction(CaptureKind.Voice, rawText: null, voiceFileId: "voice-file-1");
         db.Transactions.Add(transaction);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -113,8 +109,7 @@ public class VoiceSchemaTests(PostgresFixture fixture)
     [Fact]
     public async Task One_reply_may_queue_a_transcription_and_the_correction_it_produces()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = NewTransaction(CaptureKind.Text, rawText: "кофе 250", voiceFileId: null);
         db.Transactions.Add(transaction);
         db.CategorizationJobs.Add(NewJob(transaction.Id, JobKind.Transcribe, sourceMessageId: 900, voiceFileId: "reply-voice"));
@@ -126,8 +121,7 @@ public class VoiceSchemaTests(PostgresFixture fixture)
     [Fact]
     public async Task The_same_reply_cannot_queue_two_transcriptions()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = NewTransaction(CaptureKind.Text, rawText: "кофе 250", voiceFileId: null);
         db.Transactions.Add(transaction);
         db.CategorizationJobs.Add(NewJob(transaction.Id, JobKind.Transcribe, sourceMessageId: 900, voiceFileId: "reply-voice"));

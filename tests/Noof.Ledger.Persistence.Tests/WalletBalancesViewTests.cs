@@ -11,8 +11,7 @@ public class WalletBalancesViewTests(PostgresFixture fixture)
     [Fact]
     public async Task The_view_has_exactly_the_columns_the_contract_names()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
 
         var columns = await db.Database.SqlQueryRaw<string>(
             """

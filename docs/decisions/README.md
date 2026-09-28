@@ -36,7 +36,7 @@ rewrite a decision's own file to say something different than what was actually 
 The original file's own preamble, and a few section headings that only grouped several items without
 being a decision themselves, are kept here verbatim so nothing from the original is lost:
 
-> Parked from the approved design (`docs/superpowers/specs/2026-09-19-noof-finance-design.md`).
+> Parked from the approved design (`docs/specs/2026-09-19-noof-finance-design.md`).
 > The spec was approved without answering these, so **each has taken its stated default**. None
 > blocks the current phase. Each names the phase where it becomes real — revisit it there, or
 > earlier if you want to change the default.

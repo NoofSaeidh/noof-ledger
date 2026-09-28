@@ -42,8 +42,7 @@ public class EfTranscriptionStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task Completing_a_capture_stores_the_transcript_and_queues_its_first_reading()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = await SeedAsync(db, CaptureKind.Voice);
         var store = new EfTranscriptionStore(db, Clock);
 
@@ -61,8 +60,7 @@ public class EfTranscriptionStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task Completing_a_capture_twice_queues_one_reading_and_keeps_the_first_transcript()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = await SeedAsync(db, CaptureKind.Voice);
         var store = new EfTranscriptionStore(db, Clock);
 
@@ -78,8 +76,7 @@ public class EfTranscriptionStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task Completing_a_spoken_correction_queues_a_correction_with_the_transcript_as_its_instruction()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = await SeedAsync(db, CaptureKind.Text);
         var store = new EfTranscriptionStore(db, Clock);
 
@@ -97,8 +94,7 @@ public class EfTranscriptionStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task Completing_the_same_spoken_correction_twice_queues_it_once()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = await SeedAsync(db, CaptureKind.Text);
         var store = new EfTranscriptionStore(db, Clock);
 
@@ -121,8 +117,7 @@ public class EfTranscriptionStoreTests(PostgresFixture fixture)
         var t1 = t0.AddMinutes(1);
         var t2 = t0.AddMinutes(2);
 
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
 
         var transaction = new Transaction
         {
@@ -200,8 +195,7 @@ public class EfTranscriptionStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task A_spoken_correction_may_share_its_reply_with_its_own_transcription_job()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = await SeedAsync(db, CaptureKind.Text);
         db.CategorizationJobs.Add(new CategorizationJob
         {

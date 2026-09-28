@@ -20,12 +20,7 @@ public class LedgerWritePathTests(PostgresFixture fixture)
 
     static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    async Task<LedgerDbContext> LedgerAsync()
-    {
-        var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(Ct);
-        return db;
-    }
+    Task<LedgerDbContext> LedgerAsync() => fixture.CreateMigratedContextAsync();
 
     static LedgerDbContext Context(string connectionString, params IInterceptor[] interceptors) =>
         new(new DbContextOptionsBuilder<LedgerDbContext>().UseNpgsql(connectionString).AddInterceptors(interceptors).Options);
