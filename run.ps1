@@ -28,6 +28,7 @@ Commands (run `.\run.ps1 help <command>` for the detail on any one of them):
   logs               - open, tail or follow the log directory
   backups            - open the backup directory
   inspect            - the solution-wide accessibility sweep (ops/inspect.ps1)
+  pr-wait            - block until a PR's CI (and, if pending, Copilot review) land (ops/pr-wait.ps1)
   help               - this table, or `.\run.ps1 help <command>` for one command's detail
 
 An unrecognised command prints this table and exits 1.
@@ -112,6 +113,11 @@ Prints the last 50 lines of the newest log file.
 .EXAMPLE
 .\run.ps1 logs -Follow
 Keeps printing new log lines as the running host writes them.
+
+.EXAMPLE
+.\run.ps1 pr-wait 8
+Blocks until PR #8's CI checks have landed for its current head commit (and Copilot's review too, only
+if Copilot is actually pending on it), or 9 minutes pass.
 
 .EXAMPLE
 .\run.ps1 help test
@@ -483,6 +489,32 @@ was last built, not what is currently on disk.
 Prerequisites: JetBrains.ReSharper.GlobalTools restored (dotnet tool restore); a prior build.
 '@
     }
+    'pr-wait' = @{
+        Summary = 'Block until a PR''s CI (and, if pending, Copilot review) land (ops\pr-wait.ps1)'
+        Detail  = @'
+pr-wait <number> [-TimeoutMinutes <n>] [-Copilot]
+
+Runs ops\pr-wait.ps1: blocks, polling the GitHub API internally every ~25s, until every CI check run
+for the PR's current head commit has completed (no checks at all counts as done) - or -TimeoutMinutes
+passes (default 9, so one call fits inside a 600000 ms tool timeout).
+
+Copilot is optional, not a default gate - the operator's Copilot quota runs out, so most PRs never get
+a review. This only waits on Copilot when it is actually pending (shows up in the PR's requested
+reviewers), or -Copilot forces it regardless. A Copilot "could not review" (quota/limit) message
+counts the same as a posted review - it will not turn into more waiting paying off. If Copilot is
+pending, CI is done, and the PR is still a draft with no review or quota message yet, this returns
+early instead of waiting out the full budget (Copilot does not reliably review a draft on its own).
+
+Prints a compact summary: head SHA, each check's name/conclusion/duration, Copilot's state for that
+head, and any Copilot review comment still unresolved with no reply.
+
+Exit codes: 0 = CI green (or none), and Copilot not pending / reviewed / reported it cannot; 1 = a
+check failed (prints a `gh run view --log-failed` hint); 2 = timed out, or gave up early on a draft -
+names what is still pending; 3 = usage error (bad PR number, `gh` not authenticated).
+
+Prerequisites: `gh` authenticated against this repo.
+'@
+    }
 }
 
 function Write-CommandTable {
@@ -759,6 +791,14 @@ switch ($CommandName) {
 
     'inspect' {
         Invoke-Checked { & (Join-Path $Root 'ops\inspect.ps1') }
+    }
+
+    'pr-wait' {
+        # `& script.ps1` does NOT terminate this process when the child calls `exit` - it only sets
+        # $LASTEXITCODE and control returns here, so without Invoke-Checked this whole command would
+        # silently succeed (exit 0) no matter what pr-wait.ps1 itself reported. Invoke-Checked reads
+        # $LASTEXITCODE and re-raises it as run.ps1's own exit code (1/2/3), not just "0 vs failure".
+        Invoke-Checked { & (Join-Path $Root 'ops\pr-wait.ps1') @Rest }
     }
 
     default {

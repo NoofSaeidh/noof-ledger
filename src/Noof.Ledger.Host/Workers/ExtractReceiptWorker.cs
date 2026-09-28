@@ -115,7 +115,7 @@ internal sealed class ExtractReceiptWorker(
                     // RecordActionHandler's Cancel/Restore, and EfTransactionTrace's own trace-page view,
                     // through the same IsAwaitingConfirmationAsync) - a sum-only check could not tell a
                     // malformed-PIB-only pause apart from one already confirmed, since the PIB itself was
-                    // never stored once judged invalid (docs/OPEN-QUESTIONS.md P6-2).
+                    // never stored once judged invalid (docs/decisions/p6-2-vision-fallback-stopped-inventing-receipts.md).
                     var stillAwaitingConfirmation = await receiptStore.IsAwaitingConfirmationAsync(job.TransactionId, cancellationToken);
 
                     var echo = stillAwaitingConfirmation
@@ -518,7 +518,7 @@ internal sealed class ExtractReceiptWorker(
     }
 
     // This worker's own gate for whether a fresh vision read needs the operator's "Record anyway"
-    // (docs/OPEN-QUESTIONS.md P6-2) - kept private here rather than shared, since RecordEcho's
+    // (docs/decisions/p6-2-vision-fallback-stopped-inventing-receipts.md) - kept private here rather than shared, since RecordEcho's
     // ComposeReceiptNeedsConfirmation recomputes the identical one-line arithmetic itself for its own
     // wording; there is nothing to drift between two independent decimal comparisons this small.
     static bool HasMismatch(ExtractedReceipt extracted) =>

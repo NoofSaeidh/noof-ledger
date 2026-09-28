@@ -8,7 +8,7 @@ namespace Noof.Ledger.Receipts.Tests.Qr;
 // Documents the module density a real fiscal QR renders at, so a future change to
 // SyntheticQrPayloadBuilder's field sizes (and therefore to how dense the benchmark photos in
 // ZxingQrReaderRealisticPhotoTests are) does not silently drift without anyone noticing. See the
-// Phase 6 QR benchmark entry in docs/OPEN-QUESTIONS.md for why this density matters.
+// Phase 6 QR benchmark entry in docs/decisions/p6-1-receipts-decisions.md for why this density matters.
 public class QrDensityTests
 {
     [Fact]

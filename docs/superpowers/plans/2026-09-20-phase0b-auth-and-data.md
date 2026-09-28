@@ -1870,7 +1870,7 @@ git commit -m "test(auth): both modes exercised, including the login page's own 
 
 **The only way a user is ever created.** There is no `/register`, no `/setup` page and no seeded credential — *a password in any appsettings file is one commit from being permanent in a public repo*. This verb doubles as the recovery path, which is why no reset flow is needed.
 
-It **upserts**: it creates the row if absent (question B1 in `docs/OPEN-QUESTIONS.md`). Nothing else can create the first user.
+It **upserts**: it creates the row if absent (question B1 in `docs/decisions/b1-user-set-password-upsert.md`). Nothing else can create the first user.
 
 - [ ] **Step 1: Write the failing parser test**
 

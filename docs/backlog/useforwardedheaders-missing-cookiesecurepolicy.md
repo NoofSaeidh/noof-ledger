@@ -8,7 +8,7 @@ scheme when something terminates TLS in front of it.
 
 **Why it is not scheduled.** Not reachable today: the app binds loopback only, nothing sits in front of
 it, and `LoopbackGuard` refuses a non-loopback bind unconditionally now (`Auth:Mode` no longer exists;
-cookie authentication is the only mode). The capture relay decided in `OPEN-QUESTIONS.md` P1-6 does not
+cookie authentication is the only mode). The capture relay decided in `docs/decisions/p1-6-capture-relay-decision.md` does not
 change that — the drain is outbound, so nothing proxies inbound.
 
 **Why it is written down anyway.** `Program.cs` sets `CookieSecurePolicy.SameAsRequest`. Behind a

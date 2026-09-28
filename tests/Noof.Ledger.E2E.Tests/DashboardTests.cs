@@ -103,7 +103,7 @@ public sealed class DashboardTests(CookieModeHostFixture fixture) : PageTest, IC
     }
 
     // CategoryName is Task 6's EfSpendingReadModel picking between the category's bilingual NameEn /
-    // NameRu (P1-1) - nothing in the Task 1 contract or in docs/OPEN-QUESTIONS.md commits to which
+    // NameRu (P1-1) - nothing in the Task 1 contract or in docs/decisions/p1-1-category-taxonomy.md commits to which
     // one, so this test accepts either rather than baking in an assumption Task 6 hasn't made yet.
     static async Task AssertContainsCoffeeCategoryAsync(ILocator scope)
     {

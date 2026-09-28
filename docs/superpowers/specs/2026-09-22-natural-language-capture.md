@@ -49,7 +49,7 @@ which restores the previous status.
 > **Note, operator, 2026-09-23.** The labels above are now **Cancel** / **Edit** / **Restore**, and
 > the bot writes English only (multi-language is deferred — `docs/backlog/`). The operator may
 > still write to the bot in any language; only the bot's own output changed. See
-> `docs/OPEN-QUESTIONS.md` P2-5.
+> `docs/decisions/p2-5-phase2-review-decisions.md` P2-5.
 
 **D6 — Three ways to change a record, all converging on one correction job:**
 1. **Reply** to the bot's echo with free text — *"нет, 1500"*, *"это было позавчера"*, *"это подарок"*.

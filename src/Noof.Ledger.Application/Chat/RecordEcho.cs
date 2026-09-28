@@ -288,8 +288,8 @@ internal sealed class RecordEcho : IRecordEcho
 
         // 2026-09-27: every vision read is a fallback the QR path could not take - worth naming a way
         // to get an exact read next time, independent of whether this particular read happened to add
-        // up. Not "send it as a file": the operator's own real receipts (docs/OPEN-QUESTIONS.md, Phase 6
-        // QR entry) showed a photo, even a full-resolution one sent as a file, does not reliably decode
+        // up. Not "send it as a file": the operator's own real receipts (docs/decisions/p6-1-receipts-decisions.md,
+        // Phase 6 QR entry) showed a photo, even a full-resolution one sent as a file, does not reliably decode
         // the fiscal QR either - only the link, scanned by the phone's own camera, does.
         if (receipt.Source == ReceiptSource.Vision)
         {

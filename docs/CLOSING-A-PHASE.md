@@ -5,7 +5,7 @@ agent, with none of this conversation — can pick it up without rediscovering w
 
 - **Write down what outlived the phase.** A rule that will bind future work goes in `CLAUDE.md`, or
   in `.claude/rules/` when it only applies to certain paths. A decision and its reasoning goes in
-  `docs/OPEN-QUESTIONS.md`. Work deliberately not done goes in
+  `docs/decisions/` (one file per decision). Work deliberately not done goes in
   `docs/backlog/` (one file per item) with enough reasoning that nobody re-proposes it as new. A repeatable procedure
   goes in `ops/RUNBOOK.md` or a skill. If it changes how someone should work, it is not optional.
 - **Only what generalises.** A defect fixed inside the phase is in the commit that fixed it; that

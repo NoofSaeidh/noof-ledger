@@ -87,7 +87,7 @@ public interface IRecordEcho
     // printed tax id, or an unclear kind, is never recoverable here (the stored Receipt.Kind is already
     // a concrete value, and ChatReceiptVision only ever stores a well-formed tax id), so a replay or a
     // Restore whose only original reason was either one shows this prompt with no listed problem -
-    // docs/OPEN-QUESTIONS.md P6-2.
+    // docs/decisions/p6-2-vision-fallback-stopped-inventing-receipts.md.
     EchoMessage ComposeReceiptNeedsConfirmation(ReceiptView receipt, bool taxIdMalformed = false, bool kindUnclear = false);
 
     // 2026-09-27: Cancel on a receipt still awaiting confirmation (IReceiptStore.IsAwaitingConfirmationAsync)

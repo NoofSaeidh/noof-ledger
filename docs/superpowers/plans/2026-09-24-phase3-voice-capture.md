@@ -3259,7 +3259,7 @@ git commit -m "feat(host): TranscriptionWorker claims Transcribe jobs and hands 
 
 **Files:**
 - Create: `tests/Noof.Ledger.Ai.Tests/Groq/LiveTranscriptionGate.cs`, `LiveTranscriptionGateTests.cs`, `LiveTranscriptionTests.cs`
-- Modify: `docs/OPEN-QUESTIONS.md`, `docs/backlog/`, `ops/RUNBOOK.md`, `CLAUDE.md`, `README.md`
+- Modify: `docs/decisions/`, `docs/backlog/`, `ops/RUNBOOK.md`, `CLAUDE.md`, `README.md`
 
 **Interfaces:**
 - Consumes: `GroqSpeechToTextClientFactory`, `GroqOptions`, `SpeechTranscriber` (Task 4) and the test project's `StubSecretStore`.
@@ -3367,7 +3367,7 @@ Commit: `git add tests/Noof.Ledger.Ai.Tests/Groq && git commit -m "test(ai): opt
 
 Fetch Anthropic's own documentation on tool use (`https://docs.claude.com/en/docs/agents-and-tools/tool-use/implement-tool-use`, or search "tool_choice forced tool use not supported Opus 5.5"). Look for the statement AWS's Bedrock page makes: *"Claude Opus 5.5, Claude Fable 5.1, and Claude Mythos 5.1 do not support forced tool use"*. Record in P3-2 whether Anthropic's own page confirms it, with the URL, or that only Bedrock's page says it. This is a documentation read, never an API call.
 
-- [ ] **Step 3: `docs/OPEN-QUESTIONS.md`**
+- [ ] **Step 3: `docs/decisions/`**
 
 Append, in the house style of P2-5 (a `###` heading, prose with bold lead-ins, one table):
 
@@ -3421,7 +3421,7 @@ Write the P3-2 paragraph from Step 2's finding. Do not leave the angle-bracket p
 
   > **Nothing depends on an AI provider except its factory**: `IChatClientFactory` for the model and `ISpeechToTextClientFactory` for speech, each implemented in its own folder under `src/Noof.Ledger.Ai/<Provider>/` *(D-A, 2026-09-23; speech P3-1)*. Asserted by `AiBoundaryTests`. `ISpeechToTextClient` is experimental (`MEAI001`), and the warning is suppressed in `Noof.Ledger.Ai` and its tests only.
 
-- §4 *The model*, after the forced-tool bullet, add one line: `Forced tool use is unsupported on Claude Opus 5.5, Fable 5.1 and Mythos 5.1 — docs/OPEN-QUESTIONS.md P3-2.`
+- §4 *The model*, after the forced-tool bullet, add one line: `Forced tool use is unsupported on Claude Opus 5.5, Fable 5.1 and Mythos 5.1 — docs/decisions/p3-2-forced-tool-use-model-restrictions.md P3-2.`
 
 `README.md` status block:
 - Add a sentence after the natural-language one: *Voice notes work the same way: say it, and the bot records what it heard.*

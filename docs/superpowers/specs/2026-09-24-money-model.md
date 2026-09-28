@@ -146,7 +146,7 @@ No test touches `noof_ledger`, the live model or the network.
 
 `CLAUDE.md` (status; one rule: balances are derived from entries and checkpoints, never stored),
 `README.md` (balances and the restored backup leave the "still missing" list only when true),
-`docs/OPEN-QUESTIONS.md` P4-1 (these decisions and the operator's words), `docs/backlog/`
+`docs/decisions/p4-1-money-model-decisions.md` P4-1 (these decisions and the operator's words), `docs/backlog/`
 (cross-currency conversion, dump encryption, the same-day checkpoint ordering), `ops/RUNBOOK.md`
 (backups: where, how many, how to restore, the restore-check record).
 

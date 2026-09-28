@@ -3,7 +3,7 @@ title: "Demo: minor review findings left open"
 status: deferred
 area: tests
 since: 2026-09-28
-related: [demo-cut-from-first-design]
+related: [demo-cut-from-first-design, s1-demo-database-and-screenshots]
 ---
 Found by the demo branch's closing review (Fable 5.1) and by Copilot's low-vote notes on PR #4, and
 triaged as non-critical: none of them is wrong money, a leak or a broken build, and the pictures are
@@ -30,7 +30,7 @@ correct as they stand. Written down so nobody finds them again as new.
 - **The advice after a hard kill is wrong.** If the tool is killed, the host keeps port 5264, and
   `run.ps1` then says "Ctrl+C in its window", but that window no longer exists. It should name the
   process to end.
-- **The cost of anchoring to the current month is under-stated.** OPEN-QUESTIONS S-1 (e) and the
+- **The cost of anchoring to the current month is under-stated.** Decision S-1 (e) and the
   RUNBOOK say only that pictures change once a month. On days 1–19, though, the demo shows activity
   dated in the future. And about 14 of the 20 app pictures rewrite when the month rolls over.
 - **`RefreshTests.Refreshing_twice_leaves_exactly_one_demo_user`** asserts `NotBeNull`, not a count

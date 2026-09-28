@@ -20,7 +20,7 @@ paths:
   `Noof.Ledger.Ai/Anthropic/`, and `ChatToolMode.RequireAny`/`RequireSpecific` becomes `tool_choice`.
   Assert both on the captured HTTP body, not from documentation. (Phase 1B had used
   `output_config.format`; that was an agent's choice, not the operator's.)
-- Forced tool use is unsupported on Claude Opus 5.5, Fable 5.1 and Mythos 5.1 — `docs/OPEN-QUESTIONS.md` P3-2.
+- Forced tool use is unsupported on Claude Opus 5.5, Fable 5.1 and Mythos 5.1 — `docs/decisions/p3-2-forced-tool-use-model-restrictions.md`.
 - **Amounts are JSON numbers read straight into `decimal`** — from the argument's `JsonElement`,
   never via `double`.
 - **Never set temperature.** It is `[Obsolete]` in the SDK and therefore a compile error here.

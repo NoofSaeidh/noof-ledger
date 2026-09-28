@@ -8,7 +8,7 @@
 
 **Tech Stack:** .NET 10 · C# · EF Core 10 + Npgsql · PostgreSQL 18 · **Anthropic 12.49.0** (official C# SDK, MIT, GA), consumed through **`Microsoft.Extensions.AI.Abstractions` 10.5.1** (`IChatClient`) rather than the SDK's native `Messages.Create` surface · Telegram.Bot 22.10.3.1 · Blazor Server (RCL + Host) · xUnit v3 on Microsoft Testing Platform · AwesomeAssertions · NSubstitute
 
-**Spec:** `docs/superpowers/specs/2026-09-19-noof-finance-design.md` · decisions in `docs/OPEN-QUESTIONS.md` ("Phase 1 decisions — taken 2026-09-21") · deferred work in `docs/backlog/` · predecessor plan `docs/superpowers/plans/2026-09-21-phase1a-capture-and-storage.md`
+**Spec:** `docs/superpowers/specs/2026-09-19-noof-finance-design.md` · decisions in `docs/decisions/` ("Phase 1 decisions — taken 2026-09-21") · deferred work in `docs/backlog/` · predecessor plan `docs/superpowers/plans/2026-09-21-phase1a-capture-and-storage.md`
 
 ## Global Constraints
 
@@ -6079,7 +6079,7 @@ Also confirm (read-only, no edit needed): `tests/Noof.Ledger.Architecture.Tests/
 
 **1. Money and dates render through `CultureInfo.InvariantCulture`, explicitly, always — never the server's `CurrentCulture`.** This host runs on the operator's own machine, which `CurrencyCodeTests.Orders_ordinally_regardless_of_culture` already proves may be `ru-RU` or `sr-Latn-RS` — those cultures use `,` as the decimal separator and reorder date components. A bare `@item.Amount.Amount` interpolation or a `"C"` format specifier would render differently depending on which Windows locale happens to be active on the host machine, on a page this plan has no locale-specific fixture for. The rule: every number is formatted with `.ToString("N2", CultureInfo.InvariantCulture)` and a currency **code** suffix (`"250.00 RSD"`), never a currency **symbol** — `Money` is `decimal` + `CurrencyCode`, not a `RegionInfo`, so there is no correct symbol to ask .NET for. Every date is formatted with a fixed `"yyyy-MM-dd HH:mm"` pattern and `CultureInfo.InvariantCulture`, not a `"g"`/`"G"` standard format (those are culture-dependent by design). This is what keeps the E2E assertions in this task working identically on every machine that runs them, including CI and the operator's own `sr-Latn-RS` box — the alternative is a page that passes here and fails there.
 
-**2. Each transaction's time is rendered in its own stored zone, never the browser's or the server's — decision P1-3.** `RecentTransaction.TimeZoneId` is an IANA id stamped at capture time (`docs/OPEN-QUESTIONS.md` P1-3: "the zone lives on the row"). The page resolves it with `TimeZoneInfo.FindSystemTimeZoneById` and converts with `TimeZoneInfo.ConvertTime` before formatting. No fallback or try/catch around a missing zone: `TimeZoneId` is written by capture from a known-good current-zone setting, so a failure to resolve it here is a genuine upstream bug this page should surface loudly, not mask — matching CLAUDE.md's "no defensive boilerplate for conditions that cannot occur."
+**2. Each transaction's time is rendered in its own stored zone, never the browser's or the server's — decision P1-3.** `RecentTransaction.TimeZoneId` is an IANA id stamped at capture time (`docs/decisions/p1-3-timezone-per-transaction.md` P1-3: "the zone lives on the row"). The page resolves it with `TimeZoneInfo.FindSystemTimeZoneById` and converts with `TimeZoneInfo.ConvertTime` before formatting. No fallback or try/catch around a missing zone: `TimeZoneId` is written by capture from a known-good current-zone setting, so a failure to resolve it here is a genuine upstream bug this page should surface loudly, not mask — matching CLAUDE.md's "no defensive boilerplate for conditions that cannot occur."
 
 **3. `Home.razor` stays static server-rendered — no `@rendermode`.** The file has no rendermode today and this task does not add one. The dashboard has nothing to hide (unlike `Secrets.razor`, which forces `prerender: false` specifically because prerendering could leak a fetched secret status), and it has no interactive control at all — the Test button lives on the Secrets page, not here. Rendering statically means `OnInitializedAsync` runs once, synchronously with the HTTP response, with no SignalR circuit to attach — which also removes the exact race Task 5's `SettingsSecretsTests` had to work around with `RetryUntilAsync` (a click landing before the circuit finishes attaching). The dashboard's E2E tests below need no such retry wrapper because there is no circuit-attachment window to race against.
 
@@ -6221,7 +6221,7 @@ public sealed class DashboardTests(CookieModeHostFixture fixture) : PageTest, IC
     }
 
     // CategoryName is Task 6's EfSpendingReadModel picking between the category's bilingual NameEn /
-    // NameRu (P1-1) - nothing in the Task 1 contract or in docs/OPEN-QUESTIONS.md commits to which
+    // NameRu (P1-1) - nothing in the Task 1 contract or in docs/decisions/p1-1-category-taxonomy.md commits to which
     // one, so this test accepts either rather than baking in an assumption Task 6 hasn't made yet.
     static async Task AssertContainsCoffeeCategoryAsync(ILocator scope)
     {
@@ -6767,7 +6767,7 @@ git commit -m "feat(web): dashboard reads ISpendingReadModel, Anthropic key gets
 
 ~~Which of a category's two names the read model puts in `CategoryName`.~~ **CLOSED: `NameEn`.** The contract now says so at `MonthTotal`, Task 6 resolves `categories.name_en`, and this task's E2E test asserts the English name rather than accepting either. The reasoning is the settled rule that the interface is English while only model-authored prose is Russian — `NameRu` exists so the model reads a Russian message well, not so the dashboard renders one. The original note is kept below because the hedge it describes was a real symptom of the gap.
 
-**(original)** `RecentLineItem.CategoryName` and `MonthTotal.CategoryName` are both plain `string`/`string?`, already resolved by the read model — but neither the Task 1 contract nor `docs/OPEN-QUESTIONS.md` (P1-1: "bilingual `NameEn`/`NameRu`, renameable") states **which** of a category's two names `EfSpendingReadModel` (Task 6) is supposed to put there. This task's page treats `CategoryName` as an opaque already-decided string (correctly — that choice belongs to Task 6, not the page), but its E2E test had to hedge against both known seed values ("Coffee" / "Кофе") rather than asserting one, because Task 8 is drafted before Task 6 exists and cannot know which the eventual implementation will pick. Task 6 should make this choice deliberately (a fixed field, a per-user setting, or always both) and record it — this plan does not invent an answer for it.
+**(original)** `RecentLineItem.CategoryName` and `MonthTotal.CategoryName` are both plain `string`/`string?`, already resolved by the read model — but neither the Task 1 contract nor `docs/decisions/p1-1-category-taxonomy.md` (P1-1: "bilingual `NameEn`/`NameRu`, renameable") states **which** of a category's two names `EfSpendingReadModel` (Task 6) is supposed to put there. This task's page treats `CategoryName` as an opaque already-decided string (correctly — that choice belongs to Task 6, not the page), but its E2E test had to hedge against both known seed values ("Coffee" / "Кофе") rather than asserting one, because Task 8 is drafted before Task 6 exists and cannot know which the eventual implementation will pick. Task 6 should make this choice deliberately (a fixed field, a per-user setting, or always both) and record it — this plan does not invent an answer for it.
 
 ---
 
@@ -7044,11 +7044,11 @@ with:
 
 Substitute `<SUCCEEDED-COUNT-FROM-STEP-8>` and `<E2E-COUNT-FROM-STEP-8>` with the actual numbers written down in Step 8 — never a guessed or remembered figure. Phase 2's description is taken verbatim from spec §12's phase table row `2 | Money model | Balances exact across all five currencies under ru-RU and sr-Latn-RS. A backup restored successfully at least once.` — the next row after Phase 1 in that table, since Phases 1A and 1B together are this repository's split of the spec's single Phase 1.
 
-- [x] **Step 11: `docs/OPEN-QUESTIONS.md` and `docs/backlog/` — checked, not assumed**
+- [x] **Step 11: `docs/decisions/` and `docs/backlog/` — checked, not assumed**
 
 Checked directly against both files as they stand (not reproduced from memory of what this plan's own earlier sections claim):
 
-- **`docs/OPEN-QUESTIONS.md`: no new entry.** Everything this phase defers is deferred *work* whose decision is already made (per `docs/backlog/`'s own header, which draws that line), not an undecided *question* — so it belongs in `docs/backlog/`, matching how this phase's own "What this plan deliberately does NOT do" section already frames every one of its deferrals. Do not add anything here.
+- **`docs/decisions/`: no new entry.** Everything this phase defers is deferred *work* whose decision is already made (per `docs/backlog/`'s own header, which draws that line), not an undecided *question* — so it belongs in `docs/backlog/`, matching how this phase's own "What this plan deliberately does NOT do" section already frames every one of its deferrals. Do not add anything here.
 - **The Telegram `getMe` probe.** `docs/backlog/` was grepped for `getme` (case-insensitive) and has no entry — despite this plan's own "What this plan deliberately does NOT do" section stating *"the Telegram equivalent is recorded in the backlog by that task"* (Task 8). **Add it now if Task 8 has not already added it by the time this task runs** — grep first, do not duplicate. Entry to add, matching this file's existing format (title, **Wanted**, **Why it is not scheduled**, one short closing paragraph):
 
   ```markdown
