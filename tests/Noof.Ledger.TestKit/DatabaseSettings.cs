@@ -39,8 +39,7 @@ public static class DatabaseSettings
     public static string CreateFromTemplateSql(string name, string template) =>
         $"CREATE DATABASE \"{name}\" TEMPLATE {template} STRATEGY FILE_COPY";
 
-    public static string CreateEmptySql(string name) =>
-        $"CREATE DATABASE \"{name}\" STRATEGY FILE_COPY";
+    public static string CreateEmptySql(string name) => CreateFromTemplateSql(name, "template0");
 
     public static Task CreateDatabaseFromTemplateAsync(string name, CancellationToken cancellationToken) =>
         CreateDatabaseFromTemplateAsync(name, TemplateDatabase, cancellationToken);
