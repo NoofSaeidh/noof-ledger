@@ -206,7 +206,7 @@ Moved to `.claude/rules/logging.md` — loads automatically when you touch a `Lo
   |---|---|---|
   | Domain, Ai, Telegram, Receipts, Architecture, Host | 30000 | 120000 |
   | Persistence, filtered | 60000 | 120000 |
-  | Persistence, full (≈13 min since Phase 6) | 600000 | 600000 |
+  | Persistence, full (≈2.5 min since parallel tests, 2026-09-28) | 240000 | 600000 |
   | Full solution (13–15 min since Phase 6) | 600000 | 600000 |
   | E2E (no data yet — recalibrate) | 180000 | 600000 |
 

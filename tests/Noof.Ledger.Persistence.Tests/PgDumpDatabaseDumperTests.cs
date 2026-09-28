@@ -6,7 +6,7 @@ using Npgsql;
 
 namespace Noof.Ledger.Persistence.Tests;
 
-[Collection("postgres")]
+[Collection("postgres-serial")]
 public class PgDumpDatabaseDumperTests(PostgresFixture fixture) : IAsyncLifetime
 {
     string? tempDump;

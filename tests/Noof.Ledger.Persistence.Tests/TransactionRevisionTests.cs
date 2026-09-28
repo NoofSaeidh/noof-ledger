@@ -44,8 +44,7 @@ public class TransactionRevisionTests(PostgresFixture fixture)
     [Fact]
     public async Task A_first_reading_appends_an_initial_revision_with_a_snapshot_of_what_was_written()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transactionId = await SeedTransactionAsync(db);
 
         await new EfCategorizationStore(db, Clock).ApplyAsync(transactionId,
@@ -72,8 +71,7 @@ public class TransactionRevisionTests(PostgresFixture fixture)
     [Fact]
     public async Task A_correction_appends_the_next_revision_with_its_instruction()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transactionId = await SeedTransactionAsync(db);
         var store = new EfCategorizationStore(db, Clock);
 
@@ -92,8 +90,7 @@ public class TransactionRevisionTests(PostgresFixture fixture)
     [Fact]
     public async Task A_receipts_first_categorization_is_initial_but_a_later_correction_of_it_is_not()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transactionId = await SeedTransactionAsync(db);
         var store = new EfCategorizationStore(db, Clock);
 
@@ -112,8 +109,7 @@ public class TransactionRevisionTests(PostgresFixture fixture)
     [Fact]
     public async Task A_reinterpretation_is_recorded_as_an_edit()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transactionId = await SeedTransactionAsync(db);
 
         await new EfCategorizationStore(db, Clock).ApplyAsync(transactionId,
@@ -129,8 +125,7 @@ public class TransactionRevisionTests(PostgresFixture fixture)
     [InlineData("TRUNCATE public.transaction_revisions")]
     public async Task The_history_cannot_be_rewritten(string sql)
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transactionId = await SeedTransactionAsync(db);
         await new EfCategorizationStore(db, Clock).ApplyAsync(transactionId,
             new CategorizationOutcome([Coffee(250m)], new DateOnly(2026, 9, 21)), TestContext.Current.CancellationToken);
@@ -143,8 +138,7 @@ public class TransactionRevisionTests(PostgresFixture fixture)
     [Fact]
     public async Task A_correction_applied_to_a_cancelled_record_keeps_it_cancelled()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transactionId = await SeedTransactionAsync(db);
         var store = new EfCategorizationStore(db, Clock);
         await store.ApplyAsync(transactionId, new CategorizationOutcome([Coffee(250m)], new DateOnly(2026, 9, 21)), TestContext.Current.CancellationToken);
@@ -164,8 +158,7 @@ public class TransactionRevisionTests(PostgresFixture fixture)
     [InlineData(TransactionKind.Income, "Income")]
     public async Task A_snapshot_names_the_records_kind_and_its_wallet(TransactionKind kind, string expected)
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transactionId = await SeedTransactionAsync(db, kind);
 
         await new EfCategorizationStore(db, Clock).ApplyAsync(transactionId,
@@ -182,8 +175,7 @@ public class TransactionRevisionTests(PostgresFixture fixture)
     [Fact]
     public async Task A_revision_records_the_kind_the_wallet_and_the_stated_balance()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var transactionId = await SeedTransactionAsync(db);
         var store = new EfCategorizationStore(db, Clock);
 

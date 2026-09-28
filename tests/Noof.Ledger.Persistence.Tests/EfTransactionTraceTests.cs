@@ -1,5 +1,4 @@
 using AwesomeAssertions;
-using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Diagnostics;
@@ -79,8 +78,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
     [Fact]
     public async Task Events_are_ordered_by_logged_at_then_id_with_stage_and_event_id_parsed()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         await SeedTransactionAsync(db);
         var t0 = DateTimeOffset.Parse("2026-09-25T10:00:00Z");
         db.AppLogs.AddRange(
@@ -102,8 +100,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
     [Fact]
     public async Task Rows_without_a_transaction_id_or_without_a_stage_are_excluded()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         await SeedTransactionAsync(db);
         var t0 = DateTimeOffset.Parse("2026-09-25T10:00:00Z");
         db.AppLogs.AddRange(
@@ -119,8 +116,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
     [Fact]
     public async Task Pruned_logs_leave_events_empty_but_history_still_present()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         await SeedTransactionAsync(db);
         db.TransactionRevisions.Add(new TransactionRevision
         {
@@ -146,8 +142,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
     [Fact]
     public async Task History_uses_the_instruction_when_present_else_the_status_transition()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         await SeedTransactionAsync(db);
         db.TransactionRevisions.AddRange(
             new TransactionRevision
@@ -173,8 +168,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
     [Fact]
     public async Task A_StageFailed_event_carries_the_failed_stage_parsed_from_properties()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         await SeedTransactionAsync(db);
         var t0 = DateTimeOffset.Parse("2026-09-25T10:00:00Z");
         db.AppLogs.Add(StageFailedEvent(1, t0, TransactionStages.Categorized, TransactionId));
@@ -190,8 +184,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
     [Fact]
     public async Task A_non_failed_event_carries_no_failed_stage()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         await SeedTransactionAsync(db);
         var t0 = DateTimeOffset.Parse("2026-09-25T10:00:00Z");
         db.AppLogs.Add(StageEvent(1, t0, TransactionStages.Received, TransactionStages.ReceivedEventId, TransactionId));
@@ -205,8 +198,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
     [Fact]
     public async Task A_transaction_with_no_receipt_reports_a_null_Receipt()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         await SeedTransactionAsync(db);
 
         var trace = await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
@@ -217,8 +209,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
     [Fact]
     public async Task A_transaction_with_a_receipt_exposes_shop_lines_and_their_categories()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         await SeedTransactionAsync(db);
 
         var category = new Category { Id = Guid.NewGuid(), Slug = "trace-groceries", NameEn = "Groceries", NameRu = "Продукты", IsActive = true };
@@ -298,8 +289,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
     [Fact]
     public async Task A_captured_vision_receipt_with_no_categorize_job_is_awaiting_confirmation_with_the_mismatch_named()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         db.Transactions.Add(new Transaction
         {
             Id = TransactionId,
@@ -350,8 +340,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
     [Fact]
     public async Task A_captured_vision_receipt_whose_categorize_job_already_exists_is_not_awaiting_confirmation()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         db.Transactions.Add(new Transaction
         {
             Id = TransactionId,
@@ -412,8 +401,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
     [Fact]
     public async Task An_unknown_transaction_id_reports_Exists_false_with_empty_events_and_history()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
 
         var trace = await Trace(db).GetAsync(Guid.NewGuid(), TestContext.Current.CancellationToken);
 
@@ -426,8 +414,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
     [Fact]
     public async Task The_summary_carries_the_raw_text_capture_kind_received_time_status_kind_wallet_and_occurred_on()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         await SeedTransactionAsync(db);
 
         var trace = await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
@@ -445,8 +432,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
     [Fact]
     public async Task The_summary_reports_no_wallet_name_when_the_transaction_has_no_wallet()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         db.Transactions.Add(new Transaction
         {
             Id = TransactionId,
@@ -476,8 +462,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
     [Fact]
     public async Task The_summary_lists_line_items_with_description_amount_and_category_when_any_exist()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         await SeedTransactionAsync(db);
         db.LineItems.Add(new LineItem
         {
@@ -501,8 +486,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
     [Fact]
     public async Task The_summary_has_no_line_items_when_none_exist()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         await SeedTransactionAsync(db);
 
         var trace = await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
@@ -513,8 +497,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
     [Fact]
     public async Task A_StageFailed_event_carries_a_one_line_reason_extracted_from_its_exception_text()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         await SeedTransactionAsync(db);
         var t0 = DateTimeOffset.Parse("2026-09-25T10:00:00Z");
         const string exceptionText = """
@@ -532,8 +515,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
     [Fact]
     public async Task An_event_with_no_exception_carries_no_reason()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         await SeedTransactionAsync(db);
         var t0 = DateTimeOffset.Parse("2026-09-25T10:00:00Z");
         db.AppLogs.Add(StageEvent(1, t0, TransactionStages.Received, TransactionStages.ReceivedEventId, TransactionId));

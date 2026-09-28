@@ -17,8 +17,7 @@ public class EfMerchantDirectoryTests(PostgresFixture fixture)
     [Fact]
     public async Task LinkAliasAsync_creates_a_merchant_and_an_alias_keyed_on_the_folded_text()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var directory = new EfMerchantDirectory(db, time);
         var folded = Folded("LIDL");
@@ -40,8 +39,7 @@ public class EfMerchantDirectoryTests(PostgresFixture fixture)
     [Fact]
     public async Task LinkAliasAsync_the_loser_of_a_race_returns_the_winners_id_and_leaves_no_orphaned_merchant()
     {
-        await using var dbA = await fixture.CreateContextAsync();
-        await dbA.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var dbA = await fixture.CreateMigratedContextAsync();
         var optionsB = new DbContextOptionsBuilder<LedgerDbContext>()
             .UseNpgsql(dbA.Database.GetConnectionString())
             .Options;
@@ -75,8 +73,7 @@ public class EfMerchantDirectoryTests(PostgresFixture fixture)
     [Fact]
     public async Task Changing_an_existing_alias_fails_loudly_instead_of_silently_rewriting_history()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var directory = new EfMerchantDirectory(db, new FakeTimeProvider());
         var folded = Folded("SPAR");
         await directory.LinkAliasAsync(folded, "Spar", TestContext.Current.CancellationToken);
@@ -93,8 +90,7 @@ public class EfMerchantDirectoryTests(PostgresFixture fixture)
     [Fact]
     public async Task LinkAliasAsync_rejects_a_folded_key_longer_than_256_characters()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var directory = new EfMerchantDirectory(db, new FakeTimeProvider());
         var tooLong = new string('X', 257);
 
@@ -107,8 +103,7 @@ public class EfMerchantDirectoryTests(PostgresFixture fixture)
     [Fact]
     public async Task LinkAliasAsync_rejects_a_display_name_longer_than_256_characters()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var directory = new EfMerchantDirectory(db, new FakeTimeProvider());
         var tooLong = new string('X', 257);
 
@@ -121,8 +116,7 @@ public class EfMerchantDirectoryTests(PostgresFixture fixture)
     [Fact]
     public async Task AliasesAsync_returns_every_alias_with_its_merchants_display_name()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var directory = new EfMerchantDirectory(db, new FakeTimeProvider());
         var folded = Folded("IDEA");
         var merchantId = await directory.LinkAliasAsync(folded, "Idea", TestContext.Current.CancellationToken);
@@ -142,8 +136,7 @@ public class EfMerchantDirectoryTests(PostgresFixture fixture)
         // (e.g. "МАКСИ" for a merchant already known as "MAXI"). The folded alias key differs, so
         // the race-loser path in LinkAliasAsync never fires - reusing the merchant has to be a
         // deliberate lookup on display name, not a side effect of the alias PK collision.
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var directory = new EfMerchantDirectory(db, new FakeTimeProvider());
         var displayName = $"Maxi {Guid.NewGuid():N}";
         var firstFolded = Folded("MAXI-LATIN");
@@ -162,8 +155,7 @@ public class EfMerchantDirectoryTests(PostgresFixture fixture)
     [Fact]
     public async Task MerchantsAsync_returns_every_merchant_as_an_option()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var directory = new EfMerchantDirectory(db, new FakeTimeProvider());
         var merchantId = await directory.LinkAliasAsync(Folded("DM"), "DM", TestContext.Current.CancellationToken);
 
@@ -175,8 +167,7 @@ public class EfMerchantDirectoryTests(PostgresFixture fixture)
     [Fact]
     public async Task FindByTaxIdAsync_returns_null_when_no_merchant_carries_the_pib()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var directory = new EfMerchantDirectory(db, new FakeTimeProvider());
 
         var found = await directory.FindByTaxIdAsync($"P{Guid.NewGuid():N}"[..20], TestContext.Current.CancellationToken);
@@ -187,8 +178,7 @@ public class EfMerchantDirectoryTests(PostgresFixture fixture)
     [Fact]
     public async Task LinkTaxIdAsync_sets_the_pib_once_and_FindByTaxIdAsync_then_resolves_it()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var directory = new EfMerchantDirectory(db, new FakeTimeProvider());
         var merchantId = await directory.LinkAliasAsync(Folded("PEKARA"), "Pekara", TestContext.Current.CancellationToken);
         var taxId = $"P{Guid.NewGuid():N}"[..20];
@@ -201,8 +191,7 @@ public class EfMerchantDirectoryTests(PostgresFixture fixture)
     [Fact]
     public async Task LinkTaxIdAsync_is_write_once_a_second_call_with_a_different_pib_is_ignored()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var directory = new EfMerchantDirectory(db, new FakeTimeProvider());
         var merchantId = await directory.LinkAliasAsync(Folded("PEKARA2"), "Pekara 2", TestContext.Current.CancellationToken);
         var firstTaxId = $"P{Guid.NewGuid():N}"[..20];
@@ -218,8 +207,7 @@ public class EfMerchantDirectoryTests(PostgresFixture fixture)
     [Fact]
     public async Task LinkTaxIdAsync_when_another_merchant_already_claimed_the_pib_leaves_ours_unset()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var directory = new EfMerchantDirectory(db, new FakeTimeProvider());
         var firstMerchant = await directory.LinkAliasAsync(Folded("A"), "Shop A", TestContext.Current.CancellationToken);
         var secondMerchant = await directory.LinkAliasAsync(Folded("B"), "Shop B", TestContext.Current.CancellationToken);

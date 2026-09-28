@@ -17,8 +17,7 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task Captures_even_when_no_wallet_is_marked_default()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var seeded = await db.Wallets.SingleAsync(TestContext.Current.CancellationToken);
         seeded.IsDefaultForCurrency = false;
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -33,8 +32,7 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task Captures_a_transaction_and_a_pending_job_in_one_call()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
 
         var now = new DateTimeOffset(2026, 9, 21, 8, 0, 0, TimeSpan.Zero);
         var store = new EfCaptureStore(db, new FakeTimeProvider(now));
@@ -67,8 +65,7 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task Occurred_at_is_the_telegram_messages_own_timestamp_not_when_it_was_processed()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
 
         var sentAt = new DateTimeOffset(2026, 9, 21, 8, 0, 0, TimeSpan.Zero);
         var processedAt = sentAt.AddHours(3);
@@ -85,8 +82,7 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task Replaying_the_same_chat_and_message_id_returns_the_existing_transaction_without_writing_a_second_job()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var store = new EfCaptureStore(db, new FakeTimeProvider());
         var message = NewMessage();
 
@@ -137,8 +133,7 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task Concurrent_CaptureAsync_calls_for_the_same_chat_and_message_let_exactly_one_caller_insert()
     {
-        await using var dbA = await fixture.CreateContextAsync();
-        await dbA.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var dbA = await fixture.CreateMigratedContextAsync();
 
         var optionsB = new DbContextOptionsBuilder<LedgerDbContext>()
             .UseNpgsql(dbA.Database.GetConnectionString()!)
@@ -173,8 +168,7 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
     [InlineData("2026-09-21T22:30:00Z", "2026-09-22")]
     public async Task Occurred_on_is_the_local_day_the_message_was_sent_in_the_capture_time_zone(string sentAt, string expectedDay)
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         // Processed the next morning: the offline queue must not move a purchase to the day it was read (D2).
         var store = new EfCaptureStore(db, new FakeTimeProvider(new DateTimeOffset(2026, 9, 22, 8, 0, 0, TimeSpan.Zero)));
 
@@ -190,8 +184,7 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task AttachBotMessageAsync_stamps_the_bot_message_id_onto_the_row()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var store = new EfCaptureStore(db, new FakeTimeProvider());
         var transactionId =
             await store.CaptureAsync(NewMessage(), "Europe/Belgrade", TestContext.Current.CancellationToken);
@@ -205,8 +198,7 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task Captures_a_voice_note_with_no_text_and_a_transcription_job()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var now = new DateTimeOffset(2026, 9, 24, 21, 30, 0, TimeSpan.Zero);
         var store = new EfCaptureStore(db, new FakeTimeProvider(now));
 
@@ -234,8 +226,7 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task A_redelivered_voice_note_is_captured_once()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var now = new DateTimeOffset(2026, 9, 24, 9, 0, 0, TimeSpan.Zero);
         var store = new EfCaptureStore(db, new FakeTimeProvider(now));
         var voice = new CapturedVoice(111, 5, "voice-file-1", 4, now);
@@ -251,8 +242,7 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task Captures_a_receipt_photo_with_no_text_and_an_extract_receipt_job()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var now = new DateTimeOffset(2026, 9, 25, 8, 0, 0, TimeSpan.Zero);
         var store = new EfCaptureStore(db, new FakeTimeProvider(now));
 
@@ -277,8 +267,7 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task Captures_a_fiscal_qr_link_sent_as_text_with_the_caption_as_raw_text()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var now = new DateTimeOffset(2026, 9, 25, 8, 30, 0, TimeSpan.Zero);
         var store = new EfCaptureStore(db, new FakeTimeProvider(now));
         const string link = "https://suf.purs.gov.rs/v/?vl=synthetic";
@@ -298,8 +287,7 @@ public class EfCaptureStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task A_redelivered_receipt_capture_is_captured_once()
     {
-        await using var db = await fixture.CreateContextAsync();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+        await using var db = await fixture.CreateMigratedContextAsync();
         var now = new DateTimeOffset(2026, 9, 25, 9, 0, 0, TimeSpan.Zero);
         var store = new EfCaptureStore(db, new FakeTimeProvider(now));
         var receipt = new CapturedReceipt(222, 8, now, Caption: null, TelegramFileId: "photo-2", VerificationUrl: null);
