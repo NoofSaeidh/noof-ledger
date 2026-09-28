@@ -3,13 +3,14 @@
 // slowed every process spawn; the built-in Glob tool is instant for the same job.
 //
 // Threat model: an agent typing the wrong path by accident, not someone deliberately evading this
-// hook. It splits the raw command text with a couple of regexes, not a real shell parser: it strips
-// one pair of quotes and treats `\` as `/`, but does not track `cd`, expand shell variables, look
-// inside nested shells (`sh -c`, subshells) or honour escaping. It only sees `find` at the start of a
-// command, so `time find /`, `sudo find /`, `xargs find` and the like are deliberately not handled.
+// hook. It splits the raw command text with a couple of regexes, not a real shell parser: it joins
+// adjacent quoted and unquoted fragments into one word and removes the quotes, treats `\` as `/` and
+// drops `/.` segments, but does not track `cd`, expand shell variables, look inside nested shells
+// (`sh -c`, subshells) or honour escaping. It only sees `find` at the start of a command, so
+// `time find /`, `sudo find /`, `xargs find` and the like are deliberately not handled.
 
 const FIND_START_RE = /(?:^|[;&|(\n\r])\s*find(?=\s)/g;
-const TOKEN_RE = /[ \t]*("[^"\n]*"|'[^'\n]*'|[^\s;&|()<>]+)/y;
+const TOKEN_RE = /[ \t]*((?:"[^"\n]*"|'[^'\n]*'|[^\s;&|()<>"'])+)/y;
 const OPTIONS_TAKING_A_VALUE = new Set(["-maxdepth", "-mindepth", "-D"]);
 const DRIVE_ROOT_RE = /^(\/[a-z]|[a-z]:)$/;
 const USERS_DIR_RE = /^(\/[a-z]|[a-z]:)\/users(\/[^/]+)?$/;
@@ -24,16 +25,14 @@ const HOME_PATHS = new Set([
   "%userprofile%",
 ]);
 
-function unquote(token) {
-  const first = token[0];
-  if (token.length >= 2 && (first === '"' || first === "'") && token.endsWith(first)) {
-    return token.slice(1, -1);
-  }
-  return token;
+function unquote(word) {
+  return word.replace(/"([^"]*)"|'([^']*)'/g, (_, doubled, single) => doubled ?? single);
 }
 
-function normalizePath(token) {
-  let path = unquote(token).toLowerCase().replace(/\\/g, "/");
+function normalizePath(word) {
+  let path = unquote(word).toLowerCase().replace(/\\/g, "/");
+  path = path.replace(/\/\.(?=\/|$)/g, "").replace(/\/{2,}/g, "/");
+  if (path === "") return "/";
   if (path.length > 1) path = path.replace(/\/+$/, "");
   return path;
 }

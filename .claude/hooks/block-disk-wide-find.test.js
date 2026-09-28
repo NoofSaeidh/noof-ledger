@@ -50,6 +50,10 @@ const REFUSE_CASES = [
   ["-L then -maxdepth N before the path", "find -L -maxdepth 3 $HOME"],
   ["root as a second starting point", "find src / -name x"],
   ["$env:USERPROFILE with trailing backslash, in quotes", 'find "$env:USERPROFILE\\" -name x'],
+  ["root spelled /.", "find /. -name x"],
+  ["root spelled //", "find // -name x"],
+  ["home with a trailing /.", "find /c/Users/noofs/. -name x"],
+  ["$HOME with a trailing /.", 'find "$HOME"/. -name x'],
 ];
 
 for (const [label, command] of REFUSE_CASES) {
@@ -79,6 +83,9 @@ const ALLOW_CASES = [
   ["several bounded starting points", "find src tests -name x"],
   ["an escaped-paren expression after a bounded path", "find src \\( -name a -o -name / \\)"],
   ["a negated expression after a bounded path", "find src ! -path /"],
+  ["quoted $HOME followed by an unquoted subdirectory", 'find "$HOME"/projects -name x'],
+  ["quoted drive followed by an unquoted subdirectory", 'find "C:"/repos -name x'],
+  ["a hidden directory under a mount root", "find /c/.cache -name x"],
 ];
 
 for (const [label, command] of ALLOW_CASES) {
