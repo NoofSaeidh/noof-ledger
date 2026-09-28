@@ -1,9 +1,19 @@
 ---
 title: The Persistence test suite takes 1m48s and nobody has found where it goes
-status: deferred
+status: done
 area: tests
 since: 2026-09-22
 ---
+**Resolved 2026-09-28.** The missing time was serial execution. Every database test class sat in
+one xUnit collection (`"postgres"`), and xUnit never runs two tests of one collection at the same
+time — which is why `maxParallelThreads` 4 and 8 measured the same below: the setting had nothing
+to parallelise. `"parallelMode": "all"` with `maxParallelThreads: 12` let the collection's tests
+run concurrently (a machine-wide `pg_dump` test moved to its own `postgres-serial` collection),
+and the full run fell from 355 s to 127 s with no failures or connection errors across repeated
+runs (PR #21). At 12 threads, with per-test connections opened with `Pooling=false`, the earlier
+socket failures (seen at 16 threads) did not appear; 16 was not re-tested. Kept as `done` because
+the ruled-out causes below are still worth not re-investigating.
+
 Measured 2026-09-22, deferred by the operator. Two plausible causes were tested and **both ruled
 out by measurement**, so the next person should not start from either:
 
