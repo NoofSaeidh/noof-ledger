@@ -32,6 +32,24 @@ const REFUSE_CASES = [
   ["windows-style find /i piped in bash", 'something | find /i "x"'],
   ["after a bare newline (heredoc/multi-line command)", "echo ok\nfind /"],
   ["after a CRLF line ending", "echo ok\r\nfind /"],
+  ["root in double quotes", 'find "/" -name x'],
+  ["root in single quotes", "find '/' -name x"],
+  ["$HOME in double quotes", 'find "$HOME" -name x'],
+  ["${HOME} braced", "find ${HOME} -name x"],
+  ["tilde in double quotes", 'find "~"'],
+  ["home, forward-slash windows path in quotes", 'find "C:/Users/noofs" -name x'],
+  ["home, backslash windows path", "find C:\\Users\\noofs -name x"],
+  ["home, backslash windows path with trailing backslash", "find C:\\Users\\noofs\\"],
+  ["the Users directory itself", "find /c/Users -name x"],
+  ["windows drive root, bare backslash", "find C:\\ -name x"],
+  ["another git-bash drive mount", "find /d -name x"],
+  ["another windows drive root, backslash", "find D:\\ -name x"],
+  ["another windows drive root, forward slash", "find e:/"],
+  ["-maxdepth N before the path", "find -maxdepth 2 / -name x"],
+  ["-mindepth N before the path", "find -mindepth 1 ~"],
+  ["-L then -maxdepth N before the path", "find -L -maxdepth 3 $HOME"],
+  ["root as a second starting point", "find src / -name x"],
+  ["$env:USERPROFILE with trailing backslash, in quotes", 'find "$env:USERPROFILE\\" -name x'],
 ];
 
 for (const [label, command] of REFUSE_CASES) {
@@ -52,6 +70,15 @@ const ALLOW_CASES = [
   ["git log --find-renames is not find", "git log --find-renames"],
   ["PowerShell Find-Module is not find", "Find-Module something"],
   ["find as literal text inside a quoted grep pattern", 'grep "find /"'],
+  ["quoted backups path under LOCALAPPDATA", 'find "$LOCALAPPDATA/NoofLedger/backups" -name "*.dump"'],
+  ["-maxdepth N before a bounded path", "find -maxdepth 2 src -name x"],
+  ["bounded windows path with backslashes", "find C:\\repos\\dev -name x"],
+  ["bounded path under a user's home", 'find "C:/Users/noofs/.nuget/packages/foo" -name x'],
+  ["a root-like name only as the -name pattern", 'find src -name "/"'],
+  ["a longer top-level mount path", "find /tmp -name x"],
+  ["several bounded starting points", "find src tests -name x"],
+  ["an escaped-paren expression after a bounded path", "find src \\( -name a -o -name / \\)"],
+  ["a negated expression after a bounded path", "find src ! -path /"],
 ];
 
 for (const [label, command] of ALLOW_CASES) {
