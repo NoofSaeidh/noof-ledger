@@ -31,6 +31,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nuget-
 
+      # The fast tier builds only the projects it tests; this catches a change that breaks only
+      # Persistence.Tests or E2E.Tests, which CI does not run.
+      - name: Build the whole solution
+        shell: pwsh
+        run: dotnet build NoofLedger.slnx
+
       - name: Run fast test tier
         shell: pwsh
         run: pwsh -NoProfile -File run.ps1 test fast

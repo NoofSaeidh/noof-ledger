@@ -7,8 +7,13 @@ polling `gh` itself.
 
 .DESCRIPTION
 Polls the GitHub API internally every -PollSeconds (this script polls, not the caller). CI is the
-gate: it waits until every CI check run for the PR's current head SHA has completed (no checks at all
-counts as done), or -TimeoutMinutes passes.
+gate: it waits until the `build-and-fast-tests` check run (the job in .github/workflows/ci.yml) and
+every other check run for the PR's current head SHA have completed, or -TimeoutMinutes passes. The
+check runs are read by that SHA, not through `gh pr checks`. A required check GitHub has not
+registered yet - routine for a few seconds right after a push - counts as still running, never as
+"no CI"; only a repo with no workflow file at all treats "no checks" as done. Before any verdict the
+head SHA is read once more, after everything the summary reports, and a poll the head moved under (a
+push during the wait) reports nothing - it keeps waiting on the new head instead.
 
 Copilot is optional, not a default gate - the operator's Copilot quota runs out, so most PRs never
 get a Copilot review at all. This only waits on Copilot when Copilot is actually pending on the PR:
@@ -34,7 +39,9 @@ can be left over from an earlier round.
 The pull request number.
 
 .PARAMETER TimeoutMinutes
-How long to poll before giving up. Default 9, so one call fits inside a 600000 ms tool timeout.
+How long to poll before giving up. Default 8, so one call fits inside a 600000 ms tool timeout with
+room to spare: the last sleep is cut short at the deadline, leaving only one final round of `gh`
+calls after it.
 
 .PARAMETER PollSeconds
 The internal poll interval. Default 25.
@@ -43,17 +50,21 @@ The internal poll interval. Default 25.
 Wait for a Copilot review even if Copilot does not show up in the PR's requested reviewers.
 
 .OUTPUTS
-Exit code 0: CI green (or no checks at all), and Copilot is either not pending, has reviewed the
-             current head, or has reported it cannot (quota/limit).
+Exit code 0: CI green (or the repo has no workflow file), and Copilot is either not pending, has
+             reviewed the current head, or has reported it cannot (quota/limit).
 Exit code 1: a check failed or was cancelled - prints a `gh run view --log-failed` hint.
-Exit code 2: timed out (or gave up early on a draft with Copilot still pending) - says what's pending.
+Exit code 2: timed out - says what's still pending. Running once more can help.
 Exit code 3: usage error (bad PR number, `gh` not authenticated, etc).
+Exit code 4: draft - CI is green, but Copilot is requested and will not review a draft on its own.
+             Not a timeout: running again returns the same. Mark the PR ready or request Copilot.
+Exit code 5: CI has not finished and the PR conflicts with its base - GitHub runs no pull_request
+             workflow then, so it never would. Rebase or merge the base and push.
 #>
 param(
     [Parameter(Mandatory = $true, Position = 0)]
     [int]$Number,
 
-    [int]$TimeoutMinutes = 9,
+    [int]$TimeoutMinutes = 8,
 
     [int]$PollSeconds = 25,
 
@@ -63,6 +74,8 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $CopilotReviewLogin = 'copilot-pull-request-reviewer[bot]'
+# The job name in .github/workflows/ci.yml - rename both together.
+$RequiredCheckName = 'build-and-fast-tests'
 # Deliberately narrower than matching "quota" or "rate limit" as bare words - a real review's own
 # prose can legitimately discuss rate limiting or quota tracking as the PR's subject matter, and that
 # is not Copilot reporting that IT could not review. Every alternative below pairs the inability with
@@ -78,45 +91,69 @@ function Get-RepoNameWithOwner {
 
 function Get-PrSnapshot {
     param([int]$Number)
-    $raw = gh pr view $Number --json 'number,headRefName,headRefOid,isDraft,state,url' 2>&1
+    $raw = gh pr view $Number --json 'number,headRefName,headRefOid,isDraft,mergeable,state,url' 2>&1
     if ($LASTEXITCODE -ne 0) { throw "gh pr view $Number failed: $raw" }
     return $raw | ConvertFrom-Json
 }
 
-function Get-PrChecksRaw {
-    param([int]$Number)
-    # `gh pr checks --json` exits 8 (not 0) while checks are still pending - still with valid JSON on
-    # stdout - so this parses the output first and only falls back to the exit code as an error signal
-    # when that fails, rather than gating on "exit 0" and misreading a pending run as a failure.
-    $raw = gh pr checks $Number --json 'name,state,bucket,startedAt,completedAt,workflow,link' 2>&1
-    if ($raw -match 'no checks reported') { return , @() }
-    try {
-        $parsed = $raw | ConvertFrom-Json
-    } catch {
-        throw "gh pr checks $Number failed: $raw"
-    }
+# Bound to one commit SHA rather than read through `gh pr checks`, which reports whatever the PR's
+# head is at the moment it is called - so the answer can never belong to a different commit than the
+# one this poll is judging.
+function Get-CheckRunsRaw {
+    param([string]$RepoNameWithOwner, [string]$HeadSha)
+    $raw = gh api "repos/$RepoNameWithOwner/commits/$HeadSha/check-runs?per_page=100" 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "gh api commits/$HeadSha/check-runs failed: $raw" }
     # A comma before the array forces PowerShell to hand the caller the array itself as one pipeline
     # object - without it, an empty or single-item array unwraps to $null or a bare scalar once it
     # leaves the function, and run.ps1's Set-StrictMode -Version Latest then throws on the very next
     # `.Count` a caller does against what it assumed was still an array.
-    return , @($parsed)
+    return , @(($raw | ConvertFrom-Json).check_runs)
 }
 
-# Pure - takes gh pr checks' own JSON shape, decides the one thing the caller needs: is CI still
-# running, and if not, did anything fail. Kept separate from Get-PrChecksRaw so it can be exercised
-# against fixture arrays without a network call.
+# Pure. No workflow file at all is the only case where "no checks" means "no CI" rather than "GitHub
+# has not registered this push's checks yet" - right after a push it routinely has not.
+function Get-RequiredCheckName {
+    param([string]$WorkflowDirectory)
+    if (-not (Test-Path -LiteralPath $WorkflowDirectory -PathType Container)) { return $null }
+    $workflows = @(Get-ChildItem -LiteralPath $WorkflowDirectory -File | Where-Object { $_.Extension -in @('.yml', '.yaml') })
+    if ($workflows.Count -eq 0) { return $null }
+    return $RequiredCheckName
+}
+
+function ConvertTo-CheckBucket {
+    param($CheckRun)
+    if ($CheckRun.status -ne 'completed') { return 'pending' }
+    switch ($CheckRun.conclusion) {
+        { $_ -in @('success', 'neutral', 'skipped') } { return 'pass' }
+        'cancelled' { return 'cancel' }
+        default { return 'fail' }
+    }
+}
+
+# Pure - takes the check-runs API's own shape for one commit and decides the one thing the caller
+# needs: is CI still running, and if not, did anything fail. A required check that has not shown up
+# yet counts as still running. Kept separate from Get-CheckRunsRaw so ops/pr-wait.tests.ps1 can
+# exercise it against fixtures without a network call.
 function ConvertTo-ChecksSummary {
-    param([array]$Checks)
-    if (-not $Checks -or $Checks.Count -eq 0) {
-        return [PSCustomObject]@{ Status = 'none'; Checks = @() }
+    param([array]$CheckRuns, [string]$RequiredCheck)
+    $checks = @($CheckRuns | Where-Object { $_ } | ForEach-Object {
+        [PSCustomObject]@{
+            name        = $_.name
+            state       = if ($_.status -eq 'completed') { $_.conclusion } else { $_.status }
+            bucket      = ConvertTo-CheckBucket $_
+            startedAt   = $_.started_at
+            completedAt = $_.completed_at
+            link        = $_.html_url
+        }
+    })
+    if ($checks.Count -eq 0 -and -not $RequiredCheck) {
+        return [PSCustomObject]@{ Status = 'none'; Checks = @(); RequiredMissing = $false }
     }
-    if (@($Checks | Where-Object { $_.bucket -eq 'pending' }).Count -gt 0) {
-        return [PSCustomObject]@{ Status = 'pending'; Checks = $Checks }
-    }
-    if (@($Checks | Where-Object { $_.bucket -in @('fail', 'cancel') }).Count -gt 0) {
-        return [PSCustomObject]@{ Status = 'fail'; Checks = $Checks }
-    }
-    return [PSCustomObject]@{ Status = 'pass'; Checks = $Checks }
+    $requiredMissing = [bool]$RequiredCheck -and @($checks | Where-Object { $_.name -eq $RequiredCheck }).Count -eq 0
+    $status = if ($requiredMissing -or @($checks | Where-Object { $_.bucket -eq 'pending' }).Count -gt 0) { 'pending' }
+    elseif (@($checks | Where-Object { $_.bucket -in @('fail', 'cancel') }).Count -gt 0) { 'fail' }
+    else { 'pass' }
+    return [PSCustomObject]@{ Status = $status; Checks = $checks; RequiredMissing = $requiredMissing }
 }
 
 function Get-PrReviewsRaw {
@@ -261,7 +298,9 @@ function ConvertTo-UnrepliedUnresolvedComments {
 
 # Pure. The one decision the whole loop exists to make. Copilot only gates the result while it is
 # actually pending ($CopilotPending) - and even then, a quota/limit message satisfies it exactly like
-# a real review would, because neither will ever turn into more waiting paying off.
+# a real review would, because neither will ever turn into more waiting paying off. $HeadMoved means
+# a push landed while this poll was reading: everything it read describes a commit that is no longer
+# the PR, so no verdict - green or red - may be reported from it.
 function Get-PrWaitOutcome {
     param(
         [string]$ChecksStatus,
@@ -269,14 +308,40 @@ function Get-PrWaitOutcome {
         [bool]$CopilotFound,
         [bool]$CopilotQuotaHit,
         [bool]$IsDraft,
-        [bool]$TimedOut
+        [bool]$TimedOut,
+        [bool]$HeadMoved,
+        [bool]$Conflicting
     )
+    if ($HeadMoved) { return $(if ($TimedOut) { 'timeout' } else { 'keep-polling' }) }
     if ($ChecksStatus -eq 'fail') { return 'fail' }
+    # GitHub runs no pull_request workflow for a PR that conflicts with its base, so waiting on CI
+    # here would only ever run out the clock.
+    if ($ChecksStatus -eq 'pending' -and $Conflicting) { return 'conflict' }
     $copilotSatisfied = (-not $CopilotPending) -or $CopilotFound -or $CopilotQuotaHit
     if ($ChecksStatus -in @('none', 'pass') -and $copilotSatisfied) { return 'done' }
     if ($ChecksStatus -eq 'pending') { return $(if ($TimedOut) { 'timeout' } else { 'keep-polling' }) }
     if ($IsDraft) { return 'draft-no-review' }
     return $(if ($TimedOut) { 'timeout' } else { 'keep-polling' })
+}
+
+function Get-OutcomeExitCode {
+    param([string]$Outcome)
+    switch ($Outcome) {
+        'done' { return 0 }
+        'fail' { return 1 }
+        'timeout' { return 2 }
+        'draft-no-review' { return 4 }
+        'conflict' { return 5 }
+        default { throw "Unreachable outcome '$Outcome'." }
+    }
+}
+
+# Pure. Sleeping a full interval past the deadline, then paying for another round of `gh` calls, is
+# what pushed a 9-minute budget to within seconds of a 10-minute tool timeout.
+function Get-PollDelaySeconds {
+    param([timespan]$Remaining, [int]$PollSeconds)
+    if ($Remaining -le [timespan]::Zero) { return 0 }
+    return [int][Math]::Min($PollSeconds, [Math]::Ceiling($Remaining.TotalSeconds))
 }
 
 function Format-Duration {
@@ -304,13 +369,15 @@ function Write-Summary {
     Write-Host ''
 
     switch ($ChecksSummary.Status) {
-        'none' { Write-Host 'CI: none' }
+        'none' { Write-Host 'CI: none (no workflow file in .github/workflows)' }
         default {
             Write-Host "CI (head $head):"
             foreach ($check in $ChecksSummary.Checks) {
                 $duration = Format-Duration $check.startedAt $check.completedAt
-                $name = if ($check.workflow) { "$($check.workflow) / $($check.name)" } else { $check.name }
-                Write-Host ("  {0,-45} {1,-10} {2}" -f $name, $check.state, $duration)
+                Write-Host ("  {0,-45} {1,-10} {2}" -f $check.name, $check.state, $duration)
+            }
+            if ($ChecksSummary.RequiredMissing) {
+                Write-Host ("  {0,-45} {1}" -f $RequiredCheckName, 'not registered for this head yet')
             }
         }
     }
@@ -357,6 +424,7 @@ if ($MyInvocation.InvocationName -ne '.') {
     try {
         $repoNameWithOwner = Get-RepoNameWithOwner
         $owner, $repo = $repoNameWithOwner.Split('/', 2)
+        $requiredCheck = Get-RequiredCheckName -WorkflowDirectory (Join-Path $PSScriptRoot '..\.github\workflows')
         $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
         $outcome = 'keep-polling'
         $pr = $null
@@ -367,7 +435,8 @@ if ($MyInvocation.InvocationName -ne '.') {
 
         while ($true) {
             $pr = Get-PrSnapshot -Number $Number
-            $checksSummary = ConvertTo-ChecksSummary (Get-PrChecksRaw -Number $Number)
+            $checkRuns = Get-CheckRunsRaw -RepoNameWithOwner $repoNameWithOwner -HeadSha $pr.headRefOid
+            $checksSummary = ConvertTo-ChecksSummary -CheckRuns $checkRuns -RequiredCheck $requiredCheck
             $reviews = Get-PrReviewsRaw -RepoNameWithOwner $repoNameWithOwner -Number $Number
             $copilotReview = Find-CopilotReviewForHead -Reviews $reviews -HeadSha $pr.headRefOid
             $requestedReviewers = Get-RequestedReviewersRaw -RepoNameWithOwner $repoNameWithOwner -Number $Number
@@ -379,40 +448,55 @@ if ($MyInvocation.InvocationName -ne '.') {
                 $copilotQuotaMessage = Find-CopilotQuotaMessage -Reviews $reviews -IssueComments $issueComments -SinceUtc $requestTime
             }
 
-            $timedOut = (Get-Date) -ge $deadline
-            $outcome = Get-PrWaitOutcome -ChecksStatus $checksSummary.Status -CopilotPending $copilotPending `
-                -CopilotFound ([bool]$copilotReview) -CopilotQuotaHit ([bool]$copilotQuotaMessage) `
-                -IsDraft $pr.isDraft -TimedOut $timedOut
-            if ($outcome -ne 'keep-polling') { break }
-            Start-Sleep -Seconds $PollSeconds
+            $verdict = @{
+                ChecksStatus    = $checksSummary.Status
+                CopilotPending  = $copilotPending
+                CopilotFound    = [bool]$copilotReview
+                CopilotQuotaHit = [bool]$copilotQuotaMessage
+                IsDraft         = $pr.isDraft
+                TimedOut        = (Get-Date) -ge $deadline
+                Conflicting     = $pr.mergeable -eq 'CONFLICTING'
+            }
+            $headMoved = $false
+            $outcome = Get-PrWaitOutcome @verdict -HeadMoved $false
+            if ($outcome -ne 'keep-polling') {
+                # The last thing read before a verdict is the head itself, after everything the summary
+                # reports - so a push while any of that was being read can never leave a verdict
+                # standing for the commit it replaced.
+                $threads = Get-ReviewThreadsRaw -Owner $owner -Repo $repo -Number $Number
+                $headMoved = (Get-PrSnapshot -Number $Number).headRefOid -ne $pr.headRefOid
+                if ($headMoved) { $outcome = Get-PrWaitOutcome @verdict -HeadMoved $true }
+                if ($outcome -ne 'keep-polling') { break }
+            }
+            Start-Sleep -Seconds (Get-PollDelaySeconds -Remaining ($deadline - (Get-Date)) -PollSeconds $PollSeconds)
         }
 
-        $threads = Get-ReviewThreadsRaw -Owner $owner -Repo $repo -Number $Number
         $unreplied = ConvertTo-UnrepliedUnresolvedComments -Threads $threads
 
         Write-Summary -Pr $pr -ChecksSummary $checksSummary -CopilotReview $copilotReview `
             -CopilotPending $copilotPending -CopilotQuotaMessage $copilotQuotaMessage -UnrepliedComments $unreplied
 
         switch ($outcome) {
-            'done' { Write-Host 'Result: ready (CI green or none; Copilot not pending, reviewed, or reported it cannot).'; exit 0 }
+            'done' { Write-Host 'Result: ready (CI green or no workflow; Copilot not pending, reviewed, or reported it cannot).' }
             'fail' {
                 Write-Host 'Result: a CI check failed.' -ForegroundColor Red
                 Write-FailedRunHint -ChecksSummary $checksSummary
-                exit 1
             }
             'draft-no-review' {
-                Write-Host 'Result: pending - CI is done, but Copilot (pending on this PR) has not reviewed this draft''s current head.' -ForegroundColor Yellow
-                exit 2
+                Write-Host 'Result: draft - CI is green, but Copilot (requested on this PR) does not review a draft on its own. Not a timeout: re-running will not help. Mark the PR ready (gh pr ready) or request Copilot explicitly if you want its review.' -ForegroundColor Yellow
+            }
+            'conflict' {
+                Write-Host 'Result: the PR conflicts with its base - GitHub runs no CI for it until that is resolved. Rebase or merge the base, push, and run pr-wait again.' -ForegroundColor Red
             }
             'timeout' {
                 $pending = @()
-                if ($checksSummary.Status -eq 'pending') { $pending += 'CI still running' }
+                if ($headMoved) { $pending += 'the head moved during the last poll' }
+                if ($checksSummary.Status -eq 'pending') { $pending += 'CI not finished for this head' }
                 if ($copilotPending -and -not $copilotReview -and -not $copilotQuotaMessage) { $pending += 'Copilot review not posted for this head' }
                 Write-Host "Result: timed out after $TimeoutMinutes min. Still pending: $($pending -join '; ')." -ForegroundColor Yellow
-                exit 2
             }
-            default { throw "Unreachable outcome '$outcome'." }
         }
+        exit (Get-OutcomeExitCode $outcome)
     } catch {
         Write-Host $_.Exception.Message -ForegroundColor Red
         exit 3

@@ -354,6 +354,8 @@ Architecture, Telegram, Receipts, Host.Tests and Demo.Tests - except the classes
 Demo.Tests tagged [Trait("Category", "Database")] (AppLogSinkTests, DashboardCultureTests,
 ReadyGatedBufferSinkDbTests, SecretRedactionSentinelTests; RefreshTests, MockLedgerTests), which
 create databases whenever PostgreSQL is reachable and so belong under the lock, not in fast.
+Without -Filter, fast first runs the agent tooling's own tests: the hook tests
+(`node --test .claude/hooks/*.test.js`) and ops\pr-wait.tests.ps1. CI runs exactly this command.
 
 db runs Noof.Ledger.Persistence.Tests plus those Database-tagged classes, e2e runs
 Noof.Ledger.E2E.Tests, all runs the whole solution suite (`dotnet test --solution`). Each of these
@@ -494,23 +496,30 @@ Prerequisites: JetBrains.ReSharper.GlobalTools restored (dotnet tool restore); a
         Detail  = @'
 pr-wait <number> [-TimeoutMinutes <n>] [-Copilot]
 
-Runs ops\pr-wait.ps1: blocks, polling the GitHub API internally every ~25s, until every CI check run
-for the PR's current head commit has completed (no checks at all counts as done) - or -TimeoutMinutes
-passes (default 9, so one call fits inside a 600000 ms tool timeout).
+Runs ops\pr-wait.ps1: blocks, polling the GitHub API internally every ~25s, until the
+build-and-fast-tests check and every other check run for the PR's current head commit have completed
+- or -TimeoutMinutes passes (default 8, so one call fits inside a 600000 ms tool timeout). Right
+after a push GitHub may not have registered the checks yet; that counts as still running, never as
+"no CI" (only a repo with no workflow file treats no checks as done). If the head moves during the
+wait (another push), it keeps waiting on the new head rather than reporting the old one.
 
 Copilot is optional, not a default gate - the operator's Copilot quota runs out, so most PRs never get
 a review. This only waits on Copilot when it is actually pending (shows up in the PR's requested
 reviewers), or -Copilot forces it regardless. A Copilot "could not review" (quota/limit) message
 counts the same as a posted review - it will not turn into more waiting paying off. If Copilot is
-pending, CI is done, and the PR is still a draft with no review or quota message yet, this returns
-early instead of waiting out the full budget (Copilot does not reliably review a draft on its own).
+pending, CI is green, and the PR is still a draft with no review or quota message yet, this returns
+early with exit 4 instead of waiting out the full budget (Copilot does not reliably review a draft on
+its own).
 
 Prints a compact summary: head SHA, each check's name/conclusion/duration, Copilot's state for that
 head, and any Copilot review comment still unresolved with no reply.
 
-Exit codes: 0 = CI green (or none), and Copilot not pending / reviewed / reported it cannot; 1 = a
-check failed (prints a `gh run view --log-failed` hint); 2 = timed out, or gave up early on a draft -
-names what is still pending; 3 = usage error (bad PR number, `gh` not authenticated).
+Exit codes: 0 = CI green (or no workflow), and Copilot not pending / reviewed / reported it cannot;
+1 = a check failed (prints a `gh run view --log-failed` hint); 2 = timed out - names what is still
+pending, and running once more can help; 3 = usage error (bad PR number, `gh` not authenticated);
+4 = draft: CI green but Copilot is requested and will not review a draft - not a timeout, running
+again returns the same; mark the PR ready or request Copilot; 5 = CI not finished and the PR
+conflicts with its base - GitHub runs no CI then, so rebase or merge the base and push.
 
 Prerequisites: `gh` authenticated against this repo.
 '@
@@ -646,6 +655,13 @@ switch ($CommandName) {
 
         switch ($suite) {
             'fast' {
+                # The agent tooling's own tests - seconds, no .NET. Skipped under -Filter, which names
+                # a .NET test class. A glob, not the directory: Node 22+ runs a directory argument as
+                # if it were a test file and fails.
+                if (-not $filter) {
+                    Invoke-Checked { node --test (Join-Path $Root '.claude/hooks/*.test.js') }
+                    Invoke-Checked { pwsh -NoProfile -File (Join-Path $Root 'ops\pr-wait.tests.ps1') }
+                }
                 foreach ($project in $fastProjects) {
                     $full = Join-Path $Root $project
                     $baseFilter = if ($project -like '*Noof.Ledger.Host.Tests*' -or $project -like '*Noof.Ledger.Demo.Tests*') { $hostTestsDatabaseExclusion } else { $null }
