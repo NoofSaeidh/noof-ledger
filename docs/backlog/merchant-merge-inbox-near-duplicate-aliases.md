@@ -15,3 +15,11 @@ recategorization batch UI it shares page furniture with.
 **Until then.** A wrong canonicalisation on first sighting is permanent under write-once (a
 named, accepted trade-off - see spec §13 risk 4), with no UI yet to correct it short of a manual
 database edit.
+
+**Prerequisite when this is built — create the extensions in a migration** (found 2026-09-28).
+`pg_trgm` and `unaccent` are installed today only by `ops/reset-database-auth.ps1` and the demo
+tool (`tools/Noof.Ledger.Demo`); no migration creates them and no code uses them yet. The first
+migration whose SQL relies on them must `CREATE EXTENSION IF NOT EXISTS` both, or a database
+created without that script (a fresh install, a test database migrated from `template0`) fails.
+Both are trusted extensions since PostgreSQL 13, so the database owner can create them without
+superuser rights.
