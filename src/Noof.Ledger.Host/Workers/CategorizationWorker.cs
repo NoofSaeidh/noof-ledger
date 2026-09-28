@@ -108,7 +108,7 @@ internal sealed class CategorizationWorker(
         // job.CreatedAt, not job.RunAfter: EfJobQueue.ClaimAsync rewrites run_after to the lease
         // expiry as part of claiming, so it is never the time the job became due - created_at is
         // stamped once at enqueue and never touched again, so this stays non-negative on every
-        // attempt, first or re-claimed (docs/OPEN-QUESTIONS.md O-13).
+        // attempt, first or re-claimed (docs/decisions/p5-2-phase5-followups.md).
         timer.Record(logger, TimedOperations.JobQueueWait, (job.ClaimedAt ?? timeProvider.GetUtcNow()) - job.CreatedAt);
         using var jobTiming = timer.Start(logger, TimedOperations.JobCategorize);
 
@@ -373,7 +373,7 @@ internal sealed class CategorizationWorker(
 
     // A correction's "today" is the reply's own send day (job.InstructionDay), not the original
     // message's - otherwise a relative word like "позавчера" resolves from the wrong anchor when
-    // the reply arrives days after the original capture (docs/OPEN-QUESTIONS.md P2-2). A first
+    // the reply arrives days after the original capture (docs/decisions/p2-2-correction-today-anchor.md). A first
     // reading and a Reinterpret job carry no InstructionDay, so both fall back to SentOn (D2).
     static DateOnly TodayFor(CategorizationJob job, CategorizationSubject record) =>
         job.InstructionDay ?? record.SentOn;

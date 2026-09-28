@@ -44,7 +44,7 @@ internal sealed class EfRecordEditor(LedgerDbContext db, TimeProvider timeProvid
             cancellationToken);
 
     // sentAt is the correction reply's own send instant, so the model's "today" for this correction is the
-    // reply's local day, not the original message's (docs/OPEN-QUESTIONS.md P2-2).
+    // reply's local day, not the original message's (docs/decisions/p2-2-correction-today-anchor.md).
     async Task<DateOnly?> InstructionDayAsync(Guid transactionId, DateTimeOffset sentAt, CancellationToken cancellationToken)
     {
         var timeZoneId = await db.Transactions.AsNoTracking()

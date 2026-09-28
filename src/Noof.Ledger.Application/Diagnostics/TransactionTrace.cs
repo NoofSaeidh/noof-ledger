@@ -12,7 +12,7 @@ public sealed record ReceiptTraceLine(
 // recomputed from the stored lines and total (a sum-vs-total mismatch); a malformed printed tax id is
 // never recoverable here once ChatReceiptVision has already dropped it to null, so that reason - when
 // it was the only one - shows only as AwaitingConfirmation with an empty Problems list
-// (docs/OPEN-QUESTIONS.md P6-2).
+// (docs/decisions/p6-2-vision-fallback-stopped-inventing-receipts.md).
 public sealed record ReceiptTraceView(
     ReceiptSource Source,
     string? SellerName,

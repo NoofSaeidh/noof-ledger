@@ -21,7 +21,7 @@ is no real usage data yet to say which products repeat often enough to be worth 
 **Editing receipt lines.** Named out of scope by the design (R-4's sibling: "storing photos" is
 declined, editing lines is simply not built). A correction today can change a line's category or the
 transaction's wallet, never a receipt line's name, quantity or price — those come from the fiscal
-record or the vision read, and F-2 (`docs/OPEN-QUESTIONS.md` P6-1) answers a request to change one in
+record or the vision read, and F-2 (`docs/decisions/p6-1-receipts-decisions.md`) answers a request to change one in
 the echo rather than silently applying or ignoring it.
 
 **Storing photos — declined, R-4.** The photo is never kept, in the database or anywhere in the repo;
@@ -44,7 +44,7 @@ for a condition that cannot occur. Revisit if a receipt ever actually needs the 
 with unusually long product names could in principle overflow within 40 lines.
 
 **Fixed (Phase 6 second re-review, R2-3) — a correction deferred during a long extraction outage no
-longer exhausts its retry budget silently.** (`docs/OPEN-QUESTIONS.md` P6-1's defer-mechanism note.) A
+longer exhausts its retry budget silently.** (`docs/decisions/p6-1-receipts-decisions.md`'s defer-mechanism note.) A
 correction that arrives while a receipt is still being extracted is deferred on the job's own retry
 budget (`MaxAttempts × 5s`, ≈40s) rather than discarded. `TryRouteToReceiptAsync`'s defer branch now
 computes `isLastAttempt` the same way `HandleModelFailureAsync` does; on the final deferral it logs
@@ -141,7 +141,7 @@ vertically-flipped scan, not a phone photo — are left untransformed. Not obser
 deferred). Today a photo whose caption carries a fiscal link is captured by its photo alone: the link
 is ignored, and `CapturedReceipt`/`ck_transactions_capture_has_content` allow exactly one source
 (`AddReceiptCaptureSourceXor`). Real fiscal QRs did not decode from any of the operator's photos
-(`docs/OPEN-QUESTIONS.md`, Phase 6 QR entry), so that photo nearly always goes through the vision
+(`docs/decisions/p6-1-receipts-decisions.md`, Phase 6 QR entry), so that photo nearly always goes through the vision
 fallback while an exact link was right there.
 - **Operator's preference: the link wins when present.** Capture it as a link, since that gives exact
   Tax Administration data. Still to decide when building it: keep the photo's file id as a

@@ -24,6 +24,6 @@ paths:
 - **Stop and ask the operator before adding** a package whose licence is copyleft (GPL, AGPL, LGPL,
   MPL), source-available, dual or commercial, or has revenue or usage thresholds (Six Labors Split
   Licence, BSL, SSPL), or is missing. This repo deliberately has no licence of its own (`README.md`),
-  so "free for OSI-approved open source" cannot be claimed on its behalf — `docs/OPEN-QUESTIONS.md`
+  so "free for OSI-approved open source" cannot be claimed on its behalf — `docs/decisions/p6-1-receipts-decisions.md`
   records how that ruled out `ZXing.Net.Bindings.ImageSharp` in Phase 6.
 - **Removing a package removes its row.**

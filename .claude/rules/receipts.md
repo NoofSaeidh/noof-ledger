@@ -33,7 +33,7 @@ paths:
   but held back from `CategorizeReceipt` until the operator presses "Record anyway"
   (`RecordAction.RecordAnyway`) — never for a fiscal QR/SUF receipt, whose own numbers are trusted as
   before. A printed PIB/fiscal number is accepted into `ExtractedReceipt` only when well-formed. Full
-  reasoning and the production evidence that prompted it: `docs/OPEN-QUESTIONS.md` P6-2.
+  reasoning and the production evidence that prompted it: `docs/decisions/p6-2-vision-fallback-stopped-inventing-receipts.md`.
 - **Every fact a decoded QR carries wins over vision, not only Total/Currency** *(settled 2026-09-27)*:
   when the QR decodes but the Tax Administration fetch fails, `ExtractReceiptWorker` also overwrites
   the vision fallback's `IssuedAt`, `Kind` and `FiscalNumber` with the QR payload's own — the seller

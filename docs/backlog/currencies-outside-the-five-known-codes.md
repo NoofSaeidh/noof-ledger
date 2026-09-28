@@ -12,7 +12,7 @@ compile-time enum of the five supported codes, so the model has no way to answer
 when a message names one — it lands on `CategorizationWorkerOptions.DefaultCurrency` (RSD) instead,
 visible only in the echo if the operator happens to notice the wrong code. Widening it safely is
 Phase 4/7 work: `CurrencyCode.Supported` conflates "nameable" (can appear as an ISO code at all) with
-"rateable" (has an exchange-rate source), and Phase 7's rate source (`docs/OPEN-QUESTIONS.md` Q4) is
+"rateable" (has an exchange-rate source), and Phase 7's rate source (`docs/decisions/q4-fx-rate-source.md`) is
 scoped to the same five. Recorded by the operator's 2026-09-23 review (P2-5, D-F).
 
 **What it costs, when built.** Split `CurrencyCode.Supported` into a nameable set and a rateable

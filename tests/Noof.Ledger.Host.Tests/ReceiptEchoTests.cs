@@ -105,7 +105,7 @@ public class ReceiptEchoTests
     // 2026-09-27: a vision-read receipt is only ever a fallback for a photo the QR path could not
     // read reliably - one short line pointing at a way to get an exact read next time, whether or not
     // the lines happen to add up this time. Not "send it as a file": the operator's own real receipts
-    // (docs/OPEN-QUESTIONS.md, Phase 6 QR entry) showed a photo, even a full-resolution one sent as a
+    // (docs/decisions/p6-1-receipts-decisions.md, Phase 6 QR entry) showed a photo, even a full-resolution one sent as a
     // file, does not reliably decode the fiscal QR either - only the link, scanned by the phone's own
     // camera, does.
     [Fact]

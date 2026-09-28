@@ -6,7 +6,7 @@ namespace Noof.Ledger.Application.Categorization;
 // Maps, never judges. Amount is already a decimal by the time it reaches here — the model answered a
 // JSON number and System.Text.Json read it straight in, so there is no amount parsing left to do.
 // Whether a figure is plausible, or appears in the message at all, is for the person to see in the
-// echo and correct there (D1, docs/OPEN-QUESTIONS.md P2-1). Do not add a sanity bound or a verbatim
+// echo and correct there (D1, docs/decisions/p2-1-quote-and-verify-removed.md). Do not add a sanity bound or a verbatim
 // check here. The same holds for the wallet and the kind: an offered wallet id and a known kind map,
 // and whether income "looks like" income is not this class's question (M3, M9).
 internal sealed class ProposalMapper : IProposalMapper

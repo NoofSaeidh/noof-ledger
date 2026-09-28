@@ -9,7 +9,7 @@ since: 2026-09-21
 Researched 2026-09-21 across three verification passes. The first survey's prices were challenged and
 **28 were found unsupported by their own citations; four were then proved wrong**. Everything below was
 read off a vendor page or API on that date. Decision: **stay local, build none of it yet** — see
-`OPEN-QUESTIONS.md` P1-6 SUPERSEDED.
+`docs/decisions/p1-6-stay-local-only.md`.
 
 The problem, restated: Telegram discards unfetched updates after 24 hours and a bot cannot read history
 (P1-5). A PC off for a weekend loses what was sent. Pick these up when the gap is actually felt.

@@ -30,6 +30,6 @@ test.
 exceptions per tick and await `IDatabaseGate` first (`CLAUDE.md` §4), but the filter itself is
 unchanged — still a bare `ex is not OperationCanceledException` — and
 `HostOptions.BackgroundServiceExceptionBehavior` is still the unoverridden .NET default `StopHost`
-(confirmed directly by Phase 5's C-1 finding, `docs/OPEN-QUESTIONS.md` P5-1). A dependency that raises
+(confirmed directly by Phase 5's C-1 finding, `docs/decisions/p5-1-observability-decisions.md`). A dependency that raises
 `OperationCanceledException` for a reason other than the loop's own token would still stop the host.
 The verification step above is still not done.

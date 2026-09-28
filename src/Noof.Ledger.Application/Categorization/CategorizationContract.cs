@@ -16,7 +16,7 @@ public sealed record WalletOption(Guid Id, string Name, CurrencyCode Currency, I
 
 // Today is the local day the message was SENT, never the day the job runs: a message that waited in the
 // offline queue overnight must not move a day (D2). For a Correct job specifically, "the message" is the
-// correction reply itself, not the original capture (docs/OPEN-QUESTIONS.md P2-2).
+// correction reply itself, not the original capture (docs/decisions/p2-2-correction-today-anchor.md).
 // Wallets is null, not an empty list, when the caller offers none at all - CategorizationSchema and
 // CategorizationPrompt both treat null the same as empty (M9), but the distinction stays in the type
 // so a future caller can tell "no wallets exist yet" from "I forgot to pass them".
