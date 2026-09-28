@@ -57,6 +57,8 @@ Exit code 2: timed out - says what's still pending. Running once more can help.
 Exit code 3: usage error (bad PR number, `gh` not authenticated, etc).
 Exit code 4: draft - CI is green, but Copilot is requested and will not review a draft on its own.
              Not a timeout: running again returns the same. Mark the PR ready or request Copilot.
+Exit code 5: CI has not finished and the PR conflicts with its base - GitHub runs no pull_request
+             workflow then, so it never would. Rebase or merge the base and push.
 #>
 param(
     [Parameter(Mandatory = $true, Position = 0)]
@@ -89,7 +91,7 @@ function Get-RepoNameWithOwner {
 
 function Get-PrSnapshot {
     param([int]$Number)
-    $raw = gh pr view $Number --json 'number,headRefName,headRefOid,isDraft,state,url' 2>&1
+    $raw = gh pr view $Number --json 'number,headRefName,headRefOid,isDraft,mergeable,state,url' 2>&1
     if ($LASTEXITCODE -ne 0) { throw "gh pr view $Number failed: $raw" }
     return $raw | ConvertFrom-Json
 }
@@ -307,10 +309,14 @@ function Get-PrWaitOutcome {
         [bool]$CopilotQuotaHit,
         [bool]$IsDraft,
         [bool]$TimedOut,
-        [bool]$HeadMoved
+        [bool]$HeadMoved,
+        [bool]$Conflicting
     )
     if ($HeadMoved) { return $(if ($TimedOut) { 'timeout' } else { 'keep-polling' }) }
     if ($ChecksStatus -eq 'fail') { return 'fail' }
+    # GitHub runs no pull_request workflow for a PR that conflicts with its base, so waiting on CI
+    # here would only ever run out the clock.
+    if ($ChecksStatus -eq 'pending' -and $Conflicting) { return 'conflict' }
     $copilotSatisfied = (-not $CopilotPending) -or $CopilotFound -or $CopilotQuotaHit
     if ($ChecksStatus -in @('none', 'pass') -and $copilotSatisfied) { return 'done' }
     if ($ChecksStatus -eq 'pending') { return $(if ($TimedOut) { 'timeout' } else { 'keep-polling' }) }
@@ -325,6 +331,7 @@ function Get-OutcomeExitCode {
         'fail' { return 1 }
         'timeout' { return 2 }
         'draft-no-review' { return 4 }
+        'conflict' { return 5 }
         default { throw "Unreachable outcome '$Outcome'." }
     }
 }
@@ -441,11 +448,13 @@ if ($MyInvocation.InvocationName -ne '.') {
                 $copilotQuotaMessage = Find-CopilotQuotaMessage -Reviews $reviews -IssueComments $issueComments -SinceUtc $requestTime
             }
 
-            $headMoved = (Get-PrSnapshot -Number $Number).headRefOid -ne $pr.headRefOid
+            $latest = Get-PrSnapshot -Number $Number
+            $headMoved = $latest.headRefOid -ne $pr.headRefOid
             $timedOut = (Get-Date) -ge $deadline
             $outcome = Get-PrWaitOutcome -ChecksStatus $checksSummary.Status -CopilotPending $copilotPending `
                 -CopilotFound ([bool]$copilotReview) -CopilotQuotaHit ([bool]$copilotQuotaMessage) `
-                -IsDraft $pr.isDraft -TimedOut $timedOut -HeadMoved $headMoved
+                -IsDraft $pr.isDraft -TimedOut $timedOut -HeadMoved $headMoved `
+                -Conflicting ($latest.mergeable -eq 'CONFLICTING')
             if ($outcome -ne 'keep-polling') { break }
             Start-Sleep -Seconds (Get-PollDelaySeconds -Remaining ($deadline - (Get-Date)) -PollSeconds $PollSeconds)
         }
@@ -464,6 +473,9 @@ if ($MyInvocation.InvocationName -ne '.') {
             }
             'draft-no-review' {
                 Write-Host 'Result: draft - CI is green, but Copilot (requested on this PR) does not review a draft on its own. Not a timeout: re-running will not help. Mark the PR ready (gh pr ready) or request Copilot explicitly if you want its review.' -ForegroundColor Yellow
+            }
+            'conflict' {
+                Write-Host 'Result: the PR conflicts with its base - GitHub runs no CI for it until that is resolved. Rebase or merge the base, push, and run pr-wait again.' -ForegroundColor Red
             }
             'timeout' {
                 $pending = @()

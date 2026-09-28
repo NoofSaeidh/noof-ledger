@@ -76,10 +76,15 @@ Assert-Equal 'this repo has a workflow -> build-and-fast-tests required' $requir
 # Get-PrWaitOutcome: a push during the wait must never be reported as green (or red) for the old head.
 function Get-Outcome {
     param([string]$Checks = 'pass', [bool]$CopilotPending = $false, [bool]$CopilotFound = $false,
-        [bool]$QuotaHit = $false, [bool]$IsDraft = $false, [bool]$TimedOut = $false, [bool]$HeadMoved = $false)
+        [bool]$QuotaHit = $false, [bool]$IsDraft = $false, [bool]$TimedOut = $false, [bool]$HeadMoved = $false,
+        [bool]$Conflicting = $false)
     Get-PrWaitOutcome -ChecksStatus $Checks -CopilotPending $CopilotPending -CopilotFound $CopilotFound `
-        -CopilotQuotaHit $QuotaHit -IsDraft $IsDraft -TimedOut $TimedOut -HeadMoved $HeadMoved
+        -CopilotQuotaHit $QuotaHit -IsDraft $IsDraft -TimedOut $TimedOut -HeadMoved $HeadMoved -Conflicting $Conflicting
 }
+# GitHub runs no pull_request workflow for a PR that conflicts with its base, so CI would never arrive.
+Assert-Equal 'CI pending on a conflicting PR -> conflict' 'conflict' (Get-Outcome -Checks 'pending' -Conflicting $true)
+Assert-Equal 'CI passed on a PR that conflicts since -> done' 'done' (Get-Outcome -Conflicting $true)
+Assert-Equal 'head moved on a conflicting PR -> keep polling' 'keep-polling' (Get-Outcome -Checks 'pending' -Conflicting $true -HeadMoved $true)
 Assert-Equal 'CI passed, head unchanged -> done' 'done' (Get-Outcome)
 Assert-Equal 'CI passed, but the head moved -> keep polling' 'keep-polling' (Get-Outcome -HeadMoved $true)
 Assert-Equal 'CI failed, but the head moved -> keep polling' 'keep-polling' (Get-Outcome -Checks 'fail' -HeadMoved $true)
@@ -98,6 +103,7 @@ Assert-Equal 'done -> 0' 0 (Get-OutcomeExitCode 'done')
 Assert-Equal 'fail -> 1' 1 (Get-OutcomeExitCode 'fail')
 Assert-Equal 'timeout -> 2' 2 (Get-OutcomeExitCode 'timeout')
 Assert-Equal 'draft-no-review -> 4' 4 (Get-OutcomeExitCode 'draft-no-review')
+Assert-Equal 'conflict -> 5' 5 (Get-OutcomeExitCode 'conflict')
 
 # Get-PollDelaySeconds: never sleep past the deadline, so the last poll lands on it rather than a
 # full interval after it.

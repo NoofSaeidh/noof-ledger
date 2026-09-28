@@ -518,7 +518,8 @@ Exit codes: 0 = CI green (or no workflow), and Copilot not pending / reviewed / 
 1 = a check failed (prints a `gh run view --log-failed` hint); 2 = timed out - names what is still
 pending, and running once more can help; 3 = usage error (bad PR number, `gh` not authenticated);
 4 = draft: CI green but Copilot is requested and will not review a draft - not a timeout, running
-again returns the same; mark the PR ready or request Copilot.
+again returns the same; mark the PR ready or request Copilot; 5 = CI not finished and the PR
+conflicts with its base - GitHub runs no CI then, so rebase or merge the base and push.
 
 Prerequisites: `gh` authenticated against this repo.
 '@
