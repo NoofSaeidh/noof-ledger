@@ -231,8 +231,10 @@ the code that builds the echo text.
 - **A large phase or feature — one the plan cuts into several PRs — gets an aggregate branch**
   (`phase-7`, `feature-<name>`) *(operator's decision, 2026-10-01)*. It is cut from `master` with a
   draft PR into `master` opened at once. Every PR of the phase targets it and is reviewed on its own;
-  fixes and the closing review's follow-ups land there too, as PRs; the aggregate PR leaves draft
-  only once the phase is finalised, and then merges into `master`.
+  fixes and the closing review's follow-ups land there too, as PRs. The phase's spec and its
+  amendments are the exception: they are committed straight to the aggregate branch, never cut into
+  PRs *(operator, 2026-10-01)*. The aggregate PR leaves draft only once the phase is finalised, and
+  then merges into `master`.
 - Independent PRs branch from the aggregate branch, or from `master` when there is none; a PR
   needing another's changes is stacked on it (base = that branch) until that one merges, never
   merged into it.
