@@ -103,3 +103,13 @@ One line per review: confirmed findings by tag. Dated history, not status.
   paths); 2 Codex only (pr-wait CI gating [high], template freshness coverage); 8 Fable only (CI
   compile gap, dangling refs, CLAUDE.md length, PR-size ambiguity, pr-wait timing, env-var test
   isolation, stale statements, hook tests unrun).
+- **Phase 7 planning, spec `2026-10-01-transfers-and-exchange-design.md`, 2026-10-01:** 8 by both
+  (gross vs net leg amounts and the fee's wallet, no recording path for a slip, slip duplicates
+  undetected, the failure reason lost and a failed correction un-booking a record, fee lines fed back
+  to the model on a correction, wallets across kind changes, rate edge cases, the PR cut); 3 Codex
+  only (a correction repricing at today's terms, principal lines surviving a change to Transfer,
+  acceptance wording); 5 Fable only (the one-wallet Cash default, a leg in a foreign currency, framing
+  the slip rule as fiscal-only, the negative-balance hint on credit wallets, old snapshots on the trace
+  page). Rejected: a pair-level default rate (Fable; the operator chose per wallet), gating a
+  capability until its echo (Codex; the aggregate branch ships whole), foreign spending on a fiscal
+  receipt (Codex; the operator has no such case).
