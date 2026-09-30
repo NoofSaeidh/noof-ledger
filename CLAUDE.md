@@ -228,8 +228,14 @@ the code that builds the echo text.
   (`Persistence`, `Ai`, `Fx`, `Receipts`, `Telegram` or `Web`) and its `Host` wiring, with their
   tests; a second leaf assembly (e.g. Persistence and Web) is the signal to propose a split.
 - Mechanical moves/renames get their own PR, separate from behaviour changes.
-- Independent PRs branch from `master`; a PR needing another's changes is stacked on it (base = that
-  branch), never merged into it.
+- **A large phase or feature — one the plan cuts into several PRs — gets an aggregate branch**
+  (`phase-7`, `feature-<name>`) *(operator's decision, 2026-10-01)*. It is cut from `master` with a
+  draft PR into `master` opened at once. Every PR of the phase targets it and is reviewed on its own;
+  fixes and the closing review's follow-ups land there too, as PRs; the aggregate PR leaves draft
+  only once the phase is finalised, and then merges into `master`.
+- Independent PRs branch from the aggregate branch, or from `master` when there is none; a PR
+  needing another's changes is stacked on it (base = that branch) until that one merges, never
+  merged into it.
 - Shared hot files (backlog entries, per-assembly allowlists) are split across PRs so parallel work
   doesn't conflict.
 
