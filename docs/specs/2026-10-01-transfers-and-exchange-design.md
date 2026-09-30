@@ -212,11 +212,13 @@ other than the wallet's:
 1. `charged` given (honoured only when there is exactly one foreign currency) → a `Stated` charge.
    With `fee_included`, the charge is the stated amount less the fee. The fee is the stated
    `fee_amount`, otherwise the wallet's terms applied to the charge.
-2. Otherwise, a `Stated` charge already on the record for that currency (a correction that did not
-   mention it) → kept.
-3. Otherwise, terms — the record's own snapshot on a correction, the wallet's current terms on a first
-   reading or after a wallet change → `charged = round(sum × rate)`, the fee by the formula, source
-   `WalletTerms`.
+2. Otherwise, a `Stated` charge already on the record for that currency, **and the record stays on the
+   same wallet** (a correction that mentioned neither) → kept, with its fee. A correction that moves
+   the record to another wallet discards the old charges and their fees: a figure stated in one
+   wallet's currency means nothing in another's.
+3. Otherwise, terms — the record's own snapshot on a correction that keeps the wallet, the wallet's
+   current terms on a first reading or after a wallet change → `charged = round(sum × rate)`, the fee
+   by the formula, source `WalletTerms`.
 4. Otherwise → M10 as today, and the echo says how to set a rate (§4).
 
 The charge is computed from the lines the apply actually leaves in place, not from the proposal alone.
@@ -279,7 +281,9 @@ currency, as a Serbian slip prints it), `commission_amount`, `commission_currenc
 
 1. `ExtractReceiptWorker` saves the evidence and, unless the slip is held or incomplete, enqueues
    `RecordExchange` in the same commit; a caption is enqueued after it in that commit as a `Correct`
-   job, so the queue's per-transaction ordering applies it second.
+   job, so the queue's per-transaction ordering applies it second. On a held slip the caption waits and
+   is enqueued, the same way, when "Record anyway" enqueues `RecordExchange`; on an incomplete slip it
+   is enqueued at once, since it may carry the missing figure.
 2. `RecordExchange` maps the evidence without the model — fills a missing received amount from the
    rate and the given amount when it can, picks the wallets, attributes a printed commission to the leg
    it was taken on — and applies a transfer outcome through `ApplyAsync`, like any other job.
@@ -291,8 +295,10 @@ currency, as a Serbian slip prints it), `commission_amount`, `commission_currenc
    `SlipIncomplete`, and the bot asks for the missing figure. "Record anyway" is never offered for it —
    confirmation cannot supply an amount; only a reply can.
 5. "Record anyway" on a held slip enqueues `RecordExchange`. "Awaiting confirmation" for an `Exchange`
-   receipt means a vision slip with no `RecordExchange` job (for a fiscal receipt it stays "no
-   `CategorizeReceipt` job"). `ReceiptCategorizationWorker` never claims an `Exchange` receipt, and
+   receipt means a held slip only: its transaction is still `Captured` and has no `RecordExchange`
+   job. An incomplete slip is `Failed`, and a slip a reply has already completed is `Completed`, so
+   neither is ever offered "Record anyway" — on the echo, after Cancel/Restore, or on the trace page.
+   (For a fiscal receipt the predicate stays "no `CategorizeReceipt` job".) `ReceiptCategorizationWorker` never claims an `Exchange` receipt, and
    the non-money kinds (Copy/Training/Proforma/Advance) are unchanged.
 
 **Wallets on a first read**, without the model: for each leg, the cash default of that leg's currency
@@ -395,9 +401,10 @@ TDD, a failing test first. No test touches `noof_ledger`, the network or a live 
   `decimal`; `read_receipt`'s `exchange` object likewise.
 - **Mapper and workers** with fakes: every principal rule, every failure reason on a first reading and
   on a correction (the record unchanged), fee on either leg included or not, stated vs snapshot vs
-  current terms vs no terms, a stated charge surviving a category-only correction, every row of the
+  current terms vs no terms, a stated charge surviving a category-only correction and discarded by a wallet change, every row of the
   kind-transition table, an archived kept leg, the slip route: held, incomplete, "Record anyway", a
-  duplicate slip, a caption, a correction changing an amount.
+  duplicate slip, a caption on a clean, held and incomplete slip, a correction changing an amount, and
+  "awaiting confirmation" false for an incomplete and for a reply-completed slip.
 - **Persistence** (filtered, template clones): postings per kind with each wallet's entries summing to
   its stored amount, the extended integrity test, facts deleted on leaving a kind, `charges` frozen
   when terms change, the check constraints and the per-currency default index, checkpoints on either
