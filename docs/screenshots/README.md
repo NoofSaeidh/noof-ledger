@@ -87,6 +87,30 @@ Do not edit by hand; a change to what the app shows regenerates them.
 
 <img src="telegram/failure.png" width="300" alt="A message it could not read">
 
+### A cash withdrawal
+
+<img src="telegram/transfer.png" width="300" alt="A cash withdrawal">
+
+### A withdrawal with a fee
+
+<img src="telegram/transfer-fee.png" width="300" alt="A withdrawal with a fee">
+
+### A currency exchange
+
+<img src="telegram/exchange.png" width="300" alt="A currency exchange">
+
+### Spending in dollars, charged to a tenge wallet at its own rate
+
+<img src="telegram/foreign-spending.png" width="300" alt="Spending in dollars, charged to a tenge wallet at its own rate">
+
+### A currency the wallet has no rate for
+
+<img src="telegram/no-terms.png" width="300" alt="A currency the wallet has no rate for">
+
+### An exchange with no amount received
+
+<img src="telegram/exchange-question.png" width="300" alt="An exchange with no amount received">
+
 ### A receipt photo, read from its fiscal QR
 
 <img src="telegram/receipt-qr.png" width="300" alt="A receipt photo, read from its fiscal QR">
