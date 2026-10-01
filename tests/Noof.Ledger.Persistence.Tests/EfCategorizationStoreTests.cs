@@ -405,6 +405,7 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
         var reloaded = await db.Transactions.AsNoTracking()
             .SingleAsync(t => t.Id == transaction.Id, TestContext.Current.CancellationToken);
         reloaded.Status.Should().Be(TransactionStatus.Failed);
+        reloaded.FailureReason.Should().BeNull("a failure that names no reason stores none");
         reloaded.RawText.Should().Be(transaction.RawText);
         reloaded.TimeZoneId.Should().Be(transaction.TimeZoneId);
         reloaded.BotMessageId.Should().Be(transaction.BotMessageId);
@@ -575,5 +576,88 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
         subject!.TelegramChatId.Should().Be(0);
         subject.WalletName.Should().Be("Main Wallet");
         subject.CaptureKind.Should().Be(CaptureKind.Manual);
+    }
+
+    static async Task<Transaction> SeedWithStatusAsync(LedgerDbContext db, TransactionStatus status)
+    {
+        var wallet = NewWallet();
+        var transaction = NewTransaction(wallet.Id);
+        transaction.Status = status;
+        db.Wallets.Add(wallet);
+        db.Transactions.Add(transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        return transaction;
+    }
+
+    static Task<Transaction> ReloadAsync(LedgerDbContext db, Guid transactionId)
+    {
+        db.ChangeTracker.Clear();
+        return db.Transactions.AsNoTracking().SingleAsync(t => t.Id == transactionId, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task MarkFailedAsync_with_a_reason_stores_it_with_the_failed_status()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var transaction = await SeedWithStatusAsync(db, TransactionStatus.Captured);
+        var store = new EfCategorizationStore(db, Clock);
+
+        await store.MarkFailedAsync(transaction.Id, RecordFailureReason.MissingReceivedAmount, TestContext.Current.CancellationToken);
+
+        var reloaded = await ReloadAsync(db, transaction.Id);
+        reloaded.Status.Should().Be(TransactionStatus.Failed);
+        reloaded.FailureReason.Should().Be(RecordFailureReason.MissingReceivedAmount);
+        reloaded.RawText.Should().Be(transaction.RawText);
+        reloaded.WalletId.Should().Be(transaction.WalletId);
+        reloaded.BotMessageId.Should().Be(transaction.BotMessageId);
+    }
+
+    [Theory]
+    [InlineData(TransactionStatus.Completed)]
+    [InlineData(TransactionStatus.Cancelled)]
+    public async Task MarkFailedAsync_leaves_a_record_that_moved_on_as_it_is(TransactionStatus status)
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var transaction = await SeedWithStatusAsync(db, status);
+
+        await new EfCategorizationStore(db, Clock).MarkFailedAsync(transaction.Id, TestContext.Current.CancellationToken);
+
+        (await ReloadAsync(db, transaction.Id)).Status.Should().Be(status,
+            "a correction or a Cancel that got there first wins over a failure written after it");
+    }
+
+    [Theory]
+    [InlineData(TransactionStatus.Completed)]
+    [InlineData(TransactionStatus.Cancelled)]
+    public async Task MarkFailedAsync_with_a_reason_leaves_a_record_that_moved_on_as_it_is(TransactionStatus status)
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var transaction = await SeedWithStatusAsync(db, status);
+
+        await new EfCategorizationStore(db, Clock)
+            .MarkFailedAsync(transaction.Id, RecordFailureReason.SameWallet, TestContext.Current.CancellationToken);
+
+        var reloaded = await ReloadAsync(db, transaction.Id);
+        reloaded.Status.Should().Be(status, "a correction or a Cancel that got there first wins over a failure written after it");
+        reloaded.FailureReason.Should().BeNull();
+    }
+
+    // ReceiptCategorizationWorker.NotifyFailureAsync calls MarkFailedAsync for a failed receipt correction too, on a
+    // record its first reading already booked; P2-3: a failed correction never un-books a record.
+    [Fact]
+    public async Task MarkFailedAsync_after_a_receipt_reading_booked_the_record_leaves_it_booked()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (transactionId, categoryId, merchantId) = await SeedAsync(db, TestContext.Current.CancellationToken);
+        var store = new EfCategorizationStore(db, Clock);
+        var items = new[] { new CategorizedLineItem("Coffee", new Money(3.50m, CurrencyCode.Eur), categoryId, merchantId) };
+        await store.ApplyAsync(
+            transactionId, Outcome(items) with { Kind = JobKind.CategorizeReceipt }, TestContext.Current.CancellationToken);
+
+        await store.MarkFailedAsync(transactionId, TestContext.Current.CancellationToken);
+
+        (await ReloadAsync(db, transactionId)).Status.Should().Be(TransactionStatus.Completed);
+        (await db.LineItems.AsNoTracking().CountAsync(l => l.TransactionId == transactionId, TestContext.Current.CancellationToken))
+            .Should().Be(1, "the booked lines stay on the record");
     }
 }
