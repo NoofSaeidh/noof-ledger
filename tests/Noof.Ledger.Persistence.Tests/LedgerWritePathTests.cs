@@ -428,6 +428,101 @@ public class LedgerWritePathTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task A_corrected_transfer_replaces_its_fee_and_drops_one_the_correction_no_longer_names()
+    {
+        await using var db = await LedgerAsync();
+        var cash = await AddWalletAsync(db, "Cash RSD", CurrencyCode.Rsd);
+        var day = new DateOnly(2026, 9, 10);
+        var id = await CaptureAsync(db, day);
+        await ApplyAsync(db, id, TransferOutcome(day,
+            new TransferFacts(MainWalletId, Rsd(10150m), cash, Rsd(10000m), Rsd(150m), TransferLeg.From, null)));
+
+        // "комиссия была 200"
+        await ApplyAsync(db, id, AsCorrection(TransferOutcome(day,
+            new TransferFacts(MainWalletId, Rsd(10200m), cash, Rsd(10000m), Rsd(200m), TransferLeg.From, null))));
+
+        db.ChangeTracker.Clear();
+        (await LinesOfAsync(db, id)).Should().ContainSingle("a fee line is replaced, never added to")
+            .Which.Amount.Should().Be(Rsd(200m));
+        (await BalanceAsync(db, MainWalletId, CurrencyCode.Rsd)).Should().Be(-10200m);
+
+        // "комиссии не было"
+        await ApplyAsync(db, id, AsCorrection(TransferOutcome(day,
+            new TransferFacts(MainWalletId, Rsd(10000m), cash, Rsd(10000m), null, null, null))));
+
+        db.ChangeTracker.Clear();
+        (await LinesOfAsync(db, id)).Should().BeEmpty(
+            "the Rule-authored fee line goes with the fee, though the model-line delete never reaches it");
+        (await TransferOfAsync(db, id)).FeeLeg.Should().BeNull();
+        (await EntriesOfAsync(db, id)).Should().Equal(
+            (MainWalletId, Rsd(-10000m), EntryRole.Principal),
+            (cash, Rsd(10000m), EntryRole.Principal));
+        (await BalanceAsync(db, MainWalletId, CurrencyCode.Rsd)).Should().Be(-10000m);
+        (await BalanceAsync(db, cash, CurrencyCode.Rsd)).Should().Be(10000m);
+    }
+
+    [Fact]
+    public async Task A_record_that_stops_being_a_transfer_loses_its_legs_and_its_fee()
+    {
+        await using var db = await LedgerAsync();
+        var cash = await AddWalletAsync(db, "Cash RSD", CurrencyCode.Rsd);
+        var day = new DateOnly(2026, 9, 10);
+        var id = await CaptureAsync(db, day);
+        await ApplyAsync(db, id, TransferOutcome(day,
+            new TransferFacts(MainWalletId, Rsd(10150m), cash, Rsd(10000m), Rsd(150m), TransferLeg.From, null)));
+
+        // "это был не перевод, а покупка на 300"
+        await ApplyAsync(db, id, AsCorrection(Expense(day, MainWalletId, Line(300m, CurrencyCode.Rsd))));
+
+        db.ChangeTracker.Clear();
+        (await db.Transfers.CountAsync(row => row.TransactionId == id, Ct)).Should().Be(0, "a record that is no longer a transfer keeps no legs");
+        (await LinesOfAsync(db, id)).Should().ContainSingle().Which.Role.Should().Be(EntryRole.Principal);
+        (await EntriesOfAsync(db, id)).Should().Equal((MainWalletId, Rsd(-300m), EntryRole.Principal));
+        var stored = await db.Transactions.AsNoTracking().SingleAsync(t => t.Id == id, Ct);
+        stored.Kind.Should().Be(TransactionKind.Expense);
+        stored.WalletId.Should().Be(MainWalletId);
+        (await BalanceAsync(db, MainWalletId, CurrencyCode.Rsd)).Should().Be(-300m);
+        (await BalanceAsync(db, cash, CurrencyCode.Rsd)).Should().BeNull("nothing is left in the wallet the destination leg was in");
+    }
+
+    [Fact]
+    public async Task A_record_that_becomes_a_transfer_loses_every_principal_line_whoever_wrote_it()
+    {
+        await using var db = await LedgerAsync();
+        var cash = await AddWalletAsync(db, "Cash RSD", CurrencyCode.Rsd);
+        var day = new DateOnly(2026, 9, 10);
+        var id = await CaptureAsync(db, day);
+        await ApplyAsync(db, id, Expense(day, MainWalletId, Line(10000m, CurrencyCode.Rsd)));
+        db.LineItems.Add(new LineItem
+        {
+            Id = Guid.NewGuid(),
+            TransactionId = id,
+            Description = "hand-written",
+            Amount = Rsd(500m),
+            CategoryId = GroceriesId,
+            CategorizedBy = CategorizationAuthority.User,
+            Ordinal = 2,
+        });
+        await db.SaveChangesAsync(Ct);
+
+        // "это была не трата, а снятие с райфа, комиссия 150"
+        await ApplyAsync(db, id, AsCorrection(TransferOutcome(day,
+            new TransferFacts(MainWalletId, Rsd(10150m), cash, Rsd(10000m), Rsd(150m), TransferLeg.From, null))));
+
+        db.ChangeTracker.Clear();
+        var fee = (await LinesOfAsync(db, id)).Should()
+            .ContainSingle("a transfer has no principal lines by definition, so even a User-authored one goes").Which;
+        fee.Role.Should().Be(EntryRole.Fee);
+        fee.Ordinal.Should().Be(1, "the fee follows every principal line, and none is left");
+        (await EntriesOfAsync(db, id)).Should().Equal(
+            (MainWalletId, Rsd(-10000m), EntryRole.Principal),
+            (cash, Rsd(10000m), EntryRole.Principal),
+            (MainWalletId, Rsd(-150m), EntryRole.Fee));
+        (await BalanceAsync(db, MainWalletId, CurrencyCode.Rsd)).Should().Be(-10150m);
+        (await BalanceAsync(db, cash, CurrencyCode.Rsd)).Should().Be(10000m);
+    }
+
+    [Fact]
     public async Task Entries_always_agree_with_the_lines_they_are_summed_from()
     {
         await using var db = await LedgerAsync();

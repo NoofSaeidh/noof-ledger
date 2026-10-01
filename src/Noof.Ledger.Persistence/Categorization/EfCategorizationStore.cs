@@ -107,6 +107,27 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
             ],
             cancellationToken);
 
+        // A fee line is Rule-authored, so the delete above never reaches it: C# rewrites it on every apply, and deleting
+        // it by role means no precedence rule can keep a stale fee alive (Phase 7 spec §1).
+        await db.Database.ExecuteSqlRawAsync(
+            "DELETE FROM line_items WHERE transaction_id = @transactionId AND role = @feeRole",
+            [
+                new NpgsqlParameter("transactionId", transactionId),
+                new NpgsqlParameter("feeRole", (int)EntryRole.Fee),
+            ],
+            cancellationToken);
+
+        // A transfer has no principal lines by definition, so one the record kept from being an expense goes whoever
+        // wrote it - nothing edits lines by hand yet (spec §2).
+        if (transfer is not null)
+            await db.Database.ExecuteSqlRawAsync(
+                "DELETE FROM line_items WHERE transaction_id = @transactionId AND role = @principalRole",
+                [
+                    new NpgsqlParameter("transactionId", transactionId),
+                    new NpgsqlParameter("principalRole", (object)(int)EntryRole.Principal),
+                ],
+                cancellationToken);
+
         // Starts after whatever survived the delete above (a Rule- or User-authored line), so a
         // model re-run's fresh ordinals never collide with an ordinal a kept line already owns.
         var ordinal = 1 + (await db.LineItems.AsNoTracking()
