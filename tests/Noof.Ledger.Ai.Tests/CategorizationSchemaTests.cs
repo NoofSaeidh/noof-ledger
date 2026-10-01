@@ -38,7 +38,7 @@ public class CategorizationSchemaTests
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["items", "occurred_on", "kind", "wallet_id", "balance_amount", "balance_currency"],
+          "required": ["items", "occurred_on", "kind", "wallet_id", "balance_amount", "balance_currency", "transfer", "charged"],
           "properties": {
             "items": {
               "type": "array",
@@ -57,10 +57,79 @@ public class CategorizationSchemaTests
               }
             },
             "occurred_on": { "type": ["string", "null"], "description": "The day the purchase happened, as an ISO date (YYYY-MM-DD), worked out from today's date given with the message, or null when the message names no day." },
-            "kind": { "type": "string", "enum": ["expense", "income", "balance"], "description": "What kind of record this is: \"expense\" for money spent, \"income\" for money received, or \"balance\" when the person states what a wallet's balance is right now rather than a purchase or a deposit - items must be empty for kind \"balance\"." },
+            "kind": { "type": "string", "enum": ["expense", "income", "balance", "transfer"], "description": "What kind of record this is: \"expense\" for money spent, \"income\" for money received, \"balance\" when the person states what a wallet's balance is right now rather than a purchase or a deposit, or \"transfer\" when money moves between the person's own wallets - a withdrawal, a top-up, a transfer between their accounts or a currency exchange. items must be empty for kind \"balance\" and kind \"transfer\"." },
             "wallet_id": { "type": "null", "description": "The id of the wallet the person means, chosen from the wallets you were offered, or null when no wallet is named or none of the offered wallets fits - the ledger then uses the default wallet for the spending's currency." },
             "balance_amount": { "type": ["number", "null"], "description": "The balance the person stated, as a number, when kind is \"balance\"; null for every other kind." },
-            "balance_currency": { "anyOf": [{ "type": "string", "enum": ["EUR", "RSD", "USD", "RUB", "KZT"] }, { "type": "null" }], "description": "The currency of the stated balance, when kind is \"balance\" and the person named one; null for every other kind, or when they named none - the wallet's own currency is used then." }
+            "balance_currency": { "anyOf": [{ "type": "string", "enum": ["EUR", "RSD", "USD", "RUB", "KZT"] }, { "type": "null" }], "description": "The currency of the stated balance, when kind is \"balance\" and the person named one; null for every other kind, or when they named none - the wallet's own currency is used then." },
+            "transfer": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["from_wallet_id", "from_amount", "from_currency", "to_wallet_id", "to_amount", "to_currency", "rate", "fee"],
+                  "properties": {
+                    "from_wallet_id": { "type": "null", "description": "The id of the wallet the money left, chosen from the wallets you were offered, or null when the person names none - the ledger then uses the cash wallet of from_currency, or else its default wallet." },
+                    "from_amount": { "type": "number", "description": "The amount that left, as the person said it - never worked out from other figures." },
+                    "from_currency": { "type": "string", "enum": ["EUR", "RSD", "USD", "RUB", "KZT"], "description": "The currency of the amount that left." },
+                    "to_wallet_id": { "type": "null", "description": "The id of the wallet the money arrived in, chosen from the wallets you were offered, or null when the person names none - the ledger then uses the cash wallet of to_currency, or else its default wallet." },
+                    "to_amount": { "type": ["number", "null"], "description": "The amount that arrived, as the person said it, or null when they did not say it - never worked out from a rate." },
+                    "to_currency": { "type": "string", "enum": ["EUR", "RSD", "USD", "RUB", "KZT"], "description": "The currency the money arrived in." },
+                    "rate": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": ["base_currency", "quote_amount", "quote_currency"],
+                          "properties": {
+                            "base_currency": { "type": "string", "enum": ["EUR", "RSD", "USD", "RUB", "KZT"], "description": "The currency the rate is quoted per one unit of." },
+                            "quote_amount": { "type": "number", "description": "How many quote_currency units one base_currency unit is, as stated." },
+                            "quote_currency": { "type": "string", "enum": ["EUR", "RSD", "USD", "RUB", "KZT"], "description": "The currency the rate is quoted in." }
+                          }
+                        },
+                        { "type": "null" }
+                      ],
+                      "description": "The exchange rate the person stated, read as 1 base_currency = quote_amount quote_currency, or null when they stated none."
+                    },
+                    "fee": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": ["amount", "currency", "leg", "included"],
+                          "properties": {
+                            "amount": { "type": "number", "description": "The fee, as the person said it." },
+                            "currency": { "type": "string", "enum": ["EUR", "RSD", "USD", "RUB", "KZT"], "description": "The fee's currency." },
+                            "leg": { "type": "string", "enum": ["from", "to"], "description": "\"from\" unless the person says the receiving side kept the fee - then \"to\"; a fee in only one side's currency is always on that side." },
+                            "included": { "type": "boolean", "description": "True only when the person says the amount they gave for that side already includes the fee." }
+                          }
+                        },
+                        { "type": "null" }
+                      ],
+                      "description": "The fee the person stated for this transfer, or null when they stated none."
+                    }
+                  }
+                },
+                { "type": "null" }
+              ],
+              "description": "What moved, when kind is \"transfer\": the side the money left (from_*) and the side it arrived on (to_*), with every amount exactly as the person said it; null for every other kind."
+            },
+            "charged": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["amount", "currency", "fee_amount", "fee_included"],
+                  "properties": {
+                    "amount": { "type": "number", "description": "The charged amount, as the person said it." },
+                    "currency": { "type": "string", "enum": ["EUR", "RSD", "USD", "RUB", "KZT"], "description": "The wallet's currency the amount was charged in." },
+                    "fee_amount": { "type": ["number", "null"], "description": "The commission the person named for that charge, or null when they named none." },
+                    "fee_included": { "type": "boolean", "description": "True only when the person says the charged amount includes that commission." }
+                  }
+                },
+                { "type": "null" }
+              ],
+              "description": "What the wallet was actually charged, in its own currency, for a purchase in another currency - only when the person says it; null otherwise."
+            }
           }
         }
         """;
@@ -76,7 +145,7 @@ public class CategorizationSchemaTests
         schema.GetProperty("properties").TryGetProperty("occurred_on", out var occurredOn).Should().BeTrue();
         occurredOn.GetProperty("type").EnumerateArray().Select(e => e.GetString()).Should().BeEquivalentTo(["string", "null"]);
         schema.GetProperty("required").EnumerateArray().Select(e => e.GetString())
-            .Should().BeEquivalentTo(["items", "occurred_on", "kind", "wallet_id", "balance_amount", "balance_currency"]);
+            .Should().BeEquivalentTo(["items", "occurred_on", "kind", "wallet_id", "balance_amount", "balance_currency", "transfer", "charged"]);
     }
 
     [Fact]
@@ -142,13 +211,13 @@ public class CategorizationSchemaTests
     }
 
     [Fact]
-    public void Kind_enum_is_exactly_expense_income_balance()
+    public void Kind_enum_is_exactly_expense_income_balance_and_transfer()
     {
         var schema = CategorizationSchema.BuildRecordTransaction(Categories, NoHints, NoWallets);
 
         schema.GetProperty("properties").GetProperty("kind").GetProperty("type").GetString().Should().Be("string");
         schema.GetProperty("properties").GetProperty("kind").GetProperty("enum")
-            .EnumerateArray().Select(e => e.GetString()).Should().BeEquivalentTo(["expense", "income", "balance"]);
+            .EnumerateArray().Select(e => e.GetString()).Should().Equal("expense", "income", "balance", "transfer");
     }
 
     [Fact]
@@ -200,13 +269,15 @@ public class CategorizationSchemaTests
     [Fact]
     public void Additional_properties_false_appears_at_every_object_level_of_record_transaction()
     {
-        // Still exactly 2 (root + line item): kind/wallet_id/balance_amount/balance_currency are
-        // scalar root properties, not a nested object - M9's decision to keep the stated balance
-        // flat (plan-00-header.md, "expensive to reverse" #5) is exactly what keeps this count from
-        // growing to 3.
+        // 6: root, line item, transfer, its rate, its fee, charged. M9 kept the stated balance flat, and kind, wallet_id
+        // and balance_* stay flat root properties. A transfer is different: two sides with a wallet, an amount and a
+        // currency each, plus a rate and a fee that are objects in their own right - flat, that is a dozen transfer_*
+        // nullables beside the expense properties, every one meaningless for an expense. So transfer and charged are
+        // nested, each an anyOf over a strict object and null (NullableObject), and every one of those objects must
+        // carry additionalProperties: false itself - which is what this count pins.
         var json = CategorizationSchema.BuildRecordTransaction(Categories, OneHint, OneWallet).GetRawText();
 
-        CountOccurrences(json, "\"additionalProperties\":false").Should().Be(2);
+        CountOccurrences(json, "\"additionalProperties\":false").Should().Be(6);
     }
 
     [Fact]
@@ -271,6 +342,149 @@ public class CategorizationSchemaTests
         var roundTripped = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(schema));
 
         JsonNode.DeepEquals(JsonNode.Parse(roundTripped.GetRawText()), JsonNode.Parse(schema.GetRawText())).Should().BeTrue();
+    }
+
+    [Fact]
+    public void Transfer_is_a_nullable_object_whose_every_property_is_required()
+    {
+        var schema = CategorizationSchema.BuildRecordTransaction(Categories, NoHints, OneWallet);
+
+        var transfer = ObjectBranch(schema.GetProperty("properties").GetProperty("transfer"));
+
+        transfer.GetProperty("additionalProperties").GetBoolean().Should().BeFalse();
+        transfer.GetProperty("required").EnumerateArray().Select(e => e.GetString()).Should().Equal(
+            "from_wallet_id", "from_amount", "from_currency", "to_wallet_id", "to_amount", "to_currency", "rate", "fee");
+        transfer.GetProperty("properties").EnumerateObject().Select(p => p.Name).Should().Equal(
+            "from_wallet_id", "from_amount", "from_currency", "to_wallet_id", "to_amount", "to_currency", "rate", "fee");
+    }
+
+    [Fact]
+    public void Each_transfer_legs_wallet_id_is_one_of_the_offered_wallet_ids_or_null()
+    {
+        var schema = CategorizationSchema.BuildRecordTransaction(Categories, NoHints, OneWallet);
+
+        var properties = ObjectBranch(schema.GetProperty("properties").GetProperty("transfer")).GetProperty("properties");
+
+        NullableStringEnumValues(properties.GetProperty("from_wallet_id")).Should().Equal("22222222-2222-2222-2222-222222222222");
+        NullableStringEnumValues(properties.GetProperty("to_wallet_id")).Should().Equal("22222222-2222-2222-2222-222222222222");
+    }
+
+    [Fact]
+    public void Each_transfer_legs_wallet_id_can_only_be_null_when_no_wallets_are_offered()
+    {
+        var schema = CategorizationSchema.BuildRecordTransaction(Categories, NoHints, NoWallets);
+
+        var properties = ObjectBranch(schema.GetProperty("properties").GetProperty("transfer")).GetProperty("properties");
+
+        properties.GetProperty("from_wallet_id").GetProperty("type").GetString().Should().Be("null");
+        properties.GetProperty("to_wallet_id").GetProperty("type").GetString().Should().Be("null");
+    }
+
+    [Fact]
+    public void Transfer_amounts_are_numbers_and_only_the_received_one_may_be_null()
+    {
+        var schema = CategorizationSchema.BuildRecordTransaction(Categories, NoHints, NoWallets);
+
+        var properties = ObjectBranch(schema.GetProperty("properties").GetProperty("transfer")).GetProperty("properties");
+
+        properties.GetProperty("from_amount").GetProperty("type").GetString().Should().Be("number");
+        properties.GetProperty("to_amount").GetProperty("type").EnumerateArray().Select(e => e.GetString())
+            .Should().Equal("number", "null");
+    }
+
+    [Fact]
+    public void Transfer_currencies_are_the_supported_codes_and_never_null()
+    {
+        var schema = CategorizationSchema.BuildRecordTransaction(Categories, NoHints, NoWallets);
+
+        var properties = ObjectBranch(schema.GetProperty("properties").GetProperty("transfer")).GetProperty("properties");
+
+        foreach (var name in new[] { "from_currency", "to_currency" })
+        {
+            properties.GetProperty(name).GetProperty("type").GetString().Should().Be("string", name);
+            properties.GetProperty(name).GetProperty("enum").EnumerateArray().Select(e => e.GetString())
+                .Should().Equal("EUR", "RSD", "USD", "RUB", "KZT");
+        }
+    }
+
+    [Fact]
+    public void Rate_and_fee_are_nullable_strict_objects_inside_the_transfer()
+    {
+        var schema = CategorizationSchema.BuildRecordTransaction(Categories, NoHints, NoWallets);
+
+        var properties = ObjectBranch(schema.GetProperty("properties").GetProperty("transfer")).GetProperty("properties");
+        var rate = ObjectBranch(properties.GetProperty("rate"));
+        var fee = ObjectBranch(properties.GetProperty("fee"));
+
+        rate.GetProperty("additionalProperties").GetBoolean().Should().BeFalse();
+        rate.GetProperty("required").EnumerateArray().Select(e => e.GetString())
+            .Should().Equal("base_currency", "quote_amount", "quote_currency");
+        fee.GetProperty("additionalProperties").GetBoolean().Should().BeFalse();
+        fee.GetProperty("required").EnumerateArray().Select(e => e.GetString())
+            .Should().Equal("amount", "currency", "leg", "included");
+        fee.GetProperty("properties").GetProperty("leg").GetProperty("enum").EnumerateArray().Select(e => e.GetString())
+            .Should().Equal("from", "to");
+        fee.GetProperty("properties").GetProperty("included").GetProperty("type").GetString().Should().Be("boolean");
+    }
+
+    [Fact]
+    public void Charged_is_a_nullable_strict_object_with_a_nullable_fee_amount()
+    {
+        var schema = CategorizationSchema.BuildRecordTransaction(Categories, NoHints, NoWallets);
+
+        var charged = ObjectBranch(schema.GetProperty("properties").GetProperty("charged"));
+
+        charged.GetProperty("additionalProperties").GetBoolean().Should().BeFalse();
+        charged.GetProperty("required").EnumerateArray().Select(e => e.GetString())
+            .Should().Equal("amount", "currency", "fee_amount", "fee_included");
+        charged.GetProperty("properties").GetProperty("fee_amount").GetProperty("type").EnumerateArray()
+            .Select(e => e.GetString()).Should().Equal("number", "null");
+    }
+
+    // The same reason NullableEnum exists: a nullable object is an anyOf, never "type": ["object", "null"].
+    [Fact]
+    public void No_node_declares_object_inside_a_type_array()
+    {
+        var schema = Reserialize(CategorizationSchema.BuildRecordTransaction(Categories, OneHint, OneWallet));
+
+        Descendants(schema).OfType<JsonObject>()
+            .Where(node => node["type"] is JsonArray types && types.Any(type => (string?)type == "object"))
+            .Should().BeEmpty();
+    }
+
+    // Anthropic's strict tool use accepts at most 16 parameters with a union type (an anyOf, or a type array such
+    // as ["number", "null"]) across the tools of one request; one more and every capture call is a 400. record_transaction
+    // and list_merchants are always offered together, so they are counted together, in the largest case: hints and
+    // wallets offered. A parameter is any property schema, at any depth.
+    [Fact]
+    public void Record_transaction_and_list_merchants_have_at_most_16_union_typed_parameters()
+    {
+        var tools = new[]
+        {
+            Reserialize(CategorizationSchema.BuildRecordTransaction(Categories, OneHint, OneWallet)),
+            Reserialize(CategorizationSchema.BuildListMerchants()),
+        };
+
+        var unionTyped = tools
+            .SelectMany(Descendants)
+            .OfType<JsonObject>()
+            .Select(node => node["properties"])
+            .OfType<JsonObject>()
+            .SelectMany(properties => properties.Select(property => property.Value))
+            .OfType<JsonObject>()
+            .Count(property => property["anyOf"] is not null || property["type"] is JsonArray);
+
+        unionTyped.Should().BeLessThanOrEqualTo(16);
+    }
+
+    static JsonElement ObjectBranch(JsonElement nullableObject)
+    {
+        nullableObject.TryGetProperty("type", out _).Should().BeFalse("a nullable object is an anyOf, not a type array");
+        var branches = nullableObject.GetProperty("anyOf").EnumerateArray().ToList();
+        branches.Should().HaveCount(2);
+        branches[0].GetProperty("type").GetString().Should().Be("object");
+        branches[1].GetProperty("type").GetString().Should().Be("null");
+        return branches[0];
     }
 
     static JsonElement LineItemProperties(JsonElement schema) =>
