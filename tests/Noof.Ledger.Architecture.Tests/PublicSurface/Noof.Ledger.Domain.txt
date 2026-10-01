@@ -6,10 +6,14 @@ CategorizationJob
 Category
 Charge
 ChargeSource
+ChargeTerms
+ComputedCharge
 CurrencyCode
 CurrencyMismatchException
 Entry
 EntryRole
+ExchangeRate
+FeeTerms
 JobKind
 JobStatus
 LineItem

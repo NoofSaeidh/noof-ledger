@@ -23,6 +23,8 @@ public readonly record struct Money(decimal Amount, CurrencyCode Currency) : ICo
         return value with { Amount = -value.Amount };
     }
 
+    public Money Round() => this with { Amount = MoneyMath.Round(Amount) };
+
     public int CompareTo(Money other)
     {
         RequireSameCurrency(this, other);

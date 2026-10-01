@@ -103,4 +103,13 @@ public class MoneyTests
     {
         new CurrencyCode("eur").Value.Should().Be("EUR");
     }
+
+    [Fact]
+    public void Rounding_keeps_two_decimals_and_takes_a_midpoint_away_from_zero()
+    {
+        new Money(12.345m, CurrencyCode.Eur).Round().Should().Be(new Money(12.35m, CurrencyCode.Eur), "banker's rounding would give 12.34");
+        new Money(-12.345m, CurrencyCode.Eur).Round().Should().Be(new Money(-12.35m, CurrencyCode.Eur));
+        new Money(12.344m, CurrencyCode.Eur).Round().Should().Be(new Money(12.34m, CurrencyCode.Eur));
+        new Money(11700m, CurrencyCode.Rsd).Round().Should().Be(new Money(11700m, CurrencyCode.Rsd));
+    }
 }
