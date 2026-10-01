@@ -416,11 +416,11 @@ branch from `phase-7`. Fixes, and whatever the large-model reviews of `phase-7` 
 | 5 | Read models: *Received*, Transfers this month, Recent with kind and view, the `/transactions` preset and either-leg filter, the trace summary and history | Application · Persistence | 1c |
 | 6 | Home, `/transactions` and trace page UI; demo data; screenshots; E2E | Web · Demo | 4b, 5 |
 | 7a | Slip reading: `read_receipt`'s `exchange`, the prompt, `ChatReceiptVision` | Ai | 1a |
-| 7b | Slip storage: evidence, slip-number duplicate, jobs and failure in one commit, the exchange awaiting predicate, "Record anyway" for exchanges, venues, `Assess`, the slip on the subject and the trace | Application · Persistence | 1b, 7a |
-| 7c-1 | Slip mapping without the model, the slip echo rows and confirmation prompt; slip scenes | Application · Host · Demo | 2b, 3, 7b |
+| 7b | Slip storage: evidence, slip-number duplicate, jobs and failure in one commit, the exchange awaiting predicate, "Record anyway" for exchanges, venues, `Assess`, the slip on the subject and the trace | Application · Persistence | 1c, 7a |
+| 7c-1 | Slip mapping without the model, the slip echo rows and confirmation prompt, the one routing predicate; slip scenes | Application · Host · Demo | 2b, 3, 7b |
 | 7c-2 | `RecordExchangeWorker` | Host | 7c-1 |
 | 7c-3 | `ExtractReceiptWorker`'s exchange branch; `RecordActionHandler` for exchanges | Host · Telegram | 7c-1 |
-| 7c-4 | The one routing predicate, slip corrections, the receipts rule reworded | Host | 7c-1 |
+| 7c-4 | Slip corrections, the receipts rule reworded | Host | 7c-1 |
 | 8 | Closing the phase per `docs/CLOSING-A-PHASE.md`: status, `CLAUDE.md`, `docs/decisions/p7-1-transfers-and-exchange-decisions.md`, backlog (M10 and M-6 settled), the full suite, the closing reviews | docs | all |
 
 Only 1a adds a migration. Each later PR declares the contract types only it produces (the dashboard read models in
