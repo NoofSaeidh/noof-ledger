@@ -2,7 +2,9 @@
 
 **Status:** approved by the operator 2026-10-01 ("spec approved"), then amended the same day after the
 planning reviews (Fable 5.1 and a Codex adversarial review, run in parallel) with the operator's
-answers to the two decisions they raised (T-12, T-13).
+answers to the two decisions they raised (T-12, T-13), and amended again at implementation planning (same
+day) with the operator's answers — see *Planning amendments* below; where it and an earlier paragraph differ,
+the amendment wins.
 
 This is Phase 7 ("Currency exchange") in the phase table of `2026-09-22-natural-language-capture.md`.
 It amends `2026-09-24-money-model.md` (M5's reserved `Transfer`/`Fee`, M10's unconverted foreign
@@ -47,6 +49,31 @@ exchange the same way a fiscal receipt becomes a purchase.
 - **§6's spending predicate** stays as the original design wrote it — expense lines plus fees — but is
   read off line items: the line items of `Expense` transactions, plus the `Fee`-role line items of
   `Transfer` transactions. A fee keeps a category that way.
+
+## Planning amendments (operator, 2026-10-01)
+
+Taken while the implementation plan was written against the code. The plan itself is scratch in the git-ignored
+`.superpowers/`; these are the decisions it changed.
+
+| # | Amendment | Why |
+|---|---|---|
+| A-1 | The PR cut is §5's table (14 PRs). A PR may exceed the ~500-line guide — it is a recommendation, not a limit. | The code put charges and the correction input in Persistence, and slips across three assemblies. |
+| A-2 | `charges.fee_amount numeric(19,4) NOT NULL` — the fee a charge cost, 0 when none. | A fee line is replaced on every apply, so a stated fee had nowhere to survive a correction. |
+| A-3 | A seventh failure reason, `InvalidAmount`: a transfer amount (said, converted or left after the fee) that is not positive. | Otherwise the `transfers` check constraint rejects the write, it is retried as transient and ends as a generic failure. |
+| A-4 | Enum columns are `integer`, as every enum column in the schema is. | The `smallint` above was illustrative. |
+| A-5 | Echo amounts keep the bot's format: `0.00` invariant, ASCII minus, no grouping (`10000.00`, `-1000.00`). | As Phase 4; the figures in §4 are illustrative. |
+| A-6 | A failure-reason echo names only what the database holds — only the reason is stored, not the rejected proposal: `Transfer not recorded: both sides are the same wallet — which wallet did it go to?`, `Transfer not recorded: a wallet holds another currency — create a wallet in that currency or name one.`, `Exchange not recorded: how much did you get? Reply with the amount or the rate.` (the currency is named when the record already holds a transfer), `Slip read, but the amount received is unreadable — reply with it.` (from the slip's evidence). | So Cancel/Restore and a replayed update render exactly the same text. |
+| A-7 | "Awaiting confirmation" for an `Exchange` receipt = no `RecordExchange` job, never applied (no `Initial`/`Correction`/`Edit` revision) and no `failure_reason`; status-independent like the fiscal predicate. | Cancel → Restore of a held slip returns to its prompt; an incomplete slip and a completed-then-cancelled one never offer "Record anyway". |
+| A-8 | A reply to a held slip records it, as for a fiscal receipt. A reply that completes a held or incomplete slip puts each unnamed leg on the cash default of its currency, by the same code `RecordExchange` uses. A slip correction keeps its office. | A reply is the operator's own figures; the slip rule (always cash) must not depend on the model. |
+| A-9 | A slip whose PIB already belongs to a shop links to that merchant; an unknown PIB creates an `ExchangeVenue`. `ix_merchants_tax_id` is unchanged. | One PIB is one legal entity. |
+| A-10 | A slip's caption job is created 1 µs after its `RecordExchange` job. | The queue orders a transaction's jobs by strict `created_at <`; two jobs of one commit share `now`. |
+| A-11 | An `Exchange` receipt with an unread dinar side stores `total = 0`; `receipts.total` stays NOT NULL. Every currency of a slip's reading is a three-letter code or null. | `receipt_exchanges` is the evidence and `transfers` the truth; nothing reads a slip's `receipts.total`. |
+| A-12 | A slip's warning line is `⚠️ Read from the slip photo — check the figures.`; a slip correction shows the model a text built from the evidence instead of the caption, so the caption arrives once, as the instruction. | The fiscal QR advice means nothing for a slip. |
+| A-13 | A stated charge in a currency other than the wallet's is not honoured; the terms apply and the echo says `wallet rate`. A stated charge that "includes" an unstated fee is solved exactly: fee = max((p·stated + fixed) / (1 + p), minimum), charge = stated − fee. | The fee is then the terms' fee on the charge that is left. |
+| A-14 | Strict tool schemas stay within Anthropic's limit of 16 union-typed parameters per request, each pinned by a test: `read_receipt`'s `exchange` is a required object whose fields are null for a non-slip, with the commission as one nullable `{amount, currency}`; `record_transaction` keeps §2's shape at 15. | Past the limit every call fails, fiscal receipts included. |
+| A-15 | The per-currency payment default lands whole in the first PR (index, `DefaultForPaymentAsync(method, currency)`, clearing per currency, the one Host caller). | The index change alone breaks the old query the moment it lands. |
+| A-16 | `/transactions`' either-leg wallet filter is `transactions.wallet_id = @id OR` a `transfers` leg on that wallet, not entries alone. | `Captured`/`Failed` records have no entries, and the filter shows them today. |
+| A-17 | No live test reads a slip in this phase. | The live suite covers capture phrasings; drawing a slip would bring SkiaSharp into the Ai tests. |
 
 ## 1. Data
 
@@ -370,25 +397,27 @@ branch from `phase-7`. Fixes, and whatever the large-model reviews of `phase-7` 
 
 | # | PR | Assemblies | Depends on |
 |---|---|---|---|
-| 1a | Model: `Transfer`/`Fee`/`Exchange`/`RecordExchange` enum members, the Domain arithmetic, all tables and columns in one migration | Domain · Persistence | — |
-| 1b | Posting branches per kind (leaving a kind deletes its facts), the extended integrity test, revision snapshots, checkpoint tests on two legs | Persistence | 1a |
-| 2 | Capture: the `record_transaction` schema, DTO, prompt, `ProposalMapper` (legs, principals, rate, fee leg, failure reasons, charges with snapshot and stated-charge retention), correction input without fee lines, kind-transition wallets, `failure_reason` written | Application · Ai · Host | 1b |
-| 3 | Echo: every row of §4's table, Cancel/Restore, `GetSubjectAsync` reading both legs, charges and the failure reason; bot scenes | Application · Persistence | 2 |
-| 4a | Wallet terms and per-currency payment defaults: `IWalletFxTerms` store, `DefaultForPaymentAsync(currency)` | Application · Persistence | 1a |
-| 4b | `/wallets` terms and per-currency defaults UI; demo data; screenshot | Web | 4a |
-| 5 | Read models: income this month, transfers this month, `Kind` in Recent with `view`, the either-leg wallet filter, the trace summary and history | Application · Persistence | 1b |
-| 6 | Home, `/transactions` and trace page UI over PR 5; demo data; screenshots | Web | 5 |
-| 7a | Slip reading: `read_receipt`'s `exchange` and `slip_number`, the prompt, the DTO | Ai | 1a |
-| 7b | Slip recording: evidence storage, `RecordExchange`, held/incomplete, awaiting-confirmation and "Record anyway" for exchanges, the one routing predicate, the receipts rule reworded; the slip scene | Persistence · Host | 2, 3, 7a |
-| 8 | Closing the phase per `docs/CLOSING-A-PHASE.md`: status, `CLAUDE.md`, `docs/decisions/p7-1-transfers-and-exchange-decisions.md`, backlog (M10 and M-6 settled) | docs | all |
+| 1a | Enum members, entities and the Domain arithmetic; every new Application contract type of capture, ledger, wallets and receipts; EF configurations and the one migration; the per-currency payment default end to end; `MarkFailedAsync(reason)` | Domain · Application · Persistence · Host | — |
+| 1b | Transfer write path in `ApplyAsync`, posting branches per kind, leaving a kind deletes its facts, `failure_reason` cleared, snapshots with transfer and role, the integrity test, checkpoints on two legs; `GetSubjectAsync` reads legs, roles and the reason | Persistence | 1a |
+| 1c | Foreign charges in `ApplyAsync` (stated → kept → snapshot or current terms → M10), their postings and snapshots, `GetSubjectAsync` reads charges; M12 extended | Persistence | 1b |
+| 2a | `record_transaction` schema, DTO, prompt, correction rendering; live phrasings | Ai | 1a |
+| 2b | `TransferRequest.TrySettle` (Domain), `ProposalMapper` for transfers and `charged`, failure reasons, the worker's per-leg kind-transition wallets, correction input, first reading vs correction failures | Domain · Application · Host | 1c, 2a, 3 |
+| 3 | Echo: every §4 row but the slip, Cancel/Restore; bot scenes | Application · Demo | 1c |
+| 4a | `IWalletFxTerms` store | Persistence | 1a |
+| 4b | `/wallets` terms and per-currency default wording; demo wallets and terms; screenshot | Web · Demo | 4a |
+| 5 | Read models: *Received*, Transfers this month, Recent with kind and view, the `/transactions` preset and either-leg filter, the trace summary and history | Application · Persistence | 1c |
+| 6 | Home, `/transactions` and trace page UI; demo data; screenshots; E2E | Web · Demo | 4b, 5 |
+| 7a | Slip reading: `read_receipt`'s `exchange`, the prompt, `ChatReceiptVision` | Ai | 1a |
+| 7b | Slip storage: evidence, slip-number duplicate, jobs and failure in one commit, the exchange awaiting predicate, "Record anyway" for exchanges, venues, `Assess`, the slip on the subject and the trace | Application · Persistence | 1b, 7a |
+| 7c | `RecordExchangeWorker`, `ExtractReceiptWorker`'s exchange branch, the one routing predicate, slip corrections, `RecordActionHandler` for exchanges, slip echo rows, the receipts rule reworded; slip scene | Application · Host · Telegram | 2b, 3, 7b |
+| 8 | Closing the phase per `docs/CLOSING-A-PHASE.md`: status, `CLAUDE.md`, `docs/decisions/p7-1-transfers-and-exchange-decisions.md`, backlog (M10 and M-6 settled), the full suite, the closing reviews | docs | all |
 
-PR 3 and PR 5 both touch Persistence reads: PR 3 owns `EfCategorizationStore.GetSubjectAsync` (the
-echo's subject), PR 5 owns `EfSpendingReadModel`, `EfTransactionList` and `EfTransactionTrace`. A PR
-that outgrows the size rule stops and proposes a split, as `CLAUDE.md` §5 says.
+Only 1a adds a migration. Each later PR declares the contract types only it produces (the dashboard read models in
+5, the slip storage types in 7b); PR 5 also changes the one caller of the replaced `RecentAsync` in `Home.razor`.
 
 **Reviews** (`CLAUDE.md` §1): Fable 5.1 and a Codex adversarial review ran on this spec at planning
 (their findings are folded in above); both run again on `phase-7` at the close. One Codex review per
-PR — adversarial for 1a, 1b, 2 and 7b, which make design choices; opus at medium effort per task.
+PR — adversarial for 1a, 1b, 1c, 2a, 2b, 7b and 7c, which make design choices, plain for the rest; opus at medium effort per task.
 
 ## Testing
 
