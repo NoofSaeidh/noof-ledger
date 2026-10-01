@@ -159,16 +159,6 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
         _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome.Kind, "No revision kind for this job kind."),
     };
 
-    public Task MarkFailedAsync(Guid transactionId, CancellationToken cancellationToken) =>
-        db.Database.ExecuteSqlRawAsync(
-            "UPDATE transactions SET status = @status WHERE id = @transactionId AND status = @captured",
-            [
-                new NpgsqlParameter("status", (int)TransactionStatus.Failed),
-                new NpgsqlParameter("transactionId", transactionId),
-                new NpgsqlParameter("captured", (object)(int)TransactionStatus.Captured),
-            ],
-            cancellationToken);
-
     public Task MarkFailedAsync(Guid transactionId, RecordFailureReason reason, CancellationToken cancellationToken) =>
         db.Database.ExecuteSqlRawAsync(
             "UPDATE transactions SET status = @status, failure_reason = @reason WHERE id = @transactionId AND status = @captured",

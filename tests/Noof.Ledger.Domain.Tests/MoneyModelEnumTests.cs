@@ -106,13 +106,14 @@ public class MoneyModelEnumTests
     [Fact]
     public void Record_failure_reason_values_never_move()
     {
-        ((int)RecordFailureReason.MissingReceivedAmount).Should().Be(0);
-        ((int)RecordFailureReason.SameWallet).Should().Be(1);
-        ((int)RecordFailureReason.LegCurrencyMismatch).Should().Be(2);
-        ((int)RecordFailureReason.InvalidRate).Should().Be(3);
-        ((int)RecordFailureReason.InvalidFee).Should().Be(4);
-        ((int)RecordFailureReason.SlipIncomplete).Should().Be(5);
-        ((int)RecordFailureReason.InvalidAmount).Should().Be(6);
-        Enum.GetValues<RecordFailureReason>().Should().HaveCount(7);
+        ((int)RecordFailureReason.None).Should().Be(0);
+        ((int)RecordFailureReason.MissingReceivedAmount).Should().Be(1);
+        ((int)RecordFailureReason.SameWallet).Should().Be(2);
+        ((int)RecordFailureReason.LegCurrencyMismatch).Should().Be(3);
+        ((int)RecordFailureReason.InvalidRate).Should().Be(4);
+        ((int)RecordFailureReason.InvalidFee).Should().Be(5);
+        ((int)RecordFailureReason.SlipIncomplete).Should().Be(6);
+        ((int)RecordFailureReason.InvalidAmount).Should().Be(7);
+        Enum.GetValues<RecordFailureReason>().Should().HaveCount(8);
     }
 }

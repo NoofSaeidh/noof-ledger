@@ -21,7 +21,8 @@ public partial class AddTransfersAndExchange : Migration
             schema: "public",
             table: "transactions",
             type: "integer",
-            nullable: true);
+            nullable: false,
+            defaultValue: 0);
 
         migrationBuilder.AddColumn<string>(
             name: "slip_number",

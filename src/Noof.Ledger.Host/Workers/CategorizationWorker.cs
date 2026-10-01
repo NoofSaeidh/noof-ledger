@@ -518,7 +518,7 @@ internal sealed class CategorizationWorker(
         // Only a first reading marks the transaction Failed. A correction or a re-read that fails leaves the
         // record the person already saw confirmed exactly as it was.
         if (job.Kind == JobKind.Categorize)
-            await store.MarkFailedAsync(job.TransactionId, cancellationToken);
+            await store.MarkFailedAsync(job.TransactionId, RecordFailureReason.None, cancellationToken);
 
         if (subject is not { BotMessageId: { } messageId } sub)
             return;

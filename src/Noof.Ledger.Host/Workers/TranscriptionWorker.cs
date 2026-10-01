@@ -178,7 +178,7 @@ internal sealed class TranscriptionWorker(
             return;
         }
 
-        await store.MarkFailedAsync(job.TransactionId, cancellationToken);
+        await store.MarkFailedAsync(job.TransactionId, RecordFailureReason.None, cancellationToken);
         await EditQuietlyAsync(notifier, record, recordEcho.HeardNothing, cancellationToken);
     }
 
@@ -222,7 +222,7 @@ internal sealed class TranscriptionWorker(
     {
         // Only a voice capture is marked Failed; a failed spoken correction leaves the record as the person saw it.
         if (!IsCorrection(job))
-            await store.MarkFailedAsync(job.TransactionId, cancellationToken);
+            await store.MarkFailedAsync(job.TransactionId, RecordFailureReason.None, cancellationToken);
 
         if (record is null)
             return;

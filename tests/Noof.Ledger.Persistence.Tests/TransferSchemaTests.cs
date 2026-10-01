@@ -437,6 +437,7 @@ public class TransferSchemaTests(PostgresFixture fixture)
 
         (await db.Transactions.AsNoTracking().SingleAsync(t => t.Id == failed.Id, Ct))
             .FailureReason.Should().Be(RecordFailureReason.MissingReceivedAmount);
-        (await db.Transactions.AsNoTracking().SingleAsync(t => t.Id == recorded.Id, Ct)).FailureReason.Should().BeNull();
+        (await db.Transactions.AsNoTracking().SingleAsync(t => t.Id == recorded.Id, Ct))
+            .FailureReason.Should().Be(RecordFailureReason.None);
     }
 }

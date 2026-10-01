@@ -429,7 +429,7 @@ internal sealed class ReceiptCategorizationWorker(
         if (subject is not { BotMessageId: { } messageId } sub)
             return;
 
-        await store.MarkFailedAsync(sub.TransactionId, cancellationToken);
+        await store.MarkFailedAsync(sub.TransactionId, RecordFailureReason.None, cancellationToken);
 
         try
         {

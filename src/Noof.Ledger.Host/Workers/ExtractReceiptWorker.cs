@@ -441,7 +441,7 @@ internal sealed class ExtractReceiptWorker(
         if (await jobQueue.FailAsync(job.Id, workerId, error, cancellationToken) != JobCompletionOutcome.Applied)
             return;
 
-        await store.MarkFailedAsync(job.TransactionId, cancellationToken);
+        await store.MarkFailedAsync(job.TransactionId, RecordFailureReason.None, cancellationToken);
         await EditQuietlyAsync(notifier, record, echo, cancellationToken);
     }
 
@@ -481,7 +481,7 @@ internal sealed class ExtractReceiptWorker(
         ICategorizationStore store, IChatNotifier notifier, CategorizationJob job, CategorizationSubject? record,
         CancellationToken cancellationToken)
     {
-        await store.MarkFailedAsync(job.TransactionId, cancellationToken);
+        await store.MarkFailedAsync(job.TransactionId, RecordFailureReason.None, cancellationToken);
 
         if (record is null)
             return;

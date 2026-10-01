@@ -166,7 +166,7 @@ public sealed record CategorizationSubject(
     Guid? WalletId = null,
     TransferView? Transfer = null,
     IReadOnlyList<ChargeView>? Charges = null,
-    RecordFailureReason? FailureReason = null,
+    RecordFailureReason FailureReason = RecordFailureReason.None,
     SlipFacts? Slip = null);
 
 // The stated amount of a balance-check transaction, and what the app had computed for that wallet

@@ -29,8 +29,8 @@ public sealed class Transaction
 
     public required TransactionStatus Status { get; set; }
 
-    // Why a first reading could not be recorded, set together with Failed; null for every other record.
-    public RecordFailureReason? FailureReason { get; set; }
+    // Why a first reading could not be recorded, set together with Failed; None for every other record.
+    public RecordFailureReason FailureReason { get; set; }
 
     // IANA id (e.g. "Europe/Belgrade"), stamped from Capture:TimeZone at capture.
     public required string TimeZoneId { get; init; }

@@ -103,7 +103,7 @@ CREATE TABLE public.transactions (
     telegram_file_id text,
     verification_url text,
     status integer NOT NULL,
-    failure_reason integer,
+    failure_reason integer NOT NULL,
     time_zone_id character varying(64) NOT NULL,
     occurred_at timestamptz NOT NULL,
     occurred_on date NOT NULL,

@@ -551,7 +551,7 @@ public class ReceiptCategorizationWorkerTests
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
         await recordEditor.Received(1).CancelAsync(TransactionId, Arg.Any<CancellationToken>());
-        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<RecordFailureReason>(), Arg.Any<CancellationToken>());
         await store.DidNotReceive().ApplyAsync(Arg.Any<Guid>(), Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
         await notifier.Received(1).EditAsync(
             111L, 42, Arg.Is<EchoMessage>(echo => echo.Text == $"This receipt is a {word} — not recorded"), Arg.Any<CancellationToken>());
@@ -832,7 +832,7 @@ public class ReceiptCategorizationWorkerTests
 
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
-        await store.Received(1).MarkFailedAsync(TransactionId, Arg.Any<CancellationToken>());
+        await store.Received(1).MarkFailedAsync(TransactionId, RecordFailureReason.None, Arg.Any<CancellationToken>());
         await notifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(m => m.Text == Echo.Failure.Text), Arg.Any<CancellationToken>());
     }
 

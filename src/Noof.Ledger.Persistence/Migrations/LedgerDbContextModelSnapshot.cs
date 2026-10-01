@@ -664,7 +664,7 @@ namespace Noof.Ledger.Persistence.Migrations
                         .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
 
-                    b.Property<int?>("FailureReason")
+                    b.Property<int>("FailureReason")
                         .HasColumnType("integer")
                         .HasColumnName("failure_reason");
 
