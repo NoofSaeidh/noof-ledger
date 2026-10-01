@@ -214,6 +214,7 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
 
         var transaction = await db.Transactions.SingleAsync(t => t.Id == transactionId, cancellationToken);
         var statusBefore = transaction.Status;
+        var walletBefore = transaction.WalletId;
         // A correction arriving for a cancelled record corrects it and leaves it cancelled; only Restore
         // brings it back.
         transaction.Status = statusBefore == TransactionStatus.Cancelled ? TransactionStatus.Cancelled : TransactionStatus.Completed;
@@ -223,6 +224,8 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
         transaction.FailureReason = RecordFailureReason.None;
 
         await db.SaveChangesAsync(cancellationToken);
+        var chargeFees = await ForeignCharges.RewriteAsync(db, transaction, outcome.Kind, walletBefore, outcome.Charged, cancellationToken);
+        await AddChargeFeeLinesAsync(transactionId, chargeFees, cancellationToken);
         await LedgerPostings.RewriteAsync(db, transaction, outcome.StatedBalance, transfer, cancellationToken);
         await RevisionLog.AppendAsync(db, transaction, RevisionKindFor(outcome), outcome.Instruction,
             statusBefore, timeProvider.GetUtcNow(), cancellationToken);
@@ -260,6 +263,24 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
             Ordinal = ordinal,
             Role = EntryRole.Fee,
         });
+    }
+
+    // After the highest ordinal the record has, not ApplyAsync's running one: a receipt line names its own (R-2), and
+    // the running ordinal never moves past it.
+    async Task AddChargeFeeLinesAsync(
+        Guid transactionId, IReadOnlyList<(CurrencyCode Purchase, Money Fee)> fees, CancellationToken cancellationToken)
+    {
+        if (fees.Count == 0)
+            return;
+
+        var ordinal = 1 + (await db.LineItems.AsNoTracking()
+            .Where(li => li.TransactionId == transactionId)
+            .Select(li => (int?)li.Ordinal)
+            .MaxAsync(cancellationToken) ?? 0);
+        foreach (var (purchase, fee) in fees)
+            await AddFeeLineAsync(transactionId, fee, $"Fee · {purchase.Value} purchase", ordinal++, cancellationToken);
+
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     // CategorizeReceipt runs twice for the same receipt (I-2, Phase 6 final review): once from
