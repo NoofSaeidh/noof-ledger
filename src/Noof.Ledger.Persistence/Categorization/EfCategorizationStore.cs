@@ -219,6 +219,8 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
         JobKind.CategorizeReceipt => outcome.Instruction is null ? RevisionKind.Initial : RevisionKind.Correction,
         JobKind.Correct => RevisionKind.Correction,
         JobKind.Reinterpret => RevisionKind.Edit,
+        // A slip's first recording, by C# from the slip's evidence; a reply correcting it arrives as Correct.
+        JobKind.RecordExchange => RevisionKind.Initial,
         _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome.Kind, "No revision kind for this job kind."),
     };
 

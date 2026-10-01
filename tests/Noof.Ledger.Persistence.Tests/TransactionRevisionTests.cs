@@ -205,4 +205,98 @@ public class TransactionRevisionTests(PostgresFixture fixture)
         decimal.Parse(stated.GetProperty("amount").GetString()!, System.Globalization.CultureInfo.InvariantCulture).Should().Be(45000m);
         stated.GetProperty("currency").GetString().Should().Be("RSD");
     }
+
+    static decimal AmountOf(JsonElement element, string name)
+    {
+        element.GetProperty(name).ValueKind.Should().Be(JsonValueKind.String, "an amount or a rate is never a JSON number");
+        return decimal.Parse(element.GetProperty(name).GetString()!, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    static async Task<(Guid CashEur, Guid Venue)> SeedExchangeWalletAndVenueAsync(LedgerDbContext db)
+    {
+        var cashEur = new Wallet { Id = Guid.NewGuid(), Name = "Cash EUR", Currency = CurrencyCode.Eur, CreatedAt = Clock.GetUtcNow() };
+        var venue = new Merchant { Id = Guid.NewGuid(), DisplayName = "Menjačnica Centar", Kind = MerchantKind.ExchangeVenue };
+        db.AddRange(cashEur, venue);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        return (cashEur.Id, venue.Id);
+    }
+
+    static TransferFacts Exchange(Guid cashEur, Guid venue) => new(
+        cashEur, new Money(100m, CurrencyCode.Eur), DefaultWalletId, new Money(11500m, CurrencyCode.Rsd),
+        new Money(200m, CurrencyCode.Rsd), TransferLeg.To, new ExchangeRate(CurrencyCode.Eur, 117m, CurrencyCode.Rsd), venue);
+
+    [Fact]
+    public async Task A_transfer_snapshot_records_both_legs_the_fee_leg_the_stated_rate_and_the_venue()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (cashEur, venue) = await SeedExchangeWalletAndVenueAsync(db);
+        var transactionId = await SeedTransactionAsync(db);
+
+        await new EfCategorizationStore(db, Clock).ApplyAsync(transactionId,
+            new CategorizationOutcome([], new DateOnly(2026, 9, 21), TransactionKind: TransactionKind.Transfer,
+                Transfer: Exchange(cashEur, venue)),
+            TestContext.Current.CancellationToken);
+
+        db.ChangeTracker.Clear();
+        var revision = await db.TransactionRevisions.SingleAsync(TestContext.Current.CancellationToken);
+        using var snapshot = JsonDocument.Parse(revision.Snapshot);
+        var root = snapshot.RootElement;
+        root.GetProperty("kind").GetString().Should().Be("Transfer");
+        root.GetProperty("wallet_id").GetGuid().Should().Be(cashEur, "a transfer's record wallet is its source leg");
+        var transfer = root.GetProperty("transfer");
+        transfer.GetProperty("from_wallet_id").GetGuid().Should().Be(cashEur);
+        AmountOf(transfer, "from_amount").Should().Be(100m);
+        transfer.GetProperty("from_currency").GetString().Should().Be("EUR");
+        transfer.GetProperty("to_wallet_id").GetGuid().Should().Be(DefaultWalletId);
+        AmountOf(transfer, "to_amount").Should().Be(11500m);
+        transfer.GetProperty("to_currency").GetString().Should().Be("RSD");
+        transfer.GetProperty("fee_leg").GetInt32().Should().Be((int)TransferLeg.To);
+        AmountOf(transfer, "stated_rate").Should().Be(117m);
+        transfer.GetProperty("stated_rate_base").GetString().Should().Be("EUR");
+        transfer.GetProperty("venue_merchant_id").GetGuid().Should().Be(venue);
+        var fee = root.GetProperty("items").EnumerateArray().Single();
+        fee.GetProperty("role").GetInt32().Should().Be((int)EntryRole.Fee);
+        fee.GetProperty("category_slug").GetString().Should().Be("fees-charges");
+        fee.GetProperty("categorized_by").GetInt32().Should().Be((int)CategorizationAuthority.Rule);
+        AmountOf(fee, "amount").Should().Be(200m);
+        fee.GetProperty("currency").GetString().Should().Be("RSD");
+    }
+
+    [Fact]
+    public async Task An_expense_snapshot_gives_each_item_its_role_and_a_null_transfer()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var transactionId = await SeedTransactionAsync(db);
+
+        await new EfCategorizationStore(db, Clock).ApplyAsync(transactionId,
+            new CategorizationOutcome([Coffee(250m)], new DateOnly(2026, 9, 21)), TestContext.Current.CancellationToken);
+
+        db.ChangeTracker.Clear();
+        var revision = await db.TransactionRevisions.SingleAsync(TestContext.Current.CancellationToken);
+        using var snapshot = JsonDocument.Parse(revision.Snapshot);
+        snapshot.RootElement.GetProperty("transfer").ValueKind.Should().Be(JsonValueKind.Null);
+        foreach (var key in new[] { "raw_text", "occurred_on", "items", "kind", "wallet_id", "stated_balance" })
+            snapshot.RootElement.TryGetProperty(key, out _).Should().BeTrue($"the existing key {key} stays");
+        var item = snapshot.RootElement.GetProperty("items").EnumerateArray().Single();
+        item.GetProperty("role").GetInt32().Should().Be((int)EntryRole.Principal);
+        foreach (var key in new[] { "description", "amount", "currency", "category_slug", "merchant_id", "categorized_by" })
+            item.TryGetProperty(key, out _).Should().BeTrue($"the existing item key {key} stays");
+    }
+
+    [Fact]
+    public async Task A_recorded_exchange_is_an_initial_revision()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (cashEur, venue) = await SeedExchangeWalletAndVenueAsync(db);
+        var transactionId = await SeedTransactionAsync(db);
+
+        await new EfCategorizationStore(db, Clock).ApplyAsync(transactionId,
+            new CategorizationOutcome([], new DateOnly(2026, 9, 21), JobKind.RecordExchange,
+                TransactionKind: TransactionKind.Transfer, Transfer: Exchange(cashEur, venue)),
+            TestContext.Current.CancellationToken);
+
+        db.ChangeTracker.Clear();
+        (await db.TransactionRevisions.SingleAsync(TestContext.Current.CancellationToken)).Kind.Should().Be(
+            RevisionKind.Initial, "RecordExchange is a slip's first recording; a reply correcting it arrives as Correct");
+    }
 }
