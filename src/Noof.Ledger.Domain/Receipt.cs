@@ -13,6 +13,9 @@ public sealed class Receipt
     public string? SellerAddress { get; init; }
     public string? LocationName { get; init; }
     public string? FiscalNumber { get; init; }
+
+    // An exchange slip's own number, trimmed and upper-cased: with the office's PIB, its duplicate detector.
+    public string? SlipNumber { get; init; }
     public DateTimeOffset? IssuedAt { get; init; }
     public required Money Total { get; init; }
     public required ReceiptKind Kind { get; init; }

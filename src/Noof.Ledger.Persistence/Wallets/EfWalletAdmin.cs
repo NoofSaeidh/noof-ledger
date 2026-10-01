@@ -124,7 +124,7 @@ internal sealed class EfWalletAdmin(LedgerDbContext db, TimeProvider timeProvide
         await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
 
         var wallet = await WalletById(walletId).AsNoTracking()
-            .Select(w => new { w.Archived })
+            .Select(w => new { w.Archived, w.Currency })
             .SingleOrDefaultAsync(cancellationToken)
             ?? throw Unknown(walletId);
 
@@ -136,9 +136,9 @@ internal sealed class EfWalletAdmin(LedgerDbContext db, TimeProvider timeProvide
 
             // Clear, then set - the same reasoning as MakeDefaultForCurrencyAsync: the unique index
             // is checked row by row, so writing the new default before the old one is cleared would
-            // violate it.
+            // violate it. Only the same currency's default moves: each currency keeps its own (T-13).
             await db.Wallets
-                .Where(w => w.DefaultForPayment == domainMethod && w.Id != walletId)
+                .Where(w => w.DefaultForPayment == domainMethod && w.Currency == wallet.Currency && w.Id != walletId)
                 .ExecuteUpdateAsync(set => set.SetProperty(w => w.DefaultForPayment, (WalletPaymentDefault?)null), cancellationToken);
         }
 

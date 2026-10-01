@@ -20,6 +20,7 @@ internal sealed class LineItemConfiguration : IEntityTypeConfiguration<LineItem>
         builder.Property(l => l.MerchantId).HasColumnName("merchant_id");
         builder.Property(l => l.Ordinal).HasColumnName("ordinal");
         builder.Property(l => l.ReceiptLineId).HasColumnName("receipt_line_id");
+        builder.Property(l => l.Role).HasColumnName("role");
 
         builder.ComplexProperty(l => l.Amount, money =>
         {

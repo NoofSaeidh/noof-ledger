@@ -13,6 +13,6 @@ public sealed class Wallet
     public bool Archived { get; set; }
     public DateTimeOffset CreatedAt { get; init; }
 
-    // At most one wallet per payment method (R-3). A partial unique index holds that, not this class.
+    // At most one wallet per payment method and currency (R-3, T-13). A partial unique index holds that, not this class.
     public WalletPaymentDefault? DefaultForPayment { get; set; }
 }

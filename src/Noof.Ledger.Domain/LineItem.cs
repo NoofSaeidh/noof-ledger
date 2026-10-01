@@ -18,4 +18,9 @@ public sealed class LineItem
 
     // Set once the categorisation worker resolves this line from a receipt's own lines (Phase 6).
     public Guid? ReceiptLineId { get; set; }
+
+    // Fee for the one line C# writes for a transfer's fee or a foreign purchase's commission; Principal for
+    // everything else. A category alone cannot tell them apart: a bank fee told as its own message is an ordinary
+    // Principal line in the same Fees & Charges category.
+    public EntryRole Role { get; set; }
 }

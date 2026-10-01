@@ -32,6 +32,7 @@ internal sealed class TransactionConfiguration : IEntityTypeConfiguration<Transa
         builder.Property(t => t.TelegramFileId).HasColumnName("telegram_file_id");
         builder.Property(t => t.VerificationUrl).HasColumnName("verification_url");
         builder.Property(t => t.Status).HasColumnName("status");
+        builder.Property(t => t.FailureReason).HasColumnName("failure_reason");
         builder.Property(t => t.TimeZoneId).HasColumnName("time_zone_id").HasMaxLength(64).IsRequired();
         builder.Property(t => t.OccurredAt).HasColumnName("occurred_at");
         builder.Property(t => t.OccurredOn).HasColumnName("occurred_on");
