@@ -9,6 +9,9 @@ namespace Noof.Ledger.Persistence.Categorization;
 
 internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider timeProvider) : ICategorizationStore
 {
+    const string FeesCategorySlug = "fees-charges";
+    const string TransferFeeDescription = "Fee";
+
     public async Task<CategorizationSubject?> GetSubjectAsync(Guid transactionId, CancellationToken cancellationToken)
     {
         var header = await (
@@ -76,6 +79,8 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
 
     public async Task ApplyAsync(Guid transactionId, CategorizationOutcome outcome, CancellationToken cancellationToken)
     {
+        var transfer = TransferOf(transactionId, outcome);
+
         await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
 
         // Row lock, first statement inside the transaction. PostgreSQL runs READ COMMITTED, so
@@ -130,6 +135,9 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
                 ordinal++;
         }
 
+        if (transfer?.Fee is { } fee)
+            await AddFeeLineAsync(transactionId, fee, TransferFeeDescription, ordinal, cancellationToken);
+
         var transaction = await db.Transactions.SingleAsync(t => t.Id == transactionId, cancellationToken);
         var statusBefore = transaction.Status;
         // A correction arriving for a cancelled record corrects it and leaves it cancelled; only Restore
@@ -137,13 +145,47 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
         transaction.Status = statusBefore == TransactionStatus.Cancelled ? TransactionStatus.Cancelled : TransactionStatus.Completed;
         transaction.OccurredOn = outcome.OccurredOn;
         transaction.Kind = outcome.TransactionKind;
-        transaction.WalletId = outcome.WalletId ?? transaction.WalletId;
+        transaction.WalletId = transfer?.FromWalletId ?? outcome.WalletId ?? transaction.WalletId;
+        transaction.FailureReason = RecordFailureReason.None;
 
         await db.SaveChangesAsync(cancellationToken);
-        await LedgerPostings.RewriteAsync(db, transaction, outcome.StatedBalance, outcome.Transfer, cancellationToken);
+        await LedgerPostings.RewriteAsync(db, transaction, outcome.StatedBalance, transfer, cancellationToken);
         await RevisionLog.AppendAsync(db, transaction, RevisionKindFor(outcome), outcome.Instruction,
             statusBefore, timeProvider.GetUtcNow(), cancellationToken);
         await tx.CommitAsync(cancellationToken);
+    }
+
+    // Unreachable while ProposalMapper and RecordExchange give every transfer its legs, no principal lines, and a fee
+    // only together with its leg. Checked before the database transaction opens, so a refusal writes nothing, and it
+    // is what holds "fee_leg is null exactly when there is no fee line" on the way in.
+    static TransferFacts? TransferOf(Guid transactionId, CategorizationOutcome outcome) => outcome switch
+    {
+        { TransactionKind: not TransactionKind.Transfer } => null,
+        { Transfer: { } transfer, Items.Count: 0 } when transfer.Fee.HasValue == transfer.FeeLeg.HasValue => transfer,
+        _ => throw new InvalidOperationException(
+            $"Transfer {transactionId} needs its legs, no line items, and a fee only together with the leg it was taken on."),
+    };
+
+    // A fee line is C#'s, never the model's (Phase 7 spec §1): Rule-authored, in Fees & Charges, in its leg's currency.
+    async Task AddFeeLineAsync(Guid transactionId, Money fee, string description, int ordinal, CancellationToken cancellationToken)
+    {
+        var feesCategoryId = await db.Categories.AsNoTracking()
+            .Where(category => category.Slug == FeesCategorySlug)
+            .Select(category => category.Id)
+            .SingleAsync(cancellationToken);
+
+        db.LineItems.Add(new LineItem
+        {
+            Id = Guid.NewGuid(),
+            TransactionId = transactionId,
+            Description = description,
+            Amount = fee,
+            CategoryId = feesCategoryId,
+            CategorizedBy = CategorizationAuthority.Rule,
+            MerchantId = null,
+            Ordinal = ordinal,
+            Role = EntryRole.Fee,
+        });
     }
 
     // CategorizeReceipt runs twice for the same receipt (I-2, Phase 6 final review): once from

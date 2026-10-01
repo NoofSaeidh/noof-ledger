@@ -411,6 +411,39 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
         reloaded.BotMessageId.Should().Be(transaction.BotMessageId);
     }
 
+    [Fact]
+    public async Task Applying_a_transfer_clears_the_failure_reason()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var cashEur = NewWallet("Cash EUR", CurrencyCode.Eur);
+        var cashRsd = NewWallet("Cash RSD", CurrencyCode.Rsd);
+        var transaction = NewTransaction(walletId: null,
+            occurredAt: new DateTimeOffset(2026, 9, 21, 10, 0, 0, TimeSpan.Zero), occurredOn: new DateOnly(2026, 9, 21));
+        db.AddRange(cashEur, cashRsd, transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        // As in production, the reply's job reads the record afresh: nothing tracked from before MarkFailedAsync.
+        db.ChangeTracker.Clear();
+        var store = new EfCategorizationStore(db, Clock);
+        await store.MarkFailedAsync(transaction.Id, RecordFailureReason.MissingReceivedAmount, TestContext.Current.CancellationToken);
+
+        // The reply "11700" to "how much RSD did you get?" completes the exchange as a correction.
+        await store.ApplyAsync(transaction.Id,
+            new CategorizationOutcome([], new DateOnly(2026, 9, 21), JobKind.Correct, "11700", TransactionKind.Transfer,
+                Transfer: new TransferFacts(
+                    cashEur.Id, new Money(100m, CurrencyCode.Eur), cashRsd.Id, new Money(11700m, CurrencyCode.Rsd), null, null, null)),
+            TestContext.Current.CancellationToken);
+
+        db.ChangeTracker.Clear();
+        var stored = await db.Transactions.AsNoTracking()
+            .SingleAsync(t => t.Id == transaction.Id, TestContext.Current.CancellationToken);
+        stored.Status.Should().Be(TransactionStatus.Completed);
+        stored.FailureReason.Should().Be(RecordFailureReason.None, "the reply completed the record, so the question it answered is no longer its state");
+        stored.Kind.Should().Be(TransactionKind.Transfer);
+        stored.WalletId.Should().Be(cashEur.Id);
+        (await db.Transfers.CountAsync(row => row.TransactionId == transaction.Id, TestContext.Current.CancellationToken))
+            .Should().Be(1);
+    }
+
     static readonly Guid SeededDefaultWalletId = new("00000000-0000-0000-0000-000000000001");
 
     static Transaction VoiceAwaitingTranscript() => new()
