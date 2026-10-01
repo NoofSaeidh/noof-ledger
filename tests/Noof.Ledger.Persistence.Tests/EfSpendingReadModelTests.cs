@@ -63,7 +63,12 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
         Ordinal = ordinal,
     };
 
+    static readonly Guid GroceriesId = new("00000000-0000-0000-0001-000000000001");
+    static readonly Guid SubscriptionsId = new("00000000-0000-0000-0001-000000000011");
     static readonly Guid FeesAndChargesId = new("00000000-0000-0000-0001-000000000013");
+    static readonly Guid CoffeeId = new("00000000-0000-0000-0001-000000000017");
+    static readonly Guid SalaryId = new("00000000-0000-0000-0001-000000000022");
+    static readonly Guid OtherIncomeId = new("00000000-0000-0000-0001-000000000025");
 
     static Transaction NewTransferRecord(Guid walletId, DateTimeOffset occurredAt, TransactionStatus status = TransactionStatus.Completed)
     {
@@ -496,13 +501,19 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var now = new DateTimeOffset(2026, 9, 15, 12, 0, 0, TimeSpan.Zero);
-        var withFee = NewTransferRecord(wise.Id, now.AddMinutes(-1));
-        var stated = NewTransferRecord(wise.Id, now);
-        db.Transactions.AddRange(withFee, stated);
+        var withFee = NewTransferRecord(wise.Id, now.AddMinutes(-3));
+        var withFeeOnTo = NewTransferRecord(wise.Id, now.AddMinutes(-2));
+        var stated = NewTransferRecord(wise.Id, now.AddMinutes(-1));
+        var statedInTo = NewTransferRecord(raiffeisen.Id, now);
+        db.Transactions.AddRange(withFee, withFeeOnTo, stated, statedInTo);
         db.Transfers.AddRange(
             NewTransfer(withFee.Id, wise, 101m, raiffeisen, 11700m, TransferLeg.From),
-            NewTransfer(stated.Id, wise, 50m, raiffeisen, 5867.50m, statedRate: 117.35m, statedRateBase: CurrencyCode.Eur));
-        db.LineItems.Add(NewFeeLine(withFee.Id, new Money(1m, CurrencyCode.Eur)));
+            NewTransfer(withFeeOnTo.Id, wise, 100m, raiffeisen, 11600m, TransferLeg.To),
+            NewTransfer(stated.Id, wise, 50m, raiffeisen, 5867.50m, statedRate: 117.35m, statedRateBase: CurrencyCode.Eur),
+            NewTransfer(statedInTo.Id, raiffeisen, 5867.50m, wise, 50m, statedRate: 117.35m, statedRateBase: CurrencyCode.Eur));
+        db.LineItems.AddRange(
+            NewFeeLine(withFee.Id, new Money(1m, CurrencyCode.Eur)),
+            NewFeeLine(withFeeOnTo.Id, new Money(100m, CurrencyCode.Rsd)));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         db.ChangeTracker.Clear();
 
@@ -513,8 +524,166 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
         recent.Single(r => r.Id == withFee.Id).Transfer!.Rate.Should().Be(
             new ExchangeRate(CurrencyCode.Eur, 117m, CurrencyCode.Rsd),
             "101 EUR left the wallet but 1 EUR of it was the fee: 100 EUR bought 11 700 RSD, not 101");
+        recent.Single(r => r.Id == withFeeOnTo.Id).Transfer!.Rate.Should().Be(
+            new ExchangeRate(CurrencyCode.Eur, 117m, CurrencyCode.Rsd),
+            "11 600 RSD arrived after a 100 RSD fee was taken from it: 100 EUR bought 11 700 RSD, not 11 600");
         recent.Single(r => r.Id == stated.Id).Transfer!.Rate.Should().Be(
             new ExchangeRate(CurrencyCode.Eur, 117.35m, CurrencyCode.Rsd),
             "a stated rate is shown as stated, never re-derived from rounded amounts");
+        recent.Single(r => r.Id == statedInTo.Id).Transfer!.Rate.Should().Be(
+            new ExchangeRate(CurrencyCode.Eur, 117.35m, CurrencyCode.Rsd),
+            "a rate stated in the currency bought is quoted against the currency paid");
+    }
+
+    [Fact]
+    public async Task ThisMonthAsync_reports_income_by_category_as_received_and_never_as_spent()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var wise = NewWallet(CurrencyCode.Eur, "Wise EUR");
+        db.Wallets.Add(wise);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var now = new DateTimeOffset(2026, 9, 10, 12, 0, 0, TimeSpan.Zero);
+        var coffee = NewTransaction(wise.Id, now, "Europe/Belgrade", TransactionStatus.Completed);
+        var salary = NewTransaction(wise.Id, now, "Europe/Belgrade", TransactionStatus.Completed);
+        salary.Kind = TransactionKind.Income;
+        var freelance = NewTransaction(wise.Id, now, "Europe/Belgrade", TransactionStatus.Completed);
+        freelance.Kind = TransactionKind.Income;
+        db.Transactions.AddRange(coffee, salary, freelance);
+        db.LineItems.AddRange(
+            NewLineItem(coffee.Id, "coffee", new Money(3.20m, CurrencyCode.Eur), CoffeeId, null),
+            NewLineItem(salary.Id, "salary", new Money(2800m, CurrencyCode.Eur), SalaryId, null),
+            NewLineItem(freelance.Id, "freelance", new Money(450m, CurrencyCode.Eur), OtherIncomeId, null));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var readModel = new EfSpendingReadModel(db, new FakeTimeProvider(now), TimeZoneInfo.Utc);
+
+        var summary = await readModel.ThisMonthAsync(TestContext.Current.CancellationToken);
+
+        summary.Totals.Should().BeEquivalentTo([new MonthTotal("Coffee", CurrencyCode.Eur, 3.20m)]);
+        summary.Received.Should().BeEquivalentTo(
+        [
+            new MonthTotal("Salary", CurrencyCode.Eur, 2800m),
+            new MonthTotal("Other income", CurrencyCode.Eur, 450m),
+        ]);
+    }
+
+    [Fact]
+    public async Task ThisMonthAsync_is_identical_with_and_without_the_months_transfer_principals_and_counts_their_fees()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var cashEur = NewWallet(CurrencyCode.Eur, "Cash EUR");
+        var cashRsd = NewWallet(CurrencyCode.Rsd, "Cash RSD");
+        var raiffeisen = NewWallet(CurrencyCode.Rsd, "Raiffeisen RSD");
+        db.Wallets.AddRange(cashEur, cashRsd, raiffeisen);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var now = new DateTimeOffset(2026, 9, 10, 12, 0, 0, TimeSpan.Zero);
+        var market = NewTransaction(cashRsd.Id, now, "Europe/Belgrade", TransactionStatus.Completed);
+        var salary = NewTransaction(cashEur.Id, now, "Europe/Belgrade", TransactionStatus.Completed);
+        salary.Kind = TransactionKind.Income;
+        db.Transactions.AddRange(market, salary);
+        db.LineItems.AddRange(
+            NewLineItem(market.Id, "market", new Money(2500m, CurrencyCode.Rsd), GroceriesId, null),
+            NewLineItem(salary.Id, "salary", new Money(2800m, CurrencyCode.Eur), SalaryId, null));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var readModel = new EfSpendingReadModel(db, new FakeTimeProvider(now), TimeZoneInfo.Utc);
+        var withoutTransfers = await readModel.ThisMonthAsync(TestContext.Current.CancellationToken);
+
+        var exchange = NewTransferRecord(cashEur.Id, now.AddHours(1));
+        var withdrawal = NewTransferRecord(raiffeisen.Id, now.AddHours(2));
+        db.Transactions.AddRange(exchange, withdrawal);
+        db.Transfers.AddRange(
+            NewTransfer(exchange.Id, cashEur, 100m, cashRsd, 11700m),
+            NewTransfer(withdrawal.Id, raiffeisen, 10150m, cashRsd, 10000m, TransferLeg.From));
+        db.LineItems.AddRange(
+            NewFeeLine(withdrawal.Id, new Money(150m, CurrencyCode.Rsd)),
+            // A principal line on a transfer is something the write path never leaves (spec §2); the report must
+            // filter it by role rather than trust that.
+            NewLineItem(exchange.Id, "stray principal", new Money(100m, CurrencyCode.Eur), GroceriesId, null));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var withTransfers = await readModel.ThisMonthAsync(TestContext.Current.CancellationToken);
+
+        withoutTransfers.Totals.Should().BeEquivalentTo([new MonthTotal("Groceries", CurrencyCode.Rsd, 2500m)]);
+        withoutTransfers.Received.Should().BeEquivalentTo([new MonthTotal("Salary", CurrencyCode.Eur, 2800m)]);
+        withTransfers.Received.Should().BeEquivalentTo(withoutTransfers.Received);
+        withTransfers.Totals.Should().BeEquivalentTo(
+        [
+            new MonthTotal("Groceries", CurrencyCode.Rsd, 2500m),
+            new MonthTotal("Fees & Charges", CurrencyCode.Rsd, 150m),
+        ],
+            "a transfer only moves the operator's own money; the fee it cost is the one part that is spending (T-5, T-9)");
+    }
+
+    [Fact]
+    public async Task ThisMonthAsync_counts_a_foreign_spending_in_its_own_currency_and_its_fee_in_the_wallets()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var kaspi = NewWallet(CurrencyCode.Kzt, "Kaspi KZT");
+        db.Wallets.Add(kaspi);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var now = new DateTimeOffset(2026, 9, 10, 12, 0, 0, TimeSpan.Zero);
+        var spending = NewTransaction(kaspi.Id, now, "Europe/Belgrade", TransactionStatus.Completed);
+        db.Transactions.Add(spending);
+        db.LineItems.AddRange(
+            NewLineItem(spending.Id, "App Store", new Money(30m, CurrencyCode.Usd), SubscriptionsId, null),
+            NewFeeLine(spending.Id, new Money(156m, CurrencyCode.Kzt), ordinal: 2));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var readModel = new EfSpendingReadModel(db, new FakeTimeProvider(now), TimeZoneInfo.Utc);
+
+        var summary = await readModel.ThisMonthAsync(TestContext.Current.CancellationToken);
+
+        summary.Totals.Should().BeEquivalentTo(
+        [
+            new MonthTotal("Subscriptions", CurrencyCode.Usd, 30m),
+            new MonthTotal("Fees & Charges", CurrencyCode.Kzt, 156m),
+        ],
+            "a foreign spending counts in the currency it was bought in; its charge moves the wallet, not the statistics (spec §4)");
+    }
+
+    [Fact]
+    public async Task TransfersThisMonthAsync_lists_the_months_transfers_newest_first_and_nothing_else()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var raiffeisen = NewWallet(CurrencyCode.Rsd, "Raiffeisen RSD");
+        var cash = NewWallet(CurrencyCode.Rsd, "Cash RSD");
+        db.Wallets.AddRange(raiffeisen, cash);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var lastMonth = NewTransferRecord(raiffeisen.Id, new DateTimeOffset(2026, 8, 20, 12, 0, 0, TimeSpan.Zero));
+        var early = NewTransferRecord(raiffeisen.Id, new DateTimeOffset(2026, 9, 2, 12, 0, 0, TimeSpan.Zero));
+        var cancelled = NewTransferRecord(raiffeisen.Id, new DateTimeOffset(2026, 9, 5, 12, 0, 0, TimeSpan.Zero), TransactionStatus.Cancelled);
+        var late = NewTransferRecord(raiffeisen.Id, new DateTimeOffset(2026, 9, 12, 12, 0, 0, TimeSpan.Zero));
+        var expense = NewTransaction(raiffeisen.Id, new DateTimeOffset(2026, 9, 10, 12, 0, 0, TimeSpan.Zero), "Europe/Belgrade", TransactionStatus.Completed);
+        db.Transactions.AddRange(lastMonth, early, cancelled, late, expense);
+        db.Transfers.AddRange(
+            NewTransfer(lastMonth.Id, raiffeisen, 1000m, cash, 1000m),
+            NewTransfer(early.Id, raiffeisen, 2000m, cash, 2000m),
+            NewTransfer(cancelled.Id, raiffeisen, 3000m, cash, 3000m),
+            NewTransfer(late.Id, raiffeisen, 10150m, cash, 10000m, TransferLeg.From));
+        db.LineItems.Add(NewFeeLine(late.Id, new Money(150m, CurrencyCode.Rsd)));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var readModel = new EfSpendingReadModel(db,
+            new FakeTimeProvider(new DateTimeOffset(2026, 9, 15, 12, 0, 0, TimeSpan.Zero)), TimeZoneInfo.Utc);
+
+        var transfers = await readModel.TransfersThisMonthAsync(TestContext.Current.CancellationToken);
+
+        transfers.Should().Equal(
+            new MonthTransfer(late.Id, new DateOnly(2026, 9, 12), new TransferLine(
+                "Raiffeisen RSD", new Money(10150m, CurrencyCode.Rsd), "Cash RSD", new Money(10000m, CurrencyCode.Rsd),
+                new Money(150m, CurrencyCode.Rsd), TransferLeg.From, null)),
+            new MonthTransfer(early.Id, new DateOnly(2026, 9, 2), new TransferLine(
+                "Raiffeisen RSD", new Money(2000m, CurrencyCode.Rsd), "Cash RSD", new Money(2000m, CurrencyCode.Rsd),
+                null, null, null)));
     }
 }

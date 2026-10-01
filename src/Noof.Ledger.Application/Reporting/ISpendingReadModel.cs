@@ -17,6 +17,8 @@ public enum RecentView
 public sealed record TransferLine(
     string FromWalletName, Money From, string ToWalletName, Money To, Money? Fee, TransferLeg? FeeLeg, ExchangeRate? Rate);
 
+public sealed record MonthTransfer(Guid Id, DateOnly OccurredOn, TransferLine Transfer);
+
 // LocalTime is null when the purchase was dated to a day other than the one the message was sent on:
 // only the day is known, and the dashboard does not invent a time for it (D3).
 public sealed record RecentTransaction(
@@ -32,7 +34,8 @@ public sealed record RecentTransaction(
 
 public sealed record MonthTotal(string CategoryName, CurrencyCode Currency, decimal Amount);
 
-public sealed record MonthSummary(DateOnly FirstDay, IReadOnlyList<MonthTotal> Totals);
+// Totals is what was spent, Received what came in as income, each by category and currency and never converted.
+public sealed record MonthSummary(DateOnly FirstDay, IReadOnlyList<MonthTotal> Totals, IReadOnlyList<MonthTotal>? Received = null);
 
 public interface ISpendingReadModel
 {
@@ -40,6 +43,10 @@ public interface ISpendingReadModel
     Task<IReadOnlyList<RecentTransaction>> RecentAsync(int limit, RecentView view, CancellationToken cancellationToken);
 
     // "This month" is decided by the read model, not the page, so there is exactly one definition of
-    // it. Rows are bucketed by occurred_on, the local day stamped per row at capture.
+    // it. Rows are bucketed by occurred_on, the local day stamped per row at capture. Totals are the Principal lines of
+    // expenses plus the Fee lines of expenses and transfers; Received the Principal lines of incomes.
     Task<MonthSummary> ThisMonthAsync(CancellationToken cancellationToken);
+
+    // Newest first, cancelled ones left out.
+    Task<IReadOnlyList<MonthTransfer>> TransfersThisMonthAsync(CancellationToken cancellationToken);
 }

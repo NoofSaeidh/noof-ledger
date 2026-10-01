@@ -96,6 +96,7 @@ ModelCallExceptionExtensions
 ModelFailureKind
 MonthSummary
 MonthTotal
+MonthTransfer
 NewWallet
 OperationTiming
 PasswordVerifyResult
