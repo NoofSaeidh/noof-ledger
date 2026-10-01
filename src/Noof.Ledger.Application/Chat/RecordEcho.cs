@@ -73,7 +73,7 @@ internal sealed class RecordEcho : IRecordEcho
         return current with { Text = $"{HeardNothing.Text}\n\n{current.Text}" };
     }
 
-    public EchoMessage ComposeCorrectionFailure(CategorizationSubject record)
+    public EchoMessage ComposeCorrectionFailure(CategorizationSubject record, RecordFailureReason? reason = null)
     {
         var current = Compose(record);
         return current with { Text = $"Could not apply that correction — the record is unchanged.\n\n{current.Text}" };

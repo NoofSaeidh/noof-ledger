@@ -50,7 +50,8 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
                 li.Amount,
                 c == null ? null : c.Slug,
                 c == null ? null : c.NameEn,
-                m == null ? null : m.DisplayName))
+                m == null ? null : m.DisplayName,
+                EntryRole.Principal))
             .ToListAsync(cancellationToken);
 
         var balances = header.WalletId is { } walletId
