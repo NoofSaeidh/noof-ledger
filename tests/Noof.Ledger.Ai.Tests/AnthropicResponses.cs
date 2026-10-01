@@ -47,8 +47,14 @@ public static class AnthropicResponses
 
     public const string ReadReceiptJsonAnswer = """
         {"id":"msg_08","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
-         "content":[{"type":"tool_use","id":"toolu_08","name":"read_receipt","input":{"readable":true,"unreadable_reason":null,"seller_name":"Maxi","seller_tax_id":"123456789","fiscal_number":null,"issued_at":"2026-09-20T14:05:00","currency":"RSD","total":845.50,"payment_method":"card","kind":"sale","lines":[{"name":"Mleko","quantity":1,"unit_price":120,"total":120},{"name":"Hleb","quantity":2,"unit_price":90.25,"total":180.50}]}}],
+         "content":[{"type":"tool_use","id":"toolu_08","name":"read_receipt","input":{"readable":true,"unreadable_reason":null,"seller_name":"Maxi","seller_tax_id":"123456789","fiscal_number":null,"issued_at":"2026-09-20T14:05:00","currency":"RSD","total":845.50,"payment_method":"card","kind":"sale","lines":[{"name":"Mleko","quantity":1,"unit_price":120,"total":120},{"name":"Hleb","quantity":2,"unit_price":90.25,"total":180.50}],"exchange":{"given_amount":null,"given_currency":null,"received_amount":null,"received_currency":null,"rate":null,"commission":null,"slip_number":null}}}],
          "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":200,"output_tokens":40}}
+        """;
+
+    public const string ReadExchangeJsonAnswer = """
+        {"id":"msg_10","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
+         "content":[{"type":"tool_use","id":"toolu_10","name":"read_receipt","input":{"readable":true,"unreadable_reason":null,"seller_name":"Menjačnica Dukat","seller_tax_id":"101234567","fiscal_number":null,"issued_at":"2026-09-28T11:42:00","currency":null,"total":null,"payment_method":null,"kind":"exchange","lines":[],"exchange":{"given_amount":150.00,"given_currency":"EUR","received_amount":17568.51,"received_currency":"RSD","rate":117.1234,"commission":null,"slip_number":"0004711/2026"}}}],
+         "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":200,"output_tokens":60}}
         """;
 
     public const string CategorizeReceiptJsonAnswer = """
