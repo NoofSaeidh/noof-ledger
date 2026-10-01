@@ -972,6 +972,32 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
         (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken)).Should().BeFalse();
     }
 
+    // A photo cancelled before its incomplete slip is saved keeps no failure reason (the Incomplete
+    // update only touches a Captured record), so only the slip's own evidence can say it is incomplete.
+    [Fact]
+    public async Task An_incomplete_slip_saved_after_a_Cancel_is_never_recorded_anyway_after_Restore()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var transaction = await SeedSlipTransactionAsync(db);
+        var editor = new EfRecordEditor(db, new FakeTimeProvider(Now));
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+        await editor.CancelAsync(transaction.Id, TestContext.Current.CancellationToken);
+        await store.SaveExchangeSlipAsync(
+            transaction.Id, NewSlipReceipt(), NewSlip(received: null) with { Rate = null }, "photo-file-1",
+            AppReceipts.SlipDisposition.Incomplete, TestContext.Current.CancellationToken);
+        await editor.RestoreAsync(transaction.Id, TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var queued = await store.EnqueueCategorizationAsync(transaction.Id, 999, TestContext.Current.CancellationToken);
+
+        var stored = await db.Transactions.AsNoTracking().SingleAsync(t => t.Id == transaction.Id, TestContext.Current.CancellationToken);
+        stored.Status.Should().Be(TransactionStatus.Captured);
+        stored.FailureReason.Should().Be(RecordFailureReason.None);
+        queued.Should().BeFalse("the slip is missing its received amount; only a reply can complete it");
+        (await JobsOfAsync(db, transaction.Id)).Should().BeEmpty();
+        (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken)).Should().BeFalse();
+    }
+
     [Fact]
     public async Task A_clean_slip_is_never_awaiting_confirmation()
     {

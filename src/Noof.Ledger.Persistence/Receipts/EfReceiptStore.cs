@@ -388,14 +388,17 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
     // Amendment 8: a held slip only - never recorded by anything (no RecordExchange job, no Initial, Correction
     // or Edit revision) and not failed. Status-independent like the fiscal rule, so a Cancelled held slip still
     // offers Restore back to its prompt; an incomplete slip (failed) and one a reply completed (a Correction
-    // revision) never offer "Record anyway".
+    // revision) never offer "Record anyway". The stored evidence must itself assess as Hold: a photo cancelled
+    // before its incomplete slip was saved is never marked failed, so only the slip can say it is incomplete.
     async Task<bool> IsHeldSlipAsync(Guid transactionId, CancellationToken cancellationToken) =>
         !await HasJobAsync(transactionId, JobKind.RecordExchange, cancellationToken)
         && !await db.TransactionRevisions.AsNoTracking().AnyAsync(
             revision => revision.TransactionId == transactionId
                 && (revision.Kind == RevisionKind.Initial || revision.Kind == RevisionKind.Correction || revision.Kind == RevisionKind.Edit),
             cancellationToken)
-        && await db.Transactions.AsNoTracking().AnyAsync(t => t.Id == transactionId && t.FailureReason == RecordFailureReason.None, cancellationToken);
+        && await db.Transactions.AsNoTracking().AnyAsync(t => t.Id == transactionId && t.FailureReason == RecordFailureReason.None, cancellationToken)
+        && await GetExchangeSlipAsync(transactionId, cancellationToken) is { } slip
+        && slip.Evidence.Assess(slip.SellerTaxId, taxIdMalformed: false).Disposition == AppReceipts.SlipDisposition.Hold;
 
     Task<bool> HasJobAsync(Guid transactionId, JobKind kind, CancellationToken cancellationToken) =>
         db.CategorizationJobs.AsNoTracking().AnyAsync(job => job.TransactionId == transactionId && job.Kind == kind, cancellationToken);
