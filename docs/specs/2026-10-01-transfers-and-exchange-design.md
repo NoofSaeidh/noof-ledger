@@ -397,7 +397,7 @@ terms and per-currency defaults.
 ## 5. Delivery
 
 **Branches (T-11, `CLAUDE.md` §5).** `phase-7` is cut from `master`, with the draft PR
-`phase-7 → master` (#26). Every PR below targets `phase-7`. A PR that depends on another branches from
+`phase-7 → master` (#31). Every PR below targets `phase-7`. A PR that depends on another branches from
 that PR's branch until the dependency is merged into `phase-7`, then is retargeted; independent PRs
 branch from `phase-7`. Fixes, and whatever the large-model reviews of `phase-7` turn up, land in
 `phase-7` as PRs too. When the phase is finalised, `phase-7` merges into `master` — so nothing in
