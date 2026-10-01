@@ -66,6 +66,16 @@ public class ChargeTermsTests
             .Should().Be(new ComputedCharge(15400m, 150m, 513.333333333333m));
     }
 
+    [Fact]
+    public void A_stated_fee_included_in_the_figure_never_adds_up_to_more_than_the_figure()
+    {
+        var charge = ChargeTerms.Stated(10.01m, 1m, statedFee: 0.005m, feeIncluded: true, FeeTerms.None);
+
+        charge.Should().Be(new ComputedCharge(10.00m, 0.01m, 10m),
+            "rounding 10.005 and 0.005 apart would give 10.01 + 0.01, a debit of 10.02 for a stated 10.01");
+        (charge?.Charged + charge?.Fee).Should().Be(10.01m);
+    }
+
     // percent, fixed, minimum, stated, expected charge, expected fee, expected rate used (over 30 USD); each row has
     // an exact cent split, so the fee is also the terms' fee on the charge.
     public static TheoryData<decimal?, decimal?, decimal?, decimal, decimal, decimal, decimal> FeeInsideTheFigure => new()

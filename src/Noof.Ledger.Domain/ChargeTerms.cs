@@ -21,12 +21,15 @@ public sealed record ChargeTerms(decimal Rate, FeeTerms Fee)
         if (foreignSum <= 0 || statedFee < 0)
             return null;
 
+        // The figure and the fee are each rounded once and the charge is what is left, so an included fee never
+        // makes Charged + Fee exceed the figure said.
+        var figure = MoneyMath.Round(stated);
         var (charged, chargedFee) = (feeIncluded, statedFee) switch
         {
-            (true, { } said) => (MoneyMath.Round(stated - said), MoneyMath.Round(said)),
-            (true, null) => FeeInside(stated, fee),
-            (false, { } said) => (MoneyMath.Round(stated), MoneyMath.Round(said)),
-            (false, null) => (MoneyMath.Round(stated), fee.FeeOn(MoneyMath.Round(stated))),
+            (true, { } said) => (figure - MoneyMath.Round(said), MoneyMath.Round(said)),
+            (true, null) => FeeInside(figure, fee),
+            (false, { } said) => (figure, MoneyMath.Round(said)),
+            (false, null) => (figure, fee.FeeOn(figure)),
         };
 
         return charged > 0
@@ -34,14 +37,14 @@ public sealed record ChargeTerms(decimal Rate, FeeTerms Fee)
             : null;
     }
 
-    // A fee said to be inside the figure but not said: over the reals, f = max(p·(stated − f) + fixed, minimum) has
-    // exactly one solution, max((p·stated + fixed) / (1 + p), minimum). In cents there may be none, so the fee is
-    // that solution rounded and can differ from FeeOn(Charged) by a cent; Charged + Fee == stated always holds.
-    static (decimal Charged, decimal Fee) FeeInside(decimal stated, FeeTerms terms)
+    // A fee said to be inside the figure but not said: over the reals, f = max(p·(figure − f) + fixed, minimum) has
+    // exactly one solution, max((p·figure + fixed) / (1 + p), minimum). In cents there may be none, so the fee is
+    // that solution rounded and can differ from FeeOn(Charged) by a cent; Charged + Fee == figure always holds.
+    static (decimal Charged, decimal Fee) FeeInside(decimal figure, FeeTerms terms)
     {
         var percent = (terms.Percent ?? 0m) / 100m;
-        var fee = MoneyMath.Round(Math.Max((stated * percent + (terms.Fixed ?? 0m)) / (1m + percent), terms.Minimum ?? 0m));
+        var fee = MoneyMath.Round(Math.Max((figure * percent + (terms.Fixed ?? 0m)) / (1m + percent), terms.Minimum ?? 0m));
 
-        return (MoneyMath.Round(stated - fee), fee);
+        return (figure - fee, fee);
     }
 }
