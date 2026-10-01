@@ -241,6 +241,10 @@ the code that builds the echo text.
   "merge after #N".
 - A PR that needs more work after that goes back to draft (`.\ops\gh-bot.ps1 pr ready <n> --undo`). The operator
   merges only non-draft PRs.
+- **Whenever a PR needs the operator, request their review** *(operator's decision, 2026-10-01)* —
+  on marking it ready, and when stopping on something only they can decide (an expensive finding, what
+  is left after the Copilot rounds): `.\ops\gh-bot.ps1 pr edit <n> --add-reviewer NoofSaeidh`. That is
+  what notifies them; a PR they are not requested on waits unseen.
 - **Agents write to GitHub as `noof-ledger-bot[bot]`, never as the operator** *(operator's decision,
   2026-10-01)*. Every `gh` command that writes — a PR's creation, edit or ready state, a comment, a
   review reply, a `gh api` POST/PATCH/DELETE or GraphQL mutation — runs as `.\ops\gh-bot.ps1 <gh args>`.
