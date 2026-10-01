@@ -182,8 +182,8 @@ internal sealed class EfSpendingReadModel(LedgerDbContext db, TimeProvider timeP
         return (firstDay, firstDay.AddMonths(1));
     }
 
-    // A constant 0 converts implicitly to any enum, so new NpgsqlParameter("x", 0) - TransactionKind.Expense,
-    // EntryRole.Principal - binds to the NpgsqlDbType/DbType overload instead of carrying the value. An int parameter is
-    // not a constant, so this always reaches (string, object).
+    // A constant 0 converts implicitly to any enum, so new NpgsqlParameter("x", (int)TransactionKind.Expense) - or
+    // EntryRole.Principal - matches both the NpgsqlDbType and the DbType overloads and does not compile (CS0121, an
+    // ambiguous call). An int parameter is not a constant, so this always reaches (string, object).
     static NpgsqlParameter Integer(string name, int value) => new(name, value);
 }

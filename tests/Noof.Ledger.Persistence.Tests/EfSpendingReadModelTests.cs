@@ -36,9 +36,9 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
 
     static Transaction NewTransaction(
         Guid? walletId, DateTimeOffset occurredAt, string timeZoneId, TransactionStatus status,
-        DateOnly? occurredOn = null) => new()
+        DateOnly? occurredOn = null, Guid? id = null) => new()
     {
-        Id = Guid.NewGuid(),
+        Id = id ?? Guid.NewGuid(),
         WalletId = walletId,
         RawText = "test capture",
         Status = status,
@@ -70,9 +70,10 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
     static readonly Guid SalaryId = new("00000000-0000-0000-0001-000000000022");
     static readonly Guid OtherIncomeId = new("00000000-0000-0000-0001-000000000025");
 
-    static Transaction NewTransferRecord(Guid walletId, DateTimeOffset occurredAt, TransactionStatus status = TransactionStatus.Completed)
+    static Transaction NewTransferRecord(
+        Guid walletId, DateTimeOffset occurredAt, TransactionStatus status = TransactionStatus.Completed, Guid? id = null)
     {
-        var transaction = NewTransaction(walletId, occurredAt, "Europe/Belgrade", status);
+        var transaction = NewTransaction(walletId, occurredAt, "Europe/Belgrade", status, id: id);
         transaction.Kind = TransactionKind.Transfer;
         return transaction;
     }
@@ -685,5 +686,36 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
             new MonthTransfer(early.Id, new DateOnly(2026, 9, 2), new TransferLine(
                 "Raiffeisen RSD", new Money(2000m, CurrencyCode.Rsd), "Cash RSD", new Money(2000m, CurrencyCode.Rsd),
                 null, null, null)));
+    }
+
+    [Fact]
+    public async Task TransfersThisMonthAsync_orders_one_days_transfers_by_time_then_by_id()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var raiffeisen = NewWallet(CurrencyCode.Rsd, "Raiffeisen RSD");
+        var cash = NewWallet(CurrencyCode.Rsd, "Cash RSD");
+        db.Wallets.AddRange(raiffeisen, cash);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var morning = NewTransferRecord(raiffeisen.Id, new DateTimeOffset(2026, 9, 12, 9, 0, 0, TimeSpan.Zero),
+            id: new Guid("00000000-0000-0000-0000-0000000000a3"));
+        var eveningLowerId = NewTransferRecord(raiffeisen.Id, new DateTimeOffset(2026, 9, 12, 18, 0, 0, TimeSpan.Zero),
+            id: new Guid("00000000-0000-0000-0000-0000000000a1"));
+        var eveningHigherId = NewTransferRecord(raiffeisen.Id, new DateTimeOffset(2026, 9, 12, 18, 0, 0, TimeSpan.Zero),
+            id: new Guid("00000000-0000-0000-0000-0000000000a2"));
+        db.Transactions.AddRange(morning, eveningLowerId, eveningHigherId);
+        db.Transfers.AddRange(
+            NewTransfer(morning.Id, raiffeisen, 1000m, cash, 1000m),
+            NewTransfer(eveningLowerId.Id, raiffeisen, 2000m, cash, 2000m),
+            NewTransfer(eveningHigherId.Id, raiffeisen, 3000m, cash, 3000m));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var readModel = new EfSpendingReadModel(db,
+            new FakeTimeProvider(new DateTimeOffset(2026, 9, 15, 12, 0, 0, TimeSpan.Zero)), TimeZoneInfo.Utc);
+
+        var transfers = await readModel.TransfersThisMonthAsync(TestContext.Current.CancellationToken);
+
+        transfers.Select(t => t.Id).Should().Equal(eveningHigherId.Id, eveningLowerId.Id, morning.Id);
     }
 }
