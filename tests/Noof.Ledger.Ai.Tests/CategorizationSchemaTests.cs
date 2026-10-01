@@ -68,7 +68,7 @@ public class CategorizationSchemaTests
                   "additionalProperties": false,
                   "required": ["from_wallet_id", "from_amount", "from_currency", "to_wallet_id", "to_amount", "to_currency", "rate", "fee"],
                   "properties": {
-                    "from_wallet_id": { "type": "null", "description": "The id of the wallet the money left, chosen from the wallets you were offered, or null when the person names none - the ledger then uses the cash wallet of from_currency, or else its default wallet." },
+                    "from_wallet_id": { "type": "null", "description": "The id of the wallet the money left, chosen from the wallets you were offered, or null when the person names none - the ledger then uses the card wallet of from_currency, or else its default wallet." },
                     "from_amount": { "type": "number", "description": "The amount that left, as the person said it - never worked out from other figures." },
                     "from_currency": { "type": "string", "enum": ["EUR", "RSD", "USD", "RUB", "KZT"], "description": "The currency of the amount that left." },
                     "to_wallet_id": { "type": "null", "description": "The id of the wallet the money arrived in, chosen from the wallets you were offered, or null when the person names none - the ledger then uses the cash wallet of to_currency, or else its default wallet." },

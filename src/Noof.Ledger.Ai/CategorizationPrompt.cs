@@ -89,7 +89,8 @@ internal static class CategorizationPrompt
         items stay empty and transfer says what moved: the wallet, amount and currency that left
         (from_wallet_id, from_amount, from_currency) and those that arrived (to_wallet_id,
         to_amount, to_currency). A side's wallet id is null when the person names no wallet for
-        it: the ledger puts that side in the cash wallet of its currency, or else in the default.
+        it: the ledger takes an unnamed from side out of the card wallet of its currency and puts
+        an unnamed to side in the cash wallet of its currency, each else in the default.
         Copy every amount exactly as the person said it and never multiply, add or subtract:
         a stated rate goes into rate — "по 117" for euros changed into dinars is base_currency
         "EUR", quote_amount 117, quote_currency "RSD" — a fee goes into fee, and the ledger works out the

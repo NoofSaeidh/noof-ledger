@@ -107,9 +107,10 @@ public class CategorizationPromptTests
     }
 
     [Fact]
-    public void System_prompt_leaves_an_unnamed_side_to_the_ledgers_cash_wallet()
+    public void System_prompt_leaves_an_unnamed_side_to_the_ledgers_card_or_cash_wallet()
     {
-        CategorizationPrompt.System.Should().Contain("the ledger puts that side in the cash wallet of its currency, or else in the default.");
+        CategorizationPrompt.System.Should().Contain("the ledger takes an unnamed from side out of the card wallet of its currency");
+        CategorizationPrompt.System.Should().Contain("an unnamed to side in the cash wallet of its currency, each else in the default.");
         CategorizationPrompt.System.Should().Contain("The person names no wallet for the cash, so to_wallet_id stays null.");
     }
 

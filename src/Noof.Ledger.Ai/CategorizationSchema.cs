@@ -43,7 +43,7 @@ internal static class CategorizationSchema
 
     const string FromWalletIdDescription =
         "The id of the wallet the money left, chosen from the wallets you were offered, or null when the person "
-        + "names none - the ledger then uses the cash wallet of from_currency, or else its default wallet.";
+        + "names none - the ledger then uses the card wallet of from_currency, or else its default wallet.";
 
     const string ToWalletIdDescription =
         "The id of the wallet the money arrived in, chosen from the wallets you were offered, or null when the "
