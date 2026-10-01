@@ -1014,6 +1014,21 @@ public class CategorizationWorkerTests
     }
 
     [Fact]
+    public async Task A_transfer_corrected_into_a_spending_keeps_the_source_legs_wallet_when_the_answer_still_carries_the_transfer()
+    {
+        var record = TransferRecord(CashRsd, new Money(250m, CurrencyCode.Rsd), MainWallet, new Money(250m, CurrencyCode.Rsd));
+        var answer = OneGroceryLine(250m) with
+        {
+            Transfer = new ProposedTransfer(null, 250m, "RSD", null, null, "RSD", null, null),
+        };
+
+        var run = await RunAsync(record, answer, Job(kind: JobKind.Correct, instruction: "это был расход на хлеб"));
+
+        (run.Applied?.TransactionKind).Should().Be(TransactionKind.Expense);
+        (run.Applied?.WalletId).Should().Be(CashRsd.Id, "the kind decides what is kept, not a leftover transfer object");
+    }
+
+    [Fact]
     public async Task A_transfer_corrected_into_an_income_keeps_the_destination_legs_wallet()
     {
         var record = TransferRecord(MainWallet, new Money(250m, CurrencyCode.Rsd), CashRsd, new Money(250m, CurrencyCode.Rsd));

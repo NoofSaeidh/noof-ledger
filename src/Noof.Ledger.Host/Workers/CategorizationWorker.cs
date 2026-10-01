@@ -393,8 +393,8 @@ internal sealed class CategorizationWorker(
     // Which slot of the proposal a kept wallet fills: the record's one wallet, or one leg of a transfer.
     enum KeptSlot { Wallet, From, To }
 
-    // A wallet the record already sits in, known from the record itself - never offered to the model, so an archived
-    // one is still a fact. Currency is null only when the store could not read it.
+    // A wallet the record already sits in, taken from the record, not from the offered list - so an archived one is
+    // still a fact. Currency is null only when the store could not read it.
     sealed record KeptWallet(KeptSlot Slot, Guid Id, string Name, CurrencyCode? Currency);
 
     // The model is shown a correction's lines, not its wallets, so a correction that names no wallet means "leave it
@@ -407,13 +407,17 @@ internal sealed class CategorizationWorker(
         if (job.Kind != JobKind.Correct)
             return [];
 
-        if (proposal.Transfer is { } transfer)
+        // The kind decides, as it does in ProposalMapper: a spending answer that still carries the old transfer object
+        // must keep its one wallet, not legs the mapper never reads.
+        if (proposal.Kind == ProposedKind.Transfer)
         {
-            return [.. new[]
-            {
-                transfer.FromWalletId is null ? KeptLeg(record, TransferLeg.From, transfer.FromCurrency) : null,
-                transfer.ToWalletId is null ? KeptLeg(record, TransferLeg.To, transfer.ToCurrency) : null,
-            }.OfType<KeptWallet>()];
+            return proposal.Transfer is { } transfer
+                ? [.. new[]
+                {
+                    transfer.FromWalletId is null ? KeptLeg(record, TransferLeg.From, transfer.FromCurrency) : null,
+                    transfer.ToWalletId is null ? KeptLeg(record, TransferLeg.To, transfer.ToCurrency) : null,
+                }.OfType<KeptWallet>()]
+                : [];
         }
 
         return proposal.WalletId is null && KeptSingle(record, proposal.Kind) is { } kept ? [kept] : [];
