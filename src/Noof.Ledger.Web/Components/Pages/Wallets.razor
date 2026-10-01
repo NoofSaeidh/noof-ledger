@@ -66,7 +66,7 @@ else
         @if (!wallet.Archived)
         {
             <div class="noof-wallet-row mt-4">
-                <MudText HtmlTag="label" for="@($"wallet-payment-default-{wallet.Id}")" Typo="Typo.caption" Class="mud-text-secondary">Default for</MudText>
+                <MudText HtmlTag="label" for="@($"wallet-payment-default-{wallet.Id}")" Typo="Typo.caption" Class="mud-text-secondary">Default @wallet.Currency wallet for</MudText>
                 <select id="@($"wallet-payment-default-{wallet.Id}")" @bind="wallet.PendingPaymentDefault"
                         @bind:after="@(() => SetPaymentDefaultAsync(wallet))" class="noof-native-select">
                     <option value="">None</option>
@@ -74,6 +74,9 @@ else
                     <option value="@PaymentMethod.Cash">Cash</option>
                 </select>
             </div>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">
+                Card and cash defaults are per currency: this one applies to @wallet.Currency only.
+            </MudText>
         }
         <div class="noof-wallet-actions mt-4">
             @if (wallet.IsDefaultForCurrency)

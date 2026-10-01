@@ -324,6 +324,42 @@ public sealed class WalletsTests(CookieModeHostFixture fixture) : PageTest, ICla
     }
 
     [Fact]
+    public async Task Two_cash_wallets_in_two_currencies_are_each_the_cash_default_for_their_own()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var dinarName = $"Cash RSD {Guid.NewGuid():N}";
+        var euroName = $"Cash EUR {Guid.NewGuid():N}";
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/wallets");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        var dinarId = await CreateWalletAsync(dinarName, "RSD");
+        var euroId = await CreateWalletAsync(euroName, "EUR");
+
+        await Expect(Page.Locator($"#wallet-{dinarId}")).ToContainTextAsync("Default RSD wallet for");
+        await Expect(Page.Locator($"#wallet-{euroId}")).ToContainTextAsync(
+            "Card and cash defaults are per currency: this one applies to EUR only.");
+
+        await Page.SelectOptionAsync($"#wallet-payment-default-{dinarId}", "Cash");
+        (await WaitForPaymentDefaultAsync(dinarId, WalletPaymentDefault.Cash, cancellationToken))
+            .Should().Be(WalletPaymentDefault.Cash);
+
+        await Page.SelectOptionAsync($"#wallet-payment-default-{euroId}", "Cash");
+        (await WaitForPaymentDefaultAsync(euroId, WalletPaymentDefault.Cash, cancellationToken))
+            .Should().Be(WalletPaymentDefault.Cash);
+
+        // SetPaymentDefaultAsync clears and sets in one database transaction: once EUR's default reads back, a clear of
+        // the RSD wallet's would already be committed.
+        await using var db = OpenDb();
+        (await db.Wallets.AsNoTracking().SingleAsync(w => w.Id == dinarId, cancellationToken)).DefaultForPayment
+            .Should().Be(WalletPaymentDefault.Cash, "each currency keeps its own cash default (T-13)");
+        await Expect(Page.Locator($"#wallet-payment-default-{dinarId}")).ToHaveValueAsync("Cash");
+    }
+
+    [Fact]
     public async Task Terms_typed_with_a_decimal_comma_keep_their_fractions_and_an_unreadable_figure_is_refused()
     {
         // Amendment 27: the operator types a decimal comma, and MudBlazor's own converter reads "117,35" as 11735 under
