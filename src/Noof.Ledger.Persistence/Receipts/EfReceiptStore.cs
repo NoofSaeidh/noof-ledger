@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Configurations;
+using Noof.Ledger.Persistence.Revisions;
 using Npgsql;
 using AppReceipts = Noof.Ledger.Application.Receipts;
 
@@ -330,40 +331,30 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
     // Row lock, same pattern and reason as EfRecordEditor.LockAsync / EfCategorizationStore.ApplyAsync:
     // without it, the status/awaiting-confirmation reads that decide whether to insert are not atomic
     // with a concurrent Cancel. A Cancel that commits between an unlocked read and this insert would
-    // otherwise still get a CategorizeReceipt job queued for it - the receipt worker can then apply
-    // line items while the transaction itself stays Cancelled. FOR UPDATE makes a concurrent Cancel
-    // (which takes the same lock in EfRecordEditor) block until this transaction commits or rolls
-    // back, so the status this reads is never stale by the time the insert happens.
+    // otherwise still get a job queued for it - the worker can then apply while the transaction itself stays
+    // Cancelled. FOR UPDATE makes a concurrent Cancel (which takes the same lock in EfRecordEditor) block
+    // until this transaction commits or rolls back, so the status this reads is never stale by the time the
+    // insert happens.
     public async Task<bool> EnqueueCategorizationAsync(Guid transactionId, int sourceMessageId, CancellationToken cancellationToken)
     {
         await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
 
-        await db.Database.SqlQueryRaw<Guid>(
-            "SELECT id FROM transactions WHERE id = @transactionId FOR UPDATE",
-            new NpgsqlParameter("transactionId", transactionId))
-            .ToListAsync(cancellationToken);
-
-        var status = await db.Transactions.AsNoTracking()
-            .Where(t => t.Id == transactionId)
-            .Select(t => (TransactionStatus?)t.Status)
-            .SingleOrDefaultAsync(cancellationToken);
-
-        if (status != TransactionStatus.Captured || !await IsAwaitingConfirmationAsync(transactionId, cancellationToken))
+        if (await LockAsync(transactionId, cancellationToken) is not { Status: TransactionStatus.Captured } transaction
+            || !await IsAwaitingConfirmationAsync(transactionId, cancellationToken))
             return false;
 
         var now = timeProvider.GetUtcNow();
-        db.CategorizationJobs.Add(new CategorizationJob
+        if (await IsExchangeSlipAsync(transactionId, cancellationToken))
         {
-            Id = Guid.NewGuid(),
-            TransactionId = transactionId,
-            Kind = JobKind.CategorizeReceipt,
-            Status = JobStatus.Pending,
-            AttemptCount = 0,
-            RunAfter = now,
-            CreatedAt = now,
-            UpdatedAt = now,
-            SourceMessageId = sourceMessageId,
-        });
+            // A held slip is recorded by RecordExchange, its caption right after it (spec §3, Recording 1).
+            db.CategorizationJobs.Add(PendingJob(transactionId, JobKind.RecordExchange, now, sourceMessageId));
+            if (CaptionJob(transactionId, transaction, now) is { } caption)
+                db.CategorizationJobs.Add(caption);
+        }
+        else
+        {
+            db.CategorizationJobs.Add(PendingJob(transactionId, JobKind.CategorizeReceipt, now, sourceMessageId));
+        }
 
         try
         {
@@ -381,17 +372,36 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
 
     public async Task<bool> IsAwaitingConfirmationAsync(Guid transactionId, CancellationToken cancellationToken)
     {
-        var source = await db.Receipts.AsNoTracking()
+        var receipt = await db.Receipts.AsNoTracking()
             .Where(r => r.TransactionId == transactionId)
-            .Select(r => (ReceiptSource?)r.Source)
+            .Select(r => new { r.Source, r.Kind })
             .SingleOrDefaultAsync(cancellationToken);
 
-        if (source != ReceiptSource.Vision)
+        if (receipt is not { Source: ReceiptSource.Vision })
             return false;
 
-        return !await db.CategorizationJobs.AsNoTracking()
-            .AnyAsync(job => job.TransactionId == transactionId && job.Kind == JobKind.CategorizeReceipt, cancellationToken);
+        return receipt.Kind == ReceiptKind.Exchange
+            ? await IsHeldSlipAsync(transactionId, cancellationToken)
+            : !await HasJobAsync(transactionId, JobKind.CategorizeReceipt, cancellationToken);
     }
+
+    // Amendment 8: a held slip only - never recorded by anything (no RecordExchange job, no Initial, Correction
+    // or Edit revision) and not failed. Status-independent like the fiscal rule, so a Cancelled held slip still
+    // offers Restore back to its prompt; an incomplete slip (failed) and one a reply completed (a Correction
+    // revision) never offer "Record anyway".
+    async Task<bool> IsHeldSlipAsync(Guid transactionId, CancellationToken cancellationToken) =>
+        !await HasJobAsync(transactionId, JobKind.RecordExchange, cancellationToken)
+        && !await db.TransactionRevisions.AsNoTracking().AnyAsync(
+            revision => revision.TransactionId == transactionId
+                && (revision.Kind == RevisionKind.Initial || revision.Kind == RevisionKind.Correction || revision.Kind == RevisionKind.Edit),
+            cancellationToken)
+        && await db.Transactions.AsNoTracking().AnyAsync(t => t.Id == transactionId && t.FailureReason == RecordFailureReason.None, cancellationToken);
+
+    Task<bool> HasJobAsync(Guid transactionId, JobKind kind, CancellationToken cancellationToken) =>
+        db.CategorizationJobs.AsNoTracking().AnyAsync(job => job.TransactionId == transactionId && job.Kind == kind, cancellationToken);
+
+    Task<bool> IsExchangeSlipAsync(Guid transactionId, CancellationToken cancellationToken) =>
+        db.Receipts.AsNoTracking().AnyAsync(r => r.TransactionId == transactionId && r.Kind == ReceiptKind.Exchange, cancellationToken);
 
     // EF's default naming for the one-to-one FK's auto-generated unique index (ReceiptConfiguration
     // never names it explicitly) - confirmed against the migration, not guessed.

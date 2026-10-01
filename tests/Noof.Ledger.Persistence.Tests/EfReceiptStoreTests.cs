@@ -2,8 +2,10 @@ using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Noof.Ledger.Domain;
+using Noof.Ledger.Persistence.Editing;
 using Noof.Ledger.Persistence.Jobs;
 using Noof.Ledger.Persistence.Receipts;
+using Noof.Ledger.Persistence.Revisions;
 using Npgsql;
 using AppReceipts = Noof.Ledger.Application.Receipts;
 
@@ -859,5 +861,133 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
 
         subject!.OccurredOn.Should().Be(new DateOnly(2026, 9, 25));
         subject.SentOn.Should().Be(new DateOnly(2026, 9, 26));
+    }
+
+    static async Task<(EfReceiptStore Store, Transaction Transaction)> SeedSlipAsync(
+        LedgerDbContext db, AppReceipts.SlipDisposition disposition, string? caption = null)
+    {
+        var transaction = await SeedSlipTransactionAsync(db, caption);
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+        await store.SaveExchangeSlipAsync(
+            transaction.Id, NewSlipReceipt(), NewSlip(received: 11650.00m), "photo-file-1", disposition, TestContext.Current.CancellationToken);
+        return (store, transaction);
+    }
+
+    [Fact]
+    public async Task EnqueueCategorizationAsync_on_a_held_slip_queues_RecordExchange_with_the_echo_message_id_then_the_caption()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (store, transaction) = await SeedSlipAsync(db, AppReceipts.SlipDisposition.Hold, caption: "получил 11650");
+
+        var queued = await store.EnqueueCategorizationAsync(transaction.Id, 999, TestContext.Current.CancellationToken);
+
+        queued.Should().BeTrue();
+        var jobs = await JobsOfAsync(db, transaction.Id);
+        jobs.Select(j => j.Kind).Should().Equal(JobKind.RecordExchange, JobKind.Correct);
+        jobs[0].SourceMessageId.Should().Be(999);
+        jobs[1].Instruction.Should().Be("получил 11650");
+        jobs[1].CreatedAt.Should().Be(jobs[0].CreatedAt.AddTicks(10));
+    }
+
+    [Fact]
+    public async Task EnqueueCategorizationAsync_on_a_held_slip_pressed_twice_is_a_no_op_the_second_time()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (store, transaction) = await SeedSlipAsync(db, AppReceipts.SlipDisposition.Hold, caption: "получил 11650");
+
+        var first = await store.EnqueueCategorizationAsync(transaction.Id, 999, TestContext.Current.CancellationToken);
+        var second = await store.EnqueueCategorizationAsync(transaction.Id, 999, TestContext.Current.CancellationToken);
+
+        first.Should().BeTrue();
+        second.Should().BeFalse();
+        (await JobsOfAsync(db, transaction.Id)).Should().HaveCount(2, "one RecordExchange and one caption, not two of each");
+    }
+
+    [Fact]
+    public async Task EnqueueCategorizationAsync_never_queues_anything_for_an_incomplete_slip()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (store, transaction) = await SeedSlipAsync(db, AppReceipts.SlipDisposition.Incomplete);
+
+        var queued = await store.EnqueueCategorizationAsync(transaction.Id, 999, TestContext.Current.CancellationToken);
+
+        queued.Should().BeFalse("confirmation cannot supply an amount; only a reply can");
+        (await JobsOfAsync(db, transaction.Id)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task IsAwaitingConfirmationAsync_is_true_for_a_held_slip()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (store, transaction) = await SeedSlipAsync(db, AppReceipts.SlipDisposition.Hold);
+
+        (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken)).Should().BeTrue();
+    }
+
+    // Review focus 2: Cancel, then Restore, must bring back the "Record anyway" prompt for a held slip.
+    [Fact]
+    public async Task A_cancelled_held_slip_is_still_awaiting_confirmation()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (store, transaction) = await SeedSlipAsync(db, AppReceipts.SlipDisposition.Hold);
+
+        await new EfRecordEditor(db, new FakeTimeProvider(Now)).CancelAsync(transaction.Id, TestContext.Current.CancellationToken);
+
+        (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken))
+            .Should().BeTrue("a Cancel is not an apply: Restore must return to the slip's confirmation prompt");
+    }
+
+    // Review focus 2: a slip a reply completed (amendment 9) and then cancelled offers Restore only.
+    [Fact]
+    public async Task A_slip_a_reply_completed_is_never_awaiting_even_when_cancelled()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (store, transaction) = await SeedSlipAsync(db, AppReceipts.SlipDisposition.Hold);
+        var completed = await db.Transactions.SingleAsync(t => t.Id == transaction.Id, TestContext.Current.CancellationToken);
+        completed.Status = TransactionStatus.Completed;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await RevisionLog.AppendAsync(
+            db, completed, RevisionKind.Correction, "получил 11650", TransactionStatus.Captured, Now, TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken)).Should().BeFalse();
+
+        await new EfRecordEditor(db, new FakeTimeProvider(Now)).CancelAsync(transaction.Id, TestContext.Current.CancellationToken);
+
+        (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken))
+            .Should().BeFalse("a reply already recorded it; Restore must never offer Record anyway again");
+    }
+
+    // Review focus 2: an incomplete slip is Failed with SlipIncomplete - only a reply completes it.
+    [Fact]
+    public async Task An_incomplete_slip_is_never_awaiting()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (store, transaction) = await SeedSlipAsync(db, AppReceipts.SlipDisposition.Incomplete);
+
+        (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken)).Should().BeFalse();
+
+        await new EfRecordEditor(db, new FakeTimeProvider(Now)).CancelAsync(transaction.Id, TestContext.Current.CancellationToken);
+
+        (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task A_clean_slip_is_never_awaiting_confirmation()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (store, transaction) = await SeedSlipAsync(db, AppReceipts.SlipDisposition.Record);
+
+        (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task A_held_slip_is_no_longer_awaiting_once_Record_anyway_has_queued_RecordExchange()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (store, transaction) = await SeedSlipAsync(db, AppReceipts.SlipDisposition.Hold);
+        await store.EnqueueCategorizationAsync(transaction.Id, 999, TestContext.Current.CancellationToken);
+
+        (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken)).Should().BeFalse();
     }
 }
