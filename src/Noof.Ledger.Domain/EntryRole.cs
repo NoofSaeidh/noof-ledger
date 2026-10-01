@@ -1,7 +1,8 @@
 namespace Noof.Ledger.Domain;
 
-// Stored as an integer; Fee is kept for Phase 7 and is not declared until then.
+// Also the type of LineItem.Role: a fee line and the fee entry it posts share one vocabulary.
 public enum EntryRole
 {
     Principal = 0,
+    Fee = 1,
 }

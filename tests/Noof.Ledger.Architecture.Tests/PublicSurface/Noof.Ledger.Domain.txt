@@ -4,6 +4,8 @@ CaptureKind
 CategorizationAuthority
 CategorizationJob
 Category
+Charge
+ChargeSource
 CurrencyCode
 CurrencyMismatchException
 Entry
@@ -18,12 +20,17 @@ MerchantName
 Money
 PaymentMethod
 Receipt
+ReceiptExchange
 ReceiptKind
 ReceiptKindExtensions
 ReceiptLine
 ReceiptSource
+RecordFailureReason
 Transaction
 TransactionKind
 TransactionStatus
+Transfer
+TransferLeg
 Wallet
+WalletFxTerms
 WalletPaymentDefault
