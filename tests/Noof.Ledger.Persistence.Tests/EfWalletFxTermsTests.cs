@@ -201,4 +201,57 @@ public class EfWalletFxTermsTests(PostgresFixture fixture)
             charge.Source.Should().Be(ChargeSource.WalletTerms);
         }
     }
+
+    public static TheoryData<string, decimal, decimal?, decimal?, decimal?> OutOfRangeTerms => new()
+    {
+        { "a zero rate", 0m, null, null, null },
+        { "a negative rate", -117.35m, null, null, null },
+        { "a negative fee percent", 117.35m, -0.5m, null, null },
+        { "a negative fixed fee", 117.35m, null, -50.00m, null },
+        { "a negative minimum fee", 117.35m, null, null, -100.00m },
+    };
+
+    [Fact]
+    public async Task SetAsync_given_an_unknown_wallet_throws_and_writes_nothing()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await using var db = await fixture.CreateMigratedContextAsync();
+
+        var act = () => new EfWalletFxTerms(db).SetAsync(Guid.NewGuid(), DollarsAtKaspi, cancellationToken);
+
+        await act.Should().ThrowExactlyAsync<KeyNotFoundException>();
+        (await db.WalletFxTerms.AsNoTracking().CountAsync(cancellationToken)).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task SetAsync_in_the_wallets_own_currency_throws_and_writes_nothing()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var kaspi = NewWallet("Kaspi KZT", CurrencyCode.Kzt);
+        await using var db = await WithWalletsAsync(kaspi);
+        var store = new EfWalletFxTerms(db);
+
+        var act = () => store.SetAsync(kaspi.Id, new(CurrencyCode.Kzt, 1m, null, null, null), cancellationToken);
+
+        await act.Should().ThrowExactlyAsync<ArgumentException>(
+            "a spending in the wallet's own currency is never charged, so it has no terms");
+        (await store.ListAsync(kaspi.Id, cancellationToken)).Should().BeEmpty();
+    }
+
+    [Theory]
+    [MemberData(nameof(OutOfRangeTerms))]
+    public async Task SetAsync_refuses_a_rate_that_is_not_positive_or_a_negative_fee_and_writes_nothing(
+        string why, decimal rate, decimal? feePercent, decimal? feeFixed, decimal? feeMinimum)
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var raiffeisen = NewWallet("Raiffeisen RSD", CurrencyCode.Rsd);
+        await using var db = await WithWalletsAsync(raiffeisen);
+        var store = new EfWalletFxTerms(db);
+
+        var act = () => store.SetAsync(
+            raiffeisen.Id, new(CurrencyCode.Eur, rate, feePercent, feeFixed, feeMinimum), cancellationToken);
+
+        await act.Should().ThrowExactlyAsync<ArgumentOutOfRangeException>(why);
+        (await store.ListAsync(raiffeisen.Id, cancellationToken)).Should().BeEmpty();
+    }
 }

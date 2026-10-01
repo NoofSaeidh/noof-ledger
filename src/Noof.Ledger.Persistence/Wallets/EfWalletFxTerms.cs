@@ -25,6 +25,18 @@ internal sealed class EfWalletFxTerms(LedgerDbContext db) : IWalletFxTerms
 
     public async Task SetAsync(Guid walletId, WalletTermsDetails terms, CancellationToken cancellationToken)
     {
+        RequireInRange(terms);
+
+        var wallet = await db.Wallets.AsNoTracking()
+            .Where(w => w.Id == walletId)
+            .Select(w => new { w.Currency })
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw new KeyNotFoundException($"There is no wallet {walletId}.");
+
+        if (terms.Currency == wallet.Currency)
+            throw new ArgumentException(
+                $"Wallet {walletId} holds {wallet.Currency}; its terms are for spending in another currency.", nameof(terms));
+
         var currency = terms.Currency.Value;
 
         await db.Database.ExecuteSqlInterpolatedAsync(
@@ -44,4 +56,15 @@ internal sealed class EfWalletFxTerms(LedgerDbContext db) : IWalletFxTerms
         db.WalletFxTerms
             .Where(t => t.WalletId == walletId && t.Currency == currency)
             .ExecuteDeleteAsync(cancellationToken);
+
+    static void RequireInRange(WalletTermsDetails terms)
+    {
+        if (terms.Rate <= 0m)
+            throw new ArgumentOutOfRangeException(
+                nameof(terms), terms.Rate, $"The {terms.Currency} rate must be above zero.");
+
+        if (terms.FeePercent < 0m || terms.FeeFixed < 0m || terms.FeeMinimum < 0m)
+            throw new ArgumentOutOfRangeException(
+                nameof(terms), $"A {terms.Currency} fee cannot be negative.");
+    }
 }
