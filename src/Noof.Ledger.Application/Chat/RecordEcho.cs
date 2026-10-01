@@ -53,9 +53,13 @@ internal sealed class RecordEcho : IRecordEcho
     {
         { Kind: TransactionKind.Transfer, Transfer: { } transfer, Status: TransactionStatus.Cancelled } =>
             new(TransferText(record, transfer, cancelled: true), [RecordAction.Restore]),
+        { Status: TransactionStatus.Cancelled, FailureReason: not RecordFailureReason.None and var reason } =>
+            new($"Cancelled — {FailureText(record, reason)}", [RecordAction.Restore]),
         { Status: TransactionStatus.Cancelled } =>
             new($"Cancelled — {record.WalletName} · balance {Balances(record)}\n{CancelledBody(record)}".TrimEnd(),
                 [RecordAction.Restore]),
+        { Status: TransactionStatus.Failed, FailureReason: not RecordFailureReason.None and var reason } =>
+            new(FailureText(record, reason), [RecordAction.Edit]),
         { Status: TransactionStatus.Failed } => Failure,
         { Status: TransactionStatus.Captured } => new(Waiting(record), []),
         { Kind: TransactionKind.Transfer, Transfer: { } transfer } =>
@@ -79,9 +83,36 @@ internal sealed class RecordEcho : IRecordEcho
 
     public EchoMessage ComposeCorrectionFailure(CategorizationSubject record, RecordFailureReason reason = RecordFailureReason.None)
     {
+        // A record that never got recorded has nothing to show beneath the notice but its own failure line, which
+        // would only repeat or contradict the reason this reply failed for.
+        if (reason != RecordFailureReason.None && record.Status == TransactionStatus.Failed)
+            return new($"Correction not applied — {FailureText(record, reason)}", [RecordAction.Edit]);
+
         var current = Compose(record);
-        return current with { Text = $"Could not apply that correction — the record is unchanged.\n\n{current.Text}" };
+        var notice = reason != RecordFailureReason.None
+            ? $"Correction not applied — {FailureText(record, reason)}"
+            : "Could not apply that correction — the record is unchanged.";
+
+        return current with { Text = $"{notice}\n\n{current.Text}" };
     }
+
+    // Only the reason is stored, never the rejected proposal, so a text names only what the record itself holds:
+    // Cancel/Restore and a replayed update must render exactly the same words.
+    static string FailureText(CategorizationSubject record, RecordFailureReason reason) => reason switch
+    {
+        RecordFailureReason.MissingReceivedAmount => record.Transfer is { } transfer
+            ? $"Exchange not recorded: how much {transfer.To.Currency} did you get? Reply with the amount or the rate."
+            : "Exchange not recorded: how much did you get? Reply with the amount or the rate.",
+        RecordFailureReason.SameWallet =>
+            "Transfer not recorded: both sides are the same wallet — which wallet did it go to?",
+        RecordFailureReason.LegCurrencyMismatch =>
+            "Transfer not recorded: a wallet holds another currency — create a wallet in that currency or name one.",
+        RecordFailureReason.InvalidRate => "Exchange not recorded: couldn't use that rate. Reply with the amount you got.",
+        RecordFailureReason.InvalidFee => "Transfer not recorded: couldn't place that fee. Reply with the amounts.",
+        RecordFailureReason.InvalidAmount => "Transfer not recorded: an amount wasn't positive. Reply with the amounts.",
+        RecordFailureReason.SlipIncomplete => "Slip read, but a figure is unreadable — reply with it.",
+        _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, "No echo text for this failure reason."),
+    };
 
     const string ReceiptExtractionStep = "Reading the receipt";
     const string ReceiptCategorizationStep = "Categorising the receipt";

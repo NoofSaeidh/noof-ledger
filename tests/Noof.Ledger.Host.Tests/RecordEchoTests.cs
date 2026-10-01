@@ -690,4 +690,77 @@ public class RecordEchoTests
         Echo.Compose(Record(kind: TransactionKind.Income, lines: [salary])).Text
             .Should().EndWith("\nNot in the wallet's currency — no conversion yet.");
     }
+
+    // 1 RSD = 0.008 EUR is how the charge stores it; the echo turns it round to read "1 dearer = N cheaper".
+    [Fact]
+    public void A_charge_at_a_rate_below_one_reads_from_the_dearer_currency()
+    {
+        var dinner = new RecordedLine("dinner", Rsd(1250m), "food-drink", "Food & Drink", null);
+        var charge = new ChargeView(CurrencyCode.Rsd, 1250m, Eur(10m), Eur(0m), 0.008m, FeeTerms.None,
+            ChargeSource.WalletTerms);
+
+        var record = Record(lines: [dinner], walletCurrency: CurrencyCode.Eur, walletBalances: [Eur(390m)])
+            with { Charges = [charge] };
+
+        Echo.Compose(record).Text.Should().EndWith("\n1250.00 RSD → charged 10.00 EUR (1 EUR = 125.0000 RSD, wallet rate)");
+    }
+
+    [Theory]
+    [InlineData(RecordFailureReason.MissingReceivedAmount, "Exchange not recorded: how much did you get? Reply with the amount or the rate.")]
+    [InlineData(RecordFailureReason.SameWallet, "Transfer not recorded: both sides are the same wallet — which wallet did it go to?")]
+    [InlineData(RecordFailureReason.LegCurrencyMismatch,
+        "Transfer not recorded: a wallet holds another currency — create a wallet in that currency or name one.")]
+    [InlineData(RecordFailureReason.InvalidRate, "Exchange not recorded: couldn't use that rate. Reply with the amount you got.")]
+    [InlineData(RecordFailureReason.InvalidFee, "Transfer not recorded: couldn't place that fee. Reply with the amounts.")]
+    [InlineData(RecordFailureReason.InvalidAmount, "Transfer not recorded: an amount wasn't positive. Reply with the amounts.")]
+    [InlineData(RecordFailureReason.SlipIncomplete, "Slip read, but a figure is unreadable — reply with it.")]
+    public void A_failed_first_reading_says_why_it_was_not_recorded_and_offers_edit(RecordFailureReason reason, string text)
+    {
+        var echo = Echo.Compose(Record(TransactionStatus.Failed, lines: []) with { FailureReason = reason });
+
+        echo.Text.Should().Be(text);
+        echo.Actions.Should().Equal(RecordAction.Edit);
+    }
+
+    [Fact]
+    public void A_reply_to_a_failed_reading_that_fails_too_names_only_its_own_reason()
+    {
+        var record = Record(TransactionStatus.Failed, lines: []) with { FailureReason = RecordFailureReason.MissingReceivedAmount };
+
+        var echo = Echo.ComposeCorrectionFailure(record, RecordFailureReason.InvalidRate);
+
+        echo.Text.Should().Be("Correction not applied — Exchange not recorded: couldn't use that rate. Reply with the amount you got.");
+        echo.Actions.Should().Equal(RecordAction.Edit);
+    }
+
+    [Fact]
+    public void A_failed_correction_with_a_reason_names_it_above_the_unchanged_record()
+    {
+        var echo = Echo.ComposeCorrectionFailure(TransferRecord(ExchangeOf100Eur), RecordFailureReason.InvalidRate);
+
+        echo.Text.Should().Be(
+            "Correction not applied — Exchange not recorded: couldn't use that rate. Reply with the amount you got.\n\n"
+            + "Exchange — 100.00 EUR (Cash EUR) → 11700.00 RSD (Cash RSD) · 1 EUR = 117.0000 RSD\n"
+            + "Cash EUR · balance 400.00 EUR\n"
+            + "Cash RSD · balance 23700.00 RSD");
+        echo.Actions.Should().Equal(RecordAction.Cancel, RecordAction.Edit);
+    }
+
+    [Fact]
+    public void A_failed_correction_asking_for_the_received_amount_names_the_records_own_destination_currency()
+    {
+        Echo.ComposeCorrectionFailure(TransferRecord(ExchangeOf100Eur), RecordFailureReason.MissingReceivedAmount).Text
+            .Should().StartWith(
+                "Correction not applied — Exchange not recorded: how much RSD did you get? Reply with the amount or the rate.\n\n"
+                + "Exchange — 100.00 EUR (Cash EUR)");
+    }
+
+    [Fact]
+    public void A_cancelled_record_that_had_failed_keeps_its_reason_and_offers_only_restore()
+    {
+        var echo = Echo.Compose(Record(TransactionStatus.Cancelled, lines: []) with { FailureReason = RecordFailureReason.InvalidFee });
+
+        echo.Text.Should().Be("Cancelled — Transfer not recorded: couldn't place that fee. Reply with the amounts.");
+        echo.Actions.Should().Equal(RecordAction.Restore);
+    }
 }
