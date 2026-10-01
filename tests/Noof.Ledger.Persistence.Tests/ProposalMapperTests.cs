@@ -45,6 +45,8 @@ public class ProposalMapperTests
     static readonly WalletOption RaiffeisenRsd = new(
         Guid.Parse("77777777-7777-7777-7777-777777777777"), "Raiffeisen", CurrencyCode.Rsd, ["райф"], IsDefaultForCurrency: false,
         DefaultForPayment: WalletPaymentDefault.Card);
+    static readonly WalletOption KaspiKzt = new(
+        Guid.Parse("55555555-5555-5555-5555-555555555555"), "Kaspi KZT", CurrencyCode.Kzt, ["каспи"], IsDefaultForCurrency: true);
 
     static readonly ExchangeRate EuroAt117 = new(CurrencyCode.Eur, 117m, CurrencyCode.Rsd);
 
@@ -657,6 +659,42 @@ public class ProposalMapperTests
             .Should().BeTrue();
 
         failure.Should().BeEmpty();
+        reason.Should().Be(RecordFailureReason.None);
+    }
+
+    [Fact]
+    public void A_charge_stated_in_the_wallets_currency_reaches_the_mapped_spending()
+    {
+        var proposal = new CategorizationProposal(
+            [Line(30m, "USD")], WalletId: KaspiKzt.Id, Charged: new ProposedCharge(15400m, "kzt", 154m, true));
+
+        MapWith([.. Wallets, KaspiKzt], proposal, out var mapped, out _).Should().BeTrue();
+
+        mapped.Charged.Should().Be(new StatedCharge(new Money(15400m, CurrencyCode.Kzt), 154m, true));
+    }
+
+    [Fact]
+    public void A_charge_stated_in_another_supported_currency_still_passes_through_for_the_store_to_judge()
+    {
+        var proposal = new CategorizationProposal(
+            [Line(30m, "USD")], WalletId: KaspiKzt.Id, Charged: new ProposedCharge(30m, "USD", null, false));
+
+        MapWith([.. Wallets, KaspiKzt], proposal, out var mapped, out _).Should().BeTrue();
+
+        mapped.Charged.Should().Be(new StatedCharge(new Money(30m, CurrencyCode.Usd), null, false),
+            "a said charge counts as said even when it cannot be honoured, so no older stated charge survives it (review C-4)");
+    }
+
+    [Fact]
+    public void A_charge_in_a_currency_the_ledger_does_not_support_fails_with_no_reason()
+    {
+        var proposal = new CategorizationProposal(
+            [Line(30m, "USD")], WalletId: KaspiKzt.Id, Charged: new ProposedCharge(25m, "GBP", null, false));
+
+        Mapper.TryMap(proposal, Slugs, [KnownMerchant], [.. Wallets, KaspiKzt], "RSD", out _, out var failure, out var reason)
+            .Should().BeFalse();
+
+        failure.Should().Be("charged currency \"GBP\" is not one this ledger supports.");
         reason.Should().Be(RecordFailureReason.None);
     }
 }

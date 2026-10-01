@@ -9,9 +9,9 @@ namespace Noof.Ledger.Application.Categorization;
 // Whether a figure is plausible, or appears in the message at all, is for the person to see in the
 // echo and correct there (D1, docs/decisions/p2-1-quote-and-verify-removed.md). Do not add a sanity bound or a verbatim
 // check here. The same holds for the wallet and the kind: an offered wallet id and a known kind map,
-// and whether income "looks like" income is not this class's question (M3, M9). A transfer fails only for the reasons
-// its own rules name (spec §2): a missing received amount, one wallet on both sides, a leg in a wallet of another
-// currency, a rate or a fee that cannot be placed, an amount that is not positive.
+// and whether income "looks like" income is not this class's question (M3, M9). A transfer fails with a named reason
+// only for what its own rules name (spec §2): a missing received amount, one wallet on both sides, a leg in a wallet of
+// another currency, a rate or a fee that cannot be placed, an amount that is not positive.
 internal sealed class ProposalMapper : IProposalMapper
 {
     const int MaxDescriptionLength = 512;
@@ -60,10 +60,13 @@ internal sealed class ProposalMapper : IProposalMapper
             items = resolved;
         }
 
+        if (!TryStatedCharge(proposal, out var charged, out failure))
+            return false;
+
         if (!TryParseDay(proposal.OccurredOn, out var occurredOn, out failure))
             return false;
 
-        mapped = new MappedProposal(items, occurredOn, kind, wallet.Id, stated);
+        mapped = new MappedProposal(items, occurredOn, kind, wallet.Id, stated, Charged: charged);
         failure = string.Empty;
         return true;
     }
@@ -265,6 +268,26 @@ internal sealed class ProposalMapper : IProposalMapper
 
         failure = string.Empty;
         return new Money(amount, currency);
+    }
+
+    // Passed through unjudged: the store honours a charge only in the wallet's currency (amendment 14), but a charge said
+    // in another currency still counts as said, so it must reach the store rather than vanish here (review C-4).
+    static bool TryStatedCharge(CategorizationProposal proposal, out StatedCharge? charge, out string failure)
+    {
+        charge = null;
+        failure = string.Empty;
+
+        if (proposal.Charged is not { } said)
+            return true;
+
+        if (Supported(said.Currency) is not { } currency)
+        {
+            failure = $"charged currency \"{said.Currency}\" is not one this ledger supports.";
+            return false;
+        }
+
+        charge = new StatedCharge(new Money(said.Amount, currency), said.FeeAmount, said.FeeIncluded);
+        return true;
     }
 
     static List<ResolvedLineItem>? MapItems(
