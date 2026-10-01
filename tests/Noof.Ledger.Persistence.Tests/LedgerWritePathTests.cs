@@ -34,6 +34,12 @@ public class LedgerWritePathTests(PostgresFixture fixture)
         return wallet.Id;
     }
 
+    static async Task AddFxTermsAsync(LedgerDbContext db, Guid walletId, CurrencyCode currency, decimal rate, decimal feePercent)
+    {
+        db.WalletFxTerms.Add(new WalletFxTerms { WalletId = walletId, Currency = currency, Rate = rate, FeePercent = feePercent });
+        await db.SaveChangesAsync(Ct);
+    }
+
     // A text capture as EfCaptureStore leaves it: no wallet yet, sent at 10:00 UTC on the given day.
     static async Task<Guid> CaptureAsync(LedgerDbContext db, DateOnly sentOn)
     {
@@ -555,35 +561,58 @@ public class LedgerWritePathTests(PostgresFixture fixture)
         await ApplyAsync(db, becameATransfer, Expense(day, cash, Line(500m, CurrencyCode.Rsd)));
         await ApplyAsync(db, becameATransfer, AsCorrection(TransferOutcome(day,
             new TransferFacts(cash, Rsd(500m), MainWalletId, Rsd(500m), null, null, null))));
+        var kaspi = await AddWalletAsync(db, "Kaspi KZT", CurrencyCode.Kzt);
+        await AddFxTermsAsync(db, kaspi, CurrencyCode.Usd, 520m, 1m);
+        var charged = await CaptureAsync(db, day);
+        await ApplyAsync(db, charged, Expense(day, kaspi, Line(1000m, CurrencyCode.Kzt), Line(30m, CurrencyCode.Usd)));
+        var saidCharge = await CaptureAsync(db, day);
+        await ApplyAsync(db, saidCharge, Expense(day, kaspi, Line(30m, CurrencyCode.Usd))
+            with { Charged = new StatedCharge(new Money(15_400m, CurrencyCode.Kzt), null, false) });
+        var unpriced = await CaptureAsync(db, day);
+        await ApplyAsync(db, unpriced, Expense(day, kaspi, Line(20m, CurrencyCode.Eur)));
+        var noLongerSpending = await CaptureAsync(db, day);
+        await ApplyAsync(db, noLongerSpending, Expense(day, kaspi, Line(30m, CurrencyCode.Usd)));
+        await ApplyAsync(db, noLongerSpending, AsCorrection(Income(day, kaspi, Line(30m, CurrencyCode.Usd))));
 
         // Expected entries, derived from the stored facts independently of LedgerPostings: an expense's or income's
-        // lines per currency and role on the record's wallet; a transfer's source principal (its stored amount less a
+        // lines per currency and role on the record's wallet, less any Principal line a charge prices; each charge
+        // as its charged amount in the wallet's currency; a transfer's source principal (its stored amount less a
         // fee taken there), its destination principal (its stored amount plus a fee taken there), and its fee on the
-        // wallet of the fee's leg (T-12).
+        // wallet of the fee's leg (T-12). Summed per key, since a charge and the wallet-currency lines share one.
         const string disagreeing = """
             SELECT count(*)::int AS "Value"
             FROM (
-                SELECT t.id AS transaction_id, t.wallet_id, li.currency, li.role,
-                       CASE t.kind WHEN 1 THEN 1 ELSE -1 END * SUM(li.amount) AS amount
-                FROM transactions t
-                JOIN line_items li ON li.transaction_id = t.id
-                WHERE t.kind IN (0, 1)
-                GROUP BY t.id, t.wallet_id, t.kind, li.currency, li.role
-                UNION ALL
-                SELECT tr.transaction_id, tr.from_wallet_id, tr.from_currency, 0,
-                       -(tr.from_amount - CASE WHEN tr.fee_leg = 0 THEN fee.amount ELSE 0 END)
-                FROM transfers tr
-                LEFT JOIN line_items fee ON fee.transaction_id = tr.transaction_id AND fee.role = 1
-                UNION ALL
-                SELECT tr.transaction_id, tr.to_wallet_id, tr.to_currency, 0,
-                       tr.to_amount + CASE WHEN tr.fee_leg = 1 THEN fee.amount ELSE 0 END
-                FROM transfers tr
-                LEFT JOIN line_items fee ON fee.transaction_id = tr.transaction_id AND fee.role = 1
-                UNION ALL
-                SELECT tr.transaction_id, CASE tr.fee_leg WHEN 0 THEN tr.from_wallet_id ELSE tr.to_wallet_id END,
-                       fee.currency, 1, -fee.amount
-                FROM transfers tr
-                JOIN line_items fee ON fee.transaction_id = tr.transaction_id AND fee.role = 1
+                SELECT transaction_id, wallet_id, currency, role, SUM(amount) AS amount
+                FROM (
+                    SELECT t.id AS transaction_id, t.wallet_id, li.currency, li.role,
+                           CASE t.kind WHEN 1 THEN 1 ELSE -1 END * li.amount AS amount
+                    FROM transactions t
+                    JOIN line_items li ON li.transaction_id = t.id
+                    WHERE t.kind IN (0, 1)
+                      AND NOT (li.role = 0 AND EXISTS (
+                          SELECT 1 FROM charges c WHERE c.transaction_id = t.id AND c.currency = li.currency))
+                    UNION ALL
+                    SELECT t.id, t.wallet_id, w.currency, 0, -c.charged_amount
+                    FROM charges c
+                    JOIN transactions t ON t.id = c.transaction_id
+                    JOIN wallets w ON w.id = t.wallet_id
+                    UNION ALL
+                    SELECT tr.transaction_id, tr.from_wallet_id, tr.from_currency, 0,
+                           -(tr.from_amount - CASE WHEN tr.fee_leg = 0 THEN fee.amount ELSE 0 END)
+                    FROM transfers tr
+                    LEFT JOIN line_items fee ON fee.transaction_id = tr.transaction_id AND fee.role = 1
+                    UNION ALL
+                    SELECT tr.transaction_id, tr.to_wallet_id, tr.to_currency, 0,
+                           tr.to_amount + CASE WHEN tr.fee_leg = 1 THEN fee.amount ELSE 0 END
+                    FROM transfers tr
+                    LEFT JOIN line_items fee ON fee.transaction_id = tr.transaction_id AND fee.role = 1
+                    UNION ALL
+                    SELECT tr.transaction_id, CASE tr.fee_leg WHEN 0 THEN tr.from_wallet_id ELSE tr.to_wallet_id END,
+                           fee.currency, 1, -fee.amount
+                    FROM transfers tr
+                    JOIN line_items fee ON fee.transaction_id = tr.transaction_id AND fee.role = 1
+                ) parts
+                GROUP BY transaction_id, wallet_id, currency, role
             ) expected
             FULL JOIN (
                 SELECT transaction_id, wallet_id, currency, role, SUM(amount) AS amount
@@ -612,12 +641,44 @@ public class LedgerWritePathTests(PostgresFixture fixture)
                OR (t.kind = 3 AND EXISTS (
                        SELECT 1 FROM line_items li WHERE li.transaction_id = t.id AND li.role = 0))
             """;
+        // `disagreeing` takes each charge row as given, so a wrong row would be posted and expected alike. This checks
+        // the rows themselves against the lines they price: an expense's foreign currency, its Principal lines there
+        // at the rate the row used, and fee lines that are its fees.
+        const string mispricedCharges = """
+            SELECT ((
+                SELECT count(*)
+                FROM charges c
+                JOIN transactions t ON t.id = c.transaction_id
+                JOIN wallets w ON w.id = t.wallet_id
+                WHERE t.kind <> 0
+                   OR c.currency = w.currency
+                   OR c.charged_amount IS DISTINCT FROM (
+                          SELECT round(SUM(li.amount) * c.rate_used, 2)
+                          FROM line_items li
+                          WHERE li.transaction_id = t.id AND li.role = 0 AND li.currency = c.currency)
+            ) + (
+                SELECT count(*)
+                FROM transactions t
+                JOIN wallets w ON w.id = t.wallet_id
+                WHERE t.kind = 0
+                  AND ((SELECT coalesce(SUM(c.fee_amount), 0) FROM charges c WHERE c.transaction_id = t.id)
+                       IS DISTINCT FROM (SELECT coalesce(SUM(li.amount), 0) FROM line_items li
+                                         WHERE li.transaction_id = t.id AND li.role = 1 AND li.currency = w.currency)
+                       OR EXISTS (SELECT 1 FROM line_items li
+                                  WHERE li.transaction_id = t.id AND li.role = 1 AND li.currency <> w.currency))
+            ))::int AS "Value"
+            """;
 
         (await db.Entries.CountAsync(Ct)).Should().BeGreaterThan(0, "a rule over no entries would prove nothing");
         (await db.Transfers.CountAsync(Ct)).Should().Be(4, "a rule over no transfers would prove nothing about them");
+        (await db.Charges.CountAsync(Ct)).Should().Be(2, "a rule over no charges would prove nothing about them");
         (await CountAsync(db, disagreeing)).Should().Be(0,
-            "every expense and income has exactly minus/plus its lines per currency and role, every transfer posts each "
-            + "leg's stored amount on its own wallet with the fee on its leg's, and a statement has none (M5, T-12)");
+            "every expense and income has exactly minus/plus its lines per currency and role, a charge replacing the lines it "
+            + "prices in the wallet's currency, every transfer posts each leg's stored amount on its own wallet with the fee on "
+            + "its leg's, and a statement has none (M5, T-12)");
+        (await CountAsync(db, mispricedCharges)).Should().Be(0,
+            "a charge prices an expense's Principal lines in one foreign currency at its own rate, and an expense's fee "
+            + "lines are its charges' fees in its wallet's currency");
         (await CountAsync(db, misplaced)).Should().Be(0, "an entry is in its record's wallet, or in a transfer's destination");
         (await CountAsync(db, brokenTransfers)).Should().Be(0,
             "a transfer has its legs, its source as the record's wallet, a fee leg exactly when it has a fee line, and no principal line");

@@ -1,11 +1,15 @@
+using System.Globalization;
+using System.Text.Json;
 using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Time.Testing;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Reporting;
 using Noof.Ledger.Domain;
+using Noof.Ledger.Persistence.Categorization;
 using Noof.Ledger.TestKit;
 
 namespace Noof.Ledger.Persistence.Tests;
@@ -24,6 +28,11 @@ public class MoneyExactnessTests(PostgresFixture fixture)
     static readonly Guid UsdWalletId = Guid.NewGuid();
     static readonly Guid RubWalletId = Guid.NewGuid();
     static readonly Guid KztWalletId = Guid.NewGuid();
+    static readonly Guid RaiffeisenId = Guid.NewGuid();
+    static readonly Guid CashRsdId = Guid.NewGuid();
+    static readonly Guid KaspiId = Guid.NewGuid();
+    static readonly Guid GroceriesId = new("00000000-0000-0000-0001-000000000001");
+    static int nextMessageId;
 
     const string TimeZone = "Europe/Belgrade";
     static readonly DateOnly Day1 = new(2026, 9, 1);
@@ -120,6 +129,19 @@ public class MoneyExactnessTests(PostgresFixture fixture)
         });
     }
 
+    static async Task<Guid> CaptureAsync(LedgerDbContext db, string rawText)
+    {
+        var transaction = new Transaction
+        {
+            Id = Guid.NewGuid(), RawText = rawText, Status = TransactionStatus.Captured,
+            TimeZoneId = TimeZone, OccurredAt = At2, OccurredOn = Day2,
+            TelegramChatId = 1, TelegramMessageId = Interlocked.Increment(ref nextMessageId), CreatedAt = At2,
+        };
+        db.Transactions.Add(transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        return transaction.Id;
+    }
+
     static (IBalanceReadModel Balances, ServiceProvider Provider) BuildBalanceReadModel(string connectionString)
     {
         var services = new ServiceCollection();
@@ -160,6 +182,64 @@ public class MoneyExactnessTests(PostgresFixture fixture)
             .Should().BeEquivalentTo([new Money(-100.00m, CurrencyCode.Rub)]);
         (await balances.BalanceOfAsync(KztWalletId, TestContext.Current.CancellationToken))
             .Should().BeEquivalentTo([new Money(51_234_567.89m, CurrencyCode.Kzt)]);
+    }
+
+    [Theory]
+    [InlineData("ru-RU")]
+    [InlineData("sr-Latn-RS")]
+    public async Task A_transfer_with_a_fee_and_a_charged_foreign_spending_are_exact_under_a_non_invariant_culture(string cultureName)
+    {
+        using var culture = new CultureScope(cultureName);
+        var ct = TestContext.Current.CancellationToken;
+        var connectionString = await fixture.CreateEmptyDatabaseConnectionStringAsync();
+
+        await using (var db = new LedgerDbContext(new DbContextOptionsBuilder<LedgerDbContext>().UseNpgsql(connectionString).Options))
+        {
+            await db.Database.MigrateAsync(ct);
+            db.Wallets.AddRange(
+                Wallet(RaiffeisenId, "Raiffeisen RSD", CurrencyCode.Rsd),
+                Wallet(CashRsdId, "Cash RSD", CurrencyCode.Rsd),
+                Wallet(KaspiId, "Kaspi KZT", CurrencyCode.Kzt));
+            Opening(db, RaiffeisenId, CurrencyCode.Rsd, 50_000.00m, Day1, At1);
+            Opening(db, KaspiId, CurrencyCode.Kzt, 100_000.00m, Day1, At1);
+            db.WalletFxTerms.Add(new WalletFxTerms { WalletId = KaspiId, Currency = CurrencyCode.Usd, Rate = 519.87m, FeePercent = 1.5m });
+            await db.SaveChangesAsync(ct);
+            var store = new EfCategorizationStore(db, new FakeTimeProvider(At2));
+
+            var withdrawal = await CaptureAsync(db, "снял 10000,25 с райфа, комиссия 150,25");
+            await store.ApplyAsync(withdrawal, new CategorizationOutcome(
+                [], Day2, TransactionKind: TransactionKind.Transfer, WalletId: RaiffeisenId,
+                Transfer: new TransferFacts(
+                    RaiffeisenId, new Money(10_150.50m, CurrencyCode.Rsd), CashRsdId, new Money(10_000.25m, CurrencyCode.Rsd),
+                    new Money(150.25m, CurrencyCode.Rsd), TransferLeg.From, null)), ct);
+
+            var dinner = await CaptureAsync(db, "ужин 30,10 долларов с каспи");
+            await store.ApplyAsync(dinner, new CategorizationOutcome(
+                [new CategorizedLineItem("ужин", new Money(30.10m, CurrencyCode.Usd), GroceriesId, null)], Day2,
+                TransactionKind: TransactionKind.Expense, WalletId: KaspiId), ct);
+
+            (await store.GetSubjectAsync(dinner, ct))!.Charges.Should().Equal([new ChargeView(
+                CurrencyCode.Usd, 30.10m, new Money(15_648.09m, CurrencyCode.Kzt), new Money(234.72m, CurrencyCode.Kzt),
+                519.87m, new FeeTerms(1.5m, null, null), ChargeSource.WalletTerms)]);
+
+            var snapshot = await db.TransactionRevisions.AsNoTracking()
+                .Where(revision => revision.TransactionId == dinner)
+                .Select(revision => revision.Snapshot)
+                .SingleAsync(ct);
+            using var json = JsonDocument.Parse(snapshot);
+            var charge = json.RootElement.GetProperty("charges").EnumerateArray().Single();
+            // Read back invariant on purpose: "15648,0900" written under ru-RU would parse here as 156480900.
+            decimal.Parse(charge.GetProperty("charged_amount").GetString()!, CultureInfo.InvariantCulture).Should().Be(15_648.09m);
+            decimal.Parse(charge.GetProperty("fee_amount").GetString()!, CultureInfo.InvariantCulture).Should().Be(234.72m);
+            decimal.Parse(charge.GetProperty("rate_used").GetString()!, CultureInfo.InvariantCulture).Should().Be(519.87m);
+        }
+
+        var (balances, provider) = BuildBalanceReadModel(connectionString);
+        await using var _ = provider;
+
+        (await balances.BalanceOfAsync(RaiffeisenId, ct)).Should().Equal([new Money(39_849.50m, CurrencyCode.Rsd)]);
+        (await balances.BalanceOfAsync(CashRsdId, ct)).Should().Equal([new Money(10_000.25m, CurrencyCode.Rsd)]);
+        (await balances.BalanceOfAsync(KaspiId, ct)).Should().Equal([new Money(84_117.19m, CurrencyCode.Kzt)]);
     }
 
     [Theory]

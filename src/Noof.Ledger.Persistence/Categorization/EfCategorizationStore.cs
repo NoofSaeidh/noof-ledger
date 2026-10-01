@@ -78,6 +78,8 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
             ? await TransferViewAsync(transactionId, lines, cancellationToken)
             : null;
 
+        var charges = await ChargesOfAsync(transactionId, header.WalletCurrency, lines, cancellationToken);
+
         // A voice capture has no text until its transcript arrives, and none at all when nothing was heard;
         // the pipeline and the echo read that as empty, which is what it is. Only a Manual record has no chat,
         // and nothing categorises or echoes one, so 0 stands in for it.
@@ -85,7 +87,7 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
             header.Id, header.RawText ?? string.Empty, header.TelegramChatId ?? 0, header.BotMessageId, header.WalletName,
             header.Status, ZonedClock.LocalDate(header.OccurredAt, header.TimeZoneId), header.OccurredOn, lines,
             header.CaptureKind, header.Kind, header.WalletCurrency, balances, statement, WalletId: header.WalletId,
-            Transfer: transfer, FailureReason: header.FailureReason);
+            Transfer: transfer, FailureReason: header.FailureReason, Charges: charges);
     }
 
     async Task<TransferView?> TransferViewAsync(
@@ -129,6 +131,30 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
             ? new ExchangeRate(
                 baseCurrency, quoteAmount, baseCurrency == transfer.From.Currency ? transfer.To.Currency : transfer.From.Currency)
             : null;
+
+    async Task<IReadOnlyList<ChargeView>> ChargesOfAsync(
+        Guid transactionId, CurrencyCode? walletCurrency, IReadOnlyList<RecordedLine> lines, CancellationToken cancellationToken)
+    {
+        if (walletCurrency is not { } chargedIn)
+            return [];
+
+        var charges = await db.Charges.AsNoTracking()
+            .Where(charge => charge.TransactionId == transactionId)
+            .ToListAsync(cancellationToken);
+
+        return [.. charges
+            .OrderBy(charge => charge.Currency.Value, StringComparer.Ordinal)
+            .Select(charge => new ChargeView(
+                charge.Currency,
+                lines
+                    .Where(line => line.Role == EntryRole.Principal && line.Amount.Currency == charge.Currency)
+                    .Sum(line => line.Amount.Amount),
+                new Money(charge.ChargedAmount, chargedIn),
+                new Money(charge.FeeAmount, chargedIn),
+                charge.RateUsed,
+                new FeeTerms(charge.FeePercent, charge.FeeFixed, charge.FeeMinimum),
+                charge.Source))];
+    }
 
     public async Task ApplyAsync(Guid transactionId, CategorizationOutcome outcome, CancellationToken cancellationToken)
     {
@@ -214,6 +240,7 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
 
         var transaction = await db.Transactions.SingleAsync(t => t.Id == transactionId, cancellationToken);
         var statusBefore = transaction.Status;
+        var walletBefore = transaction.WalletId;
         // A correction arriving for a cancelled record corrects it and leaves it cancelled; only Restore
         // brings it back.
         transaction.Status = statusBefore == TransactionStatus.Cancelled ? TransactionStatus.Cancelled : TransactionStatus.Completed;
@@ -223,6 +250,8 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
         transaction.FailureReason = RecordFailureReason.None;
 
         await db.SaveChangesAsync(cancellationToken);
+        var chargeFees = await ForeignCharges.RewriteAsync(db, transaction, outcome.Kind, walletBefore, outcome.Charged, cancellationToken);
+        await AddChargeFeeLinesAsync(transactionId, chargeFees, cancellationToken);
         await LedgerPostings.RewriteAsync(db, transaction, outcome.StatedBalance, transfer, cancellationToken);
         await RevisionLog.AppendAsync(db, transaction, RevisionKindFor(outcome), outcome.Instruction,
             statusBefore, timeProvider.GetUtcNow(), cancellationToken);
@@ -260,6 +289,24 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
             Ordinal = ordinal,
             Role = EntryRole.Fee,
         });
+    }
+
+    // After the highest ordinal the record has, not ApplyAsync's running one: the running ordinal never moves past a
+    // line that names its own ordinal.
+    async Task AddChargeFeeLinesAsync(
+        Guid transactionId, IReadOnlyList<(CurrencyCode Purchase, Money Fee)> fees, CancellationToken cancellationToken)
+    {
+        if (fees.Count == 0)
+            return;
+
+        var ordinal = 1 + (await db.LineItems.AsNoTracking()
+            .Where(li => li.TransactionId == transactionId)
+            .Select(li => (int?)li.Ordinal)
+            .MaxAsync(cancellationToken) ?? 0);
+        foreach (var (purchase, fee) in fees)
+            await AddFeeLineAsync(transactionId, fee, $"Fee · {purchase.Value} purchase", ordinal++, cancellationToken);
+
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     // CategorizeReceipt runs twice for the same receipt (I-2, Phase 6 final review): once from
