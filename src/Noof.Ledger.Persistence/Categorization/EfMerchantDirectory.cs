@@ -137,6 +137,39 @@ internal sealed class EfMerchantDirectory(LedgerDbContext db, TimeProvider timeP
         }
     }
 
+    public async Task<Guid> VenueForTaxIdAsync(string taxId, string displayName, CancellationToken cancellationToken)
+    {
+        RequireMaxLength(taxId, 32, nameof(taxId));
+        RequireMaxLength(displayName, 256, nameof(displayName));
+
+        if (await FindByTaxIdAsync(taxId, cancellationToken) is { } known)
+            return known;
+
+        var venue = new Merchant
+        {
+            Id = Guid.NewGuid(),
+            DisplayName = displayName,
+            Kind = MerchantKind.ExchangeVenue,
+            TaxId = taxId,
+        };
+        db.Merchants.Add(venue);
+
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            return venue.Id;
+        }
+        catch (DbUpdateException ex) when (IsDuplicateTaxIdViolation(ex))
+        {
+            // Another worker created a merchant for this PIB first (LinkTaxIdAsync's race): that one stands.
+            db.Entry(venue).State = EntityState.Detached;
+            return await db.Merchants.AsNoTracking()
+                .Where(m => m.TaxId == taxId)
+                .Select(m => m.Id)
+                .SingleAsync(cancellationToken);
+        }
+    }
+
     static bool IsDuplicateTaxIdViolation(DbUpdateException ex) =>
         ex.InnerException is PostgresException
         {

@@ -77,6 +77,7 @@ public interface IReceiptStore
     // Captured and still awaiting confirmation at insert time, checked under the same row lock the insert runs
     // under (2026-09-27): a Cancel that lands between a caller's own status read and this call must never still
     // get a job queued - false covers that case too, and the caller treats it exactly like "already queued".
+    // A caller that gets false just re-renders the record's current state.
     Task<bool> EnqueueCategorizationAsync(Guid transactionId, int sourceMessageId, CancellationToken cancellationToken);
 
     // A fiscal vision receipt that has never had a CategorizeReceipt job, or (amendment 8) a vision exchange
