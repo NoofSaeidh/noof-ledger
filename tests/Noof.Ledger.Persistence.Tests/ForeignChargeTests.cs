@@ -96,6 +96,24 @@ public class ForeignChargeTests(PostgresFixture fixture)
             .OrderBy(line => line.Ordinal)
             .ToListAsync(Ct);
 
+    static async Task<IReadOnlyList<(Guid WalletId, Money Amount, EntryRole Role)>> EntriesOfAsync(LedgerDbContext db, Guid transactionId)
+    {
+        var entries = await db.Entries.AsNoTracking().Where(entry => entry.TransactionId == transactionId).ToListAsync(Ct);
+        return [.. entries
+            .OrderBy(entry => entry.Amount.Currency.Value, StringComparer.Ordinal)
+            .ThenBy(entry => entry.Role)
+            .Select(entry => (entry.WalletId, entry.Amount, entry.Role))];
+    }
+
+    // Read through the view the echo and the dashboard read. Null: no balance row in that currency.
+    static async Task<decimal?> BalanceAsync(LedgerDbContext db, Guid walletId, CurrencyCode currency)
+    {
+        var rows = await db.Database.SqlQuery<decimal>(
+            $"""SELECT balance AS "Value" FROM wallet_balances WHERE wallet_id = {walletId} AND currency = {currency.Value}""")
+            .ToListAsync(Ct);
+        return rows.Count == 0 ? null : rows.Single();
+    }
+
     [Fact]
     public async Task Wallet_terms_price_a_foreign_line_and_its_fee_becomes_a_fees_and_charges_line()
     {
@@ -516,5 +534,79 @@ public class ForeignChargeTests(PostgresFixture fixture)
         (await ChargesOfAsync(db, id)).Should().Equal(
             new ChargeRow("USD", 15_600m, 156m, 520m, 1m, null, null, ChargeSource.WalletTerms));
         (await FeeLinesOfAsync(db, id)).Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task A_charged_spending_debits_its_wallet_the_charge_plus_the_fee()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var kaspi = await AddKztWalletAsync(db, "Kaspi KZT");
+        await SetTermsAsync(db, kaspi, CurrencyCode.Usd, 520m, feePercent: 1m);
+        var id = await CaptureAsync(db);
+
+        await ApplyAsync(db, id, Spending(kaspi, Line(30m, CurrencyCode.Usd)));
+
+        db.ChangeTracker.Clear();
+        (await EntriesOfAsync(db, id)).Should().Equal(
+            (kaspi, new Money(-15_600m, CurrencyCode.Kzt), EntryRole.Principal),
+            (kaspi, new Money(-156m, CurrencyCode.Kzt), EntryRole.Fee));
+        (await BalanceAsync(db, kaspi, CurrencyCode.Kzt)).Should().Be(-15_756.00m, "acceptance 4: charge 15600.00 + fee 156.00");
+        (await BalanceAsync(db, kaspi, CurrencyCode.Usd)).Should().BeNull("a charged currency leaves no foreign balance behind");
+    }
+
+    [Fact]
+    public async Task A_stated_charge_debits_the_stated_figure_and_its_fee()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var kaspi = await AddKztWalletAsync(db, "Kaspi KZT");
+        await SetTermsAsync(db, kaspi, CurrencyCode.Usd, 520m, feePercent: 1m);
+        var id = await CaptureAsync(db);
+        await ApplyAsync(db, id, Spending(kaspi, Line(30m, CurrencyCode.Usd)));
+
+        await ApplyAsync(db, id, AsCorrection(Said(Spending(kaspi, Line(30m, CurrencyCode.Usd)), 15_400m, CurrencyCode.Kzt)));
+
+        db.ChangeTracker.Clear();
+        (await EntriesOfAsync(db, id)).Should().Equal(
+            (kaspi, new Money(-15_400m, CurrencyCode.Kzt), EntryRole.Principal),
+            (kaspi, new Money(-154m, CurrencyCode.Kzt), EntryRole.Fee));
+        (await BalanceAsync(db, kaspi, CurrencyCode.Kzt)).Should().Be(-15_554.00m);
+    }
+
+    [Fact]
+    public async Task Wallet_currency_lines_and_a_charged_foreign_line_share_one_principal_entry()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var kaspi = await AddKztWalletAsync(db, "Kaspi KZT");
+        await SetTermsAsync(db, kaspi, CurrencyCode.Usd, 520m, feePercent: 1m);
+        var id = await CaptureAsync(db);
+
+        await ApplyAsync(db, id, Spending(kaspi, Line(1000m, CurrencyCode.Kzt, GroceriesId), Line(30m, CurrencyCode.Usd)));
+
+        db.ChangeTracker.Clear();
+        (await EntriesOfAsync(db, id)).Should().Equal(
+            (kaspi, new Money(-16_600m, CurrencyCode.Kzt), EntryRole.Principal),
+            (kaspi, new Money(-156m, CurrencyCode.Kzt), EntryRole.Fee));
+    }
+
+    [Fact]
+    public async Task A_foreign_line_no_charge_prices_posts_in_its_own_currency()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var noTerms = await AddKztWalletAsync(db, "Kaspi KZT");
+        var tinyRate = await AddKztWalletAsync(db, "Halyk KZT");
+        await SetTermsAsync(db, tinyRate, CurrencyCode.Usd, 0.4m);
+        var unpriced = await CaptureAsync(db);
+        var roundedAway = await CaptureAsync(db);
+
+        await ApplyAsync(db, unpriced, Spending(noTerms, Line(30m, CurrencyCode.Usd)));
+        await ApplyAsync(db, roundedAway, Spending(tinyRate, Line(0.01m, CurrencyCode.Usd)));
+
+        db.ChangeTracker.Clear();
+        (await EntriesOfAsync(db, unpriced)).Should().Equal((noTerms, new Money(-30m, CurrencyCode.Usd), EntryRole.Principal));
+        (await EntriesOfAsync(db, roundedAway)).Should().Equal((tinyRate, new Money(-0.01m, CurrencyCode.Usd), EntryRole.Principal));
+        (await BalanceAsync(db, noTerms, CurrencyCode.Usd)).Should().Be(-30m);
+        (await BalanceAsync(db, noTerms, CurrencyCode.Kzt)).Should().BeNull("M10: nothing is converted without a charge");
+        (await BalanceAsync(db, tinyRate, CurrencyCode.Usd)).Should().Be(-0.01m);
+        (await BalanceAsync(db, tinyRate, CurrencyCode.Kzt)).Should().BeNull("a charge that rounds to zero converts nothing either");
     }
 }

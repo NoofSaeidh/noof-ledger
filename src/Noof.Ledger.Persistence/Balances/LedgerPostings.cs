@@ -26,6 +26,30 @@ internal static class LedgerPostings
         GROUP BY t.id, t.wallet_id, li.currency, li.role
         """;
 
+    // An expense's Principal entries (spec §1 "Posting → Expense"): its Principal lines in the wallet's currency, and
+    // in any foreign currency no charge prices (M10), as their own sum; each charge as its charged amount in the
+    // wallet's currency, in the same entry as the wallet-currency lines. One entry per currency.
+    const string InsertExpensePrincipalsSql = """
+        INSERT INTO entries (id, transaction_id, wallet_id, amount, currency, role)
+        SELECT gen_random_uuid(), t.id, t.wallet_id, -SUM(posted.amount), posted.currency, @principal
+        FROM transactions t
+        CROSS JOIN (
+            SELECT li.amount, li.currency
+            FROM line_items li
+            WHERE li.transaction_id = @transactionId AND li.role = @principal
+              AND NOT EXISTS (
+                  SELECT 1 FROM charges c WHERE c.transaction_id = li.transaction_id AND c.currency = li.currency)
+            UNION ALL
+            SELECT c.charged_amount, w.currency
+            FROM charges c
+            JOIN transactions ct ON ct.id = c.transaction_id
+            JOIN wallets w ON w.id = ct.wallet_id
+            WHERE c.transaction_id = @transactionId
+        ) posted
+        WHERE t.id = @transactionId
+        GROUP BY t.id, t.wallet_id, posted.currency
+        """;
+
     const string InsertEntrySql = """
         INSERT INTO entries (id, transaction_id, wallet_id, amount, currency, role)
         VALUES (gen_random_uuid(), @transactionId, @walletId, @amount, @currency, @role)
@@ -93,7 +117,13 @@ internal static class LedgerPostings
 
     static async Task PostExpenseAsync(LedgerDbContext db, Guid transactionId, CancellationToken cancellationToken)
     {
-        await PostLinesAsync(db, transactionId, EntryRole.Principal, sign: -1, cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(
+            InsertExpensePrincipalsSql,
+            [
+                new NpgsqlParameter("transactionId", transactionId),
+                new NpgsqlParameter("principal", (object)(int)EntryRole.Principal),
+            ],
+            cancellationToken);
         await PostLinesAsync(db, transactionId, EntryRole.Fee, sign: -1, cancellationToken);
     }
 
