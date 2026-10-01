@@ -63,7 +63,7 @@ Taken while the implementation plan was written against the code. The plan itsel
 | A-4 | Enum columns are `integer`, as every enum column in the schema is. | The `smallint` above was illustrative. |
 | A-5 | Echo amounts keep the bot's format: `0.00` invariant, ASCII minus, no grouping (`10000.00`, `-1000.00`). | As Phase 4; the figures in §4 are illustrative. |
 | A-6 | A failure-reason echo names only what the database holds — only the reason is stored, not the rejected proposal: `Transfer not recorded: both sides are the same wallet — which wallet did it go to?`, `Transfer not recorded: a wallet holds another currency — create a wallet in that currency or name one.`, `Exchange not recorded: how much did you get? Reply with the amount or the rate.` (the currency is named when the record already holds a transfer), `Slip read, but the amount received is unreadable — reply with it.` (from the slip's evidence). | So Cancel/Restore and a replayed update render exactly the same text. |
-| A-7 | "Awaiting confirmation" for an `Exchange` receipt = no `RecordExchange` job, never applied (no `Initial`/`Correction`/`Edit` revision) and no `failure_reason`; status-independent like the fiscal predicate. | Cancel → Restore of a held slip returns to its prompt; an incomplete slip and a completed-then-cancelled one never offer "Record anyway". |
+| A-7 | "Awaiting confirmation" for an `Exchange` receipt = no `RecordExchange` job, never applied (no `Initial`/`Correction`/`Edit` revision) and `failure_reason` `None`; status-independent like the fiscal predicate. | Cancel → Restore of a held slip returns to its prompt; an incomplete slip and a completed-then-cancelled one never offer "Record anyway". |
 | A-8 | A reply to a held slip records it, as for a fiscal receipt. A reply that completes a held or incomplete slip puts each unnamed leg on the cash default of its currency, by the same code `RecordExchange` uses. A slip correction keeps its office. | A reply is the operator's own figures; the slip rule (always cash) must not depend on the model. |
 | A-9 | A slip whose PIB already belongs to a shop links to that merchant; an unknown PIB creates an `ExchangeVenue`. `ix_merchants_tax_id` is unchanged. | One PIB is one legal entity. |
 | A-10 | A slip's caption job is created 1 µs after its `RecordExchange` job. | The queue orders a transaction's jobs by strict `created_at <`; two jobs of one commit share `now`. |
@@ -82,6 +82,7 @@ Taken while the implementation plan was written against the code. The plan itsel
 | A-23 | A slip's printed issue date is the record's date until a correction says otherwise. | A slip photographed the next day, completed by a reply, would otherwise land on the capture day. |
 | A-24 | Charges are never computed for a fiscal receipt's record (T-1); `DIN`/`ДИН` on a slip read as RSD; slip vision reports figures exactly as printed and never works one out; `/wallets` numeric fields take a comma as the decimal separator and refuse what they cannot parse. | The receipt echo cannot render a charge; Serbian slips print DIN; P6-2; MudBlazor's default converter reads `117,35` as 11735. |
 | A-25 | The crossing-zero line compares the source's balance with and without this transfer under the checkpoint rule. | A backdated transfer absorbed by a later checkpoint did not cause today's negative balance. |
+| A-26 | `RecordFailureReason` has `None = 0`, and a failure reason is never nullable: `transactions.failure_reason` is `not null default 0`, a record that is not `Failed` holds `None`, one `MarkFailedAsync(id, reason)` takes `None` for a failure with no named reason, and the echo's reason parameter defaults to `None`. | Operator's review of PR #32. |
 
 ## 1. Data
 
@@ -138,9 +139,9 @@ ordinary `Principal` line in the same category.
 - A fee line's currency is its wallet's currency; a fee in any other currency is a mapping failure
   (§2).
 
-**Failure reasons.** `transactions` gains `failure_reason smallint null`, written with `Failed` and
-cleared when the record completes: `MissingReceivedAmount`, `SameWallet`, `LegCurrencyMismatch`,
-`InvalidRate`, `InvalidFee`, `SlipIncomplete`. The echo reads it, so a Cancel/Restore or a replayed
+**Failure reasons.** `transactions` gains `failure_reason integer not null default 0` (`None`), written
+with `Failed` and reset to `None` when the record completes: `MissingReceivedAmount`, `SameWallet`,
+`LegCurrencyMismatch`, `InvalidRate`, `InvalidFee`, `SlipIncomplete`, `InvalidAmount` (A-26). The echo reads it, so a Cancel/Restore or a replayed
 update renders the same specific text rather than the generic failure (§4).
 
 **Payment defaults per currency (T-13).** `wallets`' unique partial index on `default_for_payment`
