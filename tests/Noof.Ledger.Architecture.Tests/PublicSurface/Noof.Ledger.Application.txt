@@ -127,6 +127,7 @@ RecentView
 RecordAction
 RecordedLine
 ResolvedLineItem
+RevisionSnapshotView
 RevisionView
 SecretKeys
 SecretResult

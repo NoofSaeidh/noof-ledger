@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Receipts;
+using Noof.Ledger.Application.Reporting;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Reporting;
 using Noof.Ledger.Persistence.Revisions;
@@ -34,17 +35,7 @@ internal sealed class EfTransactionTrace(LedgerDbContext db, IReceiptStore recei
             .Select(e => e!)
             .ToList();
 
-        var history = await db.TransactionRevisions.AsNoTracking()
-            .Where(r => r.TransactionId == transactionId)
-            .OrderBy(r => r.RevisionNumber)
-            .ToListAsync(cancellationToken);
-
-        var historyViews = history
-            .Select(r => new RevisionView(
-                r.CreatedAt,
-                r.Kind.ToString(),
-                r.Instruction ?? $"{r.StatusBefore} → {r.StatusAfter}"))
-            .ToList();
+        var historyViews = await HistoryAsync(transactionId, cancellationToken);
 
         var receipt = await ReceiptTraceAsync(transactionId, cancellationToken);
 
@@ -112,9 +103,10 @@ internal sealed class EfTransactionTrace(LedgerDbContext db, IReceiptStore recei
                 join venue in db.Merchants.AsNoTracking() on transfer.VenueMerchantId equals (Guid?)venue.Id into venueJoin
                 from venue in venueJoin.DefaultIfEmpty()
                 select new { RateStated = transfer.StatedRate != null, VenueName = venue == null ? null : venue.DisplayName })
-            .SingleAsync(cancellationToken);
+            .SingleOrDefaultAsync(cancellationToken);
 
-        return new TransferTraceView(line, facts.RateStated, facts.VenueName);
+        // A correction can delete the row between the two reads; nothing holds them in one transaction.
+        return facts is null ? null : new TransferTraceView(line, facts.RateStated, facts.VenueName);
     }
 
     async Task<IReadOnlyList<ChargeView>> ChargesAsync(
@@ -150,6 +142,88 @@ internal sealed class EfTransactionTrace(LedgerDbContext db, IReceiptStore recei
 
     static decimal ForeignSum(IEnumerable<TraceLineItem> items, CurrencyCode currency) =>
         items.Where(item => item.Role == EntryRole.Principal && item.Amount.Currency == currency).Sum(item => item.Amount.Amount);
+
+    async Task<List<RevisionView>> HistoryAsync(Guid transactionId, CancellationToken cancellationToken)
+    {
+        var revisions = await db.TransactionRevisions.AsNoTracking()
+            .Where(r => r.TransactionId == transactionId)
+            .OrderBy(r => r.RevisionNumber)
+            .ToListAsync(cancellationToken);
+
+        var snapshots = revisions.Select(r => UnlessDamaged(() => RevisionSnapshotReader.Read(r.Snapshot))).ToList();
+        var parsed = snapshots.OfType<ParsedSnapshot>().ToList();
+
+        List<Guid> walletIds =
+        [
+            .. parsed
+                .SelectMany(s => new[] { s.WalletId, s.Transfer?.FromWalletId, s.Transfer?.ToWalletId })
+                .OfType<Guid>()
+                .Distinct(),
+        ];
+        var wallets = await db.Wallets.AsNoTracking()
+            .Where(w => walletIds.Contains(w.Id))
+            .ToDictionaryAsync(w => w.Id, cancellationToken);
+
+        List<string> slugs = [.. parsed.SelectMany(s => s.Items).Select(i => i.CategorySlug).OfType<string>().Distinct()];
+        var categoryNames = await db.Categories.AsNoTracking()
+            .Where(c => slugs.Contains(c.Slug))
+            .ToDictionaryAsync(c => c.Slug, c => c.NameEn, cancellationToken);
+
+        return
+        [
+            .. revisions.Select((r, index) => new RevisionView(
+                r.CreatedAt,
+                r.Kind.ToString(),
+                r.Instruction ?? $"{r.StatusBefore} → {r.StatusAfter}",
+                snapshots[index] is { } snapshot ? UnlessDamaged(() => ToView(snapshot, wallets, categoryNames)) : null)),
+        ];
+    }
+
+    // The reader throws on a damaged snapshot rather than read it as zero, and one that parses can still hold amounts
+    // no view can be built from (a fee as large as its leg leaves no rate). The trace page is where such a snapshot
+    // would be investigated, so that revision shows no record and everything else on the page still renders.
+    static T? UnlessDamaged<T>(Func<T?> build) where T : class
+    {
+        try
+        {
+            return build();
+        }
+        catch (Exception exception) when (exception is JsonException or KeyNotFoundException or InvalidOperationException
+            or FormatException or OverflowException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    // Names are today's, resolved at read time; a snapshot keeps ids, not names.
+    static RevisionSnapshotView ToView(
+        ParsedSnapshot snapshot, IReadOnlyDictionary<Guid, Wallet> wallets, IReadOnlyDictionary<string, string> categoryNames)
+    {
+        List<TraceLineItem> items =
+        [
+            .. snapshot.Items.Select(item => new TraceLineItem(
+                item.Description,
+                item.Amount,
+                item.CategorySlug is { } slug && categoryNames.TryGetValue(slug, out var name) ? name : null,
+                item.Role)),
+        ];
+        var fee = items.Where(item => item.Role == EntryRole.Fee).Select(item => (Money?)item.Amount).FirstOrDefault();
+
+        var transfer = snapshot.Transfer is { } legs
+            ? new TransferLine(
+                WalletName(legs.FromWalletId), legs.From, WalletName(legs.ToWalletId), legs.To, fee, legs.FeeLeg,
+                TransferLines.RateOf(legs.From, legs.To, fee, legs.FeeLeg, legs.StatedRate, legs.StatedRateBase))
+            : null;
+
+        List<ChargeView> charges = snapshot.WalletId is { } recordWalletId && wallets.TryGetValue(recordWalletId, out var wallet)
+            ? [.. snapshot.Charges.Select(charge => ChargeViewOf(charge, items, wallet.Currency))]
+            : [];
+
+        return new RevisionSnapshotView(
+            snapshot.Kind, snapshot.WalletId is { } ownWalletId ? WalletName(ownWalletId) : null, items, transfer, charges);
+
+        string WalletName(Guid id) => wallets.TryGetValue(id, out var found) ? found.Name : id.ToString();
+    }
 
     async Task<ReceiptTraceView?> ReceiptTraceAsync(Guid transactionId, CancellationToken cancellationToken)
     {

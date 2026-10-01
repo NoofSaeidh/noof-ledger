@@ -1,4 +1,5 @@
 using AwesomeAssertions;
+using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Reporting;
@@ -79,7 +80,8 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
     };
 
     // 101 EUR left Wise, 1 EUR of it the fee; 11 700 RSD reached Cash RSD, at a menjačnica.
-    static async Task<(Wallet Wise, Wallet Cash)> SeedExchangeAsync(LedgerDbContext db, Guid? venueId = null)
+    static async Task<(Wallet Wise, Wallet Cash)> SeedExchangeAsync(
+        LedgerDbContext db, Guid? venueId = null, decimal? statedEurRate = null)
     {
         var wise = NewWallet("Wise EUR", CurrencyCode.Eur);
         var cash = NewWallet("Cash RSD", CurrencyCode.Rsd);
@@ -93,6 +95,8 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
             ToWalletId = cash.Id,
             To = new Money(11700m, CurrencyCode.Rsd),
             FeeLeg = TransferLeg.From,
+            StatedRate = statedEurRate,
+            StatedRateBase = statedEurRate is null ? null : CurrencyCode.Eur,
             VenueMerchantId = venueId,
         });
         db.LineItems.Add(NewLine("Fee", new Money(1m, CurrencyCode.Eur), FeesAndChargesId, 1, EntryRole.Fee));
@@ -649,5 +653,175 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
             new TraceLineItem("Fee · USD purchase", new Money(156m, CurrencyCode.Kzt), "Fees & Charges", EntryRole.Fee),
         ]);
         summary.Transfer.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task The_summary_of_a_transfer_with_a_stated_rate_shows_that_rate_as_stated()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        await SeedExchangeAsync(db, statedEurRate: 117.35m);
+
+        var transfer = (await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken)).Summary!.Transfer!;
+
+        transfer.RateStated.Should().BeTrue();
+        transfer.Line.Rate.Should().Be(new ExchangeRate(CurrencyCode.Eur, 117.35m, CurrencyCode.Rsd));
+    }
+
+    [Fact]
+    public async Task The_summary_lists_a_records_charges_in_currency_order()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var kaspi = NewWallet("Kaspi KZT", CurrencyCode.Kzt);
+        db.Wallets.Add(kaspi);
+        db.Transactions.Add(NewRecord(kaspi.Id, TransactionKind.Expense, "30 долларов и 10 евро с каспи"));
+        db.LineItems.AddRange(
+            NewLine("App Store", new Money(30m, CurrencyCode.Usd), SubscriptionsId, 1, EntryRole.Principal),
+            NewLine("Spotify", new Money(10m, CurrencyCode.Eur), SubscriptionsId, 2, EntryRole.Principal));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        // Saved one at a time, USD first, so the rows' physical order is the reverse of the order expected.
+        db.Charges.Add(NewCharge(CurrencyCode.Usd, 15600m, 520m));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.Charges.Add(NewCharge(CurrencyCode.Eur, 5600m, 560m));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var summary = (await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken)).Summary!;
+
+        summary.Charges!.Select(charge => (charge.Currency, charge.ForeignSum)).Should().Equal(
+            (CurrencyCode.Eur, 10m), (CurrencyCode.Usd, 30m));
+    }
+
+    static Charge NewCharge(CurrencyCode currency, decimal chargedAmount, decimal rateUsed) => new()
+    {
+        TransactionId = TransactionId,
+        Currency = currency,
+        ChargedAmount = chargedAmount,
+        FeeAmount = 0m,
+        RateUsed = rateUsed,
+        Source = ChargeSource.WalletTerms,
+    };
+
+    [Fact]
+    public async Task The_history_reads_back_the_transfer_block_the_revision_log_writes()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        await SeedExchangeAsync(db);
+        var record = await db.Transactions.SingleAsync(t => t.Id == TransactionId, TestContext.Current.CancellationToken);
+        await RevisionLog.AppendAsync(db, record, RevisionKind.Initial, null, TransactionStatus.Captured, At, TestContext.Current.CancellationToken);
+
+        var history = (await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken)).History;
+
+        var snapshot = history.Should().ContainSingle().Which.Snapshot;
+        snapshot.Should().NotBeNull();
+        snapshot!.Kind.Should().Be(TransactionKind.Transfer);
+        snapshot.WalletName.Should().Be("Wise EUR");
+        snapshot.Transfer.Should().Be(new TransferLine(
+            "Wise EUR", new Money(101m, CurrencyCode.Eur), "Cash RSD", new Money(11700m, CurrencyCode.Rsd),
+            new Money(1m, CurrencyCode.Eur), TransferLeg.From, new ExchangeRate(CurrencyCode.Eur, 117m, CurrencyCode.Rsd)));
+        snapshot.Items.Should().ContainSingle().Which.Should().Be(
+            new TraceLineItem("Fee", new Money(1m, CurrencyCode.Eur), "Fees & Charges", EntryRole.Fee));
+        snapshot.Charges.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task The_history_reads_back_the_charges_the_revision_log_writes()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var kaspi = NewWallet("Kaspi KZT", CurrencyCode.Kzt);
+        db.Wallets.Add(kaspi);
+        var record = NewRecord(kaspi.Id, TransactionKind.Expense, "30 долларов с каспи");
+        db.Transactions.Add(record);
+        db.LineItems.AddRange(
+            NewLine("App Store", new Money(30m, CurrencyCode.Usd), SubscriptionsId, 1, EntryRole.Principal),
+            NewLine("Fee · USD purchase", new Money(156m, CurrencyCode.Kzt), FeesAndChargesId, 2, EntryRole.Fee));
+        var charge = NewCharge(CurrencyCode.Usd, 15600m, 520m);
+        charge.FeeAmount = 156m;
+        charge.FeePercent = 1m;
+        db.Charges.Add(charge);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await RevisionLog.AppendAsync(db, record, RevisionKind.Initial, null, TransactionStatus.Captured, At, TestContext.Current.CancellationToken);
+
+        var snapshot = (await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken)).History.Should().ContainSingle().Which.Snapshot!;
+
+        snapshot.WalletName.Should().Be("Kaspi KZT");
+        snapshot.Transfer.Should().BeNull();
+        snapshot.Charges.Should().ContainSingle().Which.Should().Be(new ChargeView(
+            CurrencyCode.Usd, 30m, new Money(15600m, CurrencyCode.Kzt), new Money(156m, CurrencyCode.Kzt), 520m,
+            new FeeTerms(1m, null, null), ChargeSource.WalletTerms));
+    }
+
+    [Fact]
+    public async Task The_history_still_reads_a_snapshot_written_before_phase_7_and_an_empty_one()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        await SeedTransactionAsync(db);
+        db.TransactionRevisions.AddRange(
+            new TransactionRevision
+            {
+                Id = Guid.NewGuid(), TransactionId = TransactionId, RevisionNumber = 1, Kind = RevisionKind.Initial,
+                Instruction = null, StatusBefore = TransactionStatus.Captured, StatusAfter = TransactionStatus.Completed,
+                Snapshot = """
+                    {"raw_text":"кофе 250","occurred_on":"2026-09-25","items":[{"description":"кофе","amount":"250.0000","currency":"RSD","category_slug":"groceries","merchant_id":null,"categorized_by":1}],"kind":"Expense","wallet_id":"00000000-0000-0000-0000-000000000001","stated_balance":null}
+                    """,
+                CreatedAt = DateTimeOffset.Parse("2026-09-25T10:00:00Z"),
+            },
+            new TransactionRevision
+            {
+                Id = Guid.NewGuid(), TransactionId = TransactionId, RevisionNumber = 2, Kind = RevisionKind.Correction,
+                Instruction = "нет, 1500", StatusBefore = TransactionStatus.Completed, StatusAfter = TransactionStatus.Completed,
+                Snapshot = "{}", CreatedAt = DateTimeOffset.Parse("2026-09-25T10:01:00Z"),
+            });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var history = (await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken)).History;
+
+        history.Should().HaveCount(2);
+        history[0].Snapshot.Should().BeEquivalentTo(new RevisionSnapshotView(
+            TransactionKind.Expense,
+            "Main Wallet",
+            [new TraceLineItem("кофе", new Money(250m, CurrencyCode.Rsd), "Groceries")],
+            null,
+            []));
+        history[1].Snapshot.Should().BeNull();
+        history[1].Details.Should().Be("нет, 1500");
+    }
+
+    [Fact]
+    public async Task A_revision_whose_snapshot_cannot_be_read_shows_no_record_and_the_trace_still_renders()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        await SeedTransactionAsync(db);
+        db.TransactionRevisions.AddRange(
+            new TransactionRevision
+            {
+                Id = Guid.NewGuid(), TransactionId = TransactionId, RevisionNumber = 1, Kind = RevisionKind.Initial,
+                Instruction = null, StatusBefore = TransactionStatus.Captured, StatusAfter = TransactionStatus.Completed,
+                Snapshot = """{"kind":"Expense","items":[{"description":"кофе","currency":"RSD"}]}""",
+                CreatedAt = DateTimeOffset.Parse("2026-09-25T10:00:00Z"),
+            },
+            new TransactionRevision
+            {
+                Id = Guid.NewGuid(), TransactionId = TransactionId, RevisionNumber = 2, Kind = RevisionKind.Correction,
+                Instruction = "нет, 1500", StatusBefore = TransactionStatus.Completed, StatusAfter = TransactionStatus.Completed,
+                Snapshot = """{"kind":"Expense","items":[{"description":"кофе","amount":"1500.0000","currency":"RSD","category_slug":"groceries","merchant_id":null,"categorized_by":1,"role":0}],"wallet_id":"00000000-0000-0000-0000-000000000001","transfer":null,"charges":[]}""",
+                CreatedAt = DateTimeOffset.Parse("2026-09-25T10:01:00Z"),
+            },
+            // Parses, but its fee is the whole source amount, so the source principal is zero and no rate exists.
+            new TransactionRevision
+            {
+                Id = Guid.NewGuid(), TransactionId = TransactionId, RevisionNumber = 3, Kind = RevisionKind.Correction,
+                Instruction = "это был обмен", StatusBefore = TransactionStatus.Completed, StatusAfter = TransactionStatus.Completed,
+                Snapshot = """{"kind":"Transfer","items":[{"description":"Fee","amount":"1.0000","currency":"EUR","category_slug":"fees-charges","merchant_id":null,"categorized_by":2,"role":1}],"wallet_id":"00000000-0000-0000-0000-000000000001","transfer":{"from_wallet_id":"00000000-0000-0000-0000-000000000001","from_amount":"1.0000","from_currency":"EUR","to_wallet_id":"7a1c0000-0000-4000-8000-000000000002","to_amount":"117.0000","to_currency":"RSD","fee_leg":0,"stated_rate":null,"stated_rate_base":null,"venue_merchant_id":null},"charges":[]}""",
+                CreatedAt = DateTimeOffset.Parse("2026-09-25T10:02:00Z"),
+            });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var trace = await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+
+        trace.Summary.Should().NotBeNull();
+        trace.History.Select(h => h.ChangeKind).Should().Equal(
+            nameof(RevisionKind.Initial), nameof(RevisionKind.Correction), nameof(RevisionKind.Correction));
+        trace.History[0].Snapshot.Should().BeNull("one damaged snapshot must not take the trace page down");
+        trace.History[1].Snapshot!.Items.Should().ContainSingle().Which.Amount.Should().Be(new Money(1500m, CurrencyCode.Rsd));
+        trace.History[2].Snapshot.Should().BeNull("a snapshot that parses but cannot be shown is damage too");
     }
 }
