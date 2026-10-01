@@ -256,7 +256,9 @@ internal sealed class EfTransactionTrace(LedgerDbContext db, IReceiptStore recei
             .ToList();
 
         var awaitingConfirmation = await receiptStore.IsAwaitingConfirmationAsync(transactionId, cancellationToken);
-        var problems = awaitingConfirmation ? BuildAwaitingConfirmationProblems(receiptLines, receipt.QrTotal ?? receipt.Total.Amount, receipt.Total.Currency) : [];
+        IReadOnlyList<string> problems = !awaitingConfirmation ? []
+            : receipt.Kind == ReceiptKind.Exchange ? await SlipProblemsAsync(transactionId, cancellationToken)
+            : BuildAwaitingConfirmationProblems(receiptLines, receipt.QrTotal ?? receipt.Total.Amount, receipt.Total.Currency);
 
         return new ReceiptTraceView(
             receipt.Source,
@@ -289,6 +291,23 @@ internal sealed class EfTransactionTrace(LedgerDbContext db, IReceiptStore recei
         return [$"Lines add up to {sum.ToString("0.00", CultureInfo.InvariantCulture)} {currency}, "
             + $"the receipt says {referenceTotal.ToString("0.00", CultureInfo.InvariantCulture)} {currency}"];
     }
+
+    // A held slip's own reasons (ExtractedExchange.Assess), never the line-sum check, which a slip with no lines
+    // would always trip. The PIB stored is vision's well-formed-only value, so a malformed one reads as unread.
+    async Task<IReadOnlyList<string>> SlipProblemsAsync(Guid transactionId, CancellationToken cancellationToken) =>
+        await receiptStore.GetExchangeSlipAsync(transactionId, cancellationToken) is { } slip
+            ? [.. slip.Evidence.Assess(slip.SellerTaxId, taxIdMalformed: false).Problems.Select(DescribeSlipProblem)]
+            : [];
+
+    // Persistence-local wording, for BuildAwaitingConfirmationProblems' reason above; RecordEcho words the bot's
+    // slip prompt the same way.
+    static string DescribeSlipProblem(SlipProblem problem) => problem switch
+    {
+        SlipProblem.AmountsDisagree => "The given and received amounts don't match the printed rate",
+        SlipProblem.TaxIdUnreadable => "The office's PIB is unreadable or not 9 digits",
+        SlipProblem.SlipNumberUnreadable => "The slip number is unreadable, so a repeat of this slip can't be caught",
+        _ => problem.ToString(),
+    };
 
     static TraceEvent? ToTraceEvent(AppLogEntry entry)
     {

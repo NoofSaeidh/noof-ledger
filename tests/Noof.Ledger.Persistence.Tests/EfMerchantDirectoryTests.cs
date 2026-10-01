@@ -268,6 +268,38 @@ public class EfMerchantDirectoryTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task VenueForTaxIdAsync_the_loser_of_a_race_returns_the_winners_venue_and_adds_no_second_merchant()
+    {
+        await using var dbA = await fixture.CreateMigratedContextAsync();
+        var optionsB = new DbContextOptionsBuilder<LedgerDbContext>()
+            .UseNpgsql(dbA.Database.GetConnectionString())
+            .Options;
+        await using var dbB = new LedgerDbContext(optionsB);
+        var directoryA = new EfMerchantDirectory(dbA, new FakeTimeProvider());
+        var directoryB = new EfMerchantDirectory(dbB, new FakeTimeProvider());
+
+        await using var txA = await dbA.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
+
+        var idA = await directoryA.VenueForTaxIdAsync("123456789", "Menjačnica Zlatnik (winner)", TestContext.Current.CancellationToken);
+
+        var idBTask = directoryB.VenueForTaxIdAsync("123456789", "Menjačnica Zlatnik (loser)", TestContext.Current.CancellationToken);
+        var finished = await Task.WhenAny(idBTask, Task.Delay(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+
+        finished.Should().NotBeSameAs(idBTask,
+            "the loser's pre-check cannot see the winner's uncommitted venue, so its insert must block on the PIB's unique index");
+
+        await txA.CommitAsync(TestContext.Current.CancellationToken);
+
+        var idB = await idBTask;
+
+        idB.Should().Be(idA, "the PIB's unique index decides identity - the loser adopts the winner's venue");
+        var venues = await dbA.Merchants.AsNoTracking()
+            .Where(m => m.TaxId == "123456789")
+            .ToListAsync(TestContext.Current.CancellationToken);
+        venues.Should().ContainSingle().Which.DisplayName.Should().Be("Menjačnica Zlatnik (winner)");
+    }
+
+    [Fact]
     public async Task VenueForTaxIdAsync_rejects_a_display_name_longer_than_256_characters()
     {
         await using var db = await fixture.CreateMigratedContextAsync();

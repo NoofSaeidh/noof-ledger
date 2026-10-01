@@ -3,9 +3,11 @@ using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Balances;
 using Noof.Ledger.Persistence.Categorization;
+using Noof.Ledger.Persistence.Receipts;
 
 namespace Noof.Ledger.Persistence.Tests;
 
@@ -842,5 +844,55 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
         var subject = await new EfCategorizationStore(db, Clock).GetSubjectAsync(transactionId, TestContext.Current.CancellationToken);
 
         subject!.Charges.Should().NotBeNull().And.BeEmpty();
+    }
+
+    static ExtractedReceipt SlipReceipt(decimal dinars) => new(
+        ReceiptSource.Vision, null, "123456789", "Menjačnica Zlatnik", null, null, null,
+        new DateTimeOffset(2026, 9, 21, 10, 0, 0, TimeSpan.Zero), dinars, CurrencyCode.Rsd, ReceiptKind.Exchange, null, null, []);
+
+    [Fact]
+    public async Task GetSubjectAsync_reads_a_held_slips_evidence_and_names_the_office_the_slip_prints()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var transaction = NewTransaction(walletId: null);
+        db.Transactions.Add(transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var evidence = new ExtractedExchange(100.00m, "EUR", 11650.00m, "RSD", 117.0000m, null, null, "pz-2026-0917");
+        await new EfReceiptStore(db, Clock).SaveExchangeSlipAsync(
+            transaction.Id, SlipReceipt(11650.00m), evidence, "photo-1", SlipDisposition.Hold, TestContext.Current.CancellationToken);
+
+        var subject = await new EfCategorizationStore(db, Clock).GetSubjectAsync(transaction.Id, TestContext.Current.CancellationToken);
+
+        subject!.Slip.Should().Be(new SlipFacts("Menjačnica Zlatnik", "PZ-2026-0917", evidence));
+        subject.Transfer.Should().BeNull("nothing has recorded the held slip yet");
+    }
+
+    [Fact]
+    public async Task GetSubjectAsync_names_the_venue_merchant_on_the_transfer_and_on_the_slip()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var cashEur = NewWallet("Cash EUR", CurrencyCode.Eur);
+        var cashRsd = NewWallet("Cash RSD", CurrencyCode.Rsd);
+        var venue = new Merchant { Id = Guid.NewGuid(), DisplayName = "Zlatnik d.o.o.", Kind = MerchantKind.ExchangeVenue, TaxId = "123456789" };
+        var transaction = NewTransaction(walletId: null);
+        db.AddRange(cashEur, cashRsd, venue, transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var evidence = new ExtractedExchange(100.00m, "EUR", 11700.00m, "RSD", 117.0000m, null, null, "PZ-2026-0917");
+        await new EfReceiptStore(db, Clock).SaveExchangeSlipAsync(
+            transaction.Id, SlipReceipt(11700.00m), evidence, "photo-1", SlipDisposition.Record, TestContext.Current.CancellationToken);
+        var store = new EfCategorizationStore(db, Clock);
+        await store.ApplyAsync(transaction.Id, new CategorizationOutcome(
+                [], new DateOnly(2026, 9, 21), JobKind.RecordExchange, null, TransactionKind.Transfer, cashEur.Id,
+                Transfer: new TransferFacts(
+                    cashEur.Id, new Money(100.00m, CurrencyCode.Eur), cashRsd.Id, new Money(11700.00m, CurrencyCode.Rsd),
+                    Fee: null, FeeLeg: null, StatedRate: new ExchangeRate(CurrencyCode.Eur, 117.0000m, CurrencyCode.Rsd),
+                    VenueMerchantId: venue.Id)),
+            TestContext.Current.CancellationToken);
+
+        var subject = await store.GetSubjectAsync(transaction.Id, TestContext.Current.CancellationToken);
+
+        subject!.Transfer!.VenueName.Should().Be("Zlatnik d.o.o.");
+        subject.Slip.Should().Be(new SlipFacts("Zlatnik d.o.o.", "PZ-2026-0917", evidence),
+            "once recorded, the venue merchant is the office's name, not what the slip printed");
     }
 }

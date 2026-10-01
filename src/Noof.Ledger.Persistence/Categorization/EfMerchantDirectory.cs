@@ -161,7 +161,7 @@ internal sealed class EfMerchantDirectory(LedgerDbContext db, TimeProvider timeP
         }
         catch (DbUpdateException ex) when (IsDuplicateTaxIdViolation(ex))
         {
-            // Another worker created a merchant for this PIB first (LinkTaxIdAsync's race): that one stands.
+            // Another worker created a merchant for this PIB first: the loser adopts the winner, as LinkAliasAsync does.
             db.Entry(venue).State = EntityState.Detached;
             return await db.Merchants.AsNoTracking()
                 .Where(m => m.TaxId == taxId)
