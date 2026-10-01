@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Domain;
+using Noof.Ledger.TestKit;
 
 namespace Noof.Ledger.Ai.Tests;
 
@@ -288,5 +289,132 @@ public class CategorizationPromptTests
     public void System_prompt_asks_for_the_complete_corrected_record()
     {
         CategorizationPrompt.System.Should().Contain("complete corrected record");
+    }
+
+    static readonly DateOnly Recorded = new(2026, 9, 21);
+
+    // Stored as T-12 says: 10150 left Raiffeisen (the 150 fee inside it), 10000 reached the cash.
+    static readonly TransferView Withdrawal = new(
+        Guid.Parse("11111111-1111-1111-1111-111111111111"), "Raiffeisen RSD", new Money(10150m, CurrencyCode.Rsd),
+        Guid.Parse("22222222-2222-2222-2222-222222222222"), "Cash RSD", new Money(10000m, CurrencyCode.Rsd),
+        new Money(150m, CurrencyCode.Rsd), TransferLeg.From, null, null, [], []);
+
+    // 100 EUR at a stated 117.1235 is 11712.35 RSD; the office kept 150 RSD, so 11562.35 arrived.
+    static readonly TransferView Exchange = new(
+        Guid.Parse("33333333-3333-3333-3333-333333333333"), "Cash EUR", new Money(100m, CurrencyCode.Eur),
+        Guid.Parse("22222222-2222-2222-2222-222222222222"), "Cash RSD", new Money(11562.35m, CurrencyCode.Rsd),
+        new Money(150m, CurrencyCode.Rsd), TransferLeg.To, new ExchangeRate(CurrencyCode.Eur, 117.1235m, CurrencyCode.Rsd),
+        null, [], []);
+
+    static string TurnFor(CorrectionRequest correction) =>
+        CategorizationPrompt.BuildUserTurn(new CategorizationRequest("raw", new DateOnly(2026, 9, 22), [], [], [], correction));
+
+    [Fact]
+    public void A_correction_of_a_withdrawal_states_each_side_as_said_with_the_fee_beside_its_side()
+    {
+        var turn = TurnFor(new CorrectionRequest(Recorded, [], "нет, 12000", TransactionKind.Transfer, Withdrawal));
+
+        turn.Should().Contain("Kind: transfer");
+        turn.Should().Contain("- from Raiffeisen RSD: 10000 RSD, plus a fee of 150 RSD on this side (not included in the figure)");
+        turn.Should().Contain("- to Cash RSD: 10000 RSD, worked out by the ledger");
+        turn.Should().NotContain("10150", "the stored amount with the fee inside would be read back as said and charged twice");
+        turn.Should().NotContain("nothing was recorded");
+        turn.Should().NotContain("no line items", "a transfer has no principal lines by definition");
+    }
+
+    [Fact]
+    public void A_correction_of_an_exchange_marks_the_worked_out_side_and_keeps_the_rate_as_stated()
+    {
+        var turn = TurnFor(new CorrectionRequest(Recorded, [], "это было позавчера", TransactionKind.Transfer, Exchange));
+
+        turn.Should().Contain("- from Cash EUR: 100 EUR");
+        turn.Should().Contain(
+            "- to Cash RSD: 11712.35 RSD, worked out by the ledger, plus a fee of 150 RSD on this side (not included in the figure)");
+        turn.Should().Contain("- rate as stated: 1 EUR = 117.1235 RSD");
+    }
+
+    [Fact]
+    public void A_received_amount_the_rate_does_not_give_is_shown_as_said()
+    {
+        var said = Exchange with { To = new Money(11650m, CurrencyCode.Rsd), Fee = null, FeeLeg = null };
+
+        var turn = TurnFor(new CorrectionRequest(Recorded, [], "нет", TransactionKind.Transfer, said));
+
+        turn.Should().Contain("- to Cash RSD: 11650 RSD");
+        turn.Should().NotContain("worked out by the ledger");
+    }
+
+    [Fact]
+    public void An_exchange_with_both_amounts_said_and_no_rate_shows_both_as_said()
+    {
+        var said = Exchange with { To = new Money(11700m, CurrencyCode.Rsd), Fee = null, FeeLeg = null, StatedRate = null };
+
+        var turn = TurnFor(new CorrectionRequest(Recorded, [], "нет", TransactionKind.Transfer, said));
+
+        turn.Should().Contain("- from Cash EUR: 100 EUR");
+        turn.Should().Contain("- to Cash RSD: 11700 RSD");
+        turn.Should().NotContain("worked out by the ledger");
+        turn.Should().NotContain("rate as stated");
+    }
+
+    [Fact]
+    public void A_correction_of_a_foreign_spending_shows_each_charge_as_a_fact()
+    {
+        var book = new RecordedLine("книга", new Money(30m, CurrencyCode.Usd), "shopping", "Shopping", null);
+        IReadOnlyList<ChargeView> charges =
+        [
+            new(CurrencyCode.Usd, 30m, new Money(15400m, CurrencyCode.Kzt), new Money(154m, CurrencyCode.Kzt),
+                513.333333333333m, new FeeTerms(1m, null, null), ChargeSource.Stated),
+            new(CurrencyCode.Eur, 20m, new Money(11000m, CurrencyCode.Kzt), new Money(0m, CurrencyCode.Kzt),
+                550m, FeeTerms.None, ChargeSource.WalletTerms),
+        ];
+
+        var turn = TurnFor(new CorrectionRequest(Recorded, [book], "это подарок", TransactionKind.Expense, null, charges));
+
+        turn.Should().Contain("Kind: expense");
+        turn.Should().Contain("- книга: 30 USD, category shopping");
+        turn.Should().Contain("- the USD lines (30 USD) were charged 15400 KZT plus a fee of 154 KZT to the wallet, as the person stated");
+        turn.Should().Contain("- the EUR lines (20 EUR) were charged 11000 KZT to the wallet, at the wallet's own rate");
+    }
+
+    [Fact]
+    public void A_correction_of_an_income_names_its_kind()
+    {
+        var salary = new RecordedLine("зарплата", new Money(2000m, CurrencyCode.Eur), "salary", "Salary", null);
+
+        TurnFor(new CorrectionRequest(Recorded, [salary], "нет, 2100", TransactionKind.Income)).Should().Contain("Kind: income");
+    }
+
+    [Fact]
+    public void A_correction_of_a_balance_check_shows_the_stated_balance()
+    {
+        var statement = new BalanceStatement(new Money(45000m, CurrencyCode.Rsd), 44800m);
+
+        var turn = TurnFor(new CorrectionRequest(Recorded, [], "нет, 46000", TransactionKind.BalanceCheck, CurrentStatement: statement));
+
+        turn.Should().Contain("Kind: balance");
+        turn.Should().Contain("- stated balance: 45000 RSD");
+        turn.Should().NotContain("44800", "what the app had computed is history for the echo, not something the person said");
+        turn.Should().NotContain("no line items");
+    }
+
+    [Fact]
+    public void A_record_no_reading_ever_completed_is_nothing_recorded_with_no_kind()
+    {
+        // A failed first reading: never applied, so its kind is the default Expense and it holds nothing. Naming
+        // that kind would push a reply such as "11700" toward an expense.
+        var turn = TurnFor(new CorrectionRequest(Recorded, [], "11700"));
+
+        turn.Should().Contain("- nothing was recorded");
+        turn.Should().NotContain("Kind:");
+    }
+
+    [Fact]
+    public void Transfer_amounts_render_the_same_under_a_Russian_machine_culture()
+    {
+        using var culture = new CultureScope("ru-RU");
+
+        TurnFor(new CorrectionRequest(Recorded, [], "нет", TransactionKind.Transfer, Exchange))
+            .Should().Contain("- to Cash RSD: 11712.35 RSD, worked out by the ledger");
     }
 }

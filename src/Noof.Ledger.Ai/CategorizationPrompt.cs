@@ -1,5 +1,6 @@
 using System.Globalization;
 using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Ai;
 
@@ -228,23 +229,93 @@ internal static class CategorizationPrompt
     static string RenderCorrection(CorrectionRequest correction) =>
         $"""
         Current record (dated {correction.CurrentOccurredOn.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}):
-        {RenderCurrentLines(correction.CurrentLines)}
+        {RenderCurrentRecord(correction)}
 
         Correction from the person:
         {correction.Instruction}
         """;
 
-    static string RenderCurrentLines(IReadOnlyList<RecordedLine> lines) =>
-        lines.Count == 0
-            ? "- nothing was recorded"
-            : string.Join('\n', lines.Select(RenderCurrentLine));
+    // A record no reading ever completed (a failed first reading) is still the default Expense with nothing in it;
+    // naming that kind would tell the model something the person never said.
+    static string RenderCurrentRecord(CorrectionRequest correction)
+    {
+        if (correction is { CurrentKind: TransactionKind.Expense, CurrentLines.Count: 0, CurrentTransfer: null })
+            return "- nothing was recorded";
+
+        List<string> parts = [$"Kind: {KindWord(correction.CurrentKind)}"];
+        if (correction.CurrentTransfer is { } transfer)
+            parts.AddRange(RenderTransfer(transfer));
+
+        if (correction.CurrentStatement is { } statement)
+            parts.Add($"- stated balance: {Amount(statement.Stated)}");
+
+        if (correction.CurrentLines.Count > 0)
+            parts.AddRange(correction.CurrentLines.Select(RenderCurrentLine));
+        else if (correction is { CurrentTransfer: null, CurrentStatement: null })
+            parts.Add("- no line items");
+
+        parts.AddRange((correction.CurrentCharges ?? []).Select(RenderCharge));
+        return string.Join('\n', parts);
+    }
+
+    static string KindWord(TransactionKind kind) => kind switch
+    {
+        TransactionKind.Income => ProposedKind.Income,
+        TransactionKind.BalanceCheck => ProposedKind.Balance,
+        TransactionKind.Transfer => ProposedKind.Transfer,
+        _ => ProposedKind.Expense,
+    };
+
+    // Each side as the person would have said it (amendment 24): the principal, with the fee beside its own side as
+    // "not included in the figure". Answered back that way - included false, a worked-out side null - it settles to
+    // exactly the stored amounts; the stored amounts themselves, fee inside, would be read back as said and charged
+    // twice. A stated rate keeps its stated direction.
+    static IEnumerable<string> RenderTransfer(TransferView transfer)
+    {
+        var source = transfer is { Fee: { } sourceFee, FeeLeg: TransferLeg.From } ? transfer.From - sourceFee : transfer.From;
+        var destination = transfer is { Fee: { } destinationFee, FeeLeg: TransferLeg.To } ? transfer.To + destinationFee : transfer.To;
+        var workedOut = WorkedOutByTheLedger(transfer.StatedRate, source, destination) ? ", worked out by the ledger" : "";
+
+        yield return $"- from {transfer.FromWalletName}: {Amount(source)}{FeeNote(transfer, TransferLeg.From)}";
+        yield return $"- to {transfer.ToWalletName}: {Amount(destination)}{workedOut}{FeeNote(transfer, TransferLeg.To)}";
+
+        if (transfer.StatedRate is { } rate)
+        {
+            yield return $"- rate as stated: 1 {rate.Base} = "
+                + $"{rate.QuoteAmount.ToString("0.############", CultureInfo.InvariantCulture)} {rate.Quote}";
+        }
+    }
+
+    // A destination the person need not have said: the source copied in the same currency, or the stated rate applied
+    // to the source. Answered back as null it settles to the same figure; answered as a number it would pin a rounded
+    // figure the person never gave and outlive a corrected rate.
+    static bool WorkedOutByTheLedger(ExchangeRate? rate, Money source, Money destination) =>
+        source.Currency == destination.Currency
+            ? source == destination
+            : rate is { QuoteAmount: > 0m } stated
+              && (stated.Base == source.Currency || stated.Quote == source.Currency)
+              && stated.Convert(source) == destination;
+
+    static string FeeNote(TransferView transfer, TransferLeg leg) =>
+        transfer is { Fee: { } fee, FeeLeg: { } feeLeg } && feeLeg == leg
+            ? $", plus a fee of {Amount(fee)} on this side (not included in the figure)"
+            : "";
+
+    static string RenderCharge(ChargeView charge)
+    {
+        var fee = charge.Fee.Amount > 0m ? $" plus a fee of {Amount(charge.Fee)}" : "";
+        var source = charge.Source == ChargeSource.Stated ? "as the person stated" : "at the wallet's own rate";
+        return $"- the {charge.Currency} lines ({Amount(new Money(charge.ForeignSum, charge.Currency))}) were charged "
+            + $"{Amount(charge.Charged)}{fee} to the wallet, {source}";
+    }
 
     static string RenderCurrentLine(RecordedLine line)
     {
-        var text = $"- {line.Description}: {line.Amount.Amount.ToString("0.####", CultureInfo.InvariantCulture)} "
-            + $"{line.Amount.Currency}, category {line.CategorySlug ?? "none"}";
+        var text = $"- {line.Description}: {Amount(line.Amount)}, category {line.CategorySlug ?? "none"}";
         return line.MerchantName is { } merchant ? $"{text}, merchant {merchant}" : text;
     }
+
+    static string Amount(Money money) => $"{money.Amount.ToString("0.####", CultureInfo.InvariantCulture)} {money.Currency}";
 
     static string RenderCategory(CategoryOption category) =>
         category.ParentSlug is null
