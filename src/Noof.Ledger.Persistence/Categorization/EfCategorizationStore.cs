@@ -140,7 +140,7 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
         transaction.WalletId = outcome.WalletId ?? transaction.WalletId;
 
         await db.SaveChangesAsync(cancellationToken);
-        await LedgerPostings.RewriteAsync(db, transaction, outcome.StatedBalance, cancellationToken);
+        await LedgerPostings.RewriteAsync(db, transaction, outcome.StatedBalance, outcome.Transfer, cancellationToken);
         await RevisionLog.AppendAsync(db, transaction, RevisionKindFor(outcome), outcome.Instruction,
             statusBefore, timeProvider.GetUtcNow(), cancellationToken);
         await tx.CommitAsync(cancellationToken);
