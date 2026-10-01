@@ -69,13 +69,6 @@ public interface IFiscalReceiptClient
 // approximate one.
 public enum ReceiptUnreadableReason { TooSmall, Blurry, NotAReceipt, CutOff, Other }
 
-// An exchange-office slip as read_receipt read it (spec §3), each field null when unread: the evidence a slip's
-// transfer is recorded from. Amounts are the customer's side - what was given and what was received - and Rate is
-// dinars per one foreign unit, as the slip prints it.
-public sealed record ExtractedExchange(
-    decimal? GivenAmount, string? GivenCurrency, decimal? ReceivedAmount, string? ReceivedCurrency,
-    decimal? Rate, decimal? CommissionAmount, string? CommissionCurrency, string? SlipNumber);
-
 // Shaped like FiscalFetchResult: exactly one of Receipt/Unreadable is set. Receipt is null when the
 // model reported the photo unreadable, or when it reported readable but left the total or every line
 // missing - a contradiction this layer treats the same as an honest "unreadable" rather than trust.

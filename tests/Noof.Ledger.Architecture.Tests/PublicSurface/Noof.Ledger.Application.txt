@@ -133,7 +133,11 @@ SecretKeys
 SecretResult
 SecretState
 SecretStatus
+SlipAssessment
+SlipDisposition
 SlipFacts
+SlipMissing
+SlipProblem
 SlowOperationOptions
 StatedCharge
 SystemHealthReport
