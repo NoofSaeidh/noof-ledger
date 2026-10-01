@@ -148,6 +148,7 @@ TransactionSummary
 TransactionTrace
 TransferFacts
 TransferLine
+TransferTraceView
 TransferView
 UnsupportedChangeKind
 WalletBalance

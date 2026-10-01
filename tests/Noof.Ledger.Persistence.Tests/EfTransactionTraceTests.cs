@@ -1,5 +1,7 @@
 using AwesomeAssertions;
+using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Reporting;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Diagnostics;
 using Noof.Ledger.Persistence.Receipts;
@@ -34,6 +36,68 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
             CreatedAt = new DateTimeOffset(2026, 9, 25, 10, 0, 0, TimeSpan.Zero),
         });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+    }
+
+    static readonly DateTimeOffset At = new(2026, 9, 25, 10, 0, 0, TimeSpan.Zero);
+    static readonly Guid FeesAndChargesId = new("00000000-0000-0000-0001-000000000013");
+    static readonly Guid SubscriptionsId = new("00000000-0000-0000-0001-000000000011");
+
+    static Wallet NewWallet(string name, CurrencyCode currency) => new()
+    {
+        Id = Guid.NewGuid(),
+        Name = name,
+        Currency = currency,
+        CreatedAt = At,
+    };
+
+    static Transaction NewRecord(Guid walletId, TransactionKind kind, string rawText) => new()
+    {
+        Id = TransactionId,
+        WalletId = walletId,
+        Kind = kind,
+        RawText = rawText,
+        Status = TransactionStatus.Completed,
+        TimeZoneId = "Europe/Belgrade",
+        OccurredAt = At,
+        OccurredOn = new DateOnly(2026, 9, 25),
+        TelegramChatId = 1,
+        TelegramMessageId = 1,
+        CreatedAt = At,
+    };
+
+    static LineItem NewLine(string description, Money amount, Guid categoryId, int ordinal, EntryRole role) => new()
+    {
+        Id = Guid.NewGuid(),
+        TransactionId = TransactionId,
+        Description = description,
+        Amount = amount,
+        CategoryId = categoryId,
+        CategorizedBy = role == EntryRole.Fee ? CategorizationAuthority.Rule : CategorizationAuthority.Model,
+        MerchantId = null,
+        Ordinal = ordinal,
+        Role = role,
+    };
+
+    // 101 EUR left Wise, 1 EUR of it the fee; 11 700 RSD reached Cash RSD, at a menjačnica.
+    static async Task<(Wallet Wise, Wallet Cash)> SeedExchangeAsync(LedgerDbContext db, Guid? venueId = null)
+    {
+        var wise = NewWallet("Wise EUR", CurrencyCode.Eur);
+        var cash = NewWallet("Cash RSD", CurrencyCode.Rsd);
+        db.Wallets.AddRange(wise, cash);
+        db.Transactions.Add(NewRecord(wise.Id, TransactionKind.Transfer, "поменял 100 евро на 11700, комиссия 1 евро"));
+        db.Transfers.Add(new Transfer
+        {
+            TransactionId = TransactionId,
+            FromWalletId = wise.Id,
+            From = new Money(101m, CurrencyCode.Eur),
+            ToWalletId = cash.Id,
+            To = new Money(11700m, CurrencyCode.Rsd),
+            FeeLeg = TransferLeg.From,
+            VenueMerchantId = venueId,
+        });
+        db.LineItems.Add(NewLine("Fee", new Money(1m, CurrencyCode.Eur), FeesAndChargesId, 1, EntryRole.Fee));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        return (wise, cash);
     }
 
     static AppLogEntry StageEvent(long id, DateTimeOffset at, string stage, int eventId, Guid transactionId) => new()
@@ -524,5 +588,66 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
         var trace = await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
 
         trace.Events.Should().ContainSingle().Which.Reason.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task The_summary_of_a_transfer_shows_both_legs_the_fee_on_its_leg_the_rate_and_the_venue()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var venue = new Merchant { Id = Guid.NewGuid(), DisplayName = "Menjačnica Centar", Kind = MerchantKind.ExchangeVenue };
+        db.Merchants.Add(venue);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await SeedExchangeAsync(db, venue.Id);
+
+        var summary = (await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken)).Summary!;
+
+        summary.Kind.Should().Be(TransactionKind.Transfer);
+        summary.WalletName.Should().Be("Wise EUR", "transactions.wallet_id holds the source leg");
+        summary.Transfer.Should().Be(new TransferTraceView(
+            new TransferLine(
+                "Wise EUR", new Money(101m, CurrencyCode.Eur), "Cash RSD", new Money(11700m, CurrencyCode.Rsd),
+                new Money(1m, CurrencyCode.Eur), TransferLeg.From, new ExchangeRate(CurrencyCode.Eur, 117m, CurrencyCode.Rsd)),
+            RateStated: false,
+            VenueName: "Menjačnica Centar"));
+        summary.LineItems.Should().ContainSingle().Which.Should().Be(
+            new TraceLineItem("Fee", new Money(1m, CurrencyCode.Eur), "Fees & Charges", EntryRole.Fee));
+        summary.Charges.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task The_summary_of_a_foreign_spending_shows_its_charge_with_its_source_and_terms()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var kaspi = NewWallet("Kaspi KZT", CurrencyCode.Kzt);
+        db.Wallets.Add(kaspi);
+        db.Transactions.Add(NewRecord(kaspi.Id, TransactionKind.Expense, "30 долларов с каспи"));
+        db.LineItems.AddRange(
+            NewLine("App Store", new Money(30m, CurrencyCode.Usd), SubscriptionsId, 1, EntryRole.Principal),
+            NewLine("Fee · USD purchase", new Money(156m, CurrencyCode.Kzt), FeesAndChargesId, 2, EntryRole.Fee));
+        db.Charges.Add(new Charge
+        {
+            TransactionId = TransactionId,
+            Currency = CurrencyCode.Usd,
+            ChargedAmount = 15600m,
+            FeeAmount = 156m,
+            RateUsed = 520m,
+            FeePercent = 1m,
+            FeeFixed = null,
+            FeeMinimum = null,
+            Source = ChargeSource.WalletTerms,
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var summary = (await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken)).Summary!;
+
+        summary.Charges.Should().ContainSingle().Which.Should().Be(new ChargeView(
+            CurrencyCode.Usd, 30m, new Money(15600m, CurrencyCode.Kzt), new Money(156m, CurrencyCode.Kzt), 520m,
+            new FeeTerms(1m, null, null), ChargeSource.WalletTerms));
+        summary.LineItems.Should().BeEquivalentTo(
+        [
+            new TraceLineItem("App Store", new Money(30m, CurrencyCode.Usd), "Subscriptions"),
+            new TraceLineItem("Fee · USD purchase", new Money(156m, CurrencyCode.Kzt), "Fees & Charges", EntryRole.Fee),
+        ]);
+        summary.Transfer.Should().BeNull();
     }
 }

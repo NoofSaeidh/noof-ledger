@@ -1,3 +1,5 @@
+using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Application.Reporting;
 using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Application.Diagnostics;
@@ -42,7 +44,10 @@ public sealed record TraceEvent(
 
 public sealed record RevisionView(DateTimeOffset At, string ChangeKind, string Details);
 
-public sealed record TraceLineItem(string Description, Money Amount, string? CategoryName);
+public sealed record TraceLineItem(string Description, Money Amount, string? CategoryName, EntryRole Role = EntryRole.Principal);
+
+// Line.Rate is the operator's own rate when RateStated, otherwise the one the two principals imply.
+public sealed record TransferTraceView(TransferLine Line, bool RateStated, string? VenueName);
 
 public sealed record TransactionSummary(
     string? RawText,
@@ -52,7 +57,9 @@ public sealed record TransactionSummary(
     TransactionKind Kind,
     string? WalletName,
     DateOnly OccurredOn,
-    IReadOnlyList<TraceLineItem> LineItems);
+    IReadOnlyList<TraceLineItem> LineItems,
+    TransferTraceView? Transfer = null,
+    IReadOnlyList<ChargeView>? Charges = null);
 
 public sealed record TransactionTrace(
     Guid TransactionId,

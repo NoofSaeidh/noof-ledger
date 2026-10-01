@@ -1,9 +1,12 @@
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Domain;
+using Noof.Ledger.Persistence.Reporting;
+using Noof.Ledger.Persistence.Revisions;
 
 namespace Noof.Ledger.Persistence.Diagnostics;
 
@@ -63,7 +66,7 @@ internal sealed class EfTransactionTrace(LedgerDbContext db, IReceiptStore recei
                     t.Status,
                     t.Kind,
                     t.OccurredOn,
-                    WalletName = w == null ? null : w.Name,
+                    Wallet = w,
                 })
             .SingleOrDefaultAsync(cancellationToken);
 
@@ -76,8 +79,13 @@ internal sealed class EfTransactionTrace(LedgerDbContext db, IReceiptStore recei
                 join c in db.Categories.AsNoTracking() on li.CategoryId equals c.Id into categoryJoin
                 from c in categoryJoin.DefaultIfEmpty()
                 orderby li.Id
-                select new TraceLineItem(li.Description, li.Amount, c == null ? null : c.NameEn))
+                select new TraceLineItem(li.Description, li.Amount, c == null ? null : c.NameEn, li.Role))
             .ToListAsync(cancellationToken);
+
+        var transfer = header.Kind == TransactionKind.Transfer ? await TransferAsync(transactionId, cancellationToken) : null;
+        IReadOnlyList<ChargeView> charges = header.Wallet is { } wallet
+            ? await ChargesAsync(transactionId, wallet.Currency, lineItems, cancellationToken)
+            : [];
 
         return new TransactionSummary(
             header.RawText,
@@ -85,10 +93,63 @@ internal sealed class EfTransactionTrace(LedgerDbContext db, IReceiptStore recei
             header.CreatedAt,
             header.Status,
             header.Kind,
-            header.WalletName,
+            header.Wallet?.Name,
             header.OccurredOn,
-            lineItems);
+            lineItems,
+            transfer,
+            charges);
     }
+
+    async Task<TransferTraceView?> TransferAsync(Guid transactionId, CancellationToken cancellationToken)
+    {
+        var lines = await TransferLines.ForAsync(db, [transactionId], cancellationToken);
+        if (!lines.TryGetValue(transactionId, out var line))
+            return null;
+
+        var facts = await (
+                from transfer in db.Transfers.AsNoTracking()
+                where transfer.TransactionId == transactionId
+                join venue in db.Merchants.AsNoTracking() on transfer.VenueMerchantId equals (Guid?)venue.Id into venueJoin
+                from venue in venueJoin.DefaultIfEmpty()
+                select new { RateStated = transfer.StatedRate != null, VenueName = venue == null ? null : venue.DisplayName })
+            .SingleAsync(cancellationToken);
+
+        return new TransferTraceView(line, facts.RateStated, facts.VenueName);
+    }
+
+    async Task<IReadOnlyList<ChargeView>> ChargesAsync(
+        Guid transactionId, CurrencyCode walletCurrency, IReadOnlyList<TraceLineItem> lineItems, CancellationToken cancellationToken)
+    {
+        var charges = await db.Charges.AsNoTracking()
+            .Where(charge => charge.TransactionId == transactionId)
+            .ToListAsync(cancellationToken);
+
+        return
+        [
+            .. charges
+                .OrderBy(charge => charge.Currency)
+                .Select(charge => ChargeViewOf(
+                    new ParsedCharge(
+                        charge.Currency, charge.ChargedAmount, charge.FeeAmount, charge.RateUsed, charge.FeePercent,
+                        charge.FeeFixed, charge.FeeMinimum, charge.Source),
+                    lineItems,
+                    walletCurrency)),
+        ];
+    }
+
+    // The one build for the charges stored today and those a revision snapshot kept, so the summary and the history
+    // cannot read a charge differently.
+    static ChargeView ChargeViewOf(ParsedCharge charge, IEnumerable<TraceLineItem> items, CurrencyCode walletCurrency) => new(
+        charge.Currency,
+        ForeignSum(items, charge.Currency),
+        new Money(charge.ChargedAmount, walletCurrency),
+        new Money(charge.FeeAmount, walletCurrency),
+        charge.RateUsed,
+        new FeeTerms(charge.FeePercent, charge.FeeFixed, charge.FeeMinimum),
+        charge.Source);
+
+    static decimal ForeignSum(IEnumerable<TraceLineItem> items, CurrencyCode currency) =>
+        items.Where(item => item.Role == EntryRole.Principal && item.Amount.Currency == currency).Sum(item => item.Amount.Amount);
 
     async Task<ReceiptTraceView?> ReceiptTraceAsync(Guid transactionId, CancellationToken cancellationToken)
     {

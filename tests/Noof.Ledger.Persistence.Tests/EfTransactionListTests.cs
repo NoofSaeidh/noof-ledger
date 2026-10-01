@@ -504,6 +504,7 @@ public class EfTransactionListTests(PostgresFixture fixture)
         row.Kind.Should().Be(TransactionKind.Transfer);
         row.WalletName.Should().Be("Cash EUR");
         row.Amounts.Should().Equal(new Money(101m, CurrencyCode.Eur), new Money(11700m, CurrencyCode.Rsd));
+        row.Categories.Should().Equal(["Fees & Charges"]);
         row.Transfer.Should().Be(new TransferLine(
             "Cash EUR", new Money(101m, CurrencyCode.Eur), "Cash RSD", new Money(11700m, CurrencyCode.Rsd),
             new Money(1m, CurrencyCode.Eur), TransferLeg.From, new ExchangeRate(CurrencyCode.Eur, 117m, CurrencyCode.Rsd)));
