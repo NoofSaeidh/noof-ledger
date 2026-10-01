@@ -39,9 +39,10 @@ How to run each, and the trial tally, are in `docs/REVIEWS.md`.
 - **Per PR:** one Codex review, a family different from the implementer — plain for a mechanical PR,
   adversarial for one that makes design choices or when unsure. Codex at its usage limit → an opus
   review, said so in the PR. Never enable the Codex plugin's stop-time review gate.
-- **Per phase:** Fable 5.1 twice — at planning (reviews the decision before implementation starts)
-  and at the close of the phase or a batch of PRs; never per PR or per fix round. Trial for 3 phases:
-  each runs in parallel with a Codex adversarial review of the same scope, tallied per review.
+- **Per phase:** Fable 5.1 at three points — the spec, the implementation plan (once written, before
+  any implementation starts) *(operator, 2026-10-01)*, and the close of the phase or a batch of PRs;
+  never per PR or per fix round. Trial for 3 phases: each runs in parallel with a Codex adversarial
+  review of the same scope, tallied per review.
 - **Findings are triaged, not all fixed**, for Copilot and Codex alike: fix a critical finding (real
   bug, wrong money/balance, data loss, secret leak, security hole, broken build/test,
   *(settled)*-rule violation); reply with a sentence of reasoning and don't change code for a
