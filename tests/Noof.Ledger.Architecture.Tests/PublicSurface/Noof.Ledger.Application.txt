@@ -19,6 +19,7 @@ DatabaseState
 DumpResult
 EchoMessage
 EchoTarget
+ExchangeSlipView
 ExtractedExchange
 ExtractedReceipt
 ExtractedReceiptLine

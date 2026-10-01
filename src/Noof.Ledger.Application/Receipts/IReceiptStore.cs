@@ -4,8 +4,8 @@ namespace Noof.Ledger.Application.Receipts;
 
 // Null when the receipt saved cleanly, or was already saved for this same transaction by an earlier,
 // replayed attempt (ReceiptId is then the existing row's id either way, C-1). A duplicate
-// seller+fiscal-number pair recorded for ANOTHER transaction writes nothing and names that
-// transaction instead - ReceiptId is null and DuplicateOfTransactionId never equals the transaction
+// seller+fiscal-number pair (or, for an exchange slip, seller+slip-number) recorded for ANOTHER
+// transaction writes nothing and names that transaction instead - ReceiptId is null and DuplicateOfTransactionId never equals the transaction
 // being saved.
 public sealed record ReceiptSaveResult(Guid? ReceiptId, Guid? DuplicateOfTransactionId);
 
@@ -29,6 +29,11 @@ public sealed record ReceiptView(
     string? VerificationUrl,
     IReadOnlyList<ReceiptLineView> Lines);
 
+// An exchange-office slip as saved (spec §3): SlipNumber is the normalised one the duplicate guard keys on,
+// Evidence the receipt_exchanges row exactly as vision read it. IssuedAt is the stored UTC instant.
+public sealed record ExchangeSlipView(
+    Guid ReceiptId, string? SellerTaxId, string? SellerName, DateTimeOffset? IssuedAt, string? SlipNumber, ExtractedExchange Evidence);
+
 public interface IReceiptStore
 {
     // Inserts the receipt and its lines in one database transaction. A duplicate (seller_tax_id +
@@ -40,6 +45,19 @@ public interface IReceiptStore
     Task<ReceiptSaveResult> SaveExtractedAsync(
         Guid transactionId, ExtractedReceipt receipt, string? telegramFileId, bool enqueueCategorization,
         CancellationToken cancellationToken);
+
+    // An exchange-office slip (spec §3): the receipts row (Kind = Exchange, the slip number trimmed and
+    // upper-cased) and its receipt_exchanges evidence, plus what the disposition asks for, in ONE commit -
+    // Record queues RecordExchange and then the caption's Correct job, Hold queues nothing (the caption waits
+    // for "Record anyway"), Incomplete fails the record with SlipIncomplete and queues the caption at once. A
+    // (seller_tax_id, slip_number) another transaction already recorded writes nothing and names it, as
+    // SaveExtractedAsync does for a fiscal receipt; a replay of this transaction's own save returns its id (C-1).
+    Task<ReceiptSaveResult> SaveExchangeSlipAsync(
+        Guid transactionId, ExtractedReceipt receipt, ExtractedExchange exchange, string? telegramFileId,
+        SlipDisposition disposition, CancellationToken cancellationToken);
+
+    // Null for a transaction with no Exchange receipt.
+    Task<ExchangeSlipView?> GetExchangeSlipAsync(Guid transactionId, CancellationToken cancellationToken);
 
     Task<ReceiptView?> GetByTransactionAsync(Guid transactionId, CancellationToken cancellationToken);
 
