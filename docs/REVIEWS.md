@@ -113,3 +113,14 @@ One line per review: confirmed findings by tag. Dated history, not status.
   page). Rejected: a pair-level default rate (Fable; the operator chose per wallet), gating a
   capability until its echo (Codex; the aggregate branch ships whole), foreign spending on a fiscal
   receipt (Codex; the operator has no such case).
+- **Phase 7 planning, implementation plan (`.superpowers/p7-plan/`), 2026-10-01:** 3 by both (the crossing-zero
+  line under a later checkpoint, 1c and 7b rewriting one method in one wave, a stated rate lost or ignored on a
+  correction); 6 Codex only (a reply queued during slip extraction overwritten by the first recording, Restore of a
+  record corrected while cancelled, failure writes racing a correction or Cancel, a said charge in another currency
+  keeping an older stated one, a slip's date lost on completion by reply, the slip correction text omitting that a
+  commission is included); 11 Fable only, plus 13 minor (a date-only correction charging a transfer's fee twice,
+  `/wallets` reading `117,35` as 11735, an unnamed cash leg failing as `SameWallet`, a dinar fee rejected on a
+  EUR → RSD exchange, charges on fiscal receipts, `DIN` not read as RSD, slip vision asked to compute, the routing
+  predicate landing after the slip jobs, PR 8 unreviewed and stale backlog, a screenshot run deleting another PR's
+  pictures, tests that could not go red). Rejected: dropping a kept stated charge when the foreign sum changes
+  (Fable; the operator keeps it), refusing a same-currency transfer whose sides differ (Fable; P2-1).
