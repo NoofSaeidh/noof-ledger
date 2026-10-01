@@ -151,7 +151,7 @@ internal sealed class EfTransactionTrace(LedgerDbContext db, IReceiptStore recei
             .ToListAsync(cancellationToken);
 
         var snapshots = revisions.Select(r => UnlessDamaged(() => RevisionSnapshotReader.Read(r.Snapshot))).ToList();
-        var parsed = snapshots.OfType<ParsedSnapshot>().ToList();
+        var parsed = snapshots.Select(s => s.Value).OfType<ParsedSnapshot>().ToList();
 
         List<Guid> walletIds =
         [
@@ -171,27 +171,30 @@ internal sealed class EfTransactionTrace(LedgerDbContext db, IReceiptStore recei
 
         return
         [
-            .. revisions.Select((r, index) => new RevisionView(
-                r.CreatedAt,
-                r.Kind.ToString(),
-                r.Instruction ?? $"{r.StatusBefore} → {r.StatusAfter}",
-                snapshots[index] is { } snapshot ? UnlessDamaged(() => ToView(snapshot, wallets, categoryNames)) : null)),
+            .. revisions.Select((r, index) =>
+            {
+                var (snapshot, unreadable) = snapshots[index] is { Value: { } read }
+                    ? UnlessDamaged(() => ToView(read, wallets, categoryNames))
+                    : (null, snapshots[index].Unreadable);
+                return new RevisionView(
+                    r.CreatedAt, r.Kind.ToString(), r.Instruction ?? $"{r.StatusBefore} → {r.StatusAfter}", snapshot, unreadable);
+            }),
         ];
     }
 
     // The reader throws on a damaged snapshot rather than read it as zero, and one that parses can still hold amounts
     // no view can be built from (a fee as large as its leg leaves no rate). The trace page is where such a snapshot
-    // would be investigated, so that revision shows no record and everything else on the page still renders.
-    static T? UnlessDamaged<T>(Func<T?> build) where T : class
+    // would be investigated, so that revision is marked unreadable and everything else on the page still renders.
+    static (T? Value, bool Unreadable) UnlessDamaged<T>(Func<T?> build) where T : class
     {
         try
         {
-            return build();
+            return (build(), false);
         }
         catch (Exception exception) when (exception is JsonException or KeyNotFoundException or InvalidOperationException
             or FormatException or OverflowException or ArgumentException)
         {
-            return null;
+            return (null, true);
         }
     }
 

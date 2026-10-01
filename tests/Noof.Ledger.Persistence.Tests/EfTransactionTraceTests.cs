@@ -783,6 +783,8 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
             []));
         history[1].Snapshot.Should().BeNull();
         history[1].Details.Should().Be("нет, 1500");
+        history.Select(h => h.SnapshotUnreadable).Should().Equal(
+            [false, false], "an older shape reads, and an empty object kept no record rather than a damaged one");
     }
 
     [Fact]
@@ -823,5 +825,7 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
         trace.History[0].Snapshot.Should().BeNull("one damaged snapshot must not take the trace page down");
         trace.History[1].Snapshot!.Items.Should().ContainSingle().Which.Amount.Should().Be(new Money(1500m, CurrencyCode.Rsd));
         trace.History[2].Snapshot.Should().BeNull("a snapshot that parses but cannot be shown is damage too");
+        trace.History.Select(h => h.SnapshotUnreadable).Should().Equal(
+            [true, false, true], "the page must tell a damaged snapshot from one that kept no record");
     }
 }

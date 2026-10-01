@@ -42,14 +42,16 @@ public sealed record TraceEvent(
     string? FailedStage,
     string? Reason);
 
-// What the record looked like after this revision, read back from its snapshot. Null when the snapshot holds no record
-// (an empty object) or cannot be read; a snapshot from before Phase 7 reads with every item Principal, no transfer and
-// no charges.
+// What the record looked like after this revision, read back from its snapshot. A snapshot from before Phase 7 reads
+// with every item Principal, no transfer and no charges.
 public sealed record RevisionSnapshotView(
     TransactionKind? Kind, string? WalletName, IReadOnlyList<TraceLineItem> Items, TransferLine? Transfer,
     IReadOnlyList<ChargeView> Charges);
 
-public sealed record RevisionView(DateTimeOffset At, string ChangeKind, string Details, RevisionSnapshotView? Snapshot = null);
+// Snapshot is null both when the snapshot holds no record (an empty object) and when it is damaged — it cannot be read,
+// or holds amounts no view can be built from; SnapshotUnreadable tells the two apart.
+public sealed record RevisionView(
+    DateTimeOffset At, string ChangeKind, string Details, RevisionSnapshotView? Snapshot = null, bool SnapshotUnreadable = false);
 
 public sealed record TraceLineItem(string Description, Money Amount, string? CategoryName, EntryRole Role = EntryRole.Principal);
 
