@@ -127,7 +127,8 @@ else
 
         <div class="noof-field">
             <label class="noof-field-label" for="new-wallet-opening">Opening balance</label>
-            <MudNumericField T="decimal" InputId="new-wallet-opening" @bind-Value="newOpeningBalance"
+            <MudNumericField T="decimal?" InputId="new-wallet-opening" @bind-Value="newOpeningBalance"
+                             Converter="@newOpeningConverter"
                              Culture="@CultureInfo.InvariantCulture" HideSpinButtons="true"
                              Variant="Variant.Outlined" Margin="Margin.Dense" />
         </div>
@@ -176,7 +177,8 @@ else
 
     string newName = string.Empty;
     string newCurrency = CurrencyCode.Rsd.Value;
-    decimal newOpeningBalance;
+    decimal? newOpeningBalance;
+    readonly DecimalFieldConverter newOpeningConverter = new();
     DateOnly? newOpeningDate = DateOnly.FromDateTime(DateTime.Today);
     string newAliases = string.Empty;
     bool newIsDefault;
@@ -238,10 +240,16 @@ else
             return;
         }
 
+        if (newOpeningConverter.Failed)
+        {
+            error = "The opening balance is not a number.";
+            return;
+        }
+
         try
         {
             await WalletAdmin.CreateAsync(
-                new NewWallet(name, new CurrencyCode(newCurrency), newOpeningBalance, openingDate,
+                new NewWallet(name, new CurrencyCode(newCurrency), newOpeningBalance ?? 0m, openingDate,
                     SplitAliases(newAliases), newIsDefault),
                 cancellation.Token);
 

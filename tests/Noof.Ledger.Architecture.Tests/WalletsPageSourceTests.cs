@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using AwesomeAssertions;
 
 namespace Noof.Ledger.Architecture.Tests;
@@ -79,5 +80,24 @@ public class WalletsPageSourceTests
         var occurrences = source.Split("Culture=\"@CultureInfo.InvariantCulture\"").Length - 1;
 
         occurrences.Should().BeGreaterThanOrEqualTo(2);
+    }
+
+    [Fact]
+    public void Every_numeric_field_reads_a_decimal_comma_and_reports_what_it_cannot_read()
+    {
+        // MudBlazor's default converter reads "117,35" as 11735 under the invariant culture and an unreadable value as
+        // null (amendment 27); each field carries its own converter instance, because the instance remembers that its
+        // field failed - shared, one field's good value would clear another's refusal.
+        var fields = SourceText().Split("<MudNumericField").Skip(1)
+            .Select(rest => rest[..rest.IndexOf("/>", StringComparison.Ordinal)])
+            .ToList();
+        var converters = fields
+            .Select(field => Regex.Match(field, @"Converter=""@(?<name>[A-Za-z_][\w.]*)"""))
+            .ToList();
+
+        fields.Should().NotBeEmpty();
+        fields.Should().AllSatisfy(field => field.Should().NotContain("Converter=\"@(new "));
+        converters.Should().AllSatisfy(match => match.Success.Should().BeTrue());
+        converters.Select(match => match.Groups["name"].Value).Should().OnlyHaveUniqueItems();
     }
 }
