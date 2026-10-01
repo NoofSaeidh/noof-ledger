@@ -38,6 +38,9 @@ public sealed class MockLedgerTests(DemoTestDatabase database) : IClassFixture<D
                 // 200000 - 6000 - 8500
                 ["Kaspi"] = [new(185500.00m, CurrencyCode.Kzt)],
                 ["Old Revolut"] = [new(900.00m, CurrencyCode.Eur)],
+                // Nothing recorded in either this month: each ends on its opening balance.
+                ["Cash RSD"] = [new(15000.00m, CurrencyCode.Rsd)],
+                ["Cash EUR"] = [new(250.00m, CurrencyCode.Eur)],
                 ["Main Wallet"] = [],
             });
     }
@@ -76,6 +79,44 @@ public sealed class MockLedgerTests(DemoTestDatabase database) : IClassFixture<D
         wallets.Single(wallet => wallet.Name == "Old Revolut").Archived.Should().BeTrue();
         wallets.Single(wallet => wallet.Name == "Raiffeisen").DefaultForPayment.Should().Be(PaymentMethod.Card);
         wallets.Single(wallet => wallet.Name == "Cash").DefaultForPayment.Should().Be(PaymentMethod.Cash);
+    }
+
+    [Fact]
+    public async Task Each_cash_wallet_is_the_cash_default_for_its_own_currency()
+    {
+        if (database.Unavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        await Refresh.RunAsync(database.Admin, database.Name, database.Paths, TestContext.Current.CancellationToken);
+
+        await using var services = DemoServices.Build(database.ConnectionString, database.Paths);
+        await using var scope = services.CreateAsyncScope();
+        var wallets = await scope.ServiceProvider.GetRequiredService<IWalletAdmin>()
+            .ListAsync(TestContext.Current.CancellationToken);
+
+        wallets.Where(wallet => wallet.DefaultForPayment == PaymentMethod.Cash)
+            .Select(wallet => (wallet.Name, wallet.Currency))
+            .Should().BeEquivalentTo(new[] { ("Cash", CurrencyCode.Usd), ("Cash RSD", CurrencyCode.Rsd), ("Cash EUR", CurrencyCode.Eur) });
+    }
+
+    [Fact]
+    public async Task Kaspi_and_Raiffeisen_carry_their_foreign_currency_terms()
+    {
+        if (database.Unavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await Refresh.RunAsync(database.Admin, database.Name, database.Paths, cancellationToken);
+
+        await using var services = DemoServices.Build(database.ConnectionString, database.Paths);
+        await using var scope = services.CreateAsyncScope();
+        var wallets = await scope.ServiceProvider.GetRequiredService<IWalletAdmin>().ListAsync(cancellationToken);
+        var terms = scope.ServiceProvider.GetRequiredService<IWalletFxTerms>();
+
+        (await terms.ListAsync(wallets.Single(wallet => wallet.Name == "Kaspi").Id, cancellationToken)).Should().Equal(
+            new WalletTermsDetails(CurrencyCode.Usd, 520m, 1m, null, null));
+        (await terms.ListAsync(wallets.Single(wallet => wallet.Name == "Raiffeisen").Id, cancellationToken)).Should().Equal(
+            new WalletTermsDetails(CurrencyCode.Eur, 117.35m, 0.5m, null, 100.00m));
     }
 
     [Fact]
