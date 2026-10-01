@@ -299,4 +299,62 @@ public class TransactionRevisionTests(PostgresFixture fixture)
         (await db.TransactionRevisions.SingleAsync(TestContext.Current.CancellationToken)).Kind.Should().Be(
             RevisionKind.Initial, "RecordExchange is a slip's first recording; a reply correcting it arrives as Correct");
     }
+
+    [Fact]
+    public async Task A_snapshot_carries_the_records_charges_with_amounts_and_rates_as_strings()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var kaspi = new Wallet { Id = Guid.NewGuid(), Name = "Kaspi KZT", Currency = CurrencyCode.Kzt, CreatedAt = Clock.GetUtcNow() };
+        db.Wallets.Add(kaspi);
+        db.WalletFxTerms.Add(new WalletFxTerms { WalletId = kaspi.Id, Currency = CurrencyCode.Usd, Rate = 520m, FeePercent = 1m });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var transactionId = await SeedTransactionAsync(db);
+        var store = new EfCategorizationStore(db, Clock);
+        CategorizedLineItem coffee = new("кофе", new Money(30m, CurrencyCode.Usd), CoffeeCategoryId, null);
+
+        await store.ApplyAsync(transactionId,
+            new CategorizationOutcome([coffee], new DateOnly(2026, 9, 21), WalletId: kaspi.Id),
+            TestContext.Current.CancellationToken);
+        await store.ApplyAsync(transactionId,
+            new CategorizationOutcome([coffee], new DateOnly(2026, 9, 21), JobKind.Correct, "списали 15400",
+                WalletId: kaspi.Id, Charged: new StatedCharge(new Money(15_400m, CurrencyCode.Kzt), null, false)),
+            TestContext.Current.CancellationToken);
+
+        db.ChangeTracker.Clear();
+        var revisions = await db.TransactionRevisions.OrderBy(r => r.RevisionNumber).ToListAsync(TestContext.Current.CancellationToken);
+
+        using var byTerms = JsonDocument.Parse(revisions[0].Snapshot);
+        var termsCharge = byTerms.RootElement.GetProperty("charges").EnumerateArray().Single();
+        termsCharge.GetProperty("currency").GetString().Should().Be("USD");
+        AmountOf(termsCharge, "charged_amount").Should().Be(15_600m);
+        AmountOf(termsCharge, "fee_amount").Should().Be(156m);
+        AmountOf(termsCharge, "rate_used").Should().Be(520m);
+        AmountOf(termsCharge, "fee_percent").Should().Be(1m);
+        termsCharge.GetProperty("fee_fixed").ValueKind.Should().Be(JsonValueKind.Null);
+        termsCharge.GetProperty("fee_minimum").ValueKind.Should().Be(JsonValueKind.Null);
+        termsCharge.GetProperty("source").GetInt32().Should().Be((int)ChargeSource.WalletTerms);
+
+        using var stated = JsonDocument.Parse(revisions[1].Snapshot);
+        var statedCharge = stated.RootElement.GetProperty("charges").EnumerateArray().Single();
+        AmountOf(statedCharge, "charged_amount").Should().Be(15_400m);
+        AmountOf(statedCharge, "fee_amount").Should().Be(154m);
+        AmountOf(statedCharge, "rate_used").Should().Be(513.333333333333m);
+        statedCharge.GetProperty("source").GetInt32().Should().Be((int)ChargeSource.Stated);
+        stated.RootElement.GetProperty("raw_text").GetString().Should().Be("кофе 250", "every existing key stays");
+    }
+
+    [Fact]
+    public async Task A_snapshot_of_a_record_without_charges_has_an_empty_charges_array()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var transactionId = await SeedTransactionAsync(db);
+
+        await new EfCategorizationStore(db, Clock).ApplyAsync(transactionId,
+            new CategorizationOutcome([Coffee(250m)], new DateOnly(2026, 9, 21)), TestContext.Current.CancellationToken);
+
+        db.ChangeTracker.Clear();
+        var revision = await db.TransactionRevisions.SingleAsync(TestContext.Current.CancellationToken);
+        using var snapshot = JsonDocument.Parse(revision.Snapshot);
+        snapshot.RootElement.GetProperty("charges").GetArrayLength().Should().Be(0);
+    }
 }

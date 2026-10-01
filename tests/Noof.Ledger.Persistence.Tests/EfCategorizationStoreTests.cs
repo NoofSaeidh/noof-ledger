@@ -805,4 +805,42 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
         (await db.LineItems.AsNoTracking().CountAsync(l => l.TransactionId == transactionId, TestContext.Current.CancellationToken))
             .Should().Be(1, "the booked lines stay on the record");
     }
+
+    [Fact]
+    public async Task GetSubjectAsync_reads_each_charge_with_the_foreign_sum_it_prices()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var kaspi = NewWallet("Kaspi KZT", CurrencyCode.Kzt);
+        var transaction = NewTransaction(
+            kaspi.Id, occurredAt: new DateTimeOffset(2026, 9, 21, 10, 0, 0, TimeSpan.Zero), occurredOn: new DateOnly(2026, 9, 21));
+        db.AddRange(kaspi, transaction);
+        db.WalletFxTerms.Add(new WalletFxTerms { WalletId = kaspi.Id, Currency = CurrencyCode.Usd, Rate = 520m, FeePercent = 1m });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var coffeeId = new Guid("00000000-0000-0000-0001-000000000017");
+        var store = new EfCategorizationStore(db, Clock);
+        await store.ApplyAsync(transaction.Id, new CategorizationOutcome(
+            [
+                new CategorizedLineItem("coffee", new Money(20m, CurrencyCode.Usd), coffeeId, null),
+                new CategorizedLineItem("cake", new Money(10m, CurrencyCode.Usd), coffeeId, null),
+                new CategorizedLineItem("water", new Money(500m, CurrencyCode.Kzt), coffeeId, null),
+            ],
+            new DateOnly(2026, 9, 21), WalletId: kaspi.Id), TestContext.Current.CancellationToken);
+
+        var subject = await store.GetSubjectAsync(transaction.Id, TestContext.Current.CancellationToken);
+
+        subject!.Charges.Should().Equal([new ChargeView(
+            CurrencyCode.Usd, 30m, new Money(15_600m, CurrencyCode.Kzt), new Money(156m, CurrencyCode.Kzt), 520m,
+            new FeeTerms(1m, null, null), ChargeSource.WalletTerms)]);
+    }
+
+    [Fact]
+    public async Task GetSubjectAsync_gives_a_record_without_charges_an_empty_list()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (transactionId, _, _) = await SeedAsync(db, TestContext.Current.CancellationToken);
+
+        var subject = await new EfCategorizationStore(db, Clock).GetSubjectAsync(transactionId, TestContext.Current.CancellationToken);
+
+        subject!.Charges.Should().NotBeNull().And.BeEmpty();
+    }
 }
