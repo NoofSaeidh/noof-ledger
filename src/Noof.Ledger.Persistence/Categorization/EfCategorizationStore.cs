@@ -9,6 +9,14 @@ namespace Noof.Ledger.Persistence.Categorization;
 
 internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider timeProvider) : ICategorizationStore
 {
+    const string FeesCategorySlug = "fees-charges";
+    const string TransferFeeDescription = "Fee";
+
+    // "The end of the ledger" for BalanceSql.AsOfAsync: later than any record's (occurred_on, occurred_at). A fixed far
+    // date rather than DateOnly/DateTimeOffset.MaxValue, whose last tick Npgsql would have to truncate to microseconds.
+    static readonly DateOnly EndOfLedgerDay = new(9999, 12, 31);
+    static readonly DateTimeOffset EndOfLedgerInstant = new(9999, 12, 31, 0, 0, 0, TimeSpan.Zero);
+
     public async Task<CategorizationSubject?> GetSubjectAsync(Guid transactionId, CancellationToken cancellationToken)
     {
         var header = await (
@@ -31,6 +39,7 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
                 t.CaptureKind,
                 t.Kind,
                 t.WalletId,
+                t.FailureReason,
             })
             .SingleOrDefaultAsync(cancellationToken);
 
@@ -51,7 +60,7 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
                 c == null ? null : c.Slug,
                 c == null ? null : c.NameEn,
                 m == null ? null : m.DisplayName,
-                EntryRole.Principal))
+                li.Role))
             .ToListAsync(cancellationToken);
 
         var balances = header.WalletId is { } walletId
@@ -65,17 +74,66 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
                 .SingleOrDefaultAsync(cancellationToken)
             : null;
 
+        var transfer = header.Kind == TransactionKind.Transfer
+            ? await TransferViewAsync(transactionId, lines, cancellationToken)
+            : null;
+
         // A voice capture has no text until its transcript arrives, and none at all when nothing was heard;
         // the pipeline and the echo read that as empty, which is what it is. Only a Manual record has no chat,
         // and nothing categorises or echoes one, so 0 stands in for it.
         return new CategorizationSubject(
             header.Id, header.RawText ?? string.Empty, header.TelegramChatId ?? 0, header.BotMessageId, header.WalletName,
             header.Status, ZonedClock.LocalDate(header.OccurredAt, header.TimeZoneId), header.OccurredOn, lines,
-            header.CaptureKind, header.Kind, header.WalletCurrency, balances, statement, WalletId: header.WalletId);
+            header.CaptureKind, header.Kind, header.WalletCurrency, balances, statement, WalletId: header.WalletId,
+            Transfer: transfer, FailureReason: header.FailureReason);
     }
+
+    async Task<TransferView?> TransferViewAsync(
+        Guid transactionId, IReadOnlyList<RecordedLine> lines, CancellationToken cancellationToken)
+    {
+        var row = await (
+            from tr in db.Transfers.AsNoTracking()
+            where tr.TransactionId == transactionId
+            join source in db.Wallets.AsNoTracking() on tr.FromWalletId equals source.Id
+            join destination in db.Wallets.AsNoTracking() on tr.ToWalletId equals destination.Id
+            join venue in db.Merchants.AsNoTracking() on tr.VenueMerchantId equals (Guid?)venue.Id into venueJoin
+            from venue in venueJoin.DefaultIfEmpty()
+            select new
+            {
+                Stored = tr,
+                SourceName = source.Name,
+                DestinationName = destination.Name,
+                VenueName = venue == null ? null : venue.DisplayName,
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (row is null)
+            return null;
+
+        var balances = new EfBalanceReadModel(db);
+        return new TransferView(
+            row.Stored.FromWalletId, row.SourceName, row.Stored.From,
+            row.Stored.ToWalletId, row.DestinationName, row.Stored.To,
+            lines.SingleOrDefault(line => line.Role == EntryRole.Fee)?.Amount, row.Stored.FeeLeg, StatedRateOf(row.Stored),
+            row.VenueName,
+            await balances.BalanceOfAsync(row.Stored.FromWalletId, cancellationToken),
+            await balances.BalanceOfAsync(row.Stored.ToWalletId, cancellationToken),
+            await BalanceSql.AsOfAsync(
+                db, row.Stored.FromWalletId, row.Stored.From.Currency, EndOfLedgerDay, EndOfLedgerInstant, transactionId,
+                cancellationToken));
+    }
+
+    // transfers keeps the rate's base and amount only; its quote is whichever leg's currency the base is not.
+    static ExchangeRate? StatedRateOf(Transfer transfer) =>
+        transfer is { StatedRate: { } quoteAmount, StatedRateBase: { } baseCurrency }
+            ? new ExchangeRate(
+                baseCurrency, quoteAmount, baseCurrency == transfer.From.Currency ? transfer.To.Currency : transfer.From.Currency)
+            : null;
 
     public async Task ApplyAsync(Guid transactionId, CategorizationOutcome outcome, CancellationToken cancellationToken)
     {
+        var transfer = TransferOf(transactionId, outcome);
+
         await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
 
         // Row lock, first statement inside the transaction. PostgreSQL runs READ COMMITTED, so
@@ -101,6 +159,27 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
                 new NpgsqlParameter("modelAuthority", (int)CategorizationAuthority.Model),
             ],
             cancellationToken);
+
+        // A fee line is Rule-authored, so the delete above never reaches it: C# rewrites it on every apply, and deleting
+        // it by role means no precedence rule can keep a stale fee alive (Phase 7 spec §1).
+        await db.Database.ExecuteSqlRawAsync(
+            "DELETE FROM line_items WHERE transaction_id = @transactionId AND role = @feeRole",
+            [
+                new NpgsqlParameter("transactionId", transactionId),
+                new NpgsqlParameter("feeRole", (int)EntryRole.Fee),
+            ],
+            cancellationToken);
+
+        // A transfer has no principal lines by definition, so one the record kept from being an expense goes whoever
+        // wrote it - nothing edits lines by hand yet (spec §2).
+        if (transfer is not null)
+            await db.Database.ExecuteSqlRawAsync(
+                "DELETE FROM line_items WHERE transaction_id = @transactionId AND role = @principalRole",
+                [
+                    new NpgsqlParameter("transactionId", transactionId),
+                    new NpgsqlParameter("principalRole", (object)(int)EntryRole.Principal),
+                ],
+                cancellationToken);
 
         // Starts after whatever survived the delete above (a Rule- or User-authored line), so a
         // model re-run's fresh ordinals never collide with an ordinal a kept line already owns.
@@ -130,6 +209,9 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
                 ordinal++;
         }
 
+        if (transfer?.Fee is { } fee)
+            await AddFeeLineAsync(transactionId, fee, TransferFeeDescription, ordinal, cancellationToken);
+
         var transaction = await db.Transactions.SingleAsync(t => t.Id == transactionId, cancellationToken);
         var statusBefore = transaction.Status;
         // A correction arriving for a cancelled record corrects it and leaves it cancelled; only Restore
@@ -137,13 +219,47 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
         transaction.Status = statusBefore == TransactionStatus.Cancelled ? TransactionStatus.Cancelled : TransactionStatus.Completed;
         transaction.OccurredOn = outcome.OccurredOn;
         transaction.Kind = outcome.TransactionKind;
-        transaction.WalletId = outcome.WalletId ?? transaction.WalletId;
+        transaction.WalletId = transfer?.FromWalletId ?? outcome.WalletId ?? transaction.WalletId;
+        transaction.FailureReason = RecordFailureReason.None;
 
         await db.SaveChangesAsync(cancellationToken);
-        await LedgerPostings.RewriteAsync(db, transaction, outcome.StatedBalance, cancellationToken);
+        await LedgerPostings.RewriteAsync(db, transaction, outcome.StatedBalance, transfer, cancellationToken);
         await RevisionLog.AppendAsync(db, transaction, RevisionKindFor(outcome), outcome.Instruction,
             statusBefore, timeProvider.GetUtcNow(), cancellationToken);
         await tx.CommitAsync(cancellationToken);
+    }
+
+    // Unreachable while ProposalMapper and RecordExchange give every transfer its legs, no principal lines, and a fee
+    // only together with its leg. Checked before the database transaction opens, so a refusal writes nothing, and it
+    // is what holds "fee_leg is null exactly when there is no fee line" on the way in.
+    static TransferFacts? TransferOf(Guid transactionId, CategorizationOutcome outcome) => outcome switch
+    {
+        { TransactionKind: not TransactionKind.Transfer } => null,
+        { Transfer: { } transfer, Items.Count: 0 } when transfer.Fee.HasValue == transfer.FeeLeg.HasValue => transfer,
+        _ => throw new InvalidOperationException(
+            $"Transfer {transactionId} needs its legs, no line items, and a fee only together with the leg it was taken on."),
+    };
+
+    // A fee line is C#'s, never the model's (Phase 7 spec §1): Rule-authored, in Fees & Charges, in its leg's currency.
+    async Task AddFeeLineAsync(Guid transactionId, Money fee, string description, int ordinal, CancellationToken cancellationToken)
+    {
+        var feesCategoryId = await db.Categories.AsNoTracking()
+            .Where(category => category.Slug == FeesCategorySlug)
+            .Select(category => category.Id)
+            .SingleAsync(cancellationToken);
+
+        db.LineItems.Add(new LineItem
+        {
+            Id = Guid.NewGuid(),
+            TransactionId = transactionId,
+            Description = description,
+            Amount = fee,
+            CategoryId = feesCategoryId,
+            CategorizedBy = CategorizationAuthority.Rule,
+            MerchantId = null,
+            Ordinal = ordinal,
+            Role = EntryRole.Fee,
+        });
     }
 
     // CategorizeReceipt runs twice for the same receipt (I-2, Phase 6 final review): once from
@@ -156,6 +272,8 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
         JobKind.CategorizeReceipt => outcome.Instruction is null ? RevisionKind.Initial : RevisionKind.Correction,
         JobKind.Correct => RevisionKind.Correction,
         JobKind.Reinterpret => RevisionKind.Edit,
+        // A slip's first recording, by C# from the slip's evidence; a reply correcting it arrives as Correct.
+        JobKind.RecordExchange => RevisionKind.Initial,
         _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome.Kind, "No revision kind for this job kind."),
     };
 
