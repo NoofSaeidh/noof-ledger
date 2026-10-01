@@ -12,6 +12,11 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
     const string FeesCategorySlug = "fees-charges";
     const string TransferFeeDescription = "Fee";
 
+    // "The end of the ledger" for BalanceSql.AsOfAsync: later than any record's (occurred_on, occurred_at). A fixed far
+    // date rather than DateOnly/DateTimeOffset.MaxValue, whose last tick Npgsql would have to truncate to microseconds.
+    static readonly DateOnly EndOfLedgerDay = new(9999, 12, 31);
+    static readonly DateTimeOffset EndOfLedgerInstant = new(9999, 12, 31, 0, 0, 0, TimeSpan.Zero);
+
     public async Task<CategorizationSubject?> GetSubjectAsync(Guid transactionId, CancellationToken cancellationToken)
     {
         var header = await (
@@ -34,6 +39,7 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
                 t.CaptureKind,
                 t.Kind,
                 t.WalletId,
+                t.FailureReason,
             })
             .SingleOrDefaultAsync(cancellationToken);
 
@@ -54,7 +60,7 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
                 c == null ? null : c.Slug,
                 c == null ? null : c.NameEn,
                 m == null ? null : m.DisplayName,
-                EntryRole.Principal))
+                li.Role))
             .ToListAsync(cancellationToken);
 
         var balances = header.WalletId is { } walletId
@@ -68,14 +74,61 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
                 .SingleOrDefaultAsync(cancellationToken)
             : null;
 
+        var transfer = header.Kind == TransactionKind.Transfer
+            ? await TransferViewAsync(transactionId, lines, cancellationToken)
+            : null;
+
         // A voice capture has no text until its transcript arrives, and none at all when nothing was heard;
         // the pipeline and the echo read that as empty, which is what it is. Only a Manual record has no chat,
         // and nothing categorises or echoes one, so 0 stands in for it.
         return new CategorizationSubject(
             header.Id, header.RawText ?? string.Empty, header.TelegramChatId ?? 0, header.BotMessageId, header.WalletName,
             header.Status, ZonedClock.LocalDate(header.OccurredAt, header.TimeZoneId), header.OccurredOn, lines,
-            header.CaptureKind, header.Kind, header.WalletCurrency, balances, statement, WalletId: header.WalletId);
+            header.CaptureKind, header.Kind, header.WalletCurrency, balances, statement, WalletId: header.WalletId,
+            Transfer: transfer, FailureReason: header.FailureReason);
     }
+
+    async Task<TransferView?> TransferViewAsync(
+        Guid transactionId, IReadOnlyList<RecordedLine> lines, CancellationToken cancellationToken)
+    {
+        var row = await (
+            from tr in db.Transfers.AsNoTracking()
+            where tr.TransactionId == transactionId
+            join source in db.Wallets.AsNoTracking() on tr.FromWalletId equals source.Id
+            join destination in db.Wallets.AsNoTracking() on tr.ToWalletId equals destination.Id
+            join venue in db.Merchants.AsNoTracking() on tr.VenueMerchantId equals (Guid?)venue.Id into venueJoin
+            from venue in venueJoin.DefaultIfEmpty()
+            select new
+            {
+                Stored = tr,
+                SourceName = source.Name,
+                DestinationName = destination.Name,
+                VenueName = venue == null ? null : venue.DisplayName,
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (row is null)
+            return null;
+
+        var balances = new EfBalanceReadModel(db);
+        return new TransferView(
+            row.Stored.FromWalletId, row.SourceName, row.Stored.From,
+            row.Stored.ToWalletId, row.DestinationName, row.Stored.To,
+            lines.SingleOrDefault(line => line.Role == EntryRole.Fee)?.Amount, row.Stored.FeeLeg, StatedRateOf(row.Stored),
+            row.VenueName,
+            await balances.BalanceOfAsync(row.Stored.FromWalletId, cancellationToken),
+            await balances.BalanceOfAsync(row.Stored.ToWalletId, cancellationToken),
+            await BalanceSql.AsOfAsync(
+                db, row.Stored.FromWalletId, row.Stored.From.Currency, EndOfLedgerDay, EndOfLedgerInstant, transactionId,
+                cancellationToken));
+    }
+
+    // transfers keeps the rate's base and amount only; its quote is whichever leg's currency the base is not.
+    static ExchangeRate? StatedRateOf(Transfer transfer) =>
+        transfer is { StatedRate: { } quoteAmount, StatedRateBase: { } baseCurrency }
+            ? new ExchangeRate(
+                baseCurrency, quoteAmount, baseCurrency == transfer.From.Currency ? transfer.To.Currency : transfer.From.Currency)
+            : null;
 
     public async Task ApplyAsync(Guid transactionId, CategorizationOutcome outcome, CancellationToken cancellationToken)
     {

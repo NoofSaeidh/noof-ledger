@@ -584,6 +584,132 @@ public class EfCategorizationStoreTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task GetSubjectAsync_reads_both_legs_of_a_transfer_with_names_balances_fee_rate_and_venue()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var cashEur = NewWallet("Cash EUR", CurrencyCode.Eur);
+        var cashRsd = NewWallet("Cash RSD", CurrencyCode.Rsd);
+        var venue = new Merchant { Id = Guid.NewGuid(), DisplayName = "Menjačnica Centar", Kind = MerchantKind.ExchangeVenue };
+        var transaction = NewTransaction(walletId: null,
+            occurredAt: new DateTimeOffset(2026, 9, 21, 10, 0, 0, TimeSpan.Zero), occurredOn: new DateOnly(2026, 9, 21));
+        db.AddRange(cashEur, cashRsd, venue, transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var store = new EfCategorizationStore(db, Clock);
+        await store.ApplyAsync(transaction.Id,
+            new CategorizationOutcome([], new DateOnly(2026, 9, 21), TransactionKind: TransactionKind.Transfer,
+                Transfer: new TransferFacts(
+                    cashEur.Id, new Money(100m, CurrencyCode.Eur), cashRsd.Id, new Money(11500m, CurrencyCode.Rsd),
+                    new Money(200m, CurrencyCode.Rsd), TransferLeg.To,
+                    new ExchangeRate(CurrencyCode.Eur, 117m, CurrencyCode.Rsd), venue.Id)),
+            TestContext.Current.CancellationToken);
+
+        var subject = await store.GetSubjectAsync(transaction.Id, TestContext.Current.CancellationToken);
+
+        subject.Should().NotBeNull();
+        subject!.Kind.Should().Be(TransactionKind.Transfer);
+        subject.WalletId.Should().Be(cashEur.Id);
+        subject.Lines.Should().Equal(
+            new RecordedLine("Fee", new Money(200m, CurrencyCode.Rsd), "fees-charges", "Fees & Charges", null, EntryRole.Fee));
+        subject.FailureReason.Should().Be(RecordFailureReason.None);
+        subject.Transfer.Should().NotBeNull();
+        var transfer = subject.Transfer!;
+        transfer.FromWalletId.Should().Be(cashEur.Id);
+        transfer.FromWalletName.Should().Be("Cash EUR");
+        transfer.From.Should().Be(new Money(100m, CurrencyCode.Eur));
+        transfer.ToWalletId.Should().Be(cashRsd.Id);
+        transfer.ToWalletName.Should().Be("Cash RSD");
+        transfer.To.Should().Be(new Money(11500m, CurrencyCode.Rsd));
+        transfer.Fee.Should().Be(new Money(200m, CurrencyCode.Rsd));
+        transfer.FeeLeg.Should().Be(TransferLeg.To);
+        transfer.StatedRate.Should().Be(new ExchangeRate(CurrencyCode.Eur, 117m, CurrencyCode.Rsd),
+            "the rate as the operator stated it, never one re-derived from rounded amounts");
+        transfer.VenueName.Should().Be("Menjačnica Centar");
+        transfer.FromBalances.Should().Equal(new Money(-100m, CurrencyCode.Eur));
+        transfer.ToBalances.Should().Equal(new Money(11500m, CurrencyCode.Rsd));
+        transfer.FromBalanceWithoutThis.Should().Be(0m, "nothing else ever touched Cash EUR");
+    }
+
+    static async Task<Guid> RecordAsync(
+        LedgerDbContext db, EfCategorizationStore store, int messageId, DateOnly sentOn, CategorizationOutcome outcome)
+    {
+        var transaction = NewTransaction(walletId: null, messageId: messageId,
+            occurredAt: new DateTimeOffset(sentOn.Year, sentOn.Month, sentOn.Day, 10, 0, 0, TimeSpan.Zero), occurredOn: sentOn);
+        db.Transactions.Add(transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await store.ApplyAsync(transaction.Id, outcome, TestContext.Current.CancellationToken);
+        return transaction.Id;
+    }
+
+    static CategorizationOutcome EurStatement(DateOnly day, Guid walletId, decimal amount) =>
+        new([], day, TransactionKind: TransactionKind.BalanceCheck, WalletId: walletId, StatedBalance: new Money(amount, CurrencyCode.Eur));
+
+    static CategorizationOutcome HundredEuroExchange(DateOnly day, Guid cashEur, Guid cashRsd) =>
+        new([], day, TransactionKind: TransactionKind.Transfer,
+            Transfer: new TransferFacts(
+                cashEur, new Money(100m, CurrencyCode.Eur), cashRsd, new Money(11700m, CurrencyCode.Rsd), null, null,
+                new ExchangeRate(CurrencyCode.Eur, 117m, CurrencyCode.Rsd)));
+
+    [Fact]
+    public async Task GetSubjectAsync_gives_the_source_balance_as_it_would_be_without_this_transfer()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var cashEur = NewWallet("Cash EUR", CurrencyCode.Eur);
+        var cashRsd = NewWallet("Cash RSD", CurrencyCode.Rsd);
+        db.AddRange(cashEur, cashRsd);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var store = new EfCategorizationStore(db, Clock);
+        await RecordAsync(db, store, 1, new DateOnly(2026, 9, 1), EurStatement(new DateOnly(2026, 9, 1), cashEur.Id, 50m));
+        var exchange = await RecordAsync(db, store, 2, new DateOnly(2026, 9, 10),
+            HundredEuroExchange(new DateOnly(2026, 9, 10), cashEur.Id, cashRsd.Id));
+
+        var transfer = (await store.GetSubjectAsync(exchange, TestContext.Current.CancellationToken))!.Transfer!;
+
+        transfer.FromBalances.Should().Equal(new Money(-50m, CurrencyCode.Eur));
+        transfer.FromBalanceWithoutThis.Should().Be(50m, "the current -50 plus the 100 this transfer took: it took the wallet below zero");
+    }
+
+    [Fact]
+    public async Task GetSubjectAsync_gives_a_backdated_transfer_a_later_checkpoint_absorbed_the_current_balance_without_it()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var cashEur = NewWallet("Cash EUR", CurrencyCode.Eur);
+        var cashRsd = NewWallet("Cash RSD", CurrencyCode.Rsd);
+        db.AddRange(cashEur, cashRsd);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var store = new EfCategorizationStore(db, Clock);
+        await RecordAsync(db, store, 1, new DateOnly(2026, 9, 20), EurStatement(new DateOnly(2026, 9, 20), cashEur.Id, 500m));
+        // Told on the 22nd about the 18th: before the statement of the 20th, which already holds it.
+        var exchange = await RecordAsync(db, store, 2, new DateOnly(2026, 9, 22),
+            HundredEuroExchange(new DateOnly(2026, 9, 18), cashEur.Id, cashRsd.Id));
+
+        var transfer = (await store.GetSubjectAsync(exchange, TestContext.Current.CancellationToken))!.Transfer!;
+
+        transfer.FromBalances.Should().Equal(new Money(500m, CurrencyCode.Eur));
+        transfer.FromBalanceWithoutThis.Should().Be(500m,
+            "the checkpoint absorbed this transfer, so it changes nothing now and can claim no crossing");
+    }
+
+    [Fact]
+    public async Task GetSubjectAsync_reads_why_a_failed_record_was_not_recorded()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var wallet = NewWallet("Cash RSD", CurrencyCode.Rsd);
+        var transaction = NewTransaction(wallet.Id,
+            occurredAt: new DateTimeOffset(2026, 9, 21, 10, 0, 0, TimeSpan.Zero), occurredOn: new DateOnly(2026, 9, 21));
+        db.AddRange(wallet, transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var store = new EfCategorizationStore(db, Clock);
+        await store.MarkFailedAsync(transaction.Id, RecordFailureReason.SameWallet, TestContext.Current.CancellationToken);
+
+        var subject = await store.GetSubjectAsync(transaction.Id, TestContext.Current.CancellationToken);
+
+        subject!.Status.Should().Be(TransactionStatus.Failed);
+        subject.FailureReason.Should().Be(RecordFailureReason.SameWallet,
+            "the echo renders the reason from the record, so Cancel/Restore and a replayed update show the same text");
+        subject.Transfer.Should().BeNull("only a Transfer has legs to read");
+    }
+
+    [Fact]
     public async Task GetSubjectAsync_maps_a_manual_record_with_no_chat_to_chat_zero()
     {
         await using var db = await fixture.CreateMigratedContextAsync();
