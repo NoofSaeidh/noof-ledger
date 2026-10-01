@@ -60,3 +60,24 @@ internal static class NullableEnum
         ["description"] = description,
     };
 }
+
+// The object counterpart of NullableEnum, and an anyOf for the same reason: each branch keeps one type, so the
+// strict validator checks the object branch's "additionalProperties": false and its full "required" list on their
+// own. Every property is required (absent values are null), derived from the properties given, as the line item does.
+internal static class NullableObject
+{
+    public static JsonObject Of(string description, params (string Name, JsonNode Schema)[] properties) => new()
+    {
+        ["anyOf"] = new JsonArray(
+            new JsonObject
+            {
+                ["type"] = "object",
+                ["additionalProperties"] = false,
+                ["required"] = new JsonArray([.. properties.Select(property => (JsonNode)property.Name)]),
+                ["properties"] = new JsonObject(
+                    properties.Select(property => KeyValuePair.Create(property.Name, (JsonNode?)property.Schema))),
+            },
+            new JsonObject { ["type"] = "null" }),
+        ["description"] = description,
+    };
+}
