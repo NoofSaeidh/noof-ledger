@@ -50,7 +50,8 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
                 li.Amount,
                 c == null ? null : c.Slug,
                 c == null ? null : c.NameEn,
-                m == null ? null : m.DisplayName))
+                m == null ? null : m.DisplayName,
+                EntryRole.Principal))
             .ToListAsync(cancellationToken);
 
         var balances = header.WalletId is { } walletId
@@ -158,12 +159,14 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
         _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome.Kind, "No revision kind for this job kind."),
     };
 
-    public Task MarkFailedAsync(Guid transactionId, CancellationToken cancellationToken) =>
+    public Task MarkFailedAsync(Guid transactionId, RecordFailureReason reason, CancellationToken cancellationToken) =>
         db.Database.ExecuteSqlRawAsync(
-            "UPDATE transactions SET status = @status WHERE id = @transactionId",
+            "UPDATE transactions SET status = @status, failure_reason = @reason WHERE id = @transactionId AND status = @captured",
             [
                 new NpgsqlParameter("status", (int)TransactionStatus.Failed),
+                new NpgsqlParameter("reason", (int)reason),
                 new NpgsqlParameter("transactionId", transactionId),
+                new NpgsqlParameter("captured", (object)(int)TransactionStatus.Captured),
             ],
             cancellationToken);
 }

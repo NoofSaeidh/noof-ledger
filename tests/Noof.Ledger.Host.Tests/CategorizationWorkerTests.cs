@@ -352,7 +352,7 @@ public class CategorizationWorkerTests
 
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
-        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<RecordFailureReason>(), Arg.Any<CancellationToken>());
         await notifier.Received(1).EditAsync(111L, 42,
             Arg.Is<EchoMessage>(echo => echo.Text.StartsWith("Could not apply that correction") && echo.Text.Contains("250.00 RSD")),
             Arg.Any<CancellationToken>());
@@ -727,7 +727,7 @@ public class CategorizationWorkerTests
         await jobQueue.DidNotReceive().RetryAsync(
             Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await store.DidNotReceive().ApplyAsync(Arg.Any<Guid>(), Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
-        await store.Received(1).MarkFailedAsync(TransactionId, Arg.Any<CancellationToken>());
+        await store.Received(1).MarkFailedAsync(TransactionId, RecordFailureReason.None, Arg.Any<CancellationToken>());
         await notifier.Received(1).EditAsync(111L, 42, Arg.Any<EchoMessage>(), Arg.Any<CancellationToken>());
     }
 
@@ -909,7 +909,7 @@ public class CategorizationWorkerTests
         result.Should().Be(CategorizationTickResult.Processed);
         await store.Received(1).ApplyAsync(
             TransactionId, Arg.Is<CategorizationOutcome>(outcome => outcome.Items.Count == 0), Arg.Any<CancellationToken>());
-        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<RecordFailureReason>(), Arg.Any<CancellationToken>());
         await jobQueue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
         await jobQueue.DidNotReceive().FailAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await jobQueue.DidNotReceive().RetryAsync(
@@ -964,7 +964,7 @@ public class CategorizationWorkerTests
 
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
-        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<RecordFailureReason>(), Arg.Any<CancellationToken>());
         await notifier.DidNotReceive().EditAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<EchoMessage>(), Arg.Any<CancellationToken>());
     }
 
@@ -986,7 +986,7 @@ public class CategorizationWorkerTests
 
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
-        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<RecordFailureReason>(), Arg.Any<CancellationToken>());
         await notifier.DidNotReceive().EditAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<EchoMessage>(), Arg.Any<CancellationToken>());
     }
 
@@ -1142,7 +1142,7 @@ public class CategorizationWorkerTests
         await jobQueue.Received(1).FailAsync(JobId, WorkerId, Arg.Any<string>(), Arg.Any<CancellationToken>());
         await store.DidNotReceive().ApplyAsync(
             Arg.Any<Guid>(), Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
-        await store.Received(1).MarkFailedAsync(TransactionId, Arg.Any<CancellationToken>());
+        await store.Received(1).MarkFailedAsync(TransactionId, RecordFailureReason.None, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -1164,7 +1164,7 @@ public class CategorizationWorkerTests
 
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
-        await store.Received(1).MarkFailedAsync(TransactionId, Arg.Any<CancellationToken>());
+        await store.Received(1).MarkFailedAsync(TransactionId, RecordFailureReason.None, Arg.Any<CancellationToken>());
         await notifier.Received(1).EditAsync(111L, 42, Arg.Any<EchoMessage>(), Arg.Any<CancellationToken>());
     }
 
@@ -1187,7 +1187,7 @@ public class CategorizationWorkerTests
 
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
-        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<RecordFailureReason>(), Arg.Any<CancellationToken>());
         await notifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(m =>
             m.Text.Contains("Recording this", StringComparison.Ordinal)
             && m.Text.Contains("the model did not answer", StringComparison.Ordinal)
@@ -1246,7 +1246,7 @@ public class CategorizationWorkerTests
 
         // Still saves: nothing was marked failed and nothing was applied to the transaction - the
         // raw capture alone survives - and the job was retried, not abandoned.
-        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<RecordFailureReason>(), Arg.Any<CancellationToken>());
         await store.DidNotReceive().ApplyAsync(
             Arg.Any<Guid>(), Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
         // A retry notice edits the same placeholder instead of silence (ops/RUNBOOK.md's "When an
@@ -1308,7 +1308,7 @@ public class CategorizationWorkerTests
         result.Should().Be(CategorizationTickResult.Processed);
         await store.Received(1).ApplyAsync(
             TransactionId, Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
-        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<RecordFailureReason>(), Arg.Any<CancellationToken>());
         await jobQueue.DidNotReceive().FailAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await jobQueue.DidNotReceive().RetryAsync(
             Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
@@ -1337,7 +1337,7 @@ public class CategorizationWorkerTests
         await jobQueue.Received(1).RetryAsync(
             JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await jobQueue.DidNotReceive().FailAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
-        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<RecordFailureReason>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -1821,7 +1821,7 @@ public class CategorizationWorkerTests
         await jobQueue.DidNotReceive().HandOffToReceiptCorrectionAsync(
             Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<DateTimeOffset>(),
             Arg.Any<CancellationToken>());
-        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<RecordFailureReason>(), Arg.Any<CancellationToken>());
     }
 
     // The same reply, claimed again once extraction has finished (its receipt now exists): the
@@ -1869,7 +1869,7 @@ public class CategorizationWorkerTests
 
         await notifier.Received(1).EditAsync(
             111L, 42, Arg.Is<EchoMessage>(m => m.Text.Contains("Could not apply that correction")), Arg.Any<CancellationToken>());
-        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<RecordFailureReason>(), Arg.Any<CancellationToken>());
     }
 
     // R2-3 follow-up: the other terminal retry paths (HandleModelFailureAsync, FailTerminallyAsync)

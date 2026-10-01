@@ -284,7 +284,7 @@ internal sealed class ReceiptCategorizationWorker(
             return current;
 
         if (receipt.PaymentMethod is PaymentMethod.Card or PaymentMethod.Cash
-            && await walletDirectory.DefaultForPaymentAsync(receipt.PaymentMethod.Value, cancellationToken) is { } forPayment)
+            && await walletDirectory.DefaultForPaymentAsync(receipt.PaymentMethod.Value, receipt.Currency, cancellationToken) is { } forPayment)
             return forPayment;
 
         return DefaultWalletFor(receipt.Currency.Value, wallets);
@@ -429,7 +429,7 @@ internal sealed class ReceiptCategorizationWorker(
         if (subject is not { BotMessageId: { } messageId } sub)
             return;
 
-        await store.MarkFailedAsync(sub.TransactionId, cancellationToken);
+        await store.MarkFailedAsync(sub.TransactionId, RecordFailureReason.None, cancellationToken);
 
         try
         {

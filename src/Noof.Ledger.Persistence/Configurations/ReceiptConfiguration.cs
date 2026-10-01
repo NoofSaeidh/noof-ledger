@@ -10,6 +10,9 @@ internal sealed class ReceiptConfiguration : IEntityTypeConfiguration<Receipt>
     // recorded is the same receipt, whichever channel it arrives through the second time.
     internal const string DuplicateIndex = "ix_receipts_seller_tax_id_fiscal_number";
 
+    // The same guard for an exchange slip, keyed by the office's PIB and the slip's own number; 6 is ReceiptKind.Exchange.
+    internal const string SlipDuplicateIndex = "ix_receipts_seller_tax_id_slip_number";
+
     public void Configure(EntityTypeBuilder<Receipt> builder)
     {
         builder.ToTable("receipts");
@@ -25,6 +28,7 @@ internal sealed class ReceiptConfiguration : IEntityTypeConfiguration<Receipt>
         builder.Property(r => r.SellerAddress).HasColumnName("seller_address");
         builder.Property(r => r.LocationName).HasColumnName("location_name").HasMaxLength(256);
         builder.Property(r => r.FiscalNumber).HasColumnName("fiscal_number").HasMaxLength(64);
+        builder.Property(r => r.SlipNumber).HasColumnName("slip_number");
         builder.Property(r => r.IssuedAt).HasColumnName("issued_at");
         builder.Property(r => r.Kind).HasColumnName("receipt_kind");
         builder.Property(r => r.PaymentMethod).HasColumnName("payment_method");
@@ -46,6 +50,11 @@ internal sealed class ReceiptConfiguration : IEntityTypeConfiguration<Receipt>
             .IsUnique()
             .HasFilter("seller_tax_id IS NOT NULL AND fiscal_number IS NOT NULL")
             .HasDatabaseName(DuplicateIndex);
+
+        builder.HasIndex(r => new { r.SellerTaxId, r.SlipNumber })
+            .IsUnique()
+            .HasFilter("receipt_kind = 6 AND seller_tax_id IS NOT NULL AND slip_number IS NOT NULL")
+            .HasDatabaseName(SlipDuplicateIndex);
 
         builder.HasOne<Transaction>()
             .WithOne()

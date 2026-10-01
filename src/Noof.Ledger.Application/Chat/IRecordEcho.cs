@@ -34,7 +34,7 @@ public interface IRecordEcho
     EchoMessage NewReceiptLinkMustBeSentSeparately { get; }
 
     EchoMessage Compose(CategorizationSubject record);
-    EchoMessage ComposeCorrectionFailure(CategorizationSubject record);
+    EchoMessage ComposeCorrectionFailure(CategorizationSubject record, RecordFailureReason reason = RecordFailureReason.None);
     EchoMessage ComposeHeardNothing(CategorizationSubject record);
 
     // A failed attempt that will still be retried (ops/RUNBOOK.md's "When an attempt fails"

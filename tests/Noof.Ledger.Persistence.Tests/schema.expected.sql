@@ -103,6 +103,7 @@ CREATE TABLE public.transactions (
     telegram_file_id text,
     verification_url text,
     status integer NOT NULL,
+    failure_reason integer NOT NULL,
     time_zone_id character varying(64) NOT NULL,
     occurred_at timestamptz NOT NULL,
     occurred_on date NOT NULL,
@@ -115,6 +116,19 @@ CREATE TABLE public.transactions (
     CONSTRAINT ck_transactions_capture_has_content CHECK ((capture_kind IN (0, 2) AND raw_text IS NOT NULL) OR (capture_kind = 1 AND voice_file_id IS NOT NULL) OR (capture_kind = 3 AND ((telegram_file_id IS NOT NULL) <> (verification_url IS NOT NULL)))),
     CONSTRAINT ck_transactions_telegram_ids_match_capture_kind CHECK ((capture_kind = 2 AND telegram_chat_id IS NULL AND telegram_message_id IS NULL) OR (capture_kind <> 2 AND telegram_chat_id IS NOT NULL AND telegram_message_id IS NOT NULL)),
     CONSTRAINT "FK_transactions_wallets_wallet_id" FOREIGN KEY (wallet_id) REFERENCES public.wallets (id) ON DELETE RESTRICT
+);
+
+
+CREATE TABLE public.wallet_fx_terms (
+    wallet_id uuid NOT NULL,
+    currency character varying(3) NOT NULL,
+    rate numeric(24,12) NOT NULL,
+    fee_percent numeric(9,4),
+    fee_fixed numeric(19,4),
+    fee_minimum numeric(19,4),
+    CONSTRAINT "PK_wallet_fx_terms" PRIMARY KEY (wallet_id, currency),
+    CONSTRAINT ck_wallet_fx_terms_rate_positive CHECK (rate > 0),
+    CONSTRAINT "FK_wallet_fx_terms_wallets_wallet_id" FOREIGN KEY (wallet_id) REFERENCES public.wallets (id) ON DELETE CASCADE
 );
 
 
@@ -153,6 +167,22 @@ CREATE TABLE public.categorization_jobs (
 );
 
 
+CREATE TABLE public.charges (
+    transaction_id uuid NOT NULL,
+    currency character varying(3) NOT NULL,
+    charged_amount numeric(19,4) NOT NULL,
+    fee_amount numeric(19,4) NOT NULL,
+    rate_used numeric(24,12) NOT NULL,
+    fee_percent numeric(9,4),
+    fee_fixed numeric(19,4),
+    fee_minimum numeric(19,4),
+    source integer NOT NULL,
+    CONSTRAINT "PK_charges" PRIMARY KEY (transaction_id, currency),
+    CONSTRAINT ck_charges_amounts CHECK (charged_amount > 0 AND fee_amount >= 0 AND rate_used > 0),
+    CONSTRAINT "FK_charges_transactions_transaction_id" FOREIGN KEY (transaction_id) REFERENCES public.transactions (id) ON DELETE CASCADE
+);
+
+
 CREATE TABLE public.entries (
     id uuid NOT NULL,
     transaction_id uuid NOT NULL,
@@ -176,6 +206,7 @@ CREATE TABLE public.receipts (
     seller_address text,
     location_name character varying(256),
     fiscal_number character varying(64),
+    slip_number text,
     issued_at timestamptz,
     receipt_kind integer NOT NULL,
     payment_method integer,
@@ -204,6 +235,44 @@ CREATE TABLE public.transaction_revisions (
 );
 
 
+CREATE TABLE public.transfers (
+    transaction_id uuid NOT NULL,
+    from_wallet_id uuid NOT NULL,
+    to_wallet_id uuid NOT NULL,
+    fee_leg integer,
+    stated_rate numeric(24,12),
+    stated_rate_base character varying(3),
+    venue_merchant_id uuid,
+    from_amount numeric(19,4) NOT NULL,
+    from_currency character varying(3) NOT NULL,
+    to_amount numeric(19,4) NOT NULL,
+    to_currency character varying(3) NOT NULL,
+    CONSTRAINT "PK_transfers" PRIMARY KEY (transaction_id),
+    CONSTRAINT ck_transfers_amounts_positive CHECK (from_amount > 0 AND to_amount > 0),
+    CONSTRAINT ck_transfers_stated_rate_has_base CHECK ((stated_rate IS NULL) = (stated_rate_base IS NULL)),
+    CONSTRAINT ck_transfers_wallets_differ CHECK (from_wallet_id <> to_wallet_id),
+    CONSTRAINT "FK_transfers_merchants_venue_merchant_id" FOREIGN KEY (venue_merchant_id) REFERENCES public.merchants (id) ON DELETE RESTRICT,
+    CONSTRAINT "FK_transfers_transactions_transaction_id" FOREIGN KEY (transaction_id) REFERENCES public.transactions (id) ON DELETE CASCADE,
+    CONSTRAINT "FK_transfers_wallets_from_wallet_id" FOREIGN KEY (from_wallet_id) REFERENCES public.wallets (id) ON DELETE RESTRICT,
+    CONSTRAINT "FK_transfers_wallets_to_wallet_id" FOREIGN KEY (to_wallet_id) REFERENCES public.wallets (id) ON DELETE RESTRICT
+);
+
+
+CREATE TABLE public.receipt_exchanges (
+    receipt_id uuid NOT NULL,
+    given_amount numeric(19,4),
+    given_currency character varying(3),
+    received_amount numeric(19,4),
+    received_currency character varying(3),
+    rate numeric(24,12),
+    commission_amount numeric(19,4),
+    commission_currency character varying(3),
+    slip_number text,
+    CONSTRAINT "PK_receipt_exchanges" PRIMARY KEY (receipt_id),
+    CONSTRAINT "FK_receipt_exchanges_receipts_receipt_id" FOREIGN KEY (receipt_id) REFERENCES public.receipts (id) ON DELETE CASCADE
+);
+
+
 CREATE TABLE public.receipt_lines (
     id uuid NOT NULL,
     receipt_id uuid NOT NULL,
@@ -228,6 +297,7 @@ CREATE TABLE public.line_items (
     merchant_id uuid,
     ordinal integer NOT NULL,
     receipt_line_id uuid,
+    role integer NOT NULL,
     amount numeric(19,4) NOT NULL,
     currency character varying(3) NOT NULL,
     CONSTRAINT "PK_line_items" PRIMARY KEY (id),
@@ -292,6 +362,9 @@ CREATE UNIQUE INDEX "IX_receipt_lines_receipt_id_ordinal" ON public.receipt_line
 CREATE UNIQUE INDEX ix_receipts_seller_tax_id_fiscal_number ON public.receipts (seller_tax_id, fiscal_number) WHERE seller_tax_id IS NOT NULL AND fiscal_number IS NOT NULL;
 
 
+CREATE UNIQUE INDEX ix_receipts_seller_tax_id_slip_number ON public.receipts (seller_tax_id, slip_number) WHERE receipt_kind = 6 AND seller_tax_id IS NOT NULL AND slip_number IS NOT NULL;
+
+
 CREATE UNIQUE INDEX "IX_receipts_transaction_id" ON public.receipts (transaction_id);
 
 
@@ -304,7 +377,16 @@ CREATE UNIQUE INDEX "IX_transactions_telegram_chat_id_telegram_message_id" ON pu
 CREATE INDEX "IX_transactions_wallet_id" ON public.transactions (wallet_id);
 
 
+CREATE INDEX ix_transfers_from_wallet_id ON public.transfers (from_wallet_id);
+
+
+CREATE INDEX ix_transfers_to_wallet_id ON public.transfers (to_wallet_id);
+
+
+CREATE INDEX "IX_transfers_venue_merchant_id" ON public.transfers (venue_merchant_id);
+
+
 CREATE UNIQUE INDEX ix_wallets_one_default_per_currency ON public.wallets (currency) WHERE is_default_for_currency;
 
 
-CREATE UNIQUE INDEX ix_wallets_one_default_per_payment_method ON public.wallets (default_for_payment) WHERE default_for_payment IS NOT NULL;
+CREATE UNIQUE INDEX ix_wallets_one_default_per_payment_method_and_currency ON public.wallets (default_for_payment, currency) WHERE default_for_payment IS NOT NULL;

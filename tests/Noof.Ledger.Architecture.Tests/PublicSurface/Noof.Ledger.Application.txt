@@ -12,12 +12,14 @@ CategorizationSubject
 CategorizedLineItem
 CategoryEntry
 CategoryOption
+ChargeView
 CorrectionRequest
 DatabaseLogLevelSetting
 DatabaseState
 DumpResult
 EchoMessage
 EchoTarget
+ExtractedExchange
 ExtractedReceipt
 ExtractedReceiptLine
 FiscalFetchFailure
@@ -78,6 +80,7 @@ IUserStore
 IVoiceFileSource
 IWalletAdmin
 IWalletDirectory
+IWalletFxTerms
 JobCompletionOutcome
 LogFilter
 LogPage
@@ -98,8 +101,13 @@ OperationTiming
 PasswordVerifyResult
 PollFailure
 ProbeResult
+ProposedCharge
+ProposedFee
 ProposedKind
+ProposedLeg
 ProposedLineItem
+ProposedRate
+ProposedTransfer
 ReceiptCategorization
 ReceiptCategorizationRequest
 ReceiptLineCategory
@@ -122,7 +130,9 @@ SecretKeys
 SecretResult
 SecretState
 SecretStatus
+SlipFacts
 SlowOperationOptions
+StatedCharge
 SystemHealthReport
 TimedOperations
 TraceEvent
@@ -134,7 +144,10 @@ TransactionLogScope
 TransactionStages
 TransactionSummary
 TransactionTrace
+TransferFacts
+TransferView
 UnsupportedChangeKind
 WalletBalance
 WalletDetails
 WalletOption
+WalletTermsDetails

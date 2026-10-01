@@ -155,7 +155,7 @@ public class TranscriptionWorkerTests
         await harness.TranscriptionStore.Received(1).CompleteCaptureAsync(TransactionId, "купил вчера штуку евро", Arg.Any<CancellationToken>());
         await harness.Queue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
         await harness.TranscriptionStore.DidNotReceiveWithAnyArgs().CompleteCorrectionAsync(default, default!, default, default, Arg.Any<CancellationToken>());
-        await harness.Store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, Arg.Any<CancellationToken>());
+        await harness.Store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, default, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -247,7 +247,7 @@ public class TranscriptionWorkerTests
         await TickAsync(harness);
 
         await harness.Queue.Received(1).FailAsync(JobId, WorkerId, Arg.Any<string>(), Arg.Any<CancellationToken>());
-        await harness.Store.Received(1).MarkFailedAsync(TransactionId, Arg.Any<CancellationToken>());
+        await harness.Store.Received(1).MarkFailedAsync(TransactionId, RecordFailureReason.None, Arg.Any<CancellationToken>());
         await harness.Notifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(m => m.Text == Echo.HeardNothing.Text),
             Arg.Any<CancellationToken>());
         await harness.TranscriptionStore.DidNotReceiveWithAnyArgs().CompleteCaptureAsync(default, default!, Arg.Any<CancellationToken>());
@@ -260,7 +260,7 @@ public class TranscriptionWorkerTests
 
         await TickAsync(harness);
 
-        await harness.Store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, Arg.Any<CancellationToken>());
+        await harness.Store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, default, Arg.Any<CancellationToken>());
         await harness.Notifier.Received(1).EditAsync(111L, 42,
             Arg.Is<EchoMessage>(m => m.Text.StartsWith("Heard nothing in that voice note.\n\nRecorded — Cash", StringComparison.Ordinal)),
             Arg.Any<CancellationToken>());
@@ -279,7 +279,7 @@ public class TranscriptionWorkerTests
 
         await harness.Queue.Received(1).RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await harness.Queue.DidNotReceiveWithAnyArgs().FailAsync(default, default!, default!, Arg.Any<CancellationToken>());
-        await harness.Store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, Arg.Any<CancellationToken>());
+        await harness.Store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, default, Arg.Any<CancellationToken>());
         await harness.Notifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(m =>
             m.Text.Contains("Transcribing the voice note", StringComparison.Ordinal)
             && m.Text.Contains("the model did not answer", StringComparison.Ordinal)
@@ -335,7 +335,7 @@ public class TranscriptionWorkerTests
         await TickAsync(harness);
 
         await harness.Queue.Received(1).FailAsync(JobId, WorkerId, Arg.Any<string>(), Arg.Any<CancellationToken>());
-        await harness.Store.Received(1).MarkFailedAsync(TransactionId, Arg.Any<CancellationToken>());
+        await harness.Store.Received(1).MarkFailedAsync(TransactionId, RecordFailureReason.None, Arg.Any<CancellationToken>());
         await harness.Notifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(m => m.Text == Echo.TranscriptionFailure.Text),
             Arg.Any<CancellationToken>());
     }
@@ -349,7 +349,7 @@ public class TranscriptionWorkerTests
 
         await TickAsync(harness);
 
-        await harness.Store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, Arg.Any<CancellationToken>());
+        await harness.Store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, default, Arg.Any<CancellationToken>());
         await harness.Notifier.Received(1).EditAsync(111L, 42,
             Arg.Is<EchoMessage>(m => m.Text.StartsWith("Could not apply that correction", StringComparison.Ordinal)),
             Arg.Any<CancellationToken>());
@@ -365,7 +365,7 @@ public class TranscriptionWorkerTests
         await TickAsync(harness);
 
         await harness.Queue.Received(1).RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
-        await harness.Store.Received(1).MarkFailedAsync(TransactionId, Arg.Any<CancellationToken>());
+        await harness.Store.Received(1).MarkFailedAsync(TransactionId, RecordFailureReason.None, Arg.Any<CancellationToken>());
         await harness.Notifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(m => m.Text == Echo.TranscriptionFailure.Text),
             Arg.Any<CancellationToken>());
     }
@@ -384,7 +384,7 @@ public class TranscriptionWorkerTests
         second.Should().Be(CategorizationTickResult.Idle);
         await harness.Queue.Received(1).RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await harness.Queue.Received(1).ClaimAsync(WorkerId, Arg.Any<IReadOnlyCollection<JobKind>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
-        await harness.Store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, Arg.Any<CancellationToken>());
+        await harness.Store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, default, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -409,7 +409,7 @@ public class TranscriptionWorkerTests
         (await TickAsync(harness)).Should().Be(CategorizationTickResult.Processed);
 
         await harness.Queue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
-        await harness.Store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, Arg.Any<CancellationToken>());
+        await harness.Store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, default, Arg.Any<CancellationToken>());
         await harness.Notifier.DidNotReceiveWithAnyArgs().EditAsync(default, default, default!, Arg.Any<CancellationToken>());
     }
 
@@ -421,7 +421,7 @@ public class TranscriptionWorkerTests
 
         (await TickAsync(harness)).Should().Be(CategorizationTickResult.Processed);
 
-        await harness.Store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, Arg.Any<CancellationToken>());
+        await harness.Store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, default, Arg.Any<CancellationToken>());
         await harness.Queue.DidNotReceiveWithAnyArgs().RetryAsync(default, default!, default, default!, Arg.Any<CancellationToken>());
     }
 

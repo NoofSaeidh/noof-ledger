@@ -447,4 +447,20 @@ public class EfWalletAdminTests(PostgresFixture fixture)
         await archive.Should().ThrowAsync<KeyNotFoundException>();
         (await ReadAsync(db, MainWalletId)).IsDefaultForCurrency.Should().BeTrue();
     }
+
+    [Fact]
+    public async Task SetPaymentDefaultAsync_leaves_the_same_methods_default_of_another_currency_alone()
+    {
+        await using var db = await MigratedAsync();
+        var admin = Admin(db);
+        var cashRsd = await admin.CreateAsync(Named("Cash RSD", CurrencyCode.Rsd), TestContext.Current.CancellationToken);
+        var cashEur = await admin.CreateAsync(Named("Cash EUR", CurrencyCode.Eur), TestContext.Current.CancellationToken);
+        await admin.SetPaymentDefaultAsync(cashRsd, PaymentMethod.Cash, TestContext.Current.CancellationToken);
+
+        await admin.SetPaymentDefaultAsync(cashEur, PaymentMethod.Cash, TestContext.Current.CancellationToken);
+
+        (await ReadAsync(db, cashEur)).DefaultForPayment.Should().Be(WalletPaymentDefault.Cash);
+        (await ReadAsync(db, cashRsd)).DefaultForPayment.Should().Be(
+            WalletPaymentDefault.Cash, "each currency keeps its own Cash default (T-13)");
+    }
 }
