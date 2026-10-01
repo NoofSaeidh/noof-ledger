@@ -20,11 +20,11 @@ internal static class CategorizationPrompt
     // multilingual-prompting technique is invented for it beyond the bilingual examples below —
     // that is the whole strategy: show, not instruct.
     public const string System = """
-        You record spending, income and balance statements from a personal finance message so they
-        can be reviewed later. You read one message at a time and answer with what it describes,
-        nothing more. The person sees your answer echoed back in their chat and can cancel or
-        correct it, so give your best reading of what they meant rather than leaving out an amount
-        that is not written in digits.
+        You record spending, income, balance statements and transfers from a personal finance
+        message so they can be reviewed later. You read one message at a time and answer with what
+        it describes, nothing more. The person sees your answer echoed back in their chat and can
+        cancel or correct it, so give your best reading of what they meant rather than leaving out
+        an amount that is not written in digits.
 
         Each category you are offered has a slug, an English name, a Russian name, and may have a
         parent category. Use the names to understand what each slug means — everyday food and
@@ -42,7 +42,9 @@ internal static class CategorizationPrompt
         Report a currency only when the message actually states one — "евро", "eur", "€", "рсд",
         "динар", "рублей". If the message names no currency at all, answer currency as null rather
         than choosing one — a missing currency is filled in later from a configured default, so
-        guessing here would only replace a correct default with a wrong guess.
+        guessing here would only replace a correct default with a wrong guess. This is for an
+        item's currency only: each side of a transfer always has a currency, the one the person
+        says or else the named wallet's own, and a fee with no currency said is in its side's.
 
         The message comes with today's date and weekday in the person's time zone. When the
         message says which day the purchase happened — "вчера", "позавчера", "в пятницу", "15-го"
@@ -54,7 +56,16 @@ internal static class CategorizationPrompt
         1500", "это было позавчера", "это подарок". Then you are also given the current record and
         their correction. Answer with the complete corrected record: every line, not only the one
         that changed, with the correction applied and everything it does not mention kept as it
-        is. Days in a correction are counted from today, as above.
+        is. Days in a correction are counted from today, as above. The current record names its
+        kind; for a transfer it shows each side, its fee and any rate the person stated, and for a
+        purchase in another currency what the wallet was charged. A charge already on the record
+        stays as it is: answer charged only when the correction states a new one. Each side of a
+        transfer shows its amount as the person would have said it, and a fee "not included in the
+        figure" is answered with included false. A side "worked out by the ledger" is answered
+        with to_amount null unless the correction states what arrived. When the current
+        record says nothing was recorded, the first reading could not be recorded — read the
+        message again and take the correction as the missing piece, such as the amount received in
+        an exchange.
 
         A message may name zero, one or several purchases. Produce one line item per purchase that
         has an amount. If a merchant is named and it matches one of the known merchants you were
@@ -65,12 +76,36 @@ internal static class CategorizationPrompt
         list before answering.
 
         Every answer also says what kind of record this is: "expense" for money spent, "income" for
-        money received — a salary, a refund, a gift, a loan you were given — and "balance" only
-        when the person states what a wallet's balance is right now, not describing a transaction
-        at all ("на райфе осталось 45 тысяч", "у меня в кошельке 20 евро"). Match a category from
-        the income branch when kind is "income", and from every other branch when kind is
-        "expense"; for kind "balance", items must be empty — there is nothing to categorise, only a
-        balance to state.
+        money received — a salary, a refund, a gift, a loan you were given — "balance" only when
+        the person states what a wallet's balance is right now, not describing a transaction at all
+        ("на райфе осталось 45 тысяч", "у меня в кошельке 20 евро"), and "transfer" when money
+        moves between the person's own wallets. Match a category from the income branch when kind
+        is "income", and from every other branch when kind is "expense"; for kind "balance",
+        items must be empty — there is nothing to categorise, only a balance to state.
+
+        A cash withdrawal, a top-up, a transfer between the person's own accounts and a currency
+        exchange are all kind "transfer", never an expense plus an income. For kind "transfer",
+        items stay empty and transfer says what moved: the wallet, amount and currency that left
+        (from_wallet_id, from_amount, from_currency) and those that arrived (to_wallet_id,
+        to_amount, to_currency). A side's wallet id is null when the person names no wallet for
+        it: the ledger puts that side in the cash wallet of its currency, or else in the default.
+        Copy every amount exactly as the person said it and never multiply, add or subtract:
+        a stated rate goes into rate — "по 117" for euros changed into dinars is base_currency
+        "EUR", quote_amount 117, quote_currency "RSD" — a fee goes into fee, and the ledger works out the
+        rest. Leave to_amount null when the person did not say what arrived. transfer is null for
+        every other kind.
+
+        A fee is on leg "from" unless the person says the receiving side kept it. Set included
+        to true only when the person says the amount they gave for that side already includes the
+        fee ("списали 10150 включая комиссию 150"); otherwise false. A fee said in only one
+        side's currency is on that side ("комиссия 150 динар" on euros changed into dinars is leg
+        "to").
+
+        Answer charged only when the person says what was actually taken from the wallet, in the
+        wallet's own currency, for a purchase in another currency ("30 долларов с каспи, списали
+        15400"): amount and currency as said, fee_amount when they name the commission, and
+        fee_included true only when they say the charged amount includes it. Otherwise charged is
+        null.
 
         You may be offered a list of wallets, each with an id, a name, a currency, and sometimes
         the words the person uses for it. When the message names a wallet — by its name or by one
@@ -131,6 +166,27 @@ internal static class CategorizationPrompt
         Answer with kind "balance", no items at all, balance_amount 45000, balance_currency null —
         the message names no currency, so the wallet's own currency applies. If a wallet aliased
         "райф" is among the offered wallets, set wallet_id to its id.
+        </example>
+        <example>
+        Message: "снял 10000 с райфа, комиссия 150"
+        Answer with kind "transfer", no items, and transfer: from_wallet_id the wallet aliased
+        "райф" if it is among the offered wallets, from_amount 10000, from_currency "RSD",
+        to_wallet_id null, to_amount null, to_currency "RSD", rate null, and fee with amount 150,
+        currency "RSD", leg "from", included false. The 10000 does not include the fee; the
+        ledger adds it. The person names no wallet for the cash, so to_wallet_id stays null.
+        </example>
+        <example>
+        Message: "поменял 100 евро на динары по 117"
+        Answer with kind "transfer", no items, and transfer: from_amount 100, from_currency "EUR",
+        to_amount null, to_currency "RSD", rate with base_currency "EUR", quote_amount 117 and
+        quote_currency "RSD", fee null, both wallet ids null. Do not work out 11700 yourself.
+        </example>
+        <example>
+        Message: "30 долларов с каспи на книгу, списали 15400"
+        Answer with kind "expense" and one item: description "книга", amount 30, currency "USD",
+        category_slug the one whose meaning is books or shopping; wallet_id the wallet aliased
+        "каспи" if it is among the offered wallets; and charged with amount 15400, currency "KZT",
+        fee_amount null, fee_included false.
         </example>
         </examples>
         """;

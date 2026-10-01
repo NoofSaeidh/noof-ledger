@@ -38,14 +38,93 @@ public class CategorizationPromptTests
     }
 
     [Fact]
-    public void System_prompt_has_between_three_and_seven_examples()
+    public void System_prompt_scopes_the_null_currency_rule_to_an_items_currency()
     {
-        // Widened from [3,5] (M9): the income and balance examples added below bring the count to 7.
+        // A transfer side's currency is never null in the schema, so the null rule must not reach it.
+        CategorizationPrompt.System.Should().Contain("item's currency only: each side of a transfer always has a currency");
+        CategorizationPrompt.System.Should().Contain("says or else the named wallet's own");
+    }
+
+    [Fact]
+    public void System_prompt_has_between_three_and_ten_examples()
+    {
+        // Widened from [3,7] (Phase 7): a withdrawal with a fee, an exchange at a stated rate and a stated charge
+        // bring the count to 10.
         var opening = Regex.Matches(CategorizationPrompt.System, "<example>").Count;
         var closing = Regex.Matches(CategorizationPrompt.System, "</example>").Count;
 
-        opening.Should().BeInRange(3, 7);
+        opening.Should().BeInRange(3, 10);
         closing.Should().Be(opening);
+    }
+
+    [Fact]
+    public void System_prompt_says_money_between_own_wallets_is_one_transfer()
+    {
+        CategorizationPrompt.System.Should().Contain("are all kind \"transfer\", never an expense plus an income");
+        CategorizationPrompt.System.Should().Contain("transfer is null for");
+    }
+
+    [Fact]
+    public void System_prompt_forbids_arithmetic_and_routes_a_rate_and_a_fee_to_their_fields()
+    {
+        CategorizationPrompt.System.Should().Contain("never multiply, add or subtract");
+        CategorizationPrompt.System.Should().Contain("a stated rate goes into rate");
+        CategorizationPrompt.System.Should().Contain("a fee goes into fee, and the ledger works out the");
+        CategorizationPrompt.System.Should().Contain("Leave to_amount null when the person did not say what arrived");
+        CategorizationPrompt.System.Should().Contain("Do not work out 11700 yourself.");
+    }
+
+    [Fact]
+    public void System_prompt_puts_a_fee_on_from_and_marks_it_included_only_when_said()
+    {
+        CategorizationPrompt.System.Should().Contain("A fee is on leg \"from\" unless the person says the receiving side kept it");
+        CategorizationPrompt.System.Should().Contain("true only when the person says the amount they gave for that side");
+    }
+
+    [Fact]
+    public void System_prompt_answers_charged_only_when_the_charged_amount_is_said()
+    {
+        CategorizationPrompt.System.Should().Contain("Answer charged only when the person says what was actually taken from the wallet");
+        CategorizationPrompt.System.Should().Contain("Otherwise charged is");
+    }
+
+    [Fact]
+    public void System_prompt_explains_the_current_record_of_a_correction_and_a_failed_first_reading()
+    {
+        CategorizationPrompt.System.Should().Contain("answer charged only when the correction states a new one");
+        CategorizationPrompt.System.Should().Contain("the first reading could not be recorded");
+    }
+
+    [Fact]
+    public void System_prompt_explains_how_a_transfers_current_sides_are_answered_back()
+    {
+        // Amendment 24: a fee shown beside its side's principal is answered not included; a side the ledger worked
+        // out is answered null, so a date-only correction re-derives it instead of pinning a rounded figure.
+        CategorizationPrompt.System.Should().Contain("is answered with included false");
+        CategorizationPrompt.System.Should().Contain("A side \"worked out by the ledger\" is answered");
+        CategorizationPrompt.System.Should().Contain("with to_amount null unless the correction states what arrived");
+    }
+
+    [Fact]
+    public void System_prompt_leaves_an_unnamed_side_to_the_ledgers_cash_wallet()
+    {
+        CategorizationPrompt.System.Should().Contain("the ledger puts that side in the cash wallet of its currency, or else in the default.");
+        CategorizationPrompt.System.Should().Contain("The person names no wallet for the cash, so to_wallet_id stays null.");
+    }
+
+    [Fact]
+    public void System_prompt_puts_a_fee_said_in_one_sides_currency_on_that_side()
+    {
+        CategorizationPrompt.System.Should().Contain("side's currency is on that side");
+        CategorizationPrompt.System.Should().Contain("\"комиссия 150 динар\" on euros changed into dinars is leg");
+    }
+
+    [Fact]
+    public void System_prompt_has_a_withdrawal_an_exchange_and_a_stated_charge_example()
+    {
+        CategorizationPrompt.System.Should().Contain("Message: \"снял 10000 с райфа, комиссия 150\"");
+        CategorizationPrompt.System.Should().Contain("Message: \"поменял 100 евро на динары по 117\"");
+        CategorizationPrompt.System.Should().Contain("Message: \"30 долларов с каспи на книгу, списали 15400\"");
     }
 
     [Fact]
