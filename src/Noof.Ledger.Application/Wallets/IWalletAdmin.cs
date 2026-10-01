@@ -25,9 +25,9 @@ public interface IWalletAdmin
 
     Task MakeDefaultForCurrencyAsync(Guid walletId, CancellationToken cancellationToken);
 
-    // method is Card, Cash or null (none); the unique index per payment method means setting one
-    // atomically clears whichever other wallet held it. Any other PaymentMethod value throws
-    // ArgumentOutOfRangeException - a wallet cannot be the default for Transfer/Voucher/Other/Mixed.
+    // method is Card, Cash or null (none). The unique index is per payment method and currency (T-13), so setting
+    // one atomically clears whichever other wallet of the same currency held it. Any other PaymentMethod value
+    // throws ArgumentOutOfRangeException - a wallet cannot be the default for Transfer/Voucher/Other/Mixed.
     Task SetPaymentDefaultAsync(Guid walletId, PaymentMethod? method, CancellationToken cancellationToken);
 
     Task ArchiveAsync(Guid walletId, CancellationToken cancellationToken);

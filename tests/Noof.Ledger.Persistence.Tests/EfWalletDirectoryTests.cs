@@ -61,7 +61,7 @@ public class EfWalletDirectoryTests(PostgresFixture fixture)
         db.ChangeTracker.Clear();
 
         var walletId = await new EfWalletDirectory(db)
-            .DefaultForPaymentAsync(PaymentMethod.Card, TestContext.Current.CancellationToken);
+            .DefaultForPaymentAsync(PaymentMethod.Card, CurrencyCode.Rsd, TestContext.Current.CancellationToken);
 
         walletId.Should().Be(cardWallet.Id);
     }
@@ -77,7 +77,7 @@ public class EfWalletDirectoryTests(PostgresFixture fixture)
         db.ChangeTracker.Clear();
 
         var walletId = await new EfWalletDirectory(db)
-            .DefaultForPaymentAsync(PaymentMethod.Card, TestContext.Current.CancellationToken);
+            .DefaultForPaymentAsync(PaymentMethod.Card, CurrencyCode.Rsd, TestContext.Current.CancellationToken);
 
         walletId.Should().BeNull(
             "an archived wallet is hidden from capture; receipt categorization must fall through to the default wallet (R-3)");
@@ -89,7 +89,7 @@ public class EfWalletDirectoryTests(PostgresFixture fixture)
         await using var db = await fixture.CreateMigratedContextAsync();
 
         var walletId = await new EfWalletDirectory(db)
-            .DefaultForPaymentAsync(PaymentMethod.Cash, TestContext.Current.CancellationToken);
+            .DefaultForPaymentAsync(PaymentMethod.Cash, CurrencyCode.Rsd, TestContext.Current.CancellationToken);
 
         walletId.Should().BeNull();
     }
@@ -104,7 +104,7 @@ public class EfWalletDirectoryTests(PostgresFixture fixture)
     {
         await using var db = await fixture.CreateContextAsync();
 
-        var walletId = await new EfWalletDirectory(db).DefaultForPaymentAsync(method, TestContext.Current.CancellationToken);
+        var walletId = await new EfWalletDirectory(db).DefaultForPaymentAsync(method, CurrencyCode.Rsd, TestContext.Current.CancellationToken);
 
         walletId.Should().BeNull("a wallet is never the default for anything but Card or Cash (R-3)");
     }
@@ -142,5 +142,59 @@ public class EfWalletDirectoryTests(PostgresFixture fixture)
             .WithInnerException<DbUpdateException, PostgresException>()
             .Where(e => e.SqlState == PostgresErrorCodes.UniqueViolation
                 && e.ConstraintName == WalletConfiguration.OneDefaultPerPaymentMethodIndex);
+    }
+
+    [Fact]
+    public async Task DefaultForPaymentAsync_answers_each_currency_with_its_own_default()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var dinars = NewWallet("Cash RSD", CurrencyCode.Rsd);
+        dinars.DefaultForPayment = WalletPaymentDefault.Cash;
+        var euros = NewWallet("Cash EUR", CurrencyCode.Eur);
+        euros.DefaultForPayment = WalletPaymentDefault.Cash;
+        db.Wallets.AddRange(dinars, euros);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+        var directory = new EfWalletDirectory(db);
+
+        (await directory.DefaultForPaymentAsync(PaymentMethod.Cash, CurrencyCode.Rsd, TestContext.Current.CancellationToken))
+            .Should().Be(dinars.Id);
+        (await directory.DefaultForPaymentAsync(PaymentMethod.Cash, CurrencyCode.Eur, TestContext.Current.CancellationToken))
+            .Should().Be(euros.Id);
+    }
+
+    [Fact]
+    public async Task DefaultForPaymentAsync_ignores_the_default_of_another_currency()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var euroCard = NewWallet("Wise EUR", CurrencyCode.Eur);
+        euroCard.DefaultForPayment = WalletPaymentDefault.Card;
+        db.Wallets.Add(euroCard);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var walletId = await new EfWalletDirectory(db)
+            .DefaultForPaymentAsync(PaymentMethod.Card, CurrencyCode.Rsd, TestContext.Current.CancellationToken);
+
+        walletId.Should().BeNull("a dinar receipt must fall through to the RSD default wallet, never land on a euro card");
+    }
+
+    [Fact]
+    public async Task Active_tells_which_wallet_is_a_payment_default()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var cashRsd = NewWallet("Cash RSD", CurrencyCode.Rsd);
+        cashRsd.DefaultForPayment = WalletPaymentDefault.Cash;
+        var raiffeisen = NewWallet("Raiffeisen RSD", CurrencyCode.Rsd);
+        raiffeisen.DefaultForPayment = WalletPaymentDefault.Card;
+        db.Wallets.AddRange(cashRsd, raiffeisen);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var active = await new EfWalletDirectory(db).ActiveAsync(TestContext.Current.CancellationToken);
+
+        active.Single(wallet => wallet.Id == cashRsd.Id).DefaultForPayment.Should().Be(WalletPaymentDefault.Cash);
+        active.Single(wallet => wallet.Id == raiffeisen.Id).DefaultForPayment.Should().Be(WalletPaymentDefault.Card);
+        active.Single(wallet => wallet.Id == SeededMainWalletId).DefaultForPayment.Should().BeNull();
     }
 }

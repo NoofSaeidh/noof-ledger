@@ -16,10 +16,10 @@ internal sealed class EfWalletDirectory(LedgerDbContext db) : IWalletDirectory
             .ToListAsync(cancellationToken);
 
         return [.. wallets.Select(wallet => new WalletOption(
-            wallet.Id, wallet.Name, wallet.Currency, wallet.Aliases, wallet.IsDefaultForCurrency))];
+            wallet.Id, wallet.Name, wallet.Currency, wallet.Aliases, wallet.IsDefaultForCurrency, wallet.DefaultForPayment))];
     }
 
-    public async Task<Guid?> DefaultForPaymentAsync(PaymentMethod method, CancellationToken cancellationToken)
+    public async Task<Guid?> DefaultForPaymentAsync(PaymentMethod method, CurrencyCode currency, CancellationToken cancellationToken)
     {
         var domainMethod = method switch
         {
@@ -32,7 +32,7 @@ internal sealed class EfWalletDirectory(LedgerDbContext db) : IWalletDirectory
             return null;
 
         return await db.Wallets.AsNoTracking()
-            .Where(wallet => wallet.DefaultForPayment == domainMethod && !wallet.Archived)
+            .Where(wallet => wallet.DefaultForPayment == domainMethod && wallet.Currency == currency && !wallet.Archived)
             .Select(wallet => (Guid?)wallet.Id)
             .SingleOrDefaultAsync(cancellationToken);
     }
