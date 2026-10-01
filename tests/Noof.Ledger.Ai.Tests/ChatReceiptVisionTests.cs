@@ -53,6 +53,18 @@ public class ChatReceiptVisionTests
     }
 
     [Fact]
+    public async Task The_tool_describes_a_shop_receipt_or_an_exchange_office_slip()
+    {
+        var provider = new ScriptedChatClient().Answer(Answer());
+        var vision = new ChatReceiptVision(new FixedChatClientFactory(provider), NoopTimer, NullLogger<ChatReceiptVision>.Instance);
+
+        await vision.ReadAsync(TinyImage, "image/jpeg", null, TestContext.Current.CancellationToken);
+
+        provider.Requests.Single().Options!.Tools!.Single().Description
+            .Should().Be("Record what a photographed shop receipt or exchange-office slip prints.");
+    }
+
+    [Fact]
     public async Task A_non_ISO_issued_at_is_read_as_a_missing_date_instead_of_throwing()
     {
         var answer = new FunctionCallContent(

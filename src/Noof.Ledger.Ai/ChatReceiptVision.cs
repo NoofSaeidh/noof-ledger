@@ -18,7 +18,7 @@ internal sealed class ChatReceiptVision(
     IChatClientFactory clientFactory, IOperationTimer timer, ILogger<ChatReceiptVision> logger) : IReceiptVision
 {
     const string ReadReceiptName = "read_receipt";
-    const string ReadReceiptDescription = "Record what a photographed shop receipt prints.";
+    const string ReadReceiptDescription = "Record what a photographed shop receipt or exchange-office slip prints.";
 
     // Downscaling a large photo is the capture worker's job, not this class's - this only refuses
     // an image too large to be a reasonable receipt photo at all, so the worker has something
