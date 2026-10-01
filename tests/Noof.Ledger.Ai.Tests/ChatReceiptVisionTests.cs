@@ -427,9 +427,9 @@ public class ChatReceiptVisionTests
         ["slip_number"] = slipNumber,
     };
 
-    static Task<ReceiptVisionResult> ReadAnswerAsync(FunctionCallContent answer) =>
+    static Task<ReceiptVisionResult> ReadAnswerAsync(FunctionCallContent answer, decimal? qrTotal = null) =>
         new ChatReceiptVision(new FixedChatClientFactory(new ScriptedChatClient().Answer(answer)), NoopTimer, NullLogger<ChatReceiptVision>.Instance)
-            .ReadAsync(TinyImage, "image/jpeg", null, TestContext.Current.CancellationToken);
+            .ReadAsync(TinyImage, "image/jpeg", qrTotal, TestContext.Current.CancellationToken);
 
     [Fact]
     public async Task A_slip_is_read_as_an_exchange_receipt_with_no_lines_and_the_dinars_received_as_its_total()
@@ -577,6 +577,32 @@ public class ChatReceiptVisionTests
         result.Exchange.Should().BeNull();
         result.Receipt!.Kind.Should().Be(expectedKind);
         result.KindUnclear.Should().Be(expectedUnclear);
+    }
+
+    // A qrTotal means a fiscal QR decoded and only the Tax Administration fetch failed: the document is
+    // a fiscal receipt, so an "exchange" answer is the model misreading it, not a slip.
+    [Fact]
+    public async Task An_exchange_answer_on_a_decoded_fiscal_qr_is_an_ordinary_receipt_with_its_lines()
+    {
+        var result = await ReadAnswerAsync(
+            SlipAnswer(SlipFigures(), total: 100m, currency: "RSD", withALine: true), qrTotal: 100m);
+
+        result.Unreadable.Should().BeNull();
+        result.Exchange.Should().BeNull();
+        result.KindUnclear.Should().BeTrue("the model's kind is wrong for a fiscal receipt, so sale or refund is unread");
+        result.Receipt!.Kind.Should().Be(ReceiptKind.Sale);
+        result.Receipt.Total.Should().Be(100m);
+        result.Receipt.Lines.Should().ContainSingle().Which.Name.Should().Be("Bread");
+    }
+
+    [Fact]
+    public async Task An_exchange_answer_with_no_lines_on_a_decoded_fiscal_qr_is_unreadable_not_a_slip()
+    {
+        var result = await ReadAnswerAsync(SlipAnswer(SlipFigures(), total: 100m, currency: "RSD"), qrTotal: 100m);
+
+        result.Receipt.Should().BeNull();
+        result.Exchange.Should().BeNull();
+        result.Unreadable.Should().Be(ReceiptUnreadableReason.Other);
     }
 
     sealed class FixedChatClientFactory(IChatClient client) : IChatClientFactory

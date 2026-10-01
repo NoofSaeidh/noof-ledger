@@ -85,9 +85,12 @@ internal sealed class ChatReceiptVision(
 
         // Ahead of the contradiction check below, which is a receipt's: a slip has no lines by nature,
         // and one with an amount left unread is still a slip - the operator supplies the missing figure
-        // by a reply, which an "unreadable" answer would never let them do.
-        if (payload.Kind == ExchangeKind)
-            return ToSlipResult(payload, qrTotal, taxIdMalformed);
+        // by a reply, which an "unreadable" answer would never let them do. Never with a qrTotal, though:
+        // that is a fiscal QR that decoded, so the document is a fiscal receipt and "exchange" is the
+        // model misreading it - taken as a slip, its lines would be dropped for good, since the worker
+        // restores the QR's kind, total and date but has no lines to restore.
+        if (payload.Kind == ExchangeKind && qrTotal is null)
+            return ToSlipResult(payload, taxIdMalformed);
 
         // Readable but no total, or readable but no lines, is a contradiction treated as unreadable
         // rather than trusted: a receipt this layer cannot vouch for must come back as unreadable,
@@ -96,8 +99,9 @@ internal sealed class ChatReceiptVision(
             return Unreadable(payload);
 
         // KindUnclear's rationale (why Kind still defaults to Sale, and why that default is never
-        // trusted silently): ReceiptContracts.cs, next to ReceiptVisionResult.
-        var kindUnclear = payload.Kind is null;
+        // trusted silently): ReceiptContracts.cs, next to ReceiptVisionResult. An "exchange" reaching
+        // here is a fiscal receipt misread as a slip, so whether it is a sale or a refund is unread too.
+        var kindUnclear = payload.Kind is null or ExchangeKind;
         return new ReceiptVisionResult(ToExtractedReceipt(payload, total, qrTotal), null, taxIdMalformed, kindUnclear);
     }
 
@@ -136,11 +140,11 @@ internal sealed class ChatReceiptVision(
     // figures are kept as read, unvalidated, and 7b's assessment decides whether it is recorded, held
     // or incomplete. FiscalNumber stays null whatever the model put there - a slip number must never
     // reach the fiscal duplicate index.
-    static ReceiptVisionResult ToSlipResult(ReadReceiptPayload payload, decimal? qrTotal, bool taxIdMalformed)
+    static ReceiptVisionResult ToSlipResult(ReadReceiptPayload payload, bool taxIdMalformed)
     {
         var exchange = ToExtractedExchange(payload.Exchange);
         var slip = VisionReceipt(
-            payload, fiscalNumber: null, DinarSide(exchange), CurrencyCode.Rsd, ReceiptKind.Exchange, qrTotal, lines: []);
+            payload, fiscalNumber: null, DinarSide(exchange), CurrencyCode.Rsd, ReceiptKind.Exchange, qrTotal: null, lines: []);
 
         return new ReceiptVisionResult(slip, null, taxIdMalformed, Exchange: exchange);
     }
