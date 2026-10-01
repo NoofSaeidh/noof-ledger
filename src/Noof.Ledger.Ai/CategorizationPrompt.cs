@@ -305,7 +305,7 @@ internal static class CategorizationPrompt
     {
         var fee = charge.Fee.Amount > 0m ? $" plus a fee of {Amount(charge.Fee)}" : "";
         var source = charge.Source == ChargeSource.Stated ? "as the person stated" : "at the wallet's own rate";
-        return $"- the {charge.Currency} lines ({Amount(new Money(charge.ForeignSum, charge.Currency))}) were charged "
+        return $"- the {charge.Currency} lines ({Amount(charge.ForeignSum, charge.Currency)}) were charged "
             + $"{Amount(charge.Charged)}{fee} to the wallet, {source}";
     }
 
@@ -315,7 +315,10 @@ internal static class CategorizationPrompt
         return line.MerchantName is { } merchant ? $"{text}, merchant {merchant}" : text;
     }
 
-    static string Amount(Money money) => $"{money.Amount.ToString("0.####", CultureInfo.InvariantCulture)} {money.Currency}";
+    static string Amount(Money money) => Amount(money.Amount, money.Currency);
+
+    static string Amount(decimal amount, CurrencyCode currency) =>
+        $"{amount.ToString("0.####", CultureInfo.InvariantCulture)} {currency}";
 
     static string RenderCategory(CategoryOption category) =>
         category.ParentSlug is null
