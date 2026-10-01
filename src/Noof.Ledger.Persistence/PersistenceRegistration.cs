@@ -73,6 +73,7 @@ public static class PersistenceRegistration
         services.AddScoped<IBalanceReadModel, EfBalanceReadModel>();
         services.AddScoped<IWalletDirectory, EfWalletDirectory>();
         services.AddScoped<IWalletAdmin, EfWalletAdmin>();
+        services.AddScoped<IWalletFxTerms, EfWalletFxTerms>();
         services.AddScoped<IJobQueue>(sp => new EfJobQueue(
             sp.GetRequiredService<LedgerDbContext>(),
             sp.GetRequiredService<TimeProvider>(),
