@@ -228,7 +228,8 @@ internal sealed class CategorizationWorker(
 
             var occurredOn = mapped.OccurredOn ?? DefaultDay(job, sub);
             var outcome = new CategorizationOutcome(
-                categorizedItems, occurredOn, job.Kind, job.Instruction, mapped.Kind, mapped.WalletId, mapped.StatedBalance);
+                categorizedItems, occurredOn, job.Kind, job.Instruction, mapped.Kind, mapped.WalletId, mapped.StatedBalance,
+                mapped.Transfer, mapped.Charged);
             currentStage = TransactionStages.Persisted;
             using (timer.Start(logger, TimedOperations.DbApplyCategorization))
                 await store.ApplyAsync(job.TransactionId, outcome, cancellationToken);
@@ -366,9 +367,14 @@ internal sealed class CategorizationWorker(
     // to reach the model's prompt verbatim through here. Stripped with the same FiscalVerificationUrl
     // every other model-facing path uses; an instruction that turns out to be nothing but the URL
     // strips to null, and that means "no correction" rather than an empty one.
+    //
+    // Principal lines only (spec §2): a fee line is C#'s, and offered back as an item the model would answer it as a
+    // purchase. The kind, the transfer, the charges and a balance check's statement travel as facts of their own.
     CorrectionRequest? CorrectionFor(CategorizationJob job, CategorizationSubject record) =>
         job is { Kind: JobKind.Correct, Instruction: { } instruction } && verificationUrl.StripUrl(instruction) is { } stripped
-            ? new CorrectionRequest(record.OccurredOn, record.Lines, stripped)
+            ? new CorrectionRequest(
+                record.OccurredOn, [.. record.Lines.Where(line => line.Role == EntryRole.Principal)], stripped,
+                record.Kind, record.Transfer, record.Charges, record.Statement)
             : null;
 
     // A correction's "today" is the reply's own send day (job.InstructionDay), not the original
@@ -416,12 +422,13 @@ internal sealed class CategorizationWorker(
             ? [.. wallets, new WalletOption(kept, record.WalletName, currency, [], IsDefaultForCurrency: false)]
             : wallets;
 
-    static string BuildSummary(MappedProposal mapped) =>
-        mapped.Items.Count > 0
-            ? string.Join("; ", mapped.Items.Select(item => $"{item.Amount} {item.CategorySlug}"))
-            : mapped.StatedBalance is { } stated
-                ? $"balance {stated}"
-                : "no line items";
+    static string BuildSummary(MappedProposal mapped) => mapped switch
+    {
+        { Transfer: { } transfer } => $"transfer {transfer.From} to {transfer.To}",
+        { Items.Count: > 0 } => string.Join("; ", mapped.Items.Select(item => $"{item.Amount} {item.CategorySlug}")),
+        { StatedBalance: { } stated } => $"balance {stated}",
+        _ => "no line items",
+    };
 
     async Task EchoAsync(ICategorizationStore store, IChatNotifier notifier, CategorizationJob job, CancellationToken cancellationToken)
     {
