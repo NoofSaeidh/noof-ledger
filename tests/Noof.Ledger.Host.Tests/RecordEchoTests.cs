@@ -30,6 +30,7 @@ public class RecordEchoTests
 
     static Money Rsd(decimal amount) => new(amount, CurrencyCode.Rsd);
     static Money Eur(decimal amount) => new(amount, CurrencyCode.Eur);
+    static Money Kzt(decimal amount) => new(amount, CurrencyCode.Kzt);
 
     static TransferView Legs(
         string fromWallet, Money from, Money fromBalance, string toWallet, Money to, Money toBalance,
@@ -52,6 +53,20 @@ public class RecordEchoTests
 
     static TransferView ExchangeOf100Eur =>
         Legs("Cash EUR", Eur(100m), Eur(400m), "Cash RSD", Rsd(11700m), Rsd(23700m));
+
+    static RecordedLine Taxi => new("taxi", new Money(30m, CurrencyCode.Usd), "transport", "Transport", null);
+
+    static RecordedLine UsdPurchaseFee(decimal amount) => FeeLine(Kzt(amount), "Fee · USD purchase");
+
+    static ChargeView UsdCharge(
+        decimal charged = 15600m, decimal fee = 156m, decimal rate = 520m, ChargeSource source = ChargeSource.WalletTerms) =>
+        new(CurrencyCode.Usd, 30m, Kzt(charged), Kzt(fee), rate, new FeeTerms(1m, null, null), source);
+
+    static CategorizationSubject KaspiSpending(
+        IReadOnlyList<RecordedLine> lines, IReadOnlyList<ChargeView> charges,
+        TransactionStatus status = TransactionStatus.Completed) =>
+        Record(status, lines: lines, walletCurrency: CurrencyCode.Kzt, walletBalances: [Kzt(184244m)])
+            with { WalletName = "Kaspi KZT", Charges = charges };
 
     [Fact]
     public void A_recorded_line_is_echoed_with_its_balance_total_and_the_cancel_and_edit_buttons()
@@ -89,9 +104,8 @@ public class RecordEchoTests
             new RecordedLine("хлеб", new Money(100m, CurrencyCode.Rsd), "groceries", "Groceries", null),
         };
 
-        // Contains, not EndWith: this test's own EUR line differs from the wallet's RSD currency,
-        // which correctly appends the M10 conversion warning after the Total line - a deviation
-        // from the brief's literal EndWith, recorded in the task report.
+        // Contains, not EndWith: the EUR line differs from the wallet's RSD currency, so the no-terms hint
+        // follows the Total line.
         Echo.Compose(Record(lines: lines)).Text.Should().Contain("Total: 1000.00 EUR, 350.00 RSD");
     }
 
@@ -187,18 +201,18 @@ public class RecordEchoTests
     }
 
     [Fact]
-    public void A_line_in_a_currency_other_than_the_wallets_warns_that_it_is_not_converted()
+    public void A_foreign_currency_with_no_charge_asks_for_a_rate_on_the_wallets_page()
     {
         var line = new RecordedLine("такси", new Money(20m, CurrencyCode.Eur), "transport", "Transport", null);
 
         Echo.Compose(Record(lines: [Coffee, line])).Text
-            .Should().EndWith("Not in the wallet's currency — no conversion yet.");
+            .Should().EndWith("\n20.00 EUR not converted — set a EUR rate for Cash on /wallets, or correct this record to apply it");
     }
 
     [Fact]
-    public void A_line_in_the_wallets_own_currency_gets_no_conversion_warning()
+    public void A_line_in_the_wallets_own_currency_gets_no_conversion_line()
     {
-        Echo.Compose(Record()).Text.Should().NotContain("no conversion yet");
+        Echo.Compose(Record()).Text.Should().NotContain("not converted").And.NotContain("charged");
     }
 
     [Fact]
@@ -599,6 +613,14 @@ public class RecordEchoTests
     }
 
     [Fact]
+    public void A_source_with_no_balance_in_the_transfers_currency_stays_quiet()
+    {
+        var transfer = ExchangeOf100Eur with { FromBalances = [Rsd(-50m)], FromBalanceWithoutThis = 120m };
+
+        Echo.Compose(TransferRecord(transfer)).Text.Should().NotContain(Crossed);
+    }
+
+    [Fact]
     public void Cancel_and_restore_turn_the_crossing_line_off_and_on_again()
     {
         var transfer = Legs("Cash EUR", Eur(100m), Eur(-50m), "Cash RSD", Rsd(11700m), Rsd(23700m),
@@ -607,5 +629,65 @@ public class RecordEchoTests
         Echo.Compose(TransferRecord(transfer, TransactionStatus.Cancelled)).Text.Should().NotContain(Crossed);
         Echo.Compose(TransferRecord(transfer, TransactionStatus.Completed)).Text
             .Should().EndWith("\nCash EUR is now -50.00 EUR — a missing exchange or income?");
+    }
+
+    [Fact]
+    public void A_foreign_spending_charged_at_the_wallets_terms_shows_the_charge_its_rate_and_its_fee()
+    {
+        var echo = Echo.Compose(KaspiSpending([Taxi, UsdPurchaseFee(156m)], [UsdCharge()]));
+
+        echo.Text.Should().Be(
+            "Recorded — Kaspi KZT · balance 184244.00 KZT\n"
+            + "• taxi — 30.00 USD · Transport\n"
+            + "\n"
+            + "Total: 30.00 USD\n"
+            + "30.00 USD → charged 15600.00 KZT (1 USD = 520.0000 KZT, wallet rate) + fee 156.00 KZT");
+        echo.Actions.Should().Equal(RecordAction.Cancel, RecordAction.Edit);
+    }
+
+    [Fact]
+    public void A_stated_charge_says_stated_and_shows_the_rate_it_works_out_to()
+    {
+        var charge = UsdCharge(charged: 15400m, fee: 154m, rate: 513.333333333333m, source: ChargeSource.Stated);
+
+        Echo.Compose(KaspiSpending([Taxi, UsdPurchaseFee(154m)], [charge])).Text.Should().EndWith(
+            "\n30.00 USD → charged 15400.00 KZT (1 USD = 513.3333 KZT, stated) + fee 154.00 KZT");
+    }
+
+    [Fact]
+    public void A_charge_that_cost_no_fee_names_no_fee()
+    {
+        Echo.Compose(KaspiSpending([Taxi], [UsdCharge(fee: 0m)])).Text.Should().EndWith(
+            "\n30.00 USD → charged 15600.00 KZT (1 USD = 520.0000 KZT, wallet rate)");
+    }
+
+    [Fact]
+    public void Each_foreign_currency_gets_its_own_line_in_code_order()
+    {
+        var museum = new RecordedLine("museum", new Money(20m, CurrencyCode.Eur), "entertainment", "Entertainment", null);
+
+        Echo.Compose(KaspiSpending([Taxi, museum, UsdPurchaseFee(156m)], [UsdCharge()])).Text.Should().EndWith(
+            "\nTotal: 20.00 EUR, 30.00 USD\n"
+            + "20.00 EUR not converted — set a EUR rate for Kaspi KZT on /wallets, or correct this record to apply it\n"
+            + "30.00 USD → charged 15600.00 KZT (1 USD = 520.0000 KZT, wallet rate) + fee 156.00 KZT");
+    }
+
+    [Fact]
+    public void A_cancelled_foreign_spending_keeps_its_charge_line()
+    {
+        var echo = Echo.Compose(KaspiSpending([Taxi, UsdPurchaseFee(156m)], [UsdCharge()], TransactionStatus.Cancelled));
+
+        echo.Text.Should().StartWith("Cancelled — Kaspi KZT · balance 184244.00 KZT\n• taxi — 30.00 USD · Transport\n");
+        echo.Text.Should().EndWith("\n30.00 USD → charged 15600.00 KZT (1 USD = 520.0000 KZT, wallet rate) + fee 156.00 KZT");
+        echo.Actions.Should().Equal(RecordAction.Restore);
+    }
+
+    [Fact]
+    public void A_foreign_income_line_still_says_it_is_not_converted()
+    {
+        var salary = new RecordedLine("зарплата", new Money(2000m, CurrencyCode.Eur), "salary", "Salary", null);
+
+        Echo.Compose(Record(kind: TransactionKind.Income, lines: [salary])).Text
+            .Should().EndWith("\nNot in the wallet's currency — no conversion yet.");
     }
 }

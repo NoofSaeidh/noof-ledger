@@ -324,21 +324,52 @@ internal sealed class RecordEcho : IRecordEcho
         if (record.OccurredOn != record.SentOn)
             lines.Add(DateLine(record.OccurredOn));
 
-        lines.AddRange(record.Lines.Select(FormatLine));
+        // A charge's fee line is shown as the fee on its charge line, never as a purchase.
+        var purchases = record.Lines.Where(line => line.Role == EntryRole.Principal).ToList();
+        lines.AddRange(purchases.Select(FormatLine));
 
-        if (record.Lines.Count > 0)
+        if (purchases.Count > 0)
         {
             lines.Add(string.Empty);
-            lines.Add($"Total: {Totals(record.Lines)}");
+            lines.Add($"Total: {Totals(purchases)}");
         }
 
-        // M10: a spending in a currency other than its wallet's is not converted - visible as a
-        // separate currency line in the balance, and flagged here so it never looks like an
-        // oversight.
-        if (record.WalletCurrency is { } currency && record.Lines.Any(line => line.Amount.Currency != currency))
-            lines.Add("Not in the wallet's currency — no conversion yet.");
+        lines.AddRange(ForeignCurrencyLines(record, purchases));
 
         return string.Join('\n', lines);
+    }
+
+    static IEnumerable<string> ForeignCurrencyLines(CategorizationSubject record, IReadOnlyList<RecordedLine> purchases)
+    {
+        if (record.WalletCurrency is not { } walletCurrency)
+            return [];
+
+        var foreign = purchases.Where(line => line.Amount.Currency != walletCurrency).ToList();
+        if (foreign.Count == 0)
+            return [];
+
+        // M10 still holds for income: only a spending is charged to its wallet at the wallet's terms.
+        if (record.Kind != TransactionKind.Expense)
+            return ["Not in the wallet's currency — no conversion yet."];
+
+        return foreign
+            .GroupBy(line => line.Amount.Currency)
+            .OrderBy(group => group.Key.Value, StringComparer.Ordinal)
+            .Select(group => ForeignCurrencyLine(record, group.Key, group.Sum(line => line.Amount.Amount)));
+    }
+
+    static string ForeignCurrencyLine(CategorizationSubject record, CurrencyCode currency, decimal sum) =>
+        record.Charges?.FirstOrDefault(charge => charge.Currency == currency) is { } charge
+            ? ChargeLine(charge)
+            : $"{FormatAmount(sum)} {currency} not converted — set a {currency} rate for {record.WalletName} on /wallets, or correct this record to apply it";
+
+    static string ChargeLine(ChargeView charge)
+    {
+        var rate = new ExchangeRate(charge.Currency, charge.RateUsed, charge.Charged.Currency);
+        var source = charge.Source == ChargeSource.Stated ? "stated" : "wallet rate";
+        var line = $"{FormatAmount(charge.ForeignSum)} {charge.Currency} → charged {FormatMoney(charge.Charged)} ({rate}, {source})";
+
+        return charge.Fee.Amount > 0m ? $"{line} + fee {FormatMoney(charge.Fee)}" : line;
     }
 
     // A BalanceCheck's own body is the statement it recorded, not a line-item body - it has no lines
@@ -473,14 +504,14 @@ internal sealed class RecordEcho : IRecordEcho
 
     static string FormatLine(RecordedLine line)
     {
-        var text = $"• {line.Description} — {FormatAmount(line.Amount.Amount)} {line.Amount.Currency} · {line.CategoryName ?? "uncategorised"}";
+        var text = $"• {line.Description} — {FormatMoney(line.Amount)} · {line.CategoryName ?? "uncategorised"}";
         return line.MerchantName is { } merchant ? $"{text} · {merchant}" : text;
     }
 
     static string Totals(IReadOnlyList<RecordedLine> lines) => string.Join(", ", lines
         .GroupBy(line => line.Amount.Currency)
         .OrderBy(group => group.Key.Value, StringComparer.Ordinal)
-        .Select(group => $"{FormatAmount(group.Sum(line => line.Amount.Amount))} {group.Key}"));
+        .Select(group => FormatMoney(new Money(group.Sum(line => line.Amount.Amount), group.Key))));
 
     static string FormatAmount(decimal amount) => amount.ToString("0.00", CultureInfo.InvariantCulture);
 }
