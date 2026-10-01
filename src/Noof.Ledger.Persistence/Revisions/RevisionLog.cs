@@ -54,6 +54,10 @@ internal static class RevisionLog
         var transfer = await db.Transfers.AsNoTracking()
             .SingleOrDefaultAsync(row => row.TransactionId == transaction.Id, cancellationToken);
 
+        var charges = await db.Charges.AsNoTracking()
+            .Where(charge => charge.TransactionId == transaction.Id)
+            .ToListAsync(cancellationToken);
+
         // Amounts and rates are written as decimal strings, never JSON numbers, so no reader of this history can take
         // them as floating point.
         return JsonSerializer.Serialize(new Snapshot(
@@ -72,7 +76,18 @@ internal static class RevisionLog
             checkpoint is null
                 ? null
                 : new SnapshotBalance(checkpoint.Amount.ToString(CultureInfo.InvariantCulture), checkpoint.Currency.Value),
-            transfer is null ? null : SnapshotTransferOf(transfer)));
+            transfer is null ? null : SnapshotTransferOf(transfer),
+            [.. charges
+                .OrderBy(charge => charge.Currency.Value, StringComparer.Ordinal)
+                .Select(charge => new SnapshotCharge(
+                    charge.Currency.Value,
+                    charge.ChargedAmount.ToString(CultureInfo.InvariantCulture),
+                    charge.FeeAmount.ToString(CultureInfo.InvariantCulture),
+                    charge.RateUsed.ToString(CultureInfo.InvariantCulture),
+                    charge.FeePercent?.ToString(CultureInfo.InvariantCulture),
+                    charge.FeeFixed?.ToString(CultureInfo.InvariantCulture),
+                    charge.FeeMinimum?.ToString(CultureInfo.InvariantCulture),
+                    (int)charge.Source))]));
     }
 
     static SnapshotTransfer SnapshotTransferOf(Transfer transfer) => new(
@@ -94,7 +109,8 @@ internal static class RevisionLog
         [property: JsonPropertyName("kind")] string Kind,
         [property: JsonPropertyName("wallet_id")] Guid? WalletId,
         [property: JsonPropertyName("stated_balance")] SnapshotBalance? StatedBalance,
-        [property: JsonPropertyName("transfer")] SnapshotTransfer? Transfer);
+        [property: JsonPropertyName("transfer")] SnapshotTransfer? Transfer,
+        [property: JsonPropertyName("charges")] IReadOnlyList<SnapshotCharge> Charges);
 
     sealed record SnapshotLine(
         [property: JsonPropertyName("description")] string Description,
@@ -120,4 +136,14 @@ internal static class RevisionLog
         [property: JsonPropertyName("stated_rate")] string? StatedRate,
         [property: JsonPropertyName("stated_rate_base")] string? StatedRateBase,
         [property: JsonPropertyName("venue_merchant_id")] Guid? VenueMerchantId);
+
+    sealed record SnapshotCharge(
+        [property: JsonPropertyName("currency")] string Currency,
+        [property: JsonPropertyName("charged_amount")] string ChargedAmount,
+        [property: JsonPropertyName("fee_amount")] string FeeAmount,
+        [property: JsonPropertyName("rate_used")] string RateUsed,
+        [property: JsonPropertyName("fee_percent")] string? FeePercent,
+        [property: JsonPropertyName("fee_fixed")] string? FeeFixed,
+        [property: JsonPropertyName("fee_minimum")] string? FeeMinimum,
+        [property: JsonPropertyName("source")] int Source);
 }
