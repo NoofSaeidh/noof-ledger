@@ -1,6 +1,7 @@
 using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Domain;
+using Noof.Ledger.Persistence.Configurations;
 using Noof.Ledger.Persistence.Wallets;
 using Npgsql;
 
@@ -109,21 +110,37 @@ public class EfWalletDirectoryTests(PostgresFixture fixture)
     }
 
     [Fact]
-    public async Task Only_one_wallet_may_be_the_default_for_a_given_payment_method()
+    public async Task Wallets_of_different_currencies_may_each_be_the_default_for_the_same_payment_method()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var dinars = NewWallet("Cash RSD", CurrencyCode.Rsd);
+        dinars.DefaultForPayment = WalletPaymentDefault.Cash;
+        var euros = NewWallet("Cash EUR", CurrencyCode.Eur);
+        euros.DefaultForPayment = WalletPaymentDefault.Cash;
+        db.Wallets.AddRange(dinars, euros);
+
+        var act = async () => await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await act.Should().NotThrowAsync("the Card and Cash defaults are per currency (T-13)");
+    }
+
+    [Fact]
+    public async Task Only_one_wallet_per_currency_may_be_the_default_for_a_given_payment_method()
     {
         await using var db = await fixture.CreateMigratedContextAsync();
         var first = NewWallet("First Card Wallet", CurrencyCode.Rsd);
         first.DefaultForPayment = WalletPaymentDefault.Card;
         db.Wallets.Add(first);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-        var second = NewWallet("Second Card Wallet", CurrencyCode.Eur);
+        var second = NewWallet("Second Card Wallet", CurrencyCode.Rsd);
         second.DefaultForPayment = WalletPaymentDefault.Card;
         db.Wallets.Add(second);
 
         var act = async () => await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var assertion = await act.Should().ThrowAsync<DbUpdateException>();
-        assertion.Which.InnerException.Should().BeOfType<PostgresException>()
-            .Which.SqlState.Should().Be(PostgresErrorCodes.UniqueViolation);
+        await act.Should().ThrowAsync<DbUpdateException>()
+            .WithInnerException<DbUpdateException, PostgresException>()
+            .Where(e => e.SqlState == PostgresErrorCodes.UniqueViolation
+                && e.ConstraintName == WalletConfiguration.OneDefaultPerPaymentMethodIndex);
     }
 }

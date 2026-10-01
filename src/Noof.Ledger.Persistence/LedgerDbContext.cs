@@ -19,6 +19,10 @@ internal sealed class LedgerDbContext(DbContextOptions<LedgerDbContext> options)
     public DbSet<LineItem> LineItems => Set<LineItem>();
     public DbSet<Entry> Entries => Set<Entry>();
     public DbSet<BalanceCheck> BalanceChecks => Set<BalanceCheck>();
+    public DbSet<Transfer> Transfers => Set<Transfer>();
+    public DbSet<WalletFxTerms> WalletFxTerms => Set<WalletFxTerms>();
+    public DbSet<Charge> Charges => Set<Charge>();
+    public DbSet<ReceiptExchange> ReceiptExchanges => Set<ReceiptExchange>();
     public DbSet<CategorizationJob> CategorizationJobs => Set<CategorizationJob>();
     public DbSet<TransactionRevision> TransactionRevisions => Set<TransactionRevision>();
     public DbSet<AppSecret> Secrets => Set<AppSecret>();
