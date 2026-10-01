@@ -412,6 +412,45 @@ Ten minutes, no live model call, this costs nothing.
 5. **Ask the bot for its own health:** send `/health` from the owner's chat. Expect a plain-text
    summary — `Health: all good` or a line per check that is not Ok.
 
+## GitHub bot identity (noof-ledger-bot)
+
+Agents write to GitHub — PRs, comments, review replies, resolving threads — as
+`noof-ledger-bot[bot]`, a GitHub App owned by the operator's account and installed on this repository
+only, so their activity is not the operator's own: the operator can approve an agent's PR and gets
+notified about it. `.\ops\gh-bot.ps1 <gh args>` runs one `gh` command with an installation token
+scoped to this repository that expires after an hour. Reads and `git push` stay on the operator's
+credentials, so the app needs no Contents write. Commits made in a Claude Code session are authored
+by the bot through the `GIT_AUTHOR_*`/`GIT_COMMITTER_*` entries under `env` in `.claude/settings.json`
+(`336470484` in that address is the bot user's id).
+
+**One-time setup** — done 2026-10-01; repeat only on a new machine or for a new app.
+1. GitHub → avatar → Settings → Developer settings → GitHub Apps → New GitHub App
+   (https://github.com/settings/apps/new): name `noof-ledger-bot`, homepage = the repo URL, webhook
+   **Active** unticked, "Only on this account".
+2. Repository permissions: Pull requests and Issues — read & write; Checks, Commit statuses, Actions,
+   Contents — read-only. Nothing else.
+3. Create it and note the numeric **App ID** (General → About). Under **Private keys**, generate a
+   private key — the browser downloads a `.pem`.
+4. Install App → Only select repositories → `noof-ledger`.
+5. Store the App ID and the DPAPI-encrypted key, then delete the PEM:
+
+   ```powershell
+   $pem = "$HOME\Downloads\noof-ledger-bot.<date>.private-key.pem"
+   $dir = "$env:LOCALAPPDATA\NoofLedger\github-app"
+   New-Item -ItemType Directory -Force $dir | Out-Null
+   Set-Content "$dir\app-id.txt" '<App ID>'
+   Get-Content $pem -Raw | ConvertTo-SecureString -AsPlainText -Force | ConvertFrom-SecureString | Set-Content "$dir\key.dpapi"
+   Remove-Item $pem
+   ```
+
+   DPAPI ties `key.dpapi` to this Windows user on this machine; nothing else can decrypt it.
+
+**Check it works:** `.\ops\gh-bot.ps1 api graphql -f query='query{viewer{login}}' --jq .data.viewer.login`
+prints `noof-ledger-bot[bot]`.
+
+**Key rotation:** generate a new private key on the app's page, repeat step 5 with it (skipping the
+App ID line), check it works, then delete the old key on the app's page.
+
 ## run.ps1 — the one entry point
 
 `run.ps1` in the repo root is how the app is launched and operated from here on; `.\run.ps1` (or

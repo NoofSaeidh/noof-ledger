@@ -77,7 +77,7 @@ Copilot review does arrive:
   medium), push. At most 2 rounds per PR; then list what's left for the operator.
 - No Codex or Fable for a Copilot round unless it touches money, secrets, a migration or the public
   surface and a stronger review is judged necessary — say why in the PR.
-- Every reply ends with `🤖 Written by Claude Code (<model>)` (§5).
+- Every reply and resolve goes through `.\ops\gh-bot.ps1` (§5).
 
 ## Resolving review threads
 
@@ -89,10 +89,10 @@ comments that arrived after you looked.
 gh api graphql -F n=<pr> -f query='query($n:Int!){repository(owner:"NoofSaeidh",name:"noof-ledger"){pullRequest(number:$n){reviewThreads(first:100){nodes{id isResolved comments(first:1){nodes{databaseId body}}}}}}}'
 
 # reply to one review comment
-gh api repos/NoofSaeidh/noof-ledger/pulls/<pr>/comments/<comment databaseId>/replies -f body='...'
+.\ops\gh-bot.ps1 api repos/NoofSaeidh/noof-ledger/pulls/<pr>/comments/<comment databaseId>/replies -f body='...'
 
 # resolve exactly that thread
-gh api graphql -f id=<thread id> -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}'
+.\ops\gh-bot.ps1 api graphql -f id=<thread id> -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}'
 ```
 
 ## Trial tally
