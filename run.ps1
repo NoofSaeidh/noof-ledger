@@ -355,7 +355,8 @@ Demo.Tests tagged [Trait("Category", "Database")] (AppLogSinkTests, DashboardCul
 ReadyGatedBufferSinkDbTests, SecretRedactionSentinelTests; RefreshTests, MockLedgerTests), which
 create databases whenever PostgreSQL is reachable and so belong under the lock, not in fast.
 Without -Filter, fast first runs the agent tooling's own tests: the hook tests
-(`node --test .claude/hooks/*.test.js`) and ops\pr-wait.tests.ps1. CI runs exactly this command.
+(`node --test .claude/hooks/*.test.js`), ops\pr-wait.tests.ps1 and ops\gh-bot.tests.ps1. CI runs
+exactly this command.
 
 db runs Noof.Ledger.Persistence.Tests plus those Database-tagged classes, e2e runs
 Noof.Ledger.E2E.Tests, all runs the whole solution suite (`dotnet test --solution`). Each of these
@@ -661,6 +662,7 @@ switch ($CommandName) {
                 if (-not $filter) {
                     Invoke-Checked { node --test (Join-Path $Root '.claude/hooks/*.test.js') }
                     Invoke-Checked { pwsh -NoProfile -File (Join-Path $Root 'ops\pr-wait.tests.ps1') }
+                    Invoke-Checked { pwsh -NoProfile -File (Join-Path $Root 'ops\gh-bot.tests.ps1') }
                 }
                 foreach ($project in $fastProjects) {
                     $full = Join-Path $Root $project

@@ -234,16 +234,19 @@ the code that builds the echo text.
   doesn't conflict.
 
 **A PR says when it is ready** *(operator's decision, 2026-09-28)*
-- Open every PR as a draft (`gh pr create --draft`) and keep it draft while anything is still in
+- Open every PR as a draft (`.\ops\gh-bot.ps1 pr create --draft`) and keep it draft while anything is still in
   progress (implementation, tests, Codex triage, Copilot rounds).
-- Only when done: `gh pr ready <n>` plus one PR comment starting "Ready to merge" with one line per
+- Only when done: `.\ops\gh-bot.ps1 pr ready <n>` plus one PR comment starting "Ready to merge" with one line per
   check (tests run and result, Codex review triaged, Copilot rounds done if it reviewed) and, for a stacked PR,
   "merge after #N".
-- A PR that needs more work after that goes back to draft (`gh pr ready <n> --undo`). The operator
+- A PR that needs more work after that goes back to draft (`.\ops\gh-bot.ps1 pr ready <n> --undo`). The operator
   merges only non-draft PRs.
-- `gh` posts as the operator's account, so every comment, review reply or PR body an agent writes
-  ends with the line `🤖 Written by Claude Code (<model>)` (PR bodies keep the "Generated with Claude
-  Code" footer). Never edit or sign a comment the operator wrote.
+- **Agents write to GitHub as `noof-ledger-bot[bot]`, never as the operator** *(operator's decision,
+  2026-10-01)*. Every `gh` command that writes — a PR's creation, edit or ready state, a comment, a
+  review reply, a `gh api` POST/PATCH/DELETE or GraphQL mutation — runs as `.\ops\gh-bot.ps1 <gh args>`.
+  Reads and `git push` stay on the operator's credentials; commits made in a Claude Code session are
+  authored by the bot through `env` in `.claude/settings.json`. PR bodies keep the "Generated with
+  Claude Code" footer. Never edit a comment the operator wrote.
 
 **Waiting on a PR** *(operator's decision, 2026-09-28)*
 - After pushing to a PR branch, run `.\run.ps1 pr-wait <n>` once in the foreground (600000 ms
