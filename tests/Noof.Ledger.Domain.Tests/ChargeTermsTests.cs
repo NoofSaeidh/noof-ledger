@@ -66,7 +66,8 @@ public class ChargeTermsTests
             .Should().Be(new ComputedCharge(15400m, 150m, 513.333333333333m));
     }
 
-    // percent, fixed, minimum, stated, expected charge, expected fee, expected rate used (over 30 USD).
+    // percent, fixed, minimum, stated, expected charge, expected fee, expected rate used (over 30 USD); each row has
+    // an exact cent split, so the fee is also the terms' fee on the charge.
     public static TheoryData<decimal?, decimal?, decimal?, decimal, decimal, decimal, decimal> FeeInsideTheFigure => new()
     {
         { 1m, null, null, 15756m, 15600m, 156m, 520m },
@@ -84,6 +85,16 @@ public class ChargeTermsTests
         ChargeTerms.Stated(stated, 30m, statedFee: null, feeIncluded: true, terms).Should().Be(new ComputedCharge(charged, fee, rateUsed));
         terms.FeeOn(charged).Should().Be(fee, "the fee inside the figure is the terms' fee on the charge that is left");
         (charged + fee).Should().Be(stated);
+    }
+
+    [Fact]
+    public void A_fee_included_with_no_exact_cent_split_is_the_rounded_solution_and_still_adds_up_to_the_figure()
+    {
+        var charge = ChargeTerms.Stated(100.49m, 30m, statedFee: null, feeIncluded: true, new FeeTerms(1m, null, null));
+
+        charge.Should().Be(new ComputedCharge(99.50m, 0.99m, 3.316666666667m),
+            "1.0049 / 1.01 = 0.99495 rounds to 0.99, though 1 % of 99.50 rounds to 1.00 and a fee of 1.00 would leave 99.49");
+        (charge?.Charged + charge?.Fee).Should().Be(100.49m);
     }
 
     [Fact]

@@ -34,9 +34,9 @@ public sealed record ChargeTerms(decimal Rate, FeeTerms Fee)
             : null;
     }
 
-    // A fee said to be inside the figure but not said: the fee f that is the terms' fee on what is left,
-    // f = max(p·(stated − f) + fixed, minimum). The right side falls as f grows, so there is exactly one such f,
-    // max((p·stated + fixed) / (1 + p), minimum).
+    // A fee said to be inside the figure but not said: over the reals, f = max(p·(stated − f) + fixed, minimum) has
+    // exactly one solution, max((p·stated + fixed) / (1 + p), minimum). In cents there may be none, so the fee is
+    // that solution rounded and can differ from FeeOn(Charged) by a cent; Charged + Fee == stated always holds.
     static (decimal Charged, decimal Fee) FeeInside(decimal stated, FeeTerms terms)
     {
         var percent = (terms.Percent ?? 0m) / 100m;
