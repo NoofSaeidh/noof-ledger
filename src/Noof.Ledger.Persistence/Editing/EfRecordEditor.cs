@@ -118,13 +118,21 @@ internal sealed class EfRecordEditor(LedgerDbContext db, TimeProvider timeProvid
             return false;
 
         // CancelAsync is the only way a record becomes Cancelled, and it always writes this revision.
-        var statusBeforeCancel = await db.TransactionRevisions
+        var cancel = await db.TransactionRevisions
             .Where(r => r.TransactionId == transactionId && r.Kind == RevisionKind.Cancel)
             .OrderByDescending(r => r.RevisionNumber)
-            .Select(r => r.StatusBefore)
+            .Select(r => new { r.RevisionNumber, r.StatusBefore })
             .FirstAsync(cancellationToken);
 
-        transaction.Status = statusBeforeCancel;
+        // ApplyAsync completes a record it applies while cancelled but leaves it cancelled. Putting back the status from
+        // before the cancel would then restore a Captured or Failed that no longer describes it (amendment 25).
+        var appliedSinceCancel = await db.TransactionRevisions.AnyAsync(
+            r => r.TransactionId == transactionId
+                && r.RevisionNumber > cancel.RevisionNumber
+                && (r.Kind == RevisionKind.Initial || r.Kind == RevisionKind.Correction || r.Kind == RevisionKind.Edit),
+            cancellationToken);
+
+        transaction.Status = appliedSinceCancel ? TransactionStatus.Completed : cancel.StatusBefore;
         await db.SaveChangesAsync(cancellationToken);
         await RevisionLog.AppendAsync(db, transaction, RevisionKind.Restore, null, TransactionStatus.Cancelled,
             timeProvider.GetUtcNow(), cancellationToken);
