@@ -17,7 +17,8 @@ internal static class MockDataWriter
     public static async Task WriteAsync(IServiceProvider services, CancellationToken cancellationToken)
     {
         var db = services.GetRequiredService<LedgerDbContext>();
-        var wallets = await WriteWalletsAsync(services.GetRequiredService<IWalletAdmin>(), db, cancellationToken);
+        var wallets = await WriteWalletsAsync(
+            services.GetRequiredService<IWalletAdmin>(), services.GetRequiredService<IWalletFxTerms>(), db, cancellationToken);
         var categories = await db.Categories.ToDictionaryAsync(category => category.Slug, category => category.Id, cancellationToken);
         var merchants = await WriteMerchantsAsync(db, cancellationToken);
 
@@ -33,7 +34,8 @@ internal static class MockDataWriter
         await WriteBackupRunAsync(db, cancellationToken);
     }
 
-    static async Task<Dictionary<string, Guid>> WriteWalletsAsync(IWalletAdmin admin, LedgerDbContext db, CancellationToken cancellationToken)
+    static async Task<Dictionary<string, Guid>> WriteWalletsAsync(
+        IWalletAdmin admin, IWalletFxTerms fxTerms, LedgerDbContext db, CancellationToken cancellationToken)
     {
         var ids = new Dictionary<string, Guid>();
         foreach (var wallet in MockData.Wallets)
@@ -51,6 +53,9 @@ internal static class MockDataWriter
 
             if (wallet.PaymentDefault is { } payment)
                 await admin.SetPaymentDefaultAsync(id, payment, cancellationToken);
+
+            foreach (var terms in wallet.Terms ?? [])
+                await fxTerms.SetAsync(id, terms, cancellationToken);
 
             if (wallet.Archived)
                 await admin.ArchiveAsync(id, cancellationToken);

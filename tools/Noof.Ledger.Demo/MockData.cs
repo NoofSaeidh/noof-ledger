@@ -1,4 +1,5 @@
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Demo;
@@ -51,11 +52,15 @@ internal static class MockData
     public static IReadOnlyList<MockWallet> Wallets { get; } =
     [
         new("Wise", CurrencyCode.Eur, 3000.00m, ["wise"], Default: true),
-        new("Raiffeisen", CurrencyCode.Rsd, 180000.00m, ["raif"], Default: true, PaymentDefault: PaymentMethod.Card),
+        new("Raiffeisen", CurrencyCode.Rsd, 180000.00m, ["raif"], Default: true, PaymentDefault: PaymentMethod.Card,
+            Terms: [new(CurrencyCode.Eur, 117.35m, FeePercent: 0.5m, FeeFixed: null, FeeMinimum: 100.00m)]),
         new("Cash", CurrencyCode.Usd, 600.00m, [], Default: true, PaymentDefault: PaymentMethod.Cash),
         new("Tinkoff", CurrencyCode.Rub, 50000.00m, [], Default: true),
-        new("Kaspi", CurrencyCode.Kzt, 200000.00m, [], Default: true),
+        new("Kaspi", CurrencyCode.Kzt, 200000.00m, [], Default: true,
+            Terms: [new(CurrencyCode.Usd, 520m, FeePercent: 1m, FeeFixed: null, FeeMinimum: null)]),
         new("Old Revolut", CurrencyCode.Eur, 900.00m, [], Default: false, Archived: true),
+        new("Cash RSD", CurrencyCode.Rsd, 15000.00m, [], Default: false, PaymentDefault: PaymentMethod.Cash),
+        new("Cash EUR", CurrencyCode.Eur, 250.00m, [], Default: false, PaymentDefault: PaymentMethod.Cash),
     ];
 
     public static IReadOnlyList<MockRecord> Records { get; } =
@@ -140,13 +145,13 @@ internal static class MockData
                 : [],
             id, Receipt: receipt);
 
-    static string DinarWalletFor(PaymentMethod payment) =>
+    public static string DinarWalletFor(PaymentMethod payment) =>
         Wallets.Single(wallet => wallet.PaymentDefault == payment && wallet.Currency == CurrencyCode.Rsd).Name;
 }
 
 internal sealed record MockWallet(
     string Name, CurrencyCode Currency, decimal Opening, IReadOnlyList<string> Aliases, bool Default, bool Archived = false,
-    PaymentMethod? PaymentDefault = null);
+    PaymentMethod? PaymentDefault = null, IReadOnlyList<WalletTermsDetails>? Terms = null);
 
 internal sealed record MockLine(string Description, decimal Amount, string CategorySlug, string? Merchant);
 

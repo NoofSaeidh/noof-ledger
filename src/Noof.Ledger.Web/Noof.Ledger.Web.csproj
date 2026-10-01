@@ -21,4 +21,8 @@
     <ProjectReference Include="..\Noof.Ledger.Domain\Noof.Ledger.Domain.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Noof.Ledger.Host.Tests" />
+  </ItemGroup>
+
 </Project>

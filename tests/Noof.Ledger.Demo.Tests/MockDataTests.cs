@@ -39,4 +39,12 @@ public sealed class MockDataTests
             addsUp.Should().Be(record.Status == TransactionStatus.Completed, record.RawText ?? receipt.SellerName);
         }
     }
+
+    [Fact]
+    public void A_dinar_receipt_lands_in_the_rsd_wallet_holding_the_default_for_how_it_was_paid()
+    {
+        MockData.DinarWalletFor(PaymentMethod.Card).Should().Be("Raiffeisen");
+        MockData.DinarWalletFor(PaymentMethod.Cash).Should().Be(
+            "Cash RSD", "each currency has its own cash default (T-13), and a fiscal receipt is always in dinars");
+    }
 }
