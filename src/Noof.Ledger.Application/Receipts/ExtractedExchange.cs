@@ -76,7 +76,8 @@ public sealed record ExtractedExchange(
     // already inside its side; subtracting it once here is what balances the two, not a double count.
     bool AmountsDisagree()
     {
-        if (GivenAmount is not { } given || ReceivedAmount is not { } received || PrintedRate() is not { } printed)
+        if (GivenAmount is not { } given || given <= 0m || ReceivedAmount is not { } received || received <= 0m
+            || PrintedRate() is not { } printed)
             return false;
 
         var rate = printed.QuoteAmount;

@@ -202,6 +202,25 @@ public class ExtractedExchangeAssessTests
         Assess(Slip(given: 0m)).Missing.Should().Equal(SlipMissing.GivenAmount);
     }
 
+    // The rate can fill a received amount that is not positive, so such a slip is recorded exactly as one whose
+    // received amount went unread - never held for amounts that disagree with a figure nobody read.
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-11700)]
+    public void A_received_amount_that_is_not_positive_is_assessed_as_unread(decimal received)
+    {
+        var assessment = Assess(Slip(received: received));
+
+        assessment.Should().BeEquivalentTo(Assess(Slip(received: null)));
+        assessment.Disposition.Should().Be(SlipDisposition.Record);
+    }
+
+    [Fact]
+    public void A_given_amount_that_is_not_positive_names_no_disagreement()
+    {
+        Assess(Slip(given: 0m)).Problems.Should().Equal(Assess(Slip(given: null)).Problems);
+    }
+
     [Fact]
     public void An_incomplete_slip_still_names_its_problems()
     {
@@ -254,7 +273,7 @@ public class ExtractedExchangeAssessTests
     [InlineData("eur", "EUR")]
     [InlineData("RSD", "RSD")]
     [InlineData("CHF", null)]
-    public void A_commission_with_no_printed_currency_is_in_dinars(string? commissionCurrency, string? expected)
+    public void CommissionCurrencyOrDinars_reads_the_printed_currency_or_dinars(string? commissionCurrency, string? expected)
     {
         Slip(commission: 150.00m, commissionCurrency: commissionCurrency).CommissionCurrencyOrDinars()
             .Should().Be(expected is null ? null : new CurrencyCode(expected));
