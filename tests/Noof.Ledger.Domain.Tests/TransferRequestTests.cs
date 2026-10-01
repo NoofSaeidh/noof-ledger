@@ -185,6 +185,23 @@ public class TransferRequestTests
             .Should().Be(RecordFailureReason.InvalidFee);
     }
 
+    [Fact]
+    public void A_fee_equal_to_what_arrived_leaves_nothing_stored_and_is_InvalidFee()
+    {
+        FailureOf(new(Eur(1m), CurrencyCode.Rsd, 150m, null, new TransferFeeRequest(Rsd(150m), TransferLeg.To, false)))
+            .Should().Be(RecordFailureReason.InvalidFee);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void A_fee_on_the_destination_of_a_same_currency_transfer_comes_out_of_the_amount_moved_whatever_included_says(bool included)
+    {
+        // "перевёл 10000 на налик, комиссию 150 взяли на той стороне": no received amount said, so nothing includes it.
+        Settle(new(Rsd(10000m), CurrencyCode.Rsd, null, null, new TransferFeeRequest(Rsd(150m), TransferLeg.To, included)))
+            .Should().Be(new SettledTransfer(Rsd(10000m), Rsd(9850m), Rsd(150m), TransferLeg.To));
+    }
+
     [Theory]
     [InlineData("0", null)]
     [InlineData("-100", null)]

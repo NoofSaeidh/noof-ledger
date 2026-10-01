@@ -176,7 +176,7 @@ internal sealed class CategorizationWorker(
 
             if (!proposalMapper.TryMap(
                 keptProposal, offeredSlugs, offeredMerchantIds, walletsForMapping,
-                options.DefaultCurrency, out var mapped, out var failure))
+                options.DefaultCurrency, out var mapped, out var failure, out _))
             {
                 await FailTerminallyAsync(jobQueue, store, notifier, job, subject, failure, currentStage, cancellationToken);
                 return;

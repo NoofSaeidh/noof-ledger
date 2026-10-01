@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using Noof.Ledger.Domain;
 
@@ -8,7 +9,9 @@ namespace Noof.Ledger.Application.Categorization;
 // Whether a figure is plausible, or appears in the message at all, is for the person to see in the
 // echo and correct there (D1, docs/decisions/p2-1-quote-and-verify-removed.md). Do not add a sanity bound or a verbatim
 // check here. The same holds for the wallet and the kind: an offered wallet id and a known kind map,
-// and whether income "looks like" income is not this class's question (M3, M9).
+// and whether income "looks like" income is not this class's question (M3, M9). A transfer fails only for the reasons
+// its own rules name (spec §2): a missing received amount, one wallet on both sides, a leg in a wallet of another
+// currency, a rate or a fee that cannot be placed, an amount that is not positive.
 internal sealed class ProposalMapper : IProposalMapper
 {
     const int MaxDescriptionLength = 512;
@@ -21,15 +24,20 @@ internal sealed class ProposalMapper : IProposalMapper
         IReadOnlyList<WalletOption> wallets,
         string defaultCurrency,
         out MappedProposal mapped,
-        out string failure)
+        out string failure,
+        out RecordFailureReason reason)
     {
         mapped = new MappedProposal([], null);
+        reason = RecordFailureReason.None;
 
         if (KindOf(proposal.Kind) is not { } kind)
         {
-            failure = $"kind \"{proposal.Kind}\" is not expense, income or balance.";
+            failure = $"kind \"{proposal.Kind}\" is not expense, income, balance or transfer.";
             return false;
         }
+
+        if (kind == TransactionKind.Transfer)
+            return TryMapTransfer(proposal, wallets, out mapped, out failure, out reason);
 
         if (WalletFor(proposal, kind, wallets, defaultCurrency, out failure) is not { } wallet)
             return false;
@@ -65,8 +73,152 @@ internal sealed class ProposalMapper : IProposalMapper
         ProposedKind.Expense => TransactionKind.Expense,
         ProposedKind.Income => TransactionKind.Income,
         ProposedKind.Balance => TransactionKind.BalanceCheck,
+        ProposedKind.Transfer => TransactionKind.Transfer,
         _ => null,
     };
+
+    // Spec §2: legs (rule 1), then the settlement (rules 2-3) in Domain. A transfer has no line items by definition.
+    static bool TryMapTransfer(
+        CategorizationProposal proposal, IReadOnlyList<WalletOption> wallets,
+        out MappedProposal mapped, out string failure, out RecordFailureReason reason)
+    {
+        mapped = new MappedProposal([], null);
+        reason = RecordFailureReason.None;
+
+        if (proposal.Transfer is not { } transfer)
+        {
+            failure = "a transfer with no transfer object";
+            return false;
+        }
+
+        if (RequestOf(transfer, out failure) is not { } request)
+            return false;
+
+        if (!TryLegWallet(transfer.FromWalletId, request.From.Currency, WalletPaymentDefault.Card, wallets, out var from, out failure, out reason))
+            return false;
+
+        if (!TryLegWallet(transfer.ToWalletId, request.ToCurrency, WalletPaymentDefault.Cash, wallets, out var to, out failure, out reason))
+            return false;
+
+        if (from.Id == to.Id)
+            return Fails(RecordFailureReason.SameWallet, out failure, out reason);
+
+        if (!request.TrySettle(out var settled, out var settlement))
+            return Fails(settlement, out failure, out reason);
+
+        if (!TryParseDay(proposal.OccurredOn, out var occurredOn, out failure))
+            return false;
+
+        // Amendment 24: a valid stated rate is kept whenever it was said, even beside a said received amount (which
+        // still wins for the settlement), so a date-only correction answered back unchanged keeps it. A rate that could
+        // not convert between the legs - ignored by the settlement beside a said amount - is not kept.
+        mapped = new MappedProposal(
+            [], occurredOn, TransactionKind.Transfer, from.Id,
+            Transfer: new TransferFacts(
+                from.Id, settled.From, to.Id, settled.To, settled.Fee, settled.FeeLeg, request.ConvertingRate));
+        failure = string.Empty;
+        return true;
+    }
+
+    static TransferRequest? RequestOf(ProposedTransfer transfer, out string failure)
+    {
+        if (Supported(transfer.FromCurrency) is not { } fromCurrency)
+            return Unmapped($"transfer from_currency \"{transfer.FromCurrency}\" is not one this ledger supports.", out failure);
+
+        if (Supported(transfer.ToCurrency) is not { } toCurrency)
+            return Unmapped($"transfer to_currency \"{transfer.ToCurrency}\" is not one this ledger supports.", out failure);
+
+        ExchangeRate? rate = null;
+        if (transfer.Rate is { } saidRate)
+        {
+            if (Supported(saidRate.BaseCurrency) is not { } baseCurrency)
+                return Unmapped($"rate currency \"{saidRate.BaseCurrency}\" is not one this ledger supports.", out failure);
+
+            if (Supported(saidRate.QuoteCurrency) is not { } quoteCurrency)
+                return Unmapped($"rate currency \"{saidRate.QuoteCurrency}\" is not one this ledger supports.", out failure);
+
+            rate = new ExchangeRate(baseCurrency, saidRate.QuoteAmount, quoteCurrency);
+        }
+
+        TransferFeeRequest? fee = null;
+        if (transfer.Fee is { } saidFee)
+        {
+            if (Supported(saidFee.Currency) is not { } feeCurrency)
+                return Unmapped($"fee currency \"{saidFee.Currency}\" is not one this ledger supports.", out failure);
+
+            if (LegFor(saidFee, feeCurrency, fromCurrency, toCurrency) is not { } leg)
+                return Unmapped($"fee leg \"{saidFee.Leg}\" is not from or to.", out failure);
+
+            fee = new TransferFeeRequest(new Money(saidFee.Amount, feeCurrency), leg, saidFee.Included);
+        }
+
+        failure = string.Empty;
+        return new TransferRequest(new Money(transfer.FromAmount, fromCurrency), toCurrency, transfer.ToAmount, rate, fee);
+    }
+
+    static TransferRequest? Unmapped(string why, out string failure)
+    {
+        failure = why;
+        return null;
+    }
+
+    // Amendment 23: a fee in exactly one side's currency is on that side, whatever leg the model named. Only a fee in
+    // both sides' currency (a same-currency transfer) or in neither takes the model's leg.
+    static TransferLeg? LegFor(ProposedFee fee, CurrencyCode feeCurrency, CurrencyCode from, CurrencyCode to) =>
+        (feeCurrency == from, feeCurrency == to) switch
+        {
+            (true, false) => TransferLeg.From,
+            (false, true) => TransferLeg.To,
+            _ => LegOf(fee.Leg),
+        };
+
+    static TransferLeg? LegOf(string leg) => leg.ToLowerInvariant() switch
+    {
+        ProposedLeg.From => TransferLeg.From,
+        ProposedLeg.To => TransferLeg.To,
+        _ => null,
+    };
+
+    // Spec §2 rule 1: a named wallet as named; otherwise (spec A-27) the source takes its currency's card default and the
+    // destination its cash default, each else that currency's default - a bare "снял 10000" takes from the card and
+    // lands in the cash instead of putting both legs on one wallet. Never the default currency's wallet, the fallback a
+    // spending gets: a leg can only sit in a wallet of its currency.
+    static bool TryLegWallet(
+        Guid? named, CurrencyCode currency, WalletPaymentDefault unnamedTakes, IReadOnlyList<WalletOption> wallets,
+        [NotNullWhen(true)] out WalletOption? wallet, out string failure, out RecordFailureReason reason)
+    {
+        reason = RecordFailureReason.None;
+
+        if (named is { } id)
+        {
+            wallet = wallets.FirstOrDefault(offered => offered.Id == id);
+            if (wallet is null)
+            {
+                failure = $"wallet {id} was not offered";
+                return false;
+            }
+        }
+        else
+        {
+            wallet = PaymentDefaultOf(wallets, unnamedTakes, currency) ?? DefaultWalletOf(wallets, currency.Value);
+        }
+
+        if (wallet is null || wallet.Currency != currency)
+            return Fails(RecordFailureReason.LegCurrencyMismatch, out failure, out reason);
+
+        failure = string.Empty;
+        return true;
+    }
+
+    static WalletOption? PaymentDefaultOf(IReadOnlyList<WalletOption> wallets, WalletPaymentDefault method, CurrencyCode currency) =>
+        wallets.FirstOrDefault(wallet => wallet.DefaultForPayment == method && wallet.Currency == currency);
+
+    static bool Fails(RecordFailureReason why, out string failure, out RecordFailureReason reason)
+    {
+        reason = why;
+        failure = why.ToString();
+        return false;
+    }
 
     static WalletOption? WalletFor(
         CategorizationProposal proposal, TransactionKind kind, IReadOnlyList<WalletOption> wallets, string defaultCurrency,
