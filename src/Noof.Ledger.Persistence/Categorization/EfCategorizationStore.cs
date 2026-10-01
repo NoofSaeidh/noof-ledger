@@ -265,8 +265,8 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
         });
     }
 
-    // After the highest ordinal the record has, not ApplyAsync's running one: a receipt line names its own (R-2), and
-    // the running ordinal never moves past it.
+    // After the highest ordinal the record has, not ApplyAsync's running one: the running ordinal never moves past a
+    // line that names its own ordinal.
     async Task AddChargeFeeLinesAsync(
         Guid transactionId, IReadOnlyList<(CurrencyCode Purchase, Money Fee)> fees, CancellationToken cancellationToken)
     {

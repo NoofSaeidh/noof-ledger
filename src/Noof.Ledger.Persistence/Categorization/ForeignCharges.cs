@@ -49,8 +49,9 @@ internal static class ForeignCharges
             return [];
 
         // A figure stated in one wallet's currency means nothing in another's, and another wallet's terms are
-        // not this one's: moving the record discards every old charge, Stated or not.
-        var kept = walletBefore == walletId
+        // not this one's: moving the record discards every old charge, Stated or not. An edited message is read
+        // again whole, like a first reading, so a charge it no longer says was not said and today's terms price it.
+        var kept = job != JobKind.Reinterpret && walletBefore == walletId
             ? previous.ToDictionary(charge => charge.Currency)
             : new Dictionary<CurrencyCode, Charge>();
         var current = (await db.WalletFxTerms.AsNoTracking()

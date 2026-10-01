@@ -359,6 +359,45 @@ public class ForeignChargeTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task An_edited_message_that_no_longer_says_a_charge_drops_the_stated_charge()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var kaspi = await AddKztWalletAsync(db, "Kaspi KZT");
+        await SetTermsAsync(db, kaspi, CurrencyCode.Usd, 520m, feePercent: 1m);
+        var id = await CaptureAsync(db);
+        await ApplyAsync(db, id, Said(Spending(kaspi, Line(30m, CurrencyCode.Usd)), 15_400m, CurrencyCode.Kzt));
+
+        // The operator edited "30 долларов с каспи, списали 15400" down to "30 долларов с каспи".
+        await ApplyAsync(db, id, Spending(kaspi, Line(30m, CurrencyCode.Usd)) with { Kind = JobKind.Reinterpret });
+
+        db.ChangeTracker.Clear();
+        (await ChargesOfAsync(db, id)).Should().Equal(
+            [new ChargeRow("USD", 15_600m, 156m, 520m, 1m, null, null, ChargeSource.WalletTerms)],
+            "an edited message is the whole statement, so a charge it no longer says was not said");
+    }
+
+    [Fact]
+    public async Task An_edited_message_is_priced_at_the_wallets_current_terms()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var kaspi = await AddKztWalletAsync(db, "Kaspi KZT");
+        await SetTermsAsync(db, kaspi, CurrencyCode.Usd, 520m, feePercent: 1m);
+        var id = await CaptureAsync(db);
+        await ApplyAsync(db, id, Spending(kaspi, Line(30m, CurrencyCode.Usd)));
+
+        await db.WalletFxTerms
+            .Where(terms => terms.WalletId == kaspi && terms.Currency == CurrencyCode.Usd)
+            .ExecuteUpdateAsync(set => set.SetProperty(terms => terms.Rate, 530m).SetProperty(terms => terms.FeePercent, (decimal?)2m), Ct);
+
+        await ApplyAsync(db, id, Spending(kaspi, Line(30m, CurrencyCode.Usd)) with { Kind = JobKind.Reinterpret });
+
+        db.ChangeTracker.Clear();
+        (await ChargesOfAsync(db, id)).Should().Equal(
+            [new ChargeRow("USD", 15_900m, 318m, 530m, 2m, null, null, ChargeSource.WalletTerms)],
+            "an edited message is read again like a first reading");
+    }
+
+    [Fact]
     public async Task Moving_the_record_to_another_wallet_takes_that_wallets_current_terms()
     {
         await using var db = await fixture.CreateMigratedContextAsync();
