@@ -25,6 +25,34 @@ public class RecordEchoTests
         new(Guid.NewGuid(), "raw", 111L, 42, "Cash", status, Sent, occurredOn ?? Sent, lines ?? [Coffee],
             CaptureKind.Text, kind, walletCurrency ?? CurrencyCode.Rsd, walletBalances, statement);
 
+    static readonly Guid SourceWalletId = Guid.Parse("00000000-0000-0000-0000-0000000000a1");
+    static readonly Guid DestinationWalletId = Guid.Parse("00000000-0000-0000-0000-0000000000a2");
+
+    static Money Rsd(decimal amount) => new(amount, CurrencyCode.Rsd);
+    static Money Eur(decimal amount) => new(amount, CurrencyCode.Eur);
+
+    static TransferView Legs(
+        string fromWallet, Money from, Money fromBalance, string toWallet, Money to, Money toBalance,
+        Money? fee = null, TransferLeg? feeLeg = null, ExchangeRate? statedRate = null, decimal? fromBalanceWithoutThis = null) =>
+        new(SourceWalletId, fromWallet, from, DestinationWalletId, toWallet, to, fee, feeLeg, statedRate, VenueName: null,
+            [fromBalance], [toBalance], fromBalanceWithoutThis);
+
+    static CategorizationSubject TransferRecord(
+        TransferView transfer, TransactionStatus status = TransactionStatus.Completed,
+        IReadOnlyList<RecordedLine>? lines = null, DateOnly? occurredOn = null) =>
+        new(Guid.NewGuid(), "raw", 111L, 42, transfer.FromWalletName, status, Sent, occurredOn ?? Sent, lines ?? [],
+            CaptureKind.Text, TransactionKind.Transfer, transfer.From.Currency, transfer.FromBalances, Statement: null,
+            WalletId: SourceWalletId, Transfer: transfer);
+
+    static RecordedLine FeeLine(Money amount, string description = "Fee") =>
+        new(description, amount, "fees-charges", "Fees & Charges", null, EntryRole.Fee);
+
+    static TransferView Withdrawal =>
+        Legs("Raiffeisen RSD", Rsd(10000m), Rsd(164150m), "Cash RSD", Rsd(10000m), Rsd(12000m));
+
+    static TransferView ExchangeOf100Eur =>
+        Legs("Cash EUR", Eur(100m), Eur(400m), "Cash RSD", Rsd(11700m), Rsd(23700m));
+
     [Fact]
     public void A_recorded_line_is_echoed_with_its_balance_total_and_the_cancel_and_edit_buttons()
     {
@@ -355,5 +383,147 @@ public class RecordEchoTests
         echo.Text.Should().Contain("a database error");
         echo.Text.Should().Contain("14:32");
         echo.Actions.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_transfer_names_its_amount_and_both_wallets_and_shows_both_balances()
+    {
+        var echo = Echo.Compose(TransferRecord(Withdrawal));
+
+        echo.Text.Should().Be(
+            "Transfer — 10000.00 RSD · Raiffeisen RSD → Cash RSD\n"
+            + "Raiffeisen RSD · balance 164150.00 RSD\n"
+            + "Cash RSD · balance 12000.00 RSD");
+        echo.Actions.Should().Equal(RecordAction.Cancel, RecordAction.Edit);
+    }
+
+    [Fact]
+    public void A_transfer_with_a_fee_on_the_source_shows_it_inside_the_source_leg_and_on_its_own_line()
+    {
+        var transfer = Legs("Raiffeisen RSD", Rsd(10150m), Rsd(164000m), "Cash RSD", Rsd(10000m), Rsd(12000m),
+            fee: Rsd(150m), feeLeg: TransferLeg.From);
+
+        var echo = Echo.Compose(TransferRecord(transfer, lines: [FeeLine(Rsd(150m))]));
+
+        echo.Text.Should().Be(
+            "Transfer — Raiffeisen RSD -10150.00 RSD (incl. fee 150.00) → Cash RSD +10000.00 RSD\n"
+            + "Fee 150.00 RSD · Fees & Charges\n"
+            + "Raiffeisen RSD · balance 164000.00 RSD\n"
+            + "Cash RSD · balance 12000.00 RSD");
+        echo.Actions.Should().Equal(RecordAction.Cancel, RecordAction.Edit);
+    }
+
+    [Fact]
+    public void A_transfer_with_a_fee_on_the_destination_shows_what_arrived_after_the_fee()
+    {
+        var transfer = Legs("Raiffeisen RSD", Rsd(10000m), Rsd(164150m), "Cash RSD", Rsd(9850m), Rsd(11850m),
+            fee: Rsd(150m), feeLeg: TransferLeg.To);
+
+        Echo.Compose(TransferRecord(transfer, lines: [FeeLine(Rsd(150m))])).Text.Should().Be(
+            "Transfer — Raiffeisen RSD -10000.00 RSD → Cash RSD +9850.00 RSD (after fee 150.00)\n"
+            + "Fee 150.00 RSD · Fees & Charges\n"
+            + "Raiffeisen RSD · balance 164150.00 RSD\n"
+            + "Cash RSD · balance 11850.00 RSD");
+    }
+
+    [Fact]
+    public void An_exchange_shows_both_sides_their_wallets_and_the_rate_derived_from_them()
+    {
+        var echo = Echo.Compose(TransferRecord(ExchangeOf100Eur));
+
+        echo.Text.Should().Be(
+            "Exchange — 100.00 EUR (Cash EUR) → 11700.00 RSD (Cash RSD) · 1 EUR = 117.0000 RSD\n"
+            + "Cash EUR · balance 400.00 EUR\n"
+            + "Cash RSD · balance 23700.00 RSD");
+        echo.Actions.Should().Equal(RecordAction.Cancel, RecordAction.Edit);
+    }
+
+    // 33.33 × 117.35 = 3911.2755, stored as 3911.28: re-deriving from the rounded amounts would say 117.3501.
+    [Fact]
+    public void An_exchange_shows_the_rate_the_operator_stated_not_one_derived_from_rounded_amounts()
+    {
+        var transfer = Legs("Cash EUR", Eur(33.33m), Eur(400m), "Cash RSD", Rsd(3911.28m), Rsd(15911.28m),
+            statedRate: new ExchangeRate(CurrencyCode.Eur, 117.35m, CurrencyCode.Rsd));
+
+        Echo.Compose(TransferRecord(transfer)).Text.Should().StartWith(
+            "Exchange — 33.33 EUR (Cash EUR) → 3911.28 RSD (Cash RSD) · 1 EUR = 117.3500 RSD\n");
+    }
+
+    [Fact]
+    public void An_exchange_with_a_fee_on_the_source_shows_it_on_that_side_and_takes_the_rate_from_the_principals()
+    {
+        var transfer = Legs("Cash EUR", Eur(102m), Eur(398m), "Cash RSD", Rsd(11700m), Rsd(23700m),
+            fee: Eur(2m), feeLeg: TransferLeg.From);
+
+        Echo.Compose(TransferRecord(transfer, lines: [FeeLine(Eur(2m))])).Text.Should().Be(
+            "Exchange — 102.00 EUR (Cash EUR, incl. fee 2.00) → 11700.00 RSD (Cash RSD) · 1 EUR = 117.0000 RSD\n"
+            + "Fee 2.00 EUR · Fees & Charges\n"
+            + "Cash EUR · balance 398.00 EUR\n"
+            + "Cash RSD · balance 23700.00 RSD");
+    }
+
+    [Fact]
+    public void An_exchange_with_a_fee_on_the_destination_shows_it_on_that_side_and_takes_the_rate_from_the_principals()
+    {
+        var transfer = Legs("Cash EUR", Eur(100m), Eur(400m), "Cash RSD", Rsd(11500m), Rsd(23500m),
+            fee: Rsd(200m), feeLeg: TransferLeg.To);
+
+        Echo.Compose(TransferRecord(transfer, lines: [FeeLine(Rsd(200m))])).Text.Should().Be(
+            "Exchange — 100.00 EUR (Cash EUR) → 11500.00 RSD (Cash RSD, after fee 200.00) · 1 EUR = 117.0000 RSD\n"
+            + "Fee 200.00 RSD · Fees & Charges\n"
+            + "Cash EUR · balance 400.00 EUR\n"
+            + "Cash RSD · balance 23500.00 RSD");
+    }
+
+    [Fact]
+    public void A_transfer_dated_to_another_day_says_which_day()
+    {
+        Echo.Compose(TransferRecord(Withdrawal, occurredOn: new DateOnly(2026, 9, 21))).Text.Should().StartWith(
+            "Transfer — 10000.00 RSD · Raiffeisen RSD → Cash RSD\nDate: 21.09.2026\nRaiffeisen RSD · balance");
+    }
+
+    [Fact]
+    public void A_cancelled_transfer_re_renders_both_balances_and_offers_only_restore()
+    {
+        var transfer = Legs("Raiffeisen RSD", Rsd(10000m), Rsd(174150m), "Cash RSD", Rsd(10000m), Rsd(2000m));
+
+        var echo = Echo.Compose(TransferRecord(transfer, TransactionStatus.Cancelled));
+
+        echo.Text.Should().Be(
+            "Cancelled transfer — 10000.00 RSD · Raiffeisen RSD → Cash RSD\n"
+            + "Raiffeisen RSD · balance 174150.00 RSD\n"
+            + "Cash RSD · balance 2000.00 RSD");
+        echo.Actions.Should().Equal(RecordAction.Restore);
+    }
+
+    [Fact]
+    public void A_cancelled_exchange_says_so_and_offers_only_restore()
+    {
+        var echo = Echo.Compose(TransferRecord(ExchangeOf100Eur, TransactionStatus.Cancelled));
+
+        echo.Text.Should().StartWith("Cancelled exchange — 100.00 EUR (Cash EUR) → 11700.00 RSD (Cash RSD) · 1 EUR = 117.0000 RSD\n");
+        echo.Actions.Should().Equal(RecordAction.Restore);
+    }
+
+    [Fact]
+    public void A_wallet_with_no_balance_yet_reads_zero_in_its_own_currency()
+    {
+        Echo.Compose(TransferRecord(Withdrawal with { ToBalances = [] })).Text.Should().EndWith("\nCash RSD · balance 0.00 RSD");
+    }
+
+    [Fact]
+    public void Transfer_amounts_and_the_rate_render_the_same_under_a_Serbian_machine_culture()
+    {
+        var saved = CultureInfo.CurrentCulture;
+        CultureInfo.CurrentCulture = new CultureInfo("sr-Latn-RS");
+        try
+        {
+            Echo.Compose(TransferRecord(ExchangeOf100Eur)).Text.Should().StartWith(
+                "Exchange — 100.00 EUR (Cash EUR) → 11700.00 RSD (Cash RSD) · 1 EUR = 117.0000 RSD\n");
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = saved;
+        }
     }
 }

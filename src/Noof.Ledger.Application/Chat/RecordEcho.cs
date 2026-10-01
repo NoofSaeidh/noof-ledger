@@ -51,11 +51,15 @@ internal sealed class RecordEcho : IRecordEcho
 
     public EchoMessage Compose(CategorizationSubject record) => WithWhatWasHeard(record, record switch
     {
+        { Kind: TransactionKind.Transfer, Transfer: { } transfer, Status: TransactionStatus.Cancelled } =>
+            new(TransferText(record, transfer, cancelled: true), [RecordAction.Restore]),
         { Status: TransactionStatus.Cancelled } =>
             new($"Cancelled — {record.WalletName} · balance {Balances(record)}\n{CancelledBody(record)}".TrimEnd(),
                 [RecordAction.Restore]),
         { Status: TransactionStatus.Failed } => Failure,
         { Status: TransactionStatus.Captured } => new(Waiting(record), []),
+        { Kind: TransactionKind.Transfer, Transfer: { } transfer } =>
+            new(TransferText(record, transfer, cancelled: false), [RecordAction.Cancel, RecordAction.Edit]),
         { Kind: TransactionKind.BalanceCheck, Status: TransactionStatus.Completed } =>
             new(StatementLine(record), [RecordAction.Cancel, RecordAction.Edit]),
         { Kind: TransactionKind.Income, Lines.Count: 0 } =>
@@ -237,7 +241,7 @@ internal sealed class RecordEcho : IRecordEcho
 
     static string ReceiptBody(CategorizationSubject record, ReceiptView receipt)
     {
-        List<string> lines = [$"Date: {record.OccurredOn.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)}"];
+        List<string> lines = [DateLine(record.OccurredOn)];
         lines.AddRange(ReceiptLineSection(record.Lines));
         lines.Add(string.Empty);
         lines.Add($"Total: {Totals(record.Lines)}");
@@ -318,7 +322,7 @@ internal sealed class RecordEcho : IRecordEcho
         List<string> lines = [];
 
         if (record.OccurredOn != record.SentOn)
-            lines.Add($"Date: {record.OccurredOn.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)}");
+            lines.Add(DateLine(record.OccurredOn));
 
         lines.AddRange(record.Lines.Select(FormatLine));
 
@@ -363,13 +367,90 @@ internal sealed class RecordEcho : IRecordEcho
         return $"{record.WalletName}: balance was {FormatAmount(before)} {currency}, you said {FormatAmount(stated)} {currency} — {tail}";
     }
 
-    static string Balances(CategorizationSubject record)
-    {
-        if (record.WalletBalances is not { Count: > 0 } balances)
-            return record.WalletCurrency is { } currency ? $"0.00 {currency}" : "0.00";
+    static string Balances(CategorizationSubject record) => Balances(record.WalletBalances, record.WalletCurrency);
 
-        return string.Join(", ", balances.Select(money => $"{FormatAmount(money.Amount)} {money.Currency}"));
+    static string Balances(IReadOnlyList<Money>? balances, CurrencyCode? currency)
+    {
+        if (balances is not { Count: > 0 })
+            return currency is { } code ? $"0.00 {code}" : "0.00";
+
+        return string.Join(", ", balances.Select(FormatMoney));
     }
+
+    // A transfer is read from its transfers row, never from its lines: it has no principal lines, and its one
+    // fee line is shown as the fee it is, never as a purchase.
+    static string TransferText(CategorizationSubject record, TransferView transfer, bool cancelled)
+    {
+        List<string> lines = [TransferHeader(transfer, cancelled)];
+
+        if (record.OccurredOn != record.SentOn)
+            lines.Add(DateLine(record.OccurredOn));
+
+        if (transfer.Fee is { } fee)
+            lines.Add($"Fee {FormatMoney(fee)} · {FeeCategory(record)}");
+
+        lines.Add($"{transfer.FromWalletName} · balance {Balances(transfer.FromBalances, transfer.From.Currency)}");
+        lines.Add($"{transfer.ToWalletName} · balance {Balances(transfer.ToBalances, transfer.To.Currency)}");
+
+        return string.Join('\n', lines);
+    }
+
+    static string TransferHeader(TransferView transfer, bool cancelled)
+    {
+        var exchange = transfer.From.Currency != transfer.To.Currency;
+        var title = (exchange, cancelled) switch
+        {
+            (true, false) => "Exchange",
+            (true, true) => "Cancelled exchange",
+            (false, false) => "Transfer",
+            (false, true) => "Cancelled transfer",
+        };
+        var fromFee = FeeNote(transfer, TransferLeg.From);
+        var toFee = FeeNote(transfer, TransferLeg.To);
+
+        if (exchange)
+        {
+            return $"{title} — {FormatMoney(transfer.From)} ({WithNote(transfer.FromWalletName, fromFee)}) → "
+                + $"{FormatMoney(transfer.To)} ({WithNote(transfer.ToWalletName, toFee)}) · {RateOf(transfer)}";
+        }
+
+        if (transfer.Fee is null)
+            return $"{title} — {FormatMoney(transfer.From)} · {transfer.FromWalletName} → {transfer.ToWalletName}";
+
+        return $"{title} — {transfer.FromWalletName} -{FormatMoney(transfer.From)}{Parenthesised(fromFee)} → "
+            + $"{transfer.ToWalletName} +{FormatMoney(transfer.To)}{Parenthesised(toFee)}";
+    }
+
+    // The source leg's stored amount already includes its fee, and the destination's already lost it (T-12):
+    // "incl." and "after" say which.
+    static string? FeeNote(TransferView transfer, TransferLeg leg) => transfer switch
+    {
+        { Fee: { } fee, FeeLeg: { } feeLeg } when feeLeg == leg =>
+            $"{(leg == TransferLeg.From ? "incl." : "after")} fee {FormatAmount(fee.Amount)}",
+        _ => null,
+    };
+
+    static string WithNote(string walletName, string? note) => note is null ? walletName : $"{walletName}, {note}";
+
+    static string Parenthesised(string? note) => note is null ? string.Empty : $" ({note})";
+
+    // A stated rate is shown as stated; otherwise it is derived from the principals, never from a leg that
+    // carries the fee.
+    static ExchangeRate RateOf(TransferView transfer) =>
+        transfer.StatedRate ?? ExchangeRate.Between(SourcePrincipal(transfer), DestinationPrincipal(transfer));
+
+    static Money SourcePrincipal(TransferView transfer) =>
+        transfer is { Fee: { } fee, FeeLeg: TransferLeg.From } ? transfer.From - fee : transfer.From;
+
+    static Money DestinationPrincipal(TransferView transfer) =>
+        transfer is { Fee: { } fee, FeeLeg: TransferLeg.To } ? transfer.To + fee : transfer.To;
+
+    static string FeeCategory(CategorizationSubject record) =>
+        record.Lines.FirstOrDefault(line => line.Role == EntryRole.Fee)?.CategoryName ?? "uncategorised";
+
+    static string DateLine(DateOnly day) => $"Date: {day.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)}";
+
+    static string FormatMoney(Money money) => $"{FormatAmount(money.Amount)} {money.Currency}";
 
     static string FormatLine(RecordedLine line)
     {
