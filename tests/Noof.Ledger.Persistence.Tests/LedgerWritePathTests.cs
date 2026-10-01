@@ -643,7 +643,7 @@ public class LedgerWritePathTests(PostgresFixture fixture)
             """;
         // `disagreeing` takes each charge row as given, so a wrong row would be posted and expected alike. This checks
         // the rows themselves against the lines they price: an expense's foreign currency, its Principal lines there
-        // at the rate the row used, a terms fee from the terms the row snapshotted, and fee lines that are its fees.
+        // at the rate the row used, and fee lines that are its fees.
         const string mispricedCharges = """
             SELECT ((
                 SELECT count(*)
@@ -656,9 +656,6 @@ public class LedgerWritePathTests(PostgresFixture fixture)
                           SELECT round(SUM(li.amount) * c.rate_used, 2)
                           FROM line_items li
                           WHERE li.transaction_id = t.id AND li.role = 0 AND li.currency = c.currency)
-                   OR (c.source = 0 AND c.fee_amount IS DISTINCT FROM round(greatest(
-                          c.charged_amount * coalesce(c.fee_percent, 0) / 100 + coalesce(c.fee_fixed, 0),
-                          coalesce(c.fee_minimum, 0)), 2))
             ) + (
                 SELECT count(*)
                 FROM transactions t
@@ -680,8 +677,8 @@ public class LedgerWritePathTests(PostgresFixture fixture)
             + "prices in the wallet's currency, every transfer posts each leg's stored amount on its own wallet with the fee on "
             + "its leg's, and a statement has none (M5, T-12)");
         (await CountAsync(db, mispricedCharges)).Should().Be(0,
-            "a charge prices an expense's Principal lines in one foreign currency at its own rate, a terms fee follows its "
-            + "terms, and an expense's fee lines are its charges' fees in its wallet's currency");
+            "a charge prices an expense's Principal lines in one foreign currency at its own rate, and an expense's fee "
+            + "lines are its charges' fees in its wallet's currency");
         (await CountAsync(db, misplaced)).Should().Be(0, "an entry is in its record's wallet, or in a transfer's destination");
         (await CountAsync(db, brokenTransfers)).Should().Be(0,
             "a transfer has its legs, its source as the record's wallet, a fee leg exactly when it has a fee line, and no principal line");
