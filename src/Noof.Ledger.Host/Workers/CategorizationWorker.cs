@@ -171,8 +171,9 @@ internal sealed class CategorizationWorker(
             // it influenced would fail to map.
             var offeredMerchantIds = allMerchants.Select(merchant => merchant.Id).ToHashSet();
 
-            var keptProposal = KeepingTheRecordsWallet(job, sub, proposal);
-            var walletsForMapping = WalletsIncludingKept(wallets, proposal, keptProposal, sub);
+            var kept = KeptWallets(job, sub, proposal);
+            var keptProposal = KeepingTheRecordsWallet(proposal, kept);
+            var walletsForMapping = WalletsIncludingKept(wallets, kept);
 
             if (!proposalMapper.TryMap(
                 keptProposal, offeredSlugs, offeredMerchantIds, walletsForMapping,
@@ -389,38 +390,96 @@ internal sealed class CategorizationWorker(
     static DateOnly DefaultDay(CategorizationJob job, CategorizationSubject record) =>
         job.Kind == JobKind.Correct ? record.OccurredOn : record.SentOn;
 
-    // The model is shown a correction's lines, not its wallet, so a correction that names no wallet means "leave it
+    // Which slot of the proposal a kept wallet fills: the record's one wallet, or one leg of a transfer.
+    enum KeptSlot { Wallet, From, To }
+
+    // A wallet the record already sits in, known from the record itself - never offered to the model, so an archived
+    // one is still a fact. Currency is null only when the store could not read it.
+    sealed record KeptWallet(KeptSlot Slot, Guid Id, string Name, CurrencyCode? Currency);
+
+    // The model is shown a correction's lines, not its wallets, so a correction that names no wallet means "leave it
     // where it is", not "the default": otherwise "нет, 300" would quietly move a Raiffeisen purchase into the RSD
     // default and both balances would drift (M1). A re-read starts from scratch and resolves the wallet afresh (M3).
-    // Kept even when that wallet has since been archived (Phase 6 re-review, N-3): archiving a wallet must not
-    // rewrite a historical record's wallet out from under it - only a first categorisation, or a correction that
-    // names a wallet itself, may fall through to the payment/currency default, which does still skip archived
-    // wallets.
-    static CategorizationProposal KeepingTheRecordsWallet(
-        CategorizationJob job, CategorizationSubject record, CategorizationProposal proposal) =>
-        job.Kind == JobKind.Correct && proposal.WalletId is null && record.WalletId is { } current
-            ? proposal with { WalletId = current }
-            : proposal;
+    // Kept even when that wallet has since been archived: archiving a wallet must not rewrite a historical record's
+    // wallet out from under it. A transfer keeps per leg (the transfers spec, "Kind changes and wallets").
+    static IReadOnlyList<KeptWallet> KeptWallets(CategorizationJob job, CategorizationSubject record, CategorizationProposal proposal)
+    {
+        if (job.Kind != JobKind.Correct)
+            return [];
 
-    // ProposalMapper only accepts a WalletId that appears in the wallets it is given, because that
-    // list is also "what the model was offered": an id the model invented must fail terminally. A
-    // kept archived wallet was never offered to the model - it is a fact this worker already knows
-    // from the record, injected by KeepingTheRecordsWallet - so it is added here, not to the active
-    // list the model saw, using the currency the store already read for it
-    // (EfCategorizationStore's WalletCurrency). The gate is
-    // `proposal.WalletId is null`: only when the model itself named no wallet did the worker do the
-    // substituting, so only then is the kept wallet added on the worker's own authority. A model that
-    // names a wallet directly - including one the worker would have kept anyway - must still have
-    // named one that was actually offered, or the job fails.
-    static IReadOnlyList<WalletOption> WalletsIncludingKept(
-        IReadOnlyList<WalletOption> wallets, CategorizationProposal proposal, CategorizationProposal keptProposal,
-        CategorizationSubject record) =>
-        proposal.WalletId is null
-        && keptProposal.WalletId is { } kept
-        && !wallets.Any(wallet => wallet.Id == kept)
-        && record.WalletCurrency is { } currency
-            ? [.. wallets, new WalletOption(kept, record.WalletName, currency, [], IsDefaultForCurrency: false)]
-            : wallets;
+        if (proposal.Transfer is { } transfer)
+        {
+            return [.. new[]
+            {
+                transfer.FromWalletId is null ? KeptLeg(record, TransferLeg.From, transfer.FromCurrency) : null,
+                transfer.ToWalletId is null ? KeptLeg(record, TransferLeg.To, transfer.ToCurrency) : null,
+            }.OfType<KeptWallet>()];
+        }
+
+        return proposal.WalletId is null && KeptSingle(record, proposal.Kind) is { } kept ? [kept] : [];
+    }
+
+    // Expense or BalanceCheck → Transfer: the record's wallet is the source; Income → Transfer: the destination;
+    // Transfer → Transfer: each leg its own. A wallet holds a leg only in its own currency - a leg in another currency
+    // could never sit in it, so that leg resolves as a first reading would.
+    static KeptWallet? KeptLeg(CategorizationSubject record, TransferLeg leg, string legCurrency)
+    {
+        var slot = leg == TransferLeg.From ? KeptSlot.From : KeptSlot.To;
+        KeptWallet? kept = (record, leg) switch
+        {
+            ({ Kind: TransactionKind.Transfer, Transfer: { } transfer }, TransferLeg.From) =>
+                new KeptWallet(slot, transfer.FromWalletId, transfer.FromWalletName, transfer.From.Currency),
+            ({ Kind: TransactionKind.Transfer, Transfer: { } transfer }, TransferLeg.To) =>
+                new KeptWallet(slot, transfer.ToWalletId, transfer.ToWalletName, transfer.To.Currency),
+            ({ Kind: TransactionKind.Income, WalletId: { } receivedInto }, TransferLeg.To) =>
+                new KeptWallet(slot, receivedInto, record.WalletName, record.WalletCurrency),
+            ({ Kind: TransactionKind.Expense or TransactionKind.BalanceCheck, WalletId: { } spentFrom }, TransferLeg.From) =>
+                new KeptWallet(slot, spentFrom, record.WalletName, record.WalletCurrency),
+            _ => null,
+        };
+
+        return kept is { Currency: { } currency } && string.Equals(currency.Value, legCurrency, StringComparison.OrdinalIgnoreCase)
+            ? kept
+            : null;
+    }
+
+    // Transfer → Income keeps the destination leg's wallet; Transfer → Expense (or a balance) the source leg's, which is
+    // also transactions.wallet_id. Every other correction keeps the record's one wallet, whatever its lines' currency.
+    static KeptWallet? KeptSingle(CategorizationSubject record, string proposedKind) => record switch
+    {
+        { Kind: TransactionKind.Transfer, Transfer: { } transfer } when proposedKind == ProposedKind.Income =>
+            new KeptWallet(KeptSlot.Wallet, transfer.ToWalletId, transfer.ToWalletName, transfer.To.Currency),
+        { Kind: TransactionKind.Transfer, Transfer: { } transfer } =>
+            new KeptWallet(KeptSlot.Wallet, transfer.FromWalletId, transfer.FromWalletName, transfer.From.Currency),
+        { WalletId: { } id } => new KeptWallet(KeptSlot.Wallet, id, record.WalletName, record.WalletCurrency),
+        _ => null,
+    };
+
+    static CategorizationProposal KeepingTheRecordsWallet(CategorizationProposal proposal, IReadOnlyList<KeptWallet> kept) =>
+        kept.Aggregate(proposal, (current, wallet) => (wallet.Slot, current.Transfer) switch
+        {
+            (KeptSlot.From, { } transfer) => current with { Transfer = transfer with { FromWalletId = wallet.Id } },
+            (KeptSlot.To, { } transfer) => current with { Transfer = transfer with { ToWalletId = wallet.Id } },
+            (KeptSlot.Wallet, _) => current with { WalletId = wallet.Id },
+            _ => current,
+        });
+
+    // ProposalMapper only accepts a wallet id that appears in the wallets it is given, because that list is also "what
+    // the model was offered": an id the model invented must fail terminally. A kept wallet - archived or not - was put
+    // in the proposal by this worker from the record itself, so it is added here, not to the active list the model saw,
+    // with the currency the store read for it. Only the wallets actually substituted are added: a model that names a
+    // wallet directly - an archived one, even one the worker would have kept anyway - must have named one it was offered.
+    static IReadOnlyList<WalletOption> WalletsIncludingKept(IReadOnlyList<WalletOption> wallets, IReadOnlyList<KeptWallet> kept) =>
+    [
+        .. wallets,
+        .. kept
+            .Where(wallet => !wallets.Any(offered => offered.Id == wallet.Id))
+            .DistinctBy(wallet => wallet.Id)
+            .Select(wallet => wallet.Currency is { } currency
+                ? new WalletOption(wallet.Id, wallet.Name, currency, [], IsDefaultForCurrency: false)
+                : null)
+            .OfType<WalletOption>(),
+    ];
 
     static string BuildSummary(MappedProposal mapped) => mapped switch
     {

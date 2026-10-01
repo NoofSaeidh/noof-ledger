@@ -973,6 +973,128 @@ public class CategorizationWorkerTests
         await run.JobQueue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
     }
 
+    [Theory]
+    [InlineData(TransactionKind.Expense)]
+    [InlineData(TransactionKind.BalanceCheck)]
+    public async Task A_spending_or_balance_corrected_into_a_transfer_keeps_its_wallet_as_the_source(TransactionKind kind)
+    {
+        var record = Subject(status: TransactionStatus.Completed, lines: kind == TransactionKind.BalanceCheck ? [] : [StoredBread],
+            walletId: CashRsd.Id, walletCurrency: CurrencyCode.Rsd) with { Kind = kind };
+
+        var run = await RunAsync(record, TransferAnswer(250m, "RSD", null, "RSD", to: MainWallet.Id),
+            Job(kind: JobKind.Correct, instruction: "это был перевод на главный"));
+
+        (run.Applied?.Transfer?.FromWalletId).Should().Be(CashRsd.Id, "without the keep, the RSD default would be both sides");
+        (run.Applied?.Transfer?.ToWalletId).Should().Be(MainWallet.Id);
+        (run.Applied?.WalletId).Should().Be(CashRsd.Id);
+    }
+
+    [Fact]
+    public async Task An_income_corrected_into_a_transfer_keeps_its_wallet_as_the_destination()
+    {
+        var record = Subject(status: TransactionStatus.Completed, lines: [StoredBread], walletId: CashRsd.Id, walletCurrency: CurrencyCode.Rsd)
+            with { Kind = TransactionKind.Income };
+
+        var run = await RunAsync(record, TransferAnswer(250m, "RSD", null, "RSD", from: MainWallet.Id),
+            Job(kind: JobKind.Correct, instruction: "это не доход, я снял с главного"));
+
+        (run.Applied?.Transfer?.FromWalletId).Should().Be(MainWallet.Id);
+        (run.Applied?.Transfer?.ToWalletId).Should().Be(CashRsd.Id);
+    }
+
+    [Fact]
+    public async Task A_transfer_corrected_into_a_spending_keeps_the_source_legs_wallet()
+    {
+        var record = TransferRecord(CashRsd, new Money(250m, CurrencyCode.Rsd), MainWallet, new Money(250m, CurrencyCode.Rsd));
+
+        var run = await RunAsync(record, OneGroceryLine(250m), Job(kind: JobKind.Correct, instruction: "это был расход на хлеб"));
+
+        (run.Applied?.TransactionKind).Should().Be(TransactionKind.Expense);
+        (run.Applied?.WalletId).Should().Be(CashRsd.Id);
+    }
+
+    [Fact]
+    public async Task A_transfer_corrected_into_an_income_keeps_the_destination_legs_wallet()
+    {
+        var record = TransferRecord(MainWallet, new Money(250m, CurrencyCode.Rsd), CashRsd, new Money(250m, CurrencyCode.Rsd));
+
+        var run = await RunAsync(record, OneGroceryLine(250m) with { Kind = ProposedKind.Income },
+            Job(kind: JobKind.Correct, instruction: "это был доход"));
+
+        (run.Applied?.TransactionKind).Should().Be(TransactionKind.Income);
+        (run.Applied?.WalletId).Should().Be(CashRsd.Id, "the money arrived there, not where transactions.wallet_id pointed");
+    }
+
+    [Fact]
+    public async Task A_transfer_correction_naming_neither_wallet_keeps_both_legs()
+    {
+        var record = TransferRecord(CashEur, new Money(100m, CurrencyCode.Eur), CashRsd, new Money(11700m, CurrencyCode.Rsd));
+
+        var run = await RunAsync(record, TransferAnswer(100m, "EUR", 11650m, "RSD"), Job(kind: JobKind.Correct, instruction: "нет, 11650"));
+
+        (run.Applied?.Transfer).Should().Be(new TransferFacts(
+            CashEur.Id, new Money(100m, CurrencyCode.Eur), CashRsd.Id, new Money(11650m, CurrencyCode.Rsd), null, null, null));
+    }
+
+    [Fact]
+    public async Task A_transfer_correction_naming_one_wallet_moves_only_that_leg()
+    {
+        var record = TransferRecord(CashEur, new Money(100m, CurrencyCode.Eur), CashRsd, new Money(11700m, CurrencyCode.Rsd));
+
+        var run = await RunAsync(record, TransferAnswer(100m, "EUR", 11700m, "RSD", to: MainWallet.Id),
+            Job(kind: JobKind.Correct, instruction: "динары на главный"));
+
+        (run.Applied?.Transfer?.FromWalletId).Should().Be(CashEur.Id);
+        (run.Applied?.Transfer?.ToWalletId).Should().Be(MainWallet.Id);
+    }
+
+    [Fact]
+    public async Task A_kept_wallet_does_not_hold_a_leg_in_another_currency()
+    {
+        var record = Subject(status: TransactionStatus.Completed, lines: [StoredBread], walletId: CashRsd.Id, walletCurrency: CurrencyCode.Rsd);
+
+        var run = await RunAsync(record, TransferAnswer(100m, "EUR", 11700m, "RSD"),
+            Job(kind: JobKind.Correct, instruction: "это был обмен 100 евро на 11700 динар"));
+
+        (run.Applied?.Transfer?.FromWalletId).Should().Be(WiseEur.Id, "the EUR side resolves to the EUR default, not Cash RSD");
+        (run.Applied?.Transfer?.ToWalletId).Should().Be(MainWallet.Id);
+    }
+
+    [Fact]
+    public async Task A_transfer_correction_keeps_a_leg_whose_wallet_has_since_been_archived()
+    {
+        var record = TransferRecord(OldRevolutEur, new Money(100m, CurrencyCode.Eur), CashRsd, new Money(11700m, CurrencyCode.Rsd));
+
+        var run = await RunAsync(record, TransferAnswer(100m, "EUR", 11650m, "RSD"), Job(kind: JobKind.Correct, instruction: "нет, 11650"));
+
+        (run.Applied?.Transfer?.FromWalletId).Should().Be(OldRevolutEur.Id,
+            "archiving a wallet must not rewrite a historical record's leg out from under it");
+        (run.Applied?.Transfer?.ToWalletId).Should().Be(CashRsd.Id);
+    }
+
+    [Fact]
+    public async Task A_transfer_correction_where_the_model_names_the_archived_leg_itself_fails()
+    {
+        var record = TransferRecord(OldRevolutEur, new Money(100m, CurrencyCode.Eur), CashRsd, new Money(11700m, CurrencyCode.Rsd));
+
+        var run = await RunAsync(record, TransferAnswer(100m, "EUR", 11650m, "RSD", from: OldRevolutEur.Id),
+            Job(kind: JobKind.Correct, instruction: "нет, 11650"));
+
+        await run.JobQueue.Received(1).FailAsync(JobId, WorkerId, $"wallet {OldRevolutEur.Id} was not offered", Arg.Any<CancellationToken>());
+        run.Applied.Should().BeNull("only a wallet the worker kept itself is added, never one the model named");
+    }
+
+    [Fact]
+    public async Task A_reinterpreted_transfer_resolves_its_legs_afresh()
+    {
+        var record = TransferRecord(CashEur, new Money(100m, CurrencyCode.Eur), CashRsd, new Money(11700m, CurrencyCode.Rsd));
+
+        var run = await RunAsync(record, TransferAnswer(100m, "EUR", 11700m, "RSD"), Job(kind: JobKind.Reinterpret));
+
+        (run.Applied?.Transfer?.FromWalletId).Should().Be(WiseEur.Id);
+        (run.Applied?.Transfer?.ToWalletId).Should().Be(MainWallet.Id);
+    }
+
     [Fact]
     public async Task Idle_when_the_model_provider_is_not_configured()
     {
