@@ -2,13 +2,18 @@ using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Playwright;
 using Microsoft.Playwright.Xunit.v3;
+using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence;
+using Noof.Ledger.Persistence.Wallets;
 
 namespace Noof.Ledger.E2E.Tests;
 
 public sealed class WalletsTests(CookieModeHostFixture fixture) : PageTest, IClassFixture<CookieModeHostFixture>
 {
+    static readonly string[] OfferedToKzt = ["EUR", "RSD", "RUB", "USD"];
+    static readonly string[] OfferedToKztWithUsdTerms = ["EUR", "RSD", "RUB"];
+
     [Fact]
     public async Task Creating_a_wallet_with_an_opening_balance_lists_it()
     {
@@ -86,6 +91,7 @@ public sealed class WalletsTests(CookieModeHostFixture fixture) : PageTest, ICla
         await Page.ClickAsync($"#make-default-{walletId}");
         await Expect(Page.Locator("#wallets-saved")).ToContainTextAsync("Made default");
         await Expect(row).ToContainTextAsync("Default for RSD");
+        await Expect(Page.Locator($"#terms-{walletId}")).ToBeVisibleAsync();
 
         await Page.ClickAsync($"#archive-{walletId}");
         await Expect(Page.Locator("#wallets-saved")).ToContainTextAsync("Archived");
@@ -94,6 +100,8 @@ public sealed class WalletsTests(CookieModeHostFixture fixture) : PageTest, ICla
         // Setting one is refused server-side (EfWalletAdmin.SetPaymentDefaultAsync) once archived,
         // so the control that would silently no-op through it must not be offered any more either.
         await Expect(Page.Locator($"#wallet-payment-default-{walletId}")).ToHaveCountAsync(0);
+        // Nor foreign-currency terms: an archived wallet is never charged for anything again.
+        await Expect(Page.Locator($"#terms-{walletId}")).ToHaveCountAsync(0);
 
         // This wallet was RSD's only default; archiving it leaves RSD with none, and the page must say
         // so (Task 4 finding 3 pairs the mapper's failure text with this warning).
@@ -215,6 +223,209 @@ public sealed class WalletsTests(CookieModeHostFixture fixture) : PageTest, ICla
         await Expect(Page.Locator("#wallets-error")).ToContainTextAsync("Enter a wallet name.");
         await Expect(Page.Locator("#wallets-saved")).Not.ToBeVisibleAsync();
     }
+
+    [Fact]
+    public async Task Adding_editing_and_removing_foreign_currency_terms()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var name = $"Kaspi KZT {Guid.NewGuid():N}";
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/wallets");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        var walletId = await CreateWalletAsync(name, "KZT");
+
+        var offered = Page.Locator($"#terms-new-currency-{walletId} option");
+        await Expect(offered).ToHaveTextAsync(OfferedToKzt);
+
+        await Page.SelectOptionAsync($"#terms-new-currency-{walletId}", "USD");
+        await Page.FillAsync($"#terms-new-rate-{walletId}", "520");
+        await Page.FillAsync($"#terms-new-fee-percent-{walletId}", "1");
+        await Page.FillAsync($"#terms-new-fee-minimum-{walletId}", "100");
+        await Page.ClickAsync($"#terms-add-{walletId}");
+        await Expect(Page.Locator("#wallets-saved")).ToContainTextAsync("USD terms added.");
+
+        (await TermsOfAsync(walletId)).Should().Equal(new WalletTermsDetails(CurrencyCode.Usd, 520m, 1m, null, 100m));
+        await Expect(Page.Locator($"#terms-row-{walletId}-USD")).ToBeVisibleAsync();
+        // The values live in <input value>, which text locators never see. A rate stored as 520.000000000000 must
+        // read back as the operator typed it.
+        await Expect(Page.Locator($"#terms-rate-{walletId}-USD")).ToHaveValueAsync("520");
+        await Expect(Page.Locator($"#terms-fee-percent-{walletId}-USD")).ToHaveValueAsync("1");
+        await Expect(Page.Locator($"#terms-fee-fixed-{walletId}-USD")).ToHaveValueAsync("");
+        await Expect(Page.Locator($"#terms-fee-minimum-{walletId}-USD")).ToHaveValueAsync("100.00");
+        await Expect(offered).ToHaveTextAsync(OfferedToKztWithUsdTerms);
+
+        await Page.FillAsync($"#terms-rate-{walletId}-USD", "515.5");
+        await Page.FillAsync($"#terms-fee-fixed-{walletId}-USD", "50");
+        await Page.ClickAsync($"#terms-save-{walletId}-USD");
+        await Expect(Page.Locator("#wallets-saved")).ToContainTextAsync("USD terms saved.");
+
+        (await TermsOfAsync(walletId)).Should().Equal(new WalletTermsDetails(CurrencyCode.Usd, 515.5m, 1m, 50m, 100m));
+
+        await Page.ClickAsync($"#terms-remove-{walletId}-USD");
+        await Expect(Page.Locator("#wallets-saved")).ToContainTextAsync("USD terms removed.");
+
+        (await TermsOfAsync(walletId)).Should().BeEmpty();
+        await Expect(Page.Locator($"#terms-row-{walletId}-USD")).ToHaveCountAsync(0);
+        await Expect(offered).ToHaveTextAsync(OfferedToKzt);
+    }
+
+    [Fact]
+    public async Task Terms_typed_with_a_decimal_point_keep_their_fractions()
+    {
+        // Review focus 4: the operator's Windows is ru-RU or sr-Latn-RS, where a field parsing with the server's
+        // culture refuses "117.35" (comma is the decimal separator there) or reads it as 11735. This only bites on a
+        // comma-decimal host, and the E2E suite is not run by CI.
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var name = $"Raiffeisen RSD {Guid.NewGuid():N}";
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/wallets");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        var walletId = await CreateWalletAsync(name, "RSD");
+
+        await Page.SelectOptionAsync($"#terms-new-currency-{walletId}", "EUR");
+        await Page.FillAsync($"#terms-new-rate-{walletId}", "117.35");
+        await Page.FillAsync($"#terms-new-fee-percent-{walletId}", "1.5");
+        await Page.ClickAsync($"#terms-add-{walletId}");
+        await Expect(Page.Locator("#wallets-saved")).ToContainTextAsync("EUR terms added.");
+
+        (await TermsOfAsync(walletId)).Should().Equal(
+            [new WalletTermsDetails(CurrencyCode.Eur, 117.35m, 1.5m, null, null)],
+            "the terms fields are culture-pinned to invariant, so a decimal point parses the same on any server");
+        await Expect(Page.Locator($"#terms-rate-{walletId}-EUR")).ToHaveValueAsync("117.35");
+        await Expect(Page.Locator($"#terms-fee-percent-{walletId}-EUR")).ToHaveValueAsync("1.5");
+    }
+
+    [Fact]
+    public async Task Terms_without_a_rate_are_refused_inline()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var name = $"Wise EUR {Guid.NewGuid():N}";
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/wallets");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        var walletId = await CreateWalletAsync(name, "EUR");
+
+        await Page.SelectOptionAsync($"#terms-new-currency-{walletId}", "RSD");
+        await Page.FillAsync($"#terms-new-fee-percent-{walletId}", "1");
+        await Page.ClickAsync($"#terms-add-{walletId}");
+
+        await Expect(Page.Locator("#wallets-error")).ToContainTextAsync("Enter a rate above zero for RSD.");
+        await Expect(Page.Locator("#wallets-saved")).Not.ToBeVisibleAsync();
+        (await TermsOfAsync(walletId)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Terms_typed_with_a_decimal_comma_keep_their_fractions_and_an_unreadable_figure_is_refused()
+    {
+        // Amendment 27: the operator types a decimal comma, and MudBlazor's own converter reads "117,35" as 11735 under
+        // the invariant culture and an unreadable "1.234,5" as no fee at all. This bites on any host - but the E2E
+        // suite is not run by CI; DecimalFieldConverterTests is the guard CI runs.
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var name = $"Raiffeisen RSD {Guid.NewGuid():N}";
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/wallets");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        var walletId = await CreateWalletAsync(name, "RSD");
+
+        await Page.SelectOptionAsync($"#terms-new-currency-{walletId}", "EUR");
+        await Page.FillAsync($"#terms-new-rate-{walletId}", "117,35");
+        await Page.FillAsync($"#terms-new-fee-percent-{walletId}", "1.234,5");
+        await Page.ClickAsync($"#terms-add-{walletId}");
+
+        await Expect(Page.Locator("#wallets-error")).ToContainTextAsync("The EUR terms have a field that is not a number.");
+        (await TermsOfAsync(walletId)).Should().BeEmpty("an unreadable fee must never be saved as no fee");
+
+        // Once the refused field loses focus, MudBlazor empties it but keeps its error: the operator sees an empty fee
+        // marked in red, and the alert says how to get out of it.
+        await Expect(Page.Locator($"#terms-new-fee-percent-{walletId}")).ToHaveValueAsync("");
+        await Expect(FieldError($"terms-new-fee-percent-{walletId}")).ToContainTextAsync("Not a number");
+        await Expect(Page.Locator("#wallets-error")).ToContainTextAsync("Type the figure again in the field marked in red.");
+
+        // Clicked again, the empty-looking fee still refuses the row. Had this Add stored the fee as none, EUR would be
+        // a saved row by now and the Add below could not report EUR terms added.
+        await Page.ClickAsync($"#terms-add-{walletId}");
+        await Expect(Page.Locator("#wallets-error")).ToContainTextAsync("The EUR terms have a field that is not a number.");
+
+        await Page.FillAsync($"#terms-new-fee-percent-{walletId}", "1,5");
+        await Page.ClickAsync($"#terms-add-{walletId}");
+        await Expect(Page.Locator("#wallets-saved")).ToContainTextAsync("EUR terms added.");
+
+        (await TermsOfAsync(walletId)).Should().Equal(
+            [new WalletTermsDetails(CurrencyCode.Eur, 117.35m, 1.5m, null, null)],
+            "a comma is read as the decimal separator, never as a thousands separator");
+        await Expect(Page.Locator($"#terms-rate-{walletId}-EUR")).ToHaveValueAsync("117.35");
+        await Expect(Page.Locator($"#terms-fee-percent-{walletId}-EUR")).ToHaveValueAsync("1.5");
+    }
+
+    [Fact]
+    public async Task A_refused_terms_figure_loses_its_error_when_the_page_reloads()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var name = $"Kaspi KZT {Guid.NewGuid():N}";
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/wallets");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        var walletId = await CreateWalletAsync(name, "KZT");
+
+        await Page.SelectOptionAsync($"#terms-new-currency-{walletId}", "USD");
+        await Page.FillAsync($"#terms-new-rate-{walletId}", "520");
+        await Page.FillAsync($"#terms-new-fee-percent-{walletId}", "1");
+        await Page.ClickAsync($"#terms-add-{walletId}");
+        await Expect(Page.Locator("#wallets-saved")).ToContainTextAsync("USD terms added.");
+
+        await Page.FillAsync($"#terms-fee-percent-{walletId}-USD", "1.234,5");
+        await Page.ClickAsync($"#terms-save-{walletId}-USD");
+        await Expect(Page.Locator("#wallets-error")).ToContainTextAsync("The USD terms have a field that is not a number.");
+        await Expect(FieldError($"terms-fee-percent-{walletId}-USD")).ToContainTextAsync("Not a number");
+
+        // Any other action reloads the rows with fresh converters; the field's error must go with the one that raised
+        // it, not stay red under the stored figure the field shows again.
+        await Page.ClickAsync($"#save-aliases-{walletId}");
+        await Expect(Page.Locator("#wallets-saved")).ToContainTextAsync("Aliases saved.");
+        await Expect(Page.Locator($"#terms-fee-percent-{walletId}-USD")).ToHaveValueAsync("1");
+        await Expect(FieldError($"terms-fee-percent-{walletId}-USD")).ToHaveCountAsync(0);
+
+        (await TermsOfAsync(walletId)).Should().Equal(new WalletTermsDetails(CurrencyCode.Usd, 520m, 1m, null, null));
+    }
+
+    async Task<Guid> CreateWalletAsync(string name, string currency)
+    {
+        await Page.FillAsync("#new-wallet-name", name);
+        await Page.SelectOptionAsync("#new-wallet-currency", currency);
+        await Page.FillAsync("#new-wallet-opening", "0");
+        await Page.FillAsync("#new-wallet-date", "2026-09-01");
+        await Page.ClickAsync("#create-wallet");
+        await Expect(Page.Locator("#wallets-saved")).ToContainTextAsync($"Created {name}.");
+        return await WaitForWalletIdAsync(name, TestContext.Current.CancellationToken);
+    }
+
+    // Each terms confirmation names its own action and currency, so once it shows, that action has committed - unlike
+    // the repeated "Payment default saved." that WaitForPaymentDefaultAsync has to poll around.
+    async Task<IReadOnlyList<WalletTermsDetails>> TermsOfAsync(Guid walletId)
+    {
+        await using var db = OpenDb();
+        return await new EfWalletFxTerms(db).ListAsync(walletId, TestContext.Current.CancellationToken);
+    }
+
+    // MudBlazor writes a field's conversion error under it, outside the <input> the id names.
+    ILocator FieldError(string inputId) =>
+        Page.Locator(".noof-field", new() { Has = Page.Locator($"#{inputId}") })
+            .Locator(".mud-input-helper-text.mud-input-error");
 
     LedgerDbContext OpenDb() =>
         new(new DbContextOptionsBuilder<LedgerDbContext>().UseNpgsql(fixture.ConnectionString).Options);

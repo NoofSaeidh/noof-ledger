@@ -280,6 +280,12 @@ summary:focus-visible,
     grid-column: 1 / -1;
 }
 
+/* A terms row holds five narrow fields and its buttons; the new-wallet grid's 14rem columns would give each its own line. */
+.noof-form-grid.noof-terms-grid {
+    grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+    margin-bottom: 0.75rem;
+}
+
 /* ---- Native form controls ----
    The sign-in form and the filter bars use native <input>/<select>: the sign-in POST must not depend
    on a component emitting a name attribute, a filter must re-query on every keystroke, and a
