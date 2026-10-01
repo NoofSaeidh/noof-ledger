@@ -11,10 +11,18 @@ internal sealed class EfSpendingReadModel(LedgerDbContext db, TimeProvider timeP
 {
     internal const string UncategorisedLabel = "Uncategorised";
 
-    public async Task<IReadOnlyList<RecentTransaction>> RecentAsync(int limit, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<RecentTransaction>> RecentAsync(int limit, RecentView view, CancellationToken cancellationToken)
     {
+        var transactions = view switch
+        {
+            RecentView.SpendingAndIncome => db.Transactions.Where(t => t.Kind != TransactionKind.Transfer),
+            RecentView.Transfers => db.Transactions.Where(t => t.Kind == TransactionKind.Transfer),
+            RecentView.All => db.Transactions.AsQueryable(),
+            _ => throw new ArgumentOutOfRangeException(nameof(view), view, "Unknown recent view."),
+        };
+
         var headers = await (
-                from t in db.Transactions
+                from t in transactions
                 where t.Status != TransactionStatus.Cancelled
                 join w in db.Wallets on t.WalletId equals (Guid?)w.Id into walletJoin
                 from w in walletJoin.DefaultIfEmpty()
@@ -26,6 +34,7 @@ internal sealed class EfSpendingReadModel(LedgerDbContext db, TimeProvider timeP
                     t.TimeZoneId,
                     RawText = t.RawText ?? string.Empty,
                     t.Status,
+                    t.Kind,
                     WalletName = w == null ? string.Empty : w.Name,
                 })
             .OrderByDescending(h => h.OccurredOn)
@@ -55,10 +64,14 @@ internal sealed class EfSpendingReadModel(LedgerDbContext db, TimeProvider timeP
                 li.Amount,
                 CategoryName = c == null ? null : c.NameEn,
                 MerchantName = m == null ? null : m.DisplayName,
+                li.Role,
             })
             .ToListAsync(cancellationToken);
 
         var lineItemsByTransaction = lineItemRows.ToLookup(r => r.TransactionId);
+
+        var transfers = await TransferLines.ForAsync(
+            db, [.. headers.Where(h => h.Kind == TransactionKind.Transfer).Select(h => h.Id)], cancellationToken);
 
         return
         [
@@ -71,7 +84,9 @@ internal sealed class EfSpendingReadModel(LedgerDbContext db, TimeProvider timeP
                 h.WalletName,
                 [.. lineItemsByTransaction[h.Id]
                     .OrderBy(li => li.Ordinal)
-                    .Select(li => new RecentLineItem(li.Description, li.Amount, li.CategoryName, li.MerchantName))])),
+                    .Select(li => new RecentLineItem(li.Description, li.Amount, li.CategoryName, li.MerchantName, li.Role))],
+                h.Kind,
+                transfers.GetValueOrDefault(h.Id))),
         ];
     }
 

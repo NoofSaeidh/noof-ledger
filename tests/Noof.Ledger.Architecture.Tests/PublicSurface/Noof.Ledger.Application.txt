@@ -122,6 +122,7 @@ ReceiptView
 ReceiptVisionResult
 RecentLineItem
 RecentTransaction
+RecentView
 RecordAction
 RecordedLine
 ResolvedLineItem
@@ -145,6 +146,7 @@ TransactionStages
 TransactionSummary
 TransactionTrace
 TransferFacts
+TransferLine
 TransferView
 UnsupportedChangeKind
 WalletBalance

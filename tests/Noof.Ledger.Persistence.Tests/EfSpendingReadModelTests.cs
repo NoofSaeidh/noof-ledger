@@ -11,10 +11,10 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
 {
     static int nextTelegramMessageId;
 
-    static Wallet NewWallet(CurrencyCode currency) => new()
+    static Wallet NewWallet(CurrencyCode currency, string name = "Cash") => new()
     {
         Id = Guid.NewGuid(),
-        Name = "Cash",
+        Name = name,
         Currency = currency,
     };
 
@@ -63,6 +63,42 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
         Ordinal = ordinal,
     };
 
+    static readonly Guid FeesAndChargesId = new("00000000-0000-0000-0001-000000000013");
+
+    static Transaction NewTransferRecord(Guid walletId, DateTimeOffset occurredAt, TransactionStatus status = TransactionStatus.Completed)
+    {
+        var transaction = NewTransaction(walletId, occurredAt, "Europe/Belgrade", status);
+        transaction.Kind = TransactionKind.Transfer;
+        return transaction;
+    }
+
+    static Transfer NewTransfer(
+        Guid transactionId, Wallet from, decimal fromAmount, Wallet to, decimal toAmount,
+        TransferLeg? feeLeg = null, decimal? statedRate = null, CurrencyCode? statedRateBase = null) => new()
+    {
+        TransactionId = transactionId,
+        FromWalletId = from.Id,
+        From = new Money(fromAmount, from.Currency),
+        ToWalletId = to.Id,
+        To = new Money(toAmount, to.Currency),
+        FeeLeg = feeLeg,
+        StatedRate = statedRate,
+        StatedRateBase = statedRateBase,
+    };
+
+    static LineItem NewFeeLine(Guid transactionId, Money amount, int ordinal = 1) => new()
+    {
+        Id = Guid.NewGuid(),
+        TransactionId = transactionId,
+        Description = "Fee",
+        Amount = amount,
+        CategoryId = FeesAndChargesId,
+        CategorizedBy = CategorizationAuthority.Rule,
+        MerchantId = null,
+        Ordinal = ordinal,
+        Role = EntryRole.Fee,
+    };
+
     [Fact]
     public async Task RecentAsync_returns_transactions_newest_first_including_ones_awaiting_categorisation_and_ones_that_failed()
     {
@@ -82,7 +118,7 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
 
         var readModel = new EfSpendingReadModel(db, new FakeTimeProvider(now), TimeZoneInfo.Utc);
 
-        var recent = await readModel.RecentAsync(10, TestContext.Current.CancellationToken);
+        var recent = await readModel.RecentAsync(10, RecentView.All, TestContext.Current.CancellationToken);
 
         recent.Select(r => r.Id).Should().ContainInOrder(newest.Id, middle.Id, oldest.Id);
         recent.Single(r => r.Id == oldest.Id).Status.Should().Be(TransactionStatus.Failed);
@@ -120,7 +156,7 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
 
         var readModel = new EfSpendingReadModel(db, new FakeTimeProvider(now), TimeZoneInfo.Utc);
 
-        var recent = await readModel.RecentAsync(10, TestContext.Current.CancellationToken);
+        var recent = await readModel.RecentAsync(10, RecentView.All, TestContext.Current.CancellationToken);
 
         recent.Single().Items.Should().BeEquivalentTo(
         [
@@ -150,7 +186,7 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
 
         var readModel = new EfSpendingReadModel(db, new FakeTimeProvider(now), TimeZoneInfo.Utc);
 
-        var recent = await readModel.RecentAsync(2, TestContext.Current.CancellationToken);
+        var recent = await readModel.RecentAsync(2, RecentView.All, TestContext.Current.CancellationToken);
 
         recent.Select(r => r.Id).Should().Equal(
             [transactions[4].Id, transactions[3].Id],
@@ -212,7 +248,7 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
 
         var readModel = new EfSpendingReadModel(db, new FakeTimeProvider(now), TimeZoneInfo.Utc);
 
-        (await readModel.RecentAsync(10, TestContext.Current.CancellationToken)).Select(r => r.Id).Should().Equal(kept.Id);
+        (await readModel.RecentAsync(10, RecentView.All, TestContext.Current.CancellationToken)).Select(r => r.Id).Should().Equal(kept.Id);
         (await readModel.ThisMonthAsync(TestContext.Current.CancellationToken)).Totals.Should().ContainSingle()
             .Which.Amount.Should().Be(5m);
     }
@@ -235,7 +271,7 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
 
         var readModel = new EfSpendingReadModel(db, new FakeTimeProvider(sentAt), TimeZoneInfo.Utc);
 
-        var recent = await readModel.RecentAsync(10, TestContext.Current.CancellationToken);
+        var recent = await readModel.RecentAsync(10, RecentView.All, TestContext.Current.CancellationToken);
 
         recent.Select(r => r.Id).Should().Equal(sameDay.Id, backdated.Id);
         recent[0].LocalTime.Should().Be(new TimeOnly(12, 15));
@@ -338,7 +374,7 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
 
         var readModel = new EfSpendingReadModel(db, new FakeTimeProvider(now), TimeZoneInfo.Utc);
 
-        var recent = await readModel.RecentAsync(10, TestContext.Current.CancellationToken);
+        var recent = await readModel.RecentAsync(10, RecentView.All, TestContext.Current.CancellationToken);
 
         recent.Should().ContainSingle(r => r.Id == captured.Id, "a message awaiting its reading has no wallet yet and must still show")
             .Which.WalletName.Should().BeEmpty();
@@ -375,5 +411,110 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
         summary.Totals.Should().ContainSingle().Which.Should().Be(
             new MonthTotal("Groceries", CurrencyCode.Rsd, 250m),
             "a salary is not spending, and neither is a statement of what the wallet holds");
+    }
+
+    [Fact]
+    public async Task RecentAsync_marks_each_row_with_its_kind_and_gives_a_transfer_its_line()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var raiffeisen = NewWallet(CurrencyCode.Rsd, "Raiffeisen RSD");
+        var cash = NewWallet(CurrencyCode.Rsd, "Cash RSD");
+        db.Wallets.AddRange(raiffeisen, cash);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var now = new DateTimeOffset(2026, 9, 15, 12, 0, 0, TimeSpan.Zero);
+        var expense = NewTransaction(raiffeisen.Id, now.AddMinutes(-2), "Europe/Belgrade", TransactionStatus.Completed);
+        var salary = NewTransaction(raiffeisen.Id, now.AddMinutes(-1), "Europe/Belgrade", TransactionStatus.Completed);
+        salary.Kind = TransactionKind.Income;
+        var withdrawal = NewTransferRecord(raiffeisen.Id, now);
+        db.Transactions.AddRange(expense, salary, withdrawal);
+        db.Transfers.Add(NewTransfer(withdrawal.Id, raiffeisen, 10150m, cash, 10000m, TransferLeg.From));
+        db.LineItems.Add(NewFeeLine(withdrawal.Id, new Money(150m, CurrencyCode.Rsd)));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var readModel = new EfSpendingReadModel(db, new FakeTimeProvider(now), TimeZoneInfo.Utc);
+
+        var recent = await readModel.RecentAsync(10, RecentView.All, TestContext.Current.CancellationToken);
+
+        recent.Single(r => r.Id == expense.Id).Kind.Should().Be(TransactionKind.Expense);
+        recent.Single(r => r.Id == expense.Id).Transfer.Should().BeNull();
+        recent.Single(r => r.Id == salary.Id).Kind.Should().Be(TransactionKind.Income);
+        var row = recent.Single(r => r.Id == withdrawal.Id);
+        row.Kind.Should().Be(TransactionKind.Transfer);
+        row.Transfer.Should().Be(new TransferLine(
+            "Raiffeisen RSD", new Money(10150m, CurrencyCode.Rsd), "Cash RSD", new Money(10000m, CurrencyCode.Rsd),
+            new Money(150m, CurrencyCode.Rsd), TransferLeg.From, null),
+            "what each wallet moved, the fee on the leg that paid it, and no rate between two dinar wallets");
+        row.Items.Should().ContainSingle().Which.Should().Be(
+            new RecentLineItem("Fee", new Money(150m, CurrencyCode.Rsd), "Fees & Charges", null, EntryRole.Fee),
+            "a fee line is marked as a fee, so the page never shows it as a purchase");
+    }
+
+    [Fact]
+    public async Task RecentAsync_views_split_transfers_from_spending_and_income()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var wise = NewWallet(CurrencyCode.Eur, "Wise EUR");
+        var cash = NewWallet(CurrencyCode.Eur, "Cash EUR");
+        db.Wallets.AddRange(wise, cash);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var now = new DateTimeOffset(2026, 9, 15, 12, 0, 0, TimeSpan.Zero);
+        var expense = NewTransaction(wise.Id, now.AddMinutes(-4), "Europe/Belgrade", TransactionStatus.Completed);
+        var salary = NewTransaction(wise.Id, now.AddMinutes(-3), "Europe/Belgrade", TransactionStatus.Completed);
+        salary.Kind = TransactionKind.Income;
+        var statement = NewTransaction(wise.Id, now.AddMinutes(-2), "Europe/Belgrade", TransactionStatus.Completed);
+        statement.Kind = TransactionKind.BalanceCheck;
+        var awaiting = NewTransaction(null, now.AddMinutes(-1), "Europe/Belgrade", TransactionStatus.Captured);
+        var withdrawal = NewTransferRecord(wise.Id, now);
+        db.Transactions.AddRange(expense, salary, statement, awaiting, withdrawal);
+        db.Transfers.Add(NewTransfer(withdrawal.Id, wise, 200m, cash, 200m));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var readModel = new EfSpendingReadModel(db, new FakeTimeProvider(now), TimeZoneInfo.Utc);
+
+        var spendingAndIncome = await readModel.RecentAsync(10, RecentView.SpendingAndIncome, TestContext.Current.CancellationToken);
+        var transfers = await readModel.RecentAsync(10, RecentView.Transfers, TestContext.Current.CancellationToken);
+        var all = await readModel.RecentAsync(10, RecentView.All, TestContext.Current.CancellationToken);
+
+        spendingAndIncome.Select(r => r.Id).Should().Equal(
+            [awaiting.Id, statement.Id, salary.Id, expense.Id],
+            "a transfer is seen on its own (T-9); everything else, a record not yet read included, is the default lens");
+        transfers.Select(r => r.Id).Should().Equal(withdrawal.Id);
+        all.Select(r => r.Id).Should().Equal(withdrawal.Id, awaiting.Id, statement.Id, salary.Id, expense.Id);
+    }
+
+    [Fact]
+    public async Task A_transfer_line_derives_its_rate_from_the_principals_unless_one_was_stated()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var wise = NewWallet(CurrencyCode.Eur, "Wise EUR");
+        var raiffeisen = NewWallet(CurrencyCode.Rsd, "Raiffeisen RSD");
+        db.Wallets.AddRange(wise, raiffeisen);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var now = new DateTimeOffset(2026, 9, 15, 12, 0, 0, TimeSpan.Zero);
+        var withFee = NewTransferRecord(wise.Id, now.AddMinutes(-1));
+        var stated = NewTransferRecord(wise.Id, now);
+        db.Transactions.AddRange(withFee, stated);
+        db.Transfers.AddRange(
+            NewTransfer(withFee.Id, wise, 101m, raiffeisen, 11700m, TransferLeg.From),
+            NewTransfer(stated.Id, wise, 50m, raiffeisen, 5867.50m, statedRate: 117.35m, statedRateBase: CurrencyCode.Eur));
+        db.LineItems.Add(NewFeeLine(withFee.Id, new Money(1m, CurrencyCode.Eur)));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var readModel = new EfSpendingReadModel(db, new FakeTimeProvider(now), TimeZoneInfo.Utc);
+
+        var recent = await readModel.RecentAsync(10, RecentView.Transfers, TestContext.Current.CancellationToken);
+
+        recent.Single(r => r.Id == withFee.Id).Transfer!.Rate.Should().Be(
+            new ExchangeRate(CurrencyCode.Eur, 117m, CurrencyCode.Rsd),
+            "101 EUR left the wallet but 1 EUR of it was the fee: 100 EUR bought 11 700 RSD, not 101");
+        recent.Single(r => r.Id == stated.Id).Transfer!.Rate.Should().Be(
+            new ExchangeRate(CurrencyCode.Eur, 117.35m, CurrencyCode.Rsd),
+            "a stated rate is shown as stated, never re-derived from rounded amounts");
     }
 }
