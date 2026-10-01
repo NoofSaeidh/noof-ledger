@@ -41,27 +41,40 @@ the plugin's stop-time review gate: it would review on every Stop and burn the q
 - Codex refuses on its usage limit → don't wait for the window; fall back to an opus review and say
   so in the PR description.
 
-## Per phase — Fable 5.1, twice
+## Per phase — Fable 5.1, three times
 
 Agent tool with `model: "fable"`. Never per PR, never per fix round or Copilot round — a Fable review
 per fix round cost ~5 hours on PR #3.
 
-- **At planning**, once, after the phase's spec and plan are written and before implementation
-  starts. It reviews the decision, not code: alternatives considered, risks and failure modes,
-  conflicts with *(settled)* rules and `docs/decisions/`, and whether the PR cut is right. Its
-  findings are triaged like any review.
+- **The spec**, once it is approved and before the plan is written. It reviews the decision, not
+  code: alternatives considered, risks and failure modes, conflicts with *(settled)* rules and
+  `docs/decisions/`, and whether the PR cut is right. Findings are triaged like any review; accepted
+  ones amend the spec.
+- **The implementation plan** *(operator, 2026-10-01)*, once it is written and before any
+  implementation starts. It reviews the plan as something an engineer will execute task by task:
+  money correctness against the code as it is, consistency across the plan's files and PRs (names,
+  signatures, strings, dependencies, two PRs of one wave editing the same code), *(settled)* rules,
+  tests that could not go red, and the failure modes a real user would hit that no task tests. It
+  does not re-review the spec's decisions. Accepted findings are folded into the plan by the agents
+  that wrote it, and into the spec as amendments where they change a decision. Phase 7's plan review
+  found a fee charged twice, terms stored ×100 and three races that un-booked records — none of them
+  visible in the spec.
 - **At the end**, closing the phase or a batch of PRs.
 
 ### The Codex/Fable trial — 3 phases *(operator, 2026-09-28)*
 
-Both Fable reviews run in parallel with a Codex adversarial review of the same scope:
+All three Fable reviews run in parallel with a Codex adversarial review of the same scope:
 
 - **Closing:** the companion script above with `--base <base>`.
-- **Planning:**
+- **Spec and plan:** one prompt, given verbatim to both reviewers, naming the files — the spec, and
+  for the plan review every plan file even under the ignored `.superpowers/` — and the focus above:
 
   ```
-  codex exec -s read-only "<prompt naming the spec and plan paths, even under the ignored .superpowers/, asking for an adversarial review of the decision>"
+  codex exec -s read-only "<that prompt>"
   ```
+
+  Run it in the background with a long timeout; a plan review reads tens of thousands of lines and
+  takes a while. Its findings are the text after the last `tokens used` line of the output.
 
 An opus pass merges both lists — deduped, each finding tagged *both* / *Fable only* / *Codex only* —
 then triages them. Each review adds one tally line to [the tally below](#trial-tally) (confirmed
