@@ -526,4 +526,86 @@ public class RecordEchoTests
             CultureInfo.CurrentCulture = saved;
         }
     }
+
+    const string Crossed = "is now";
+
+    [Fact]
+    public void An_exchange_that_takes_the_source_below_zero_asks_what_is_missing()
+    {
+        var transfer = Legs("Cash EUR", Eur(1100m), Eur(-1000m), "Cash RSD", Rsd(128700m), Rsd(140400m),
+            fromBalanceWithoutThis: 100m);
+
+        Echo.Compose(TransferRecord(transfer)).Text.Should().Be(
+            "Exchange — 1100.00 EUR (Cash EUR) → 128700.00 RSD (Cash RSD) · 1 EUR = 117.0000 RSD\n"
+            + "Cash EUR · balance -1000.00 EUR\n"
+            + "Cash RSD · balance 140400.00 RSD\n"
+            + "Cash EUR is now -1000.00 EUR — a missing exchange or income?");
+    }
+
+    [Fact]
+    public void A_source_at_exactly_zero_without_the_transfer_has_crossed()
+    {
+        var transfer = Legs("Raiffeisen RSD", Rsd(5000m), Rsd(-5000m), "Cash RSD", Rsd(5000m), Rsd(5000m),
+            fromBalanceWithoutThis: 0m);
+
+        Echo.Compose(TransferRecord(transfer)).Text.Should().EndWith(
+            "\nRaiffeisen RSD is now -5000.00 RSD — a missing exchange or income?");
+    }
+
+    [Fact]
+    public void A_source_that_was_already_negative_stays_quiet()
+    {
+        var transfer = Legs("Visa RSD", Rsd(5000m), Rsd(-25000m), "Cash RSD", Rsd(5000m), Rsd(5000m),
+            fromBalanceWithoutThis: -20000m);
+
+        Echo.Compose(TransferRecord(transfer)).Text.Should().NotContain(Crossed);
+    }
+
+    // Backdated before a checkpoint on the source: the checkpoint absorbs it, so the transfer moved nothing on
+    // that wallet, and its balance was below zero with or without it.
+    [Fact]
+    public void A_backdated_transfer_absorbed_by_a_later_checkpoint_stays_quiet()
+    {
+        var transfer = Legs("Cash EUR", Eur(100m), Eur(-50m), "Cash RSD", Rsd(11700m), Rsd(23700m),
+            fromBalanceWithoutThis: -50m);
+
+        Echo.Compose(TransferRecord(transfer)).Text.Should().NotContain(Crossed);
+    }
+
+    [Fact]
+    public void A_source_left_at_exactly_zero_has_not_crossed()
+    {
+        var transfer = Legs("Raiffeisen RSD", Rsd(5000m), Rsd(0m), "Cash RSD", Rsd(5000m), Rsd(5000m),
+            fromBalanceWithoutThis: 5000m);
+
+        Echo.Compose(TransferRecord(transfer)).Text.Should().NotContain(Crossed);
+    }
+
+    [Fact]
+    public void A_source_with_no_balance_without_this_transfer_stays_quiet()
+    {
+        var transfer = Legs("Cash EUR", Eur(1100m), Eur(-1000m), "Cash RSD", Rsd(128700m), Rsd(140400m));
+
+        Echo.Compose(TransferRecord(transfer)).Text.Should().NotContain(Crossed);
+    }
+
+    [Fact]
+    public void Only_the_balance_in_the_transfers_own_currency_counts()
+    {
+        // The RSD entry first on purpose: without the currency filter the first entry is what would be read.
+        var transfer = ExchangeOf100Eur with { FromBalances = [Rsd(-50m), Eur(20m)], FromBalanceWithoutThis = 120m };
+
+        Echo.Compose(TransferRecord(transfer)).Text.Should().NotContain(Crossed);
+    }
+
+    [Fact]
+    public void Cancel_and_restore_turn_the_crossing_line_off_and_on_again()
+    {
+        var transfer = Legs("Cash EUR", Eur(100m), Eur(-50m), "Cash RSD", Rsd(11700m), Rsd(23700m),
+            fromBalanceWithoutThis: 50m);
+
+        Echo.Compose(TransferRecord(transfer, TransactionStatus.Cancelled)).Text.Should().NotContain(Crossed);
+        Echo.Compose(TransferRecord(transfer, TransactionStatus.Completed)).Text
+            .Should().EndWith("\nCash EUR is now -50.00 EUR — a missing exchange or income?");
+    }
 }

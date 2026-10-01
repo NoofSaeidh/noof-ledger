@@ -392,7 +392,26 @@ internal sealed class RecordEcho : IRecordEcho
         lines.Add($"{transfer.FromWalletName} · balance {Balances(transfer.FromBalances, transfer.From.Currency)}");
         lines.Add($"{transfer.ToWalletName} · balance {Balances(transfer.ToBalances, transfer.To.Currency)}");
 
+        if (!cancelled && SourceCrossedZero(transfer) is { } now)
+            lines.Add($"{transfer.FromWalletName} is now {FormatMoney(now)} — a missing exchange or income?");
+
         return string.Join('\n', lines);
+    }
+
+    // Only a crossing this transfer caused: a wallet that was already below zero (a credit card) stays quiet, and
+    // so does a backdated transfer a later checkpoint absorbed - the balance without it comes from
+    // GetSubjectAsync, by the wallet_balances rule, never "now plus the amount".
+    static Money? SourceCrossedZero(TransferView transfer)
+    {
+        if (transfer.FromBalanceWithoutThis is not >= 0m)
+            return null;
+
+        var now = transfer.FromBalances
+            .Where(balance => balance.Currency == transfer.From.Currency)
+            .Select(balance => (Money?)balance)
+            .FirstOrDefault();
+
+        return now is { Amount: < 0m } ? now : null;
     }
 
     static string TransferHeader(TransferView transfer, bool cancelled)
