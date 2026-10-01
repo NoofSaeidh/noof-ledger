@@ -51,6 +51,12 @@ public static class AnthropicResponses
          "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":200,"output_tokens":40}}
         """;
 
+    public const string ReadExchangeJsonAnswer = """
+        {"id":"msg_10","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
+         "content":[{"type":"tool_use","id":"toolu_10","name":"read_receipt","input":{"readable":true,"unreadable_reason":null,"seller_name":"Menjačnica Dukat","seller_tax_id":"101234567","fiscal_number":null,"issued_at":"2026-09-28T11:42:00","currency":null,"total":null,"payment_method":null,"kind":"exchange","lines":[],"exchange":{"given_amount":150.00,"given_currency":"EUR","received_amount":17568.51,"received_currency":"RSD","rate":117.1234,"commission":null,"slip_number":"0004711/2026"}}}],
+         "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":200,"output_tokens":60}}
+        """;
+
     public const string CategorizeReceiptJsonAnswer = """
         {"id":"msg_09","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
          "content":[{"type":"tool_use","id":"toolu_09","name":"categorize_receipt","input":{"lines":[{"ordinal":1,"category_slug":"groceries"},{"ordinal":2,"category_slug":"groceries"}],"merchant_name":"Maxi","wallet_id":null}}],

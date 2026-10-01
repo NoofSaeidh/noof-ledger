@@ -5,6 +5,7 @@ using Microsoft.Extensions.Time.Testing;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Receipts;
+using Noof.Ledger.Domain;
 using Noof.Ledger.TestKit;
 
 namespace Noof.Ledger.Ai.Tests;
@@ -379,6 +380,204 @@ public class ChatReceiptVisionTests
                 new Dictionary<string, object?> { ["name"] = "Bread", ["quantity"] = 1, ["unit_price"] = 100, ["total"] = 100 },
             },
         });
+
+    static FunctionCallContent SlipAnswer(
+        Dictionary<string, object?>? exchange,
+        bool readable = true,
+        string? kind = "exchange",
+        string? sellerTaxId = "101234567",
+        string? fiscalNumber = null,
+        decimal? total = null,
+        string? currency = null,
+        bool withALine = false) => new(
+        "call_1", "read_receipt",
+        new Dictionary<string, object?>
+        {
+            ["readable"] = readable,
+            ["unreadable_reason"] = readable ? null : "blurry",
+            ["seller_name"] = "Menjačnica Dukat",
+            ["seller_tax_id"] = sellerTaxId,
+            ["fiscal_number"] = fiscalNumber,
+            ["issued_at"] = "2026-09-28T11:42:00",
+            ["currency"] = currency,
+            ["total"] = total,
+            ["payment_method"] = null,
+            ["kind"] = kind,
+            ["lines"] = withALine
+                ? new object[] { new Dictionary<string, object?> { ["name"] = "Bread", ["quantity"] = 1, ["unit_price"] = 100, ["total"] = 100 } }
+                : Array.Empty<object>(),
+            ["exchange"] = exchange,
+        });
+
+    static Dictionary<string, object?> SlipFigures(
+        decimal? givenAmount = 100m,
+        string? givenCurrency = "EUR",
+        decimal? receivedAmount = 11734.56m,
+        string? receivedCurrency = "RSD",
+        decimal? rate = 117.3456m,
+        Dictionary<string, object?>? commission = null,
+        string? slipNumber = "0004711/2026") => new()
+    {
+        ["given_amount"] = givenAmount,
+        ["given_currency"] = givenCurrency,
+        ["received_amount"] = receivedAmount,
+        ["received_currency"] = receivedCurrency,
+        ["rate"] = rate,
+        ["commission"] = commission,
+        ["slip_number"] = slipNumber,
+    };
+
+    static Task<ReceiptVisionResult> ReadAnswerAsync(FunctionCallContent answer) =>
+        new ChatReceiptVision(new FixedChatClientFactory(new ScriptedChatClient().Answer(answer)), NoopTimer, NullLogger<ChatReceiptVision>.Instance)
+            .ReadAsync(TinyImage, "image/jpeg", null, TestContext.Current.CancellationToken);
+
+    [Fact]
+    public async Task A_slip_is_read_as_an_exchange_receipt_with_no_lines_and_the_dinars_received_as_its_total()
+    {
+        var result = await ReadAnswerAsync(SlipAnswer(SlipFigures()));
+
+        result.Unreadable.Should().BeNull();
+        result.KindUnclear.Should().BeFalse();
+        result.SellerTaxIdMalformed.Should().BeFalse();
+        var slip = result.Receipt!;
+        slip.Source.Should().Be(ReceiptSource.Vision);
+        slip.Kind.Should().Be(ReceiptKind.Exchange);
+        slip.SellerName.Should().Be("Menjačnica Dukat");
+        slip.SellerTaxId.Should().Be("101234567");
+        slip.IssuedAt.Should().Be(new DateTimeOffset(2026, 9, 28, 11, 42, 0, TimeSpan.FromHours(2)));
+        slip.Currency.Should().Be(CurrencyCode.Rsd);
+        slip.Total.Should().Be(11734.56m);
+        slip.Lines.Should().BeEmpty();
+        result.Exchange.Should().Be(new ExtractedExchange(100m, "EUR", 11734.56m, "RSD", 117.3456m, null, null, "0004711/2026"));
+    }
+
+    [Fact]
+    public async Task An_incomplete_slip_is_still_a_receipt_with_its_exchange_never_unreadable()
+    {
+        var result = await ReadAnswerAsync(SlipAnswer(SlipFigures(receivedAmount: null)));
+
+        result.Unreadable.Should().BeNull("an unread amount on a slip is asked for by a reply, not reported as an unreadable photo");
+        result.Receipt!.Kind.Should().Be(ReceiptKind.Exchange);
+        result.Receipt.Total.Should().Be(0m);
+        result.Exchange.Should().Be(new ExtractedExchange(100m, "EUR", null, "RSD", 117.3456m, null, null, "0004711/2026"));
+    }
+
+    public static TheoryData<string?, decimal?, string?, decimal?, decimal> DinarSides => new()
+    {
+        { "EUR", 100m, "RSD", 11734.56m, 11734.56m },
+        { "RSD", 11850m, "EUR", 100m, 11850m },
+        { "EUR", 100m, "RSD", null, 0m },
+        { "RSD", null, "EUR", 100m, 0m },
+        { null, 100m, null, 11734.56m, 0m },
+    };
+
+    [Theory]
+    [MemberData(nameof(DinarSides))]
+    public async Task A_slips_total_is_its_dinar_side_or_zero_when_that_side_is_unread(
+        string? givenCurrency, decimal? givenAmount, string? receivedCurrency, decimal? receivedAmount, decimal expectedTotal)
+    {
+        var result = await ReadAnswerAsync(SlipAnswer(SlipFigures(
+            givenAmount: givenAmount, givenCurrency: givenCurrency, receivedAmount: receivedAmount, receivedCurrency: receivedCurrency)));
+
+        result.Receipt!.Total.Should().Be(expectedTotal);
+        result.Receipt.Currency.Should().Be(CurrencyCode.Rsd);
+    }
+
+    [Fact]
+    public async Task Readable_false_on_a_slip_is_still_unreadable_and_carries_no_exchange()
+    {
+        var result = await ReadAnswerAsync(SlipAnswer(SlipFigures(), readable: false));
+
+        result.Receipt.Should().BeNull();
+        result.Exchange.Should().BeNull();
+        result.Unreadable.Should().Be(ReceiptUnreadableReason.Blurry);
+    }
+
+    [Fact]
+    public async Task An_exchange_kind_without_its_figures_is_a_slip_with_every_figure_unread()
+    {
+        var result = await ReadAnswerAsync(SlipAnswer(exchange: null));
+
+        result.Unreadable.Should().BeNull();
+        result.Receipt!.Kind.Should().Be(ReceiptKind.Exchange);
+        result.Receipt.Total.Should().Be(0m);
+        result.Exchange.Should().Be(new ExtractedExchange(null, null, null, null, null, null, null, null));
+    }
+
+    [Fact]
+    public async Task A_slips_malformed_tax_id_is_dropped_and_reported_as_for_a_receipt()
+    {
+        var result = await ReadAnswerAsync(SlipAnswer(SlipFigures(), sellerTaxId: "PIB 10123"));
+
+        result.Receipt!.SellerTaxId.Should().BeNull();
+        result.SellerTaxIdMalformed.Should().BeTrue();
+        result.Exchange.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task A_slip_number_is_kept_as_printed_and_a_fiscal_number_on_a_slip_is_never_taken()
+    {
+        var result = await ReadAnswerAsync(SlipAnswer(
+            SlipFigures(slipNumber: " MB-0004711/26 "), fiscalNumber: "2WJCQFGP-2WJCQFGP-66360"));
+
+        result.Exchange!.SlipNumber.Should().Be("MB-0004711/26");
+        result.Receipt!.FiscalNumber.Should().BeNull("a slip's number is not a fiscal number and must never reach the fiscal duplicate index");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task A_blank_slip_number_is_unread(string printed)
+    {
+        var result = await ReadAnswerAsync(SlipAnswer(SlipFigures(slipNumber: printed)));
+
+        result.Exchange!.SlipNumber.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("EUR", "EUR")]
+    [InlineData(" eur ", "EUR")]
+    [InlineData("CHF", "CHF")]
+    [InlineData("DIN", "RSD")]
+    [InlineData(" din ", "RSD")]
+    [InlineData("ДИН", "RSD")]
+    [InlineData("дин", "RSD")]
+    [InlineData("dinar", null)]
+    [InlineData("RS", null)]
+    [InlineData("€", null)]
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    public async Task A_printed_currency_is_kept_only_as_a_three_letter_code(string? printed, string? expected)
+    {
+        var result = await ReadAnswerAsync(SlipAnswer(SlipFigures(givenCurrency: printed)));
+
+        result.Exchange!.GivenCurrency.Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task A_printed_commission_is_read_with_its_currency()
+    {
+        var commission = new Dictionary<string, object?> { ["amount"] = 35.13m, ["currency"] = "rsd" };
+
+        var result = await ReadAnswerAsync(SlipAnswer(SlipFigures(receivedAmount: 11699.43m, commission: commission)));
+
+        result.Exchange!.CommissionAmount.Should().Be(35.13m);
+        result.Exchange.CommissionCurrency.Should().Be("RSD");
+        result.Receipt!.Total.Should().Be(11699.43m);
+    }
+
+    [Theory]
+    [InlineData("sale", ReceiptKind.Sale, false)]
+    [InlineData("refund", ReceiptKind.Refund, false)]
+    [InlineData(null, ReceiptKind.Sale, true)]
+    public async Task Exchange_figures_are_ignored_unless_the_kind_is_exchange(string? kind, ReceiptKind expectedKind, bool expectedUnclear)
+    {
+        var result = await ReadAnswerAsync(SlipAnswer(SlipFigures(), kind: kind, total: 100m, currency: "RSD", withALine: true));
+
+        result.Exchange.Should().BeNull();
+        result.Receipt!.Kind.Should().Be(expectedKind);
+        result.KindUnclear.Should().Be(expectedUnclear);
+    }
 
     sealed class FixedChatClientFactory(IChatClient client) : IChatClientFactory
     {

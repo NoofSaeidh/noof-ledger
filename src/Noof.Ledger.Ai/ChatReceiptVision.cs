@@ -14,11 +14,13 @@ namespace Noof.Ledger.Ai;
 // The vision fallback: one forced, strict read_receipt call carrying the photo as a DataContent
 // image. Reached only when the fiscal QR could not be decoded or the Tax Administration site did
 // not answer - Noof.Ledger.Receipts is the path that reads a receipt without ever asking the model.
+// An exchange-office slip has no fiscal QR at all, so this is the only reader it has.
 internal sealed class ChatReceiptVision(
     IChatClientFactory clientFactory, IOperationTimer timer, ILogger<ChatReceiptVision> logger) : IReceiptVision
 {
     const string ReadReceiptName = "read_receipt";
     const string ReadReceiptDescription = "Record what a photographed shop receipt or exchange-office slip prints.";
+    const string ExchangeKind = "exchange";
 
     // Downscaling a large photo is the capture worker's job, not this class's - this only refuses
     // an image too large to be a reasonable receipt photo at all, so the worker has something
@@ -34,6 +36,11 @@ internal sealed class ChatReceiptVision(
     // Never applied to a fiscal QR/SUF receipt, which reads these from the Tax Administration itself.
     static readonly Regex TaxIdPattern = new(@"^\d{9}$", RegexOptions.Compiled);
     static readonly Regex FiscalNumberPattern = new(@"^[A-Z0-9]{8}-[A-Z0-9]{8}-\d+$", RegexOptions.Compiled);
+
+    // Any code-shaped value, not only CurrencyCode.Supported: a slip for a currency no wallet holds
+    // (CHF) must read as CHF, not as an unreadable currency the bot would then ask for. Three letters
+    // also fit receipt_exchanges' varchar(3).
+    static readonly Regex CurrencyCodePattern = new(@"^[A-Z]{3}$", RegexOptions.Compiled);
 
     public async Task<ReceiptVisionResult> ReadAsync(
         ReadOnlyMemory<byte> image, string mediaType, decimal? qrTotal, CancellationToken cancellationToken)
@@ -71,13 +78,23 @@ internal sealed class ChatReceiptVision(
         if (payload is null)
             throw new ModelCallException(ModelFailureKind.Transient, $"{ReadReceiptName} returned an empty payload.");
 
-        // The model's own "I could not read this" (readable: false), or a contradiction - readable but
-        // no total, or readable but no lines - treated the same way rather than trusted: a receipt this
-        // layer cannot vouch for must come back as unreadable, never as a half-built ExtractedReceipt.
-        if (!payload.Readable || payload.Total is not { } total || payload.Lines.Count == 0)
-            return new ReceiptVisionResult(null, MapUnreadableReason(payload.UnreadableReason));
+        if (!payload.Readable)
+            return Unreadable(payload);
 
         var taxIdMalformed = !string.IsNullOrWhiteSpace(payload.SellerTaxId) && !TaxIdPattern.IsMatch(payload.SellerTaxId.Trim());
+
+        // Ahead of the contradiction check below, which is a receipt's: a slip has no lines by nature,
+        // and one with an amount left unread is still a slip - the operator supplies the missing figure
+        // by a reply, which an "unreadable" answer would never let them do.
+        if (payload.Kind == ExchangeKind)
+            return ToSlipResult(payload, qrTotal, taxIdMalformed);
+
+        // Readable but no total, or readable but no lines, is a contradiction treated as unreadable
+        // rather than trusted: a receipt this layer cannot vouch for must come back as unreadable,
+        // never as a half-built ExtractedReceipt.
+        if (payload.Total is not { } total || payload.Lines.Count == 0)
+            return Unreadable(payload);
+
         // KindUnclear's rationale (why Kind still defaults to Sale, and why that default is never
         // trusted silently): ReceiptContracts.cs, next to ReceiptVisionResult.
         var kindUnclear = payload.Kind is null;
@@ -95,6 +112,9 @@ internal sealed class ChatReceiptVision(
     static ReadReceiptPayload? ToPayload(FunctionCallContent call) =>
         JsonSerializer.Deserialize<ReadReceiptPayload>(JsonSerializer.SerializeToElement(call.Arguments));
 
+    static ReceiptVisionResult Unreadable(ReadReceiptPayload payload) =>
+        new(null, MapUnreadableReason(payload.UnreadableReason));
+
     static ExtractedReceipt ToExtractedReceipt(ReadReceiptPayload payload, decimal total, decimal? qrTotal)
     {
         var lines = payload.Lines
@@ -102,22 +122,88 @@ internal sealed class ChatReceiptVision(
                 index + 1, line.Name, line.Quantity, Unit: null, line.UnitPrice, line.Total, TaxLabel: null))
             .ToList();
 
-        return new ExtractedReceipt(
-            ReceiptSource.Vision,
-            VerificationUrl: null,
-            AcceptIfWellFormed(payload.SellerTaxId, TaxIdPattern),
-            payload.SellerName,
-            SellerAddress: null,
-            LocationName: null,
+        return VisionReceipt(
+            payload,
             AcceptIfWellFormed(payload.FiscalNumber, FiscalNumberPattern),
-            ParseIssuedAt(payload.IssuedAt),
             total,
             new CurrencyCode(payload.Currency ?? CurrencyCode.Rsd.Value),
             payload.Kind == "refund" ? ReceiptKind.Refund : ReceiptKind.Sale,
-            MapPaymentMethod(payload.PaymentMethod),
             qrTotal,
             lines);
     }
+
+    // A slip's reading is a starting point the operator corrects, like spoken amounts (spec T-8): its
+    // figures are kept as read, unvalidated, and 7b's assessment decides whether it is recorded, held
+    // or incomplete. FiscalNumber stays null whatever the model put there - a slip number must never
+    // reach the fiscal duplicate index.
+    static ReceiptVisionResult ToSlipResult(ReadReceiptPayload payload, decimal? qrTotal, bool taxIdMalformed)
+    {
+        var exchange = ToExtractedExchange(payload.Exchange);
+        var slip = VisionReceipt(
+            payload, fiscalNumber: null, DinarSide(exchange), CurrencyCode.Rsd, ReceiptKind.Exchange, qrTotal, lines: []);
+
+        return new ReceiptVisionResult(slip, null, taxIdMalformed, Exchange: exchange);
+    }
+
+    // What every vision read shares, receipt or slip: no verification URL, address or location (only
+    // a fiscal QR/SUF read has them), and the seller's tax id only when well-formed.
+    static ExtractedReceipt VisionReceipt(
+        ReadReceiptPayload payload,
+        string? fiscalNumber,
+        decimal total,
+        CurrencyCode currency,
+        ReceiptKind kind,
+        decimal? qrTotal,
+        IReadOnlyList<ExtractedReceiptLine> lines) => new(
+        ReceiptSource.Vision,
+        VerificationUrl: null,
+        AcceptIfWellFormed(payload.SellerTaxId, TaxIdPattern),
+        payload.SellerName,
+        SellerAddress: null,
+        LocationName: null,
+        fiscalNumber,
+        ParseIssuedAt(payload.IssuedAt),
+        total,
+        currency,
+        kind,
+        MapPaymentMethod(payload.PaymentMethod),
+        qrTotal,
+        lines);
+
+    static ExtractedExchange ToExtractedExchange(ReadExchangeDto? read) => new(
+        read?.GivenAmount,
+        CurrencyCodeOrNull(read?.GivenCurrency),
+        read?.ReceivedAmount,
+        CurrencyCodeOrNull(read?.ReceivedCurrency),
+        read?.Rate,
+        read?.Commission?.Amount,
+        CurrencyCodeOrNull(read?.Commission?.Currency),
+        SlipNumberOrNull(read?.SlipNumber));
+
+    // receipts.total is NOT NULL, so a slip whose dinar side is unread stores 0; nothing reads a slip's
+    // total - receipt_exchanges keeps what was read, and the transfer is the money.
+    static decimal DinarSide(ExtractedExchange exchange) =>
+        exchange.GivenCurrency == CurrencyCode.Rsd.Value ? exchange.GivenAmount ?? 0m
+        : exchange.ReceivedCurrency == CurrencyCode.Rsd.Value ? exchange.ReceivedAmount ?? 0m
+        : 0m;
+
+    static string? CurrencyCodeOrNull(string? printed)
+    {
+        if (string.IsNullOrWhiteSpace(printed))
+            return null;
+
+        var code = printed.Trim().ToUpperInvariant();
+        return code switch
+        {
+            // Serbian slips often print the dinar as DIN or ДИН rather than its ISO code.
+            "DIN" or "ДИН" => CurrencyCode.Rsd.Value,
+            _ when CurrencyCodePattern.IsMatch(code) => code,
+            _ => null,
+        };
+    }
+
+    static string? SlipNumberOrNull(string? printed) =>
+        string.IsNullOrWhiteSpace(printed) ? null : printed.Trim();
 
     static string? AcceptIfWellFormed(string? printed, Regex pattern)
     {
@@ -175,11 +261,25 @@ internal sealed class ChatReceiptVision(
         [property: JsonPropertyName("total")] decimal? Total,
         [property: JsonPropertyName("payment_method")] string? PaymentMethod,
         [property: JsonPropertyName("kind")] string? Kind,
-        [property: JsonPropertyName("lines")] IReadOnlyList<ReadReceiptLineDto> Lines);
+        [property: JsonPropertyName("lines")] IReadOnlyList<ReadReceiptLineDto> Lines,
+        [property: JsonPropertyName("exchange")] ReadExchangeDto? Exchange);
 
     sealed record ReadReceiptLineDto(
         [property: JsonPropertyName("name")] string Name,
         [property: JsonPropertyName("quantity")] decimal Quantity,
         [property: JsonPropertyName("unit_price")] decimal UnitPrice,
         [property: JsonPropertyName("total")] decimal Total);
+
+    sealed record ReadExchangeDto(
+        [property: JsonPropertyName("given_amount")] decimal? GivenAmount,
+        [property: JsonPropertyName("given_currency")] string? GivenCurrency,
+        [property: JsonPropertyName("received_amount")] decimal? ReceivedAmount,
+        [property: JsonPropertyName("received_currency")] string? ReceivedCurrency,
+        [property: JsonPropertyName("rate")] decimal? Rate,
+        [property: JsonPropertyName("commission")] ReadCommissionDto? Commission,
+        [property: JsonPropertyName("slip_number")] string? SlipNumber);
+
+    sealed record ReadCommissionDto(
+        [property: JsonPropertyName("amount")] decimal Amount,
+        [property: JsonPropertyName("currency")] string Currency);
 }
