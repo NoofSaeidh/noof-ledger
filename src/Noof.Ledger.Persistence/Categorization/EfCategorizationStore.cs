@@ -78,6 +78,8 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
             ? await TransferViewAsync(transactionId, lines, cancellationToken)
             : null;
 
+        var charges = await ChargesOfAsync(transactionId, header.WalletCurrency, lines, cancellationToken);
+
         // A voice capture has no text until its transcript arrives, and none at all when nothing was heard;
         // the pipeline and the echo read that as empty, which is what it is. Only a Manual record has no chat,
         // and nothing categorises or echoes one, so 0 stands in for it.
@@ -85,7 +87,7 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
             header.Id, header.RawText ?? string.Empty, header.TelegramChatId ?? 0, header.BotMessageId, header.WalletName,
             header.Status, ZonedClock.LocalDate(header.OccurredAt, header.TimeZoneId), header.OccurredOn, lines,
             header.CaptureKind, header.Kind, header.WalletCurrency, balances, statement, WalletId: header.WalletId,
-            Transfer: transfer, FailureReason: header.FailureReason);
+            Transfer: transfer, FailureReason: header.FailureReason, Charges: charges);
     }
 
     async Task<TransferView?> TransferViewAsync(
@@ -129,6 +131,30 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
             ? new ExchangeRate(
                 baseCurrency, quoteAmount, baseCurrency == transfer.From.Currency ? transfer.To.Currency : transfer.From.Currency)
             : null;
+
+    async Task<IReadOnlyList<ChargeView>> ChargesOfAsync(
+        Guid transactionId, CurrencyCode? walletCurrency, IReadOnlyList<RecordedLine> lines, CancellationToken cancellationToken)
+    {
+        if (walletCurrency is not { } chargedIn)
+            return [];
+
+        var charges = await db.Charges.AsNoTracking()
+            .Where(charge => charge.TransactionId == transactionId)
+            .ToListAsync(cancellationToken);
+
+        return [.. charges
+            .OrderBy(charge => charge.Currency.Value, StringComparer.Ordinal)
+            .Select(charge => new ChargeView(
+                charge.Currency,
+                lines
+                    .Where(line => line.Role == EntryRole.Principal && line.Amount.Currency == charge.Currency)
+                    .Sum(line => line.Amount.Amount),
+                new Money(charge.ChargedAmount, chargedIn),
+                new Money(charge.FeeAmount, chargedIn),
+                charge.RateUsed,
+                new FeeTerms(charge.FeePercent, charge.FeeFixed, charge.FeeMinimum),
+                charge.Source))];
+    }
 
     public async Task ApplyAsync(Guid transactionId, CategorizationOutcome outcome, CancellationToken cancellationToken)
     {
