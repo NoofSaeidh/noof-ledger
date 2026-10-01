@@ -89,6 +89,66 @@ internal static class TelegramScenes
                 Operator("#@%& ???", "11:12"),
                 Reply(echo.Failure, "11:12"),
             ]),
+            new("transfer", "A cash withdrawal",
+            [
+                Operator("withdrew 10000 rsd from raif", "13:15"),
+                Reply(echo.Compose(TransferRecord("withdrew 10000 rsd from raif", Legs(
+                    "Raiffeisen", new Money(10000.00m, CurrencyCode.Rsd), 164150.00m,
+                    "Cash RSD", new Money(10000.00m, CurrencyCode.Rsd), 12000.00m))), "13:15"),
+            ]),
+            new("transfer-fee", "A withdrawal with a fee",
+            [
+                Operator("withdrew 10000 from raif, fee 150", "13:40"),
+                Reply(echo.Compose(TransferRecord("withdrew 10000 from raif, fee 150", Legs(
+                    "Raiffeisen", new Money(10150.00m, CurrencyCode.Rsd), 154000.00m,
+                    "Cash RSD", new Money(10000.00m, CurrencyCode.Rsd), 22000.00m,
+                    new Money(150.00m, CurrencyCode.Rsd), TransferLeg.From),
+                    [FeeLine("Fee", 150.00m, CurrencyCode.Rsd)])), "13:40"),
+            ]),
+            new("exchange", "A currency exchange",
+            [
+                Operator("exchanged 100 eur for 11700 dinars", "14:05"),
+                Reply(echo.Compose(TransferRecord("exchanged 100 eur for 11700 dinars", Legs(
+                    "Cash EUR", new Money(100.00m, CurrencyCode.Eur), 250.00m,
+                    "Cash RSD", new Money(11700.00m, CurrencyCode.Rsd), 33700.00m))), "14:05"),
+            ]),
+            new("foreign-spending", "Spending in dollars, charged to a tenge wallet at its own rate",
+            [
+                Operator("taxi 30 dollars from kaspi", "16:20"),
+                Reply(echo.Compose(Expense("taxi 30 dollars from kaspi", "Kaspi", CurrencyCode.Kzt, 169744.00m,
+                [
+                    Line("Taxi", 30.00m, CurrencyCode.Usd, "Transport", null),
+                    FeeLine("Fee · USD purchase", 156.00m, CurrencyCode.Kzt),
+                ]) with
+                {
+                    Charges =
+                    [
+                        new ChargeView(CurrencyCode.Usd, 30.00m, new Money(15600.00m, CurrencyCode.Kzt), new Money(156.00m, CurrencyCode.Kzt),
+                            520m, new FeeTerms(1m, null, null), ChargeSource.WalletTerms),
+                    ],
+                }), "16:20"),
+            ]),
+            new("no-terms", "A currency the wallet has no rate for",
+            [
+                Operator("museum 20 eur from kaspi", "17:10"),
+                Reply(echo.Compose(Expense("museum 20 eur from kaspi", "Kaspi", CurrencyCode.Kzt, 185500.00m,
+                    [Line("Museum", 20.00m, CurrencyCode.Eur, "Entertainment", null)]) with
+                {
+                    WalletBalances = [new Money(185500.00m, CurrencyCode.Kzt), new Money(-20.00m, CurrencyCode.Eur)],
+                }), "17:10"),
+            ]),
+            new("exchange-question", "An exchange with no amount received",
+            [
+                Operator("exchanged 100 eur for dinars", "10:30"),
+                Reply(echo.Compose(Expense("exchanged 100 eur for dinars", string.Empty, CurrencyCode.Rsd, 0m, []) with
+                {
+                    Status = TransactionStatus.Failed,
+                    Kind = TransactionKind.Transfer,
+                    WalletCurrency = null,
+                    WalletBalances = null,
+                    FailureReason = RecordFailureReason.MissingReceivedAmount,
+                }), "10:30"),
+            ]),
             ReceiptScene("receipt-qr", "A receipt photo, read from its fiscal QR", echo, MockData.ReceiptTransactionId, "17:42", 172096.06m),
             ReceiptScene("receipt-vision", "The tax site was down, so the lines were read from the photo", echo,
                 MockData.VisionReceiptTransactionId, "12:05", 174661.00m),
@@ -148,4 +208,18 @@ internal static class TelegramScenes
     static CategorizationSubject Expense(string raw, string wallet, CurrencyCode currency, decimal balance, IReadOnlyList<RecordedLine> lines) =>
         new(Guid.Empty, raw, MockData.TelegramChatId, 1, wallet, TransactionStatus.Completed, Day, Day, lines,
             WalletCurrency: currency, WalletBalances: [new Money(balance, currency)]);
+
+    static RecordedLine FeeLine(string description, decimal amount, CurrencyCode currency) =>
+        new(description, new Money(amount, currency), "fees-charges", "Fees & Charges", null, EntryRole.Fee);
+
+    static TransferView Legs(
+        string fromWallet, Money from, decimal fromBalance, string toWallet, Money to, decimal toBalance,
+        Money? fee = null, TransferLeg? feeLeg = null) =>
+        new(Guid.Empty, fromWallet, from, Guid.Empty, toWallet, to, fee, feeLeg, StatedRate: null, VenueName: null,
+            [new Money(fromBalance, from.Currency)], [new Money(toBalance, to.Currency)]);
+
+    static CategorizationSubject TransferRecord(string raw, TransferView transfer, IReadOnlyList<RecordedLine>? lines = null) =>
+        new(Guid.Empty, raw, MockData.TelegramChatId, 1, transfer.FromWalletName, TransactionStatus.Completed, Day, Day, lines ?? [],
+            Kind: TransactionKind.Transfer, WalletCurrency: transfer.From.Currency, WalletBalances: transfer.FromBalances,
+            WalletId: transfer.FromWalletId, Transfer: transfer);
 }

@@ -51,11 +51,19 @@ internal sealed class RecordEcho : IRecordEcho
 
     public EchoMessage Compose(CategorizationSubject record) => WithWhatWasHeard(record, record switch
     {
+        { Kind: TransactionKind.Transfer, Transfer: { } transfer, Status: TransactionStatus.Cancelled } =>
+            new(TransferText(record, transfer, cancelled: true), [RecordAction.Restore]),
+        { Status: TransactionStatus.Cancelled, FailureReason: not RecordFailureReason.None and var reason } =>
+            new($"Cancelled — {FailureText(record, reason)}", [RecordAction.Restore]),
         { Status: TransactionStatus.Cancelled } =>
             new($"Cancelled — {record.WalletName} · balance {Balances(record)}\n{CancelledBody(record)}".TrimEnd(),
                 [RecordAction.Restore]),
+        { Status: TransactionStatus.Failed, FailureReason: not RecordFailureReason.None and var reason } =>
+            new(FailureText(record, reason), [RecordAction.Edit]),
         { Status: TransactionStatus.Failed } => Failure,
         { Status: TransactionStatus.Captured } => new(Waiting(record), []),
+        { Kind: TransactionKind.Transfer, Transfer: { } transfer } =>
+            new(TransferText(record, transfer, cancelled: false), [RecordAction.Cancel, RecordAction.Edit]),
         { Kind: TransactionKind.BalanceCheck, Status: TransactionStatus.Completed } =>
             new(StatementLine(record), [RecordAction.Cancel, RecordAction.Edit]),
         { Kind: TransactionKind.Income, Lines.Count: 0 } =>
@@ -75,9 +83,36 @@ internal sealed class RecordEcho : IRecordEcho
 
     public EchoMessage ComposeCorrectionFailure(CategorizationSubject record, RecordFailureReason reason = RecordFailureReason.None)
     {
+        // A record that never got recorded has nothing to show beneath the notice but its own failure line, which
+        // would only repeat or contradict the reason this reply failed for.
+        if (reason != RecordFailureReason.None && record.Status == TransactionStatus.Failed)
+            return new($"Correction not applied — {FailureText(record, reason)}", [RecordAction.Edit]);
+
         var current = Compose(record);
-        return current with { Text = $"Could not apply that correction — the record is unchanged.\n\n{current.Text}" };
+        var notice = reason != RecordFailureReason.None
+            ? $"Correction not applied — {FailureText(record, reason)}"
+            : "Could not apply that correction — the record is unchanged.";
+
+        return current with { Text = $"{notice}\n\n{current.Text}" };
     }
+
+    // Only the reason is stored, never the rejected proposal, so a text names only what the record itself holds:
+    // Cancel/Restore and a replayed update must render exactly the same words.
+    static string FailureText(CategorizationSubject record, RecordFailureReason reason) => reason switch
+    {
+        RecordFailureReason.MissingReceivedAmount => record.Transfer is { } transfer
+            ? $"Exchange not recorded: how much {transfer.To.Currency} did you get? Reply with the amount or the rate."
+            : "Exchange not recorded: how much did you get? Reply with the amount or the rate.",
+        RecordFailureReason.SameWallet =>
+            "Transfer not recorded: both sides are the same wallet — which wallet did it go to?",
+        RecordFailureReason.LegCurrencyMismatch =>
+            "Transfer not recorded: a wallet holds another currency — create a wallet in that currency or name one.",
+        RecordFailureReason.InvalidRate => "Exchange not recorded: couldn't use that rate. Reply with the amount you got.",
+        RecordFailureReason.InvalidFee => "Transfer not recorded: couldn't place that fee. Reply with the amounts.",
+        RecordFailureReason.InvalidAmount => "Transfer not recorded: an amount wasn't positive. Reply with the amounts.",
+        RecordFailureReason.SlipIncomplete => "Slip read, but a figure is unreadable — reply with it.",
+        _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, "No echo text for this failure reason."),
+    };
 
     const string ReceiptExtractionStep = "Reading the receipt";
     const string ReceiptCategorizationStep = "Categorising the receipt";
@@ -237,7 +272,7 @@ internal sealed class RecordEcho : IRecordEcho
 
     static string ReceiptBody(CategorizationSubject record, ReceiptView receipt)
     {
-        List<string> lines = [$"Date: {record.OccurredOn.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)}"];
+        List<string> lines = [DateLine(record.OccurredOn)];
         lines.AddRange(ReceiptLineSection(record.Lines));
         lines.Add(string.Empty);
         lines.Add($"Total: {Totals(record.Lines)}");
@@ -318,23 +353,54 @@ internal sealed class RecordEcho : IRecordEcho
         List<string> lines = [];
 
         if (record.OccurredOn != record.SentOn)
-            lines.Add($"Date: {record.OccurredOn.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)}");
+            lines.Add(DateLine(record.OccurredOn));
 
-        lines.AddRange(record.Lines.Select(FormatLine));
+        // A charge's fee line is shown as the fee on its charge line, never as a purchase.
+        var purchases = record.Lines.Where(line => line.Role == EntryRole.Principal).ToList();
+        lines.AddRange(purchases.Select(FormatLine));
 
-        if (record.Lines.Count > 0)
+        if (purchases.Count > 0)
         {
             lines.Add(string.Empty);
-            lines.Add($"Total: {Totals(record.Lines)}");
+            lines.Add($"Total: {Totals(purchases)}");
         }
 
-        // M10: a spending in a currency other than its wallet's is not converted - visible as a
-        // separate currency line in the balance, and flagged here so it never looks like an
-        // oversight.
-        if (record.WalletCurrency is { } currency && record.Lines.Any(line => line.Amount.Currency != currency))
-            lines.Add("Not in the wallet's currency — no conversion yet.");
+        lines.AddRange(ForeignCurrencyLines(record, purchases));
 
         return string.Join('\n', lines);
+    }
+
+    static IEnumerable<string> ForeignCurrencyLines(CategorizationSubject record, IReadOnlyList<RecordedLine> purchases)
+    {
+        if (record.WalletCurrency is not { } walletCurrency)
+            return [];
+
+        var foreign = purchases.Where(line => line.Amount.Currency != walletCurrency).ToList();
+        if (foreign.Count == 0)
+            return [];
+
+        // M10 still holds for income: only a spending is charged to its wallet at the wallet's terms.
+        if (record.Kind != TransactionKind.Expense)
+            return ["Not in the wallet's currency — no conversion yet."];
+
+        return foreign
+            .GroupBy(line => line.Amount.Currency)
+            .OrderBy(group => group.Key.Value, StringComparer.Ordinal)
+            .Select(group => ForeignCurrencyLine(record, group.Key, group.Sum(line => line.Amount.Amount)));
+    }
+
+    static string ForeignCurrencyLine(CategorizationSubject record, CurrencyCode currency, decimal sum) =>
+        record.Charges?.FirstOrDefault(charge => charge.Currency == currency) is { } charge
+            ? ChargeLine(charge)
+            : $"{FormatAmount(sum)} {currency} not converted — set a {currency} rate for {record.WalletName} on /wallets, or correct this record to apply it";
+
+    static string ChargeLine(ChargeView charge)
+    {
+        var rate = new ExchangeRate(charge.Currency, charge.RateUsed, charge.Charged.Currency);
+        var source = charge.Source == ChargeSource.Stated ? "stated" : "wallet rate";
+        var line = $"{FormatAmount(charge.ForeignSum)} {charge.Currency} → charged {FormatMoney(charge.Charged)} ({rate}, {source})";
+
+        return charge.Fee.Amount > 0m ? $"{line} + fee {FormatMoney(charge.Fee)}" : line;
     }
 
     // A BalanceCheck's own body is the statement it recorded, not a line-item body - it has no lines
@@ -363,24 +429,120 @@ internal sealed class RecordEcho : IRecordEcho
         return $"{record.WalletName}: balance was {FormatAmount(before)} {currency}, you said {FormatAmount(stated)} {currency} — {tail}";
     }
 
-    static string Balances(CategorizationSubject record)
-    {
-        if (record.WalletBalances is not { Count: > 0 } balances)
-            return record.WalletCurrency is { } currency ? $"0.00 {currency}" : "0.00";
+    static string Balances(CategorizationSubject record) => Balances(record.WalletBalances, record.WalletCurrency);
 
-        return string.Join(", ", balances.Select(money => $"{FormatAmount(money.Amount)} {money.Currency}"));
+    static string Balances(IReadOnlyList<Money>? balances, CurrencyCode? currency)
+    {
+        if (balances is not { Count: > 0 })
+            return currency is { } code ? $"0.00 {code}" : "0.00";
+
+        return string.Join(", ", balances.Select(FormatMoney));
     }
+
+    // A transfer is read from its transfers row, never from its lines: it has no principal lines, and its one
+    // fee line is shown as the fee it is, never as a purchase.
+    static string TransferText(CategorizationSubject record, TransferView transfer, bool cancelled)
+    {
+        List<string> lines = [TransferHeader(transfer, cancelled)];
+
+        if (record.OccurredOn != record.SentOn)
+            lines.Add(DateLine(record.OccurredOn));
+
+        if (transfer.Fee is { } fee)
+            lines.Add($"Fee {FormatMoney(fee)} · {FeeCategory(record)}");
+
+        lines.Add($"{transfer.FromWalletName} · balance {Balances(transfer.FromBalances, transfer.From.Currency)}");
+        lines.Add($"{transfer.ToWalletName} · balance {Balances(transfer.ToBalances, transfer.To.Currency)}");
+
+        if (!cancelled && SourceCrossedZero(transfer) is { } now)
+            lines.Add($"{transfer.FromWalletName} is now {FormatMoney(now)} — a missing exchange or income?");
+
+        return string.Join('\n', lines);
+    }
+
+    // Only a crossing this transfer caused: a wallet that was already below zero (a credit card) stays quiet, and
+    // so does a backdated transfer a later checkpoint absorbed - the balance without it comes from
+    // GetSubjectAsync, by the wallet_balances rule, never "now plus the amount".
+    static Money? SourceCrossedZero(TransferView transfer)
+    {
+        if (transfer.FromBalanceWithoutThis is not >= 0m)
+            return null;
+
+        var now = transfer.FromBalances
+            .Where(balance => balance.Currency == transfer.From.Currency)
+            .Select(balance => (Money?)balance)
+            .FirstOrDefault();
+
+        return now is { Amount: < 0m } ? now : null;
+    }
+
+    static string TransferHeader(TransferView transfer, bool cancelled)
+    {
+        var exchange = transfer.From.Currency != transfer.To.Currency;
+        var title = (exchange, cancelled) switch
+        {
+            (true, false) => "Exchange",
+            (true, true) => "Cancelled exchange",
+            (false, false) => "Transfer",
+            (false, true) => "Cancelled transfer",
+        };
+        var fromFee = FeeNote(transfer, TransferLeg.From);
+        var toFee = FeeNote(transfer, TransferLeg.To);
+
+        if (exchange)
+        {
+            return $"{title} — {FormatMoney(transfer.From)} ({WithNote(transfer.FromWalletName, fromFee)}) → "
+                + $"{FormatMoney(transfer.To)} ({WithNote(transfer.ToWalletName, toFee)}) · {RateOf(transfer)}";
+        }
+
+        if (transfer.Fee is null)
+            return $"{title} — {FormatMoney(transfer.From)} · {transfer.FromWalletName} → {transfer.ToWalletName}";
+
+        return $"{title} — {transfer.FromWalletName} -{FormatMoney(transfer.From)}{Parenthesised(fromFee)} → "
+            + $"{transfer.ToWalletName} +{FormatMoney(transfer.To)}{Parenthesised(toFee)}";
+    }
+
+    // The source leg's stored amount already includes its fee, and the destination's already lost it (T-12):
+    // "incl." and "after" say which.
+    static string? FeeNote(TransferView transfer, TransferLeg leg) => transfer switch
+    {
+        { Fee: { } fee, FeeLeg: { } feeLeg } when feeLeg == leg =>
+            $"{(leg == TransferLeg.From ? "incl." : "after")} fee {FormatAmount(fee.Amount)}",
+        _ => null,
+    };
+
+    static string WithNote(string walletName, string? note) => note is null ? walletName : $"{walletName}, {note}";
+
+    static string Parenthesised(string? note) => note is null ? string.Empty : $" ({note})";
+
+    // A stated rate is shown as stated; otherwise it is derived from the principals, never from a leg that
+    // carries the fee.
+    static ExchangeRate RateOf(TransferView transfer) =>
+        transfer.StatedRate ?? ExchangeRate.Between(SourcePrincipal(transfer), DestinationPrincipal(transfer));
+
+    static Money SourcePrincipal(TransferView transfer) =>
+        transfer is { Fee: { } fee, FeeLeg: TransferLeg.From } ? transfer.From - fee : transfer.From;
+
+    static Money DestinationPrincipal(TransferView transfer) =>
+        transfer is { Fee: { } fee, FeeLeg: TransferLeg.To } ? transfer.To + fee : transfer.To;
+
+    static string FeeCategory(CategorizationSubject record) =>
+        record.Lines.FirstOrDefault(line => line.Role == EntryRole.Fee)?.CategoryName ?? "uncategorised";
+
+    static string DateLine(DateOnly day) => $"Date: {day.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)}";
+
+    static string FormatMoney(Money money) => $"{FormatAmount(money.Amount)} {money.Currency}";
 
     static string FormatLine(RecordedLine line)
     {
-        var text = $"• {line.Description} — {FormatAmount(line.Amount.Amount)} {line.Amount.Currency} · {line.CategoryName ?? "uncategorised"}";
+        var text = $"• {line.Description} — {FormatMoney(line.Amount)} · {line.CategoryName ?? "uncategorised"}";
         return line.MerchantName is { } merchant ? $"{text} · {merchant}" : text;
     }
 
     static string Totals(IReadOnlyList<RecordedLine> lines) => string.Join(", ", lines
         .GroupBy(line => line.Amount.Currency)
         .OrderBy(group => group.Key.Value, StringComparer.Ordinal)
-        .Select(group => $"{FormatAmount(group.Sum(line => line.Amount.Amount))} {group.Key}"));
+        .Select(group => FormatMoney(new Money(group.Sum(line => line.Amount.Amount), group.Key))));
 
     static string FormatAmount(decimal amount) => amount.ToString("0.00", CultureInfo.InvariantCulture);
 }
