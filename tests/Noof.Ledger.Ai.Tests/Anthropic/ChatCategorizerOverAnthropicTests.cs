@@ -239,6 +239,98 @@ public class ChatCategorizerOverAnthropicTests
     }
 
     [Fact]
+    public async Task A_transfer_in_the_response_reads_every_amount_into_decimal_exactly()
+    {
+        // Spliced as raw JSON numbers, as the round-trip test above does: neither 12345678901234567.89 nor
+        // 0.30000000000000004 survives a trip through double, so a regression reading GetDouble() shows here.
+        var (categorizer, handler) = Build();
+        handler.Enqueue(HttpStatusCode.OK, """
+            {"id":"msg_08","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
+             "content":[{"type":"tool_use","id":"toolu_08","name":"record_transaction","input":{"items":[],"occurred_on":null,"kind":"transfer","wallet_id":null,"balance_amount":null,"balance_currency":null,"transfer":{"from_wallet_id":"33333333-3333-3333-3333-333333333333","from_amount":12345678901234567.89,"from_currency":"EUR","to_wallet_id":null,"to_amount":11700.01,"to_currency":"RSD","rate":{"base_currency":"EUR","quote_amount":117.123456789012,"quote_currency":"RSD"},"fee":{"amount":0.30000000000000004,"currency":"EUR","leg":"from","included":true}},"charged":null}}],
+             "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
+            """);
+
+        var proposal = await categorizer.ProposeAsync(Request("поменял евро"), TestContext.Current.CancellationToken);
+
+        proposal.Kind.Should().Be(ProposedKind.Transfer);
+        proposal.Items.Should().BeEmpty();
+        proposal.Transfer.Should().Be(new ProposedTransfer(
+            Guid.Parse("33333333-3333-3333-3333-333333333333"), 12345678901234567.89m, "EUR",
+            null, 11700.01m, "RSD",
+            new ProposedRate("EUR", 117.123456789012m, "RSD"),
+            new ProposedFee(0.30000000000000004m, "EUR", ProposedLeg.From, true)));
+        proposal.Charged.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_transfer_with_no_rate_fee_or_received_amount_reads_them_as_null()
+    {
+        var (categorizer, handler) = Build();
+        handler.Enqueue(HttpStatusCode.OK, """
+            {"id":"msg_09","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
+             "content":[{"type":"tool_use","id":"toolu_09","name":"record_transaction","input":{"items":[],"occurred_on":null,"kind":"transfer","wallet_id":null,"balance_amount":null,"balance_currency":null,"transfer":{"from_wallet_id":null,"from_amount":100,"from_currency":"EUR","to_wallet_id":null,"to_amount":null,"to_currency":"RSD","rate":null,"fee":null},"charged":null}}],
+             "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
+            """);
+
+        var proposal = await categorizer.ProposeAsync(Request("поменял 100 евро на динары"), TestContext.Current.CancellationToken);
+
+        proposal.Transfer.Should().Be(new ProposedTransfer(null, 100m, "EUR", null, null, "RSD", null, null));
+    }
+
+    // The round trip of amendment 24, middle step. Task 2a.4 renders an exchange stored as 100 EUR → 11562.35 RSD with a
+    // 150 RSD fee on the destination and a stated rate of 117.1235 as "- from Cash EUR: 100 EUR", "- to Cash RSD:
+    // 11712.35 RSD, worked out by the ledger, plus a fee of 150 RSD on this side (not included in the figure)" and
+    // "- rate as stated: 1 EUR = 117.1235 RSD". A date-only correction answers that back unchanged as below; 2b's
+    // A_date_only_correction_answered_back_unchanged_keeps_the_legs_fee_and_stated_rate settles this same
+    // ProposedTransfer to the stored figures.
+    [Fact]
+    public async Task An_exchange_answered_back_unchanged_reads_into_the_proposal_the_rendering_implies()
+    {
+        var (categorizer, handler) = Build();
+        handler.Enqueue(HttpStatusCode.OK, """
+            {"id":"msg_11","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
+             "content":[{"type":"tool_use","id":"toolu_11","name":"record_transaction","input":{"items":[],"occurred_on":"2026-09-20","kind":"transfer","wallet_id":null,"balance_amount":null,"balance_currency":null,"transfer":{"from_wallet_id":null,"from_amount":100,"from_currency":"EUR","to_wallet_id":null,"to_amount":null,"to_currency":"RSD","rate":{"base_currency":"EUR","quote_amount":117.1235,"quote_currency":"RSD"},"fee":{"amount":150,"currency":"RSD","leg":"to","included":false}},"charged":null}}],
+             "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
+            """);
+
+        var proposal = await categorizer.ProposeAsync(Request("это было позавчера"), TestContext.Current.CancellationToken);
+
+        proposal.OccurredOn.Should().Be("2026-09-20");
+        proposal.Transfer.Should().Be(new ProposedTransfer(
+            null, 100m, "EUR", null, null, "RSD",
+            new ProposedRate("EUR", 117.1235m, "RSD"),
+            new ProposedFee(150m, "RSD", ProposedLeg.To, false)));
+    }
+
+    [Fact]
+    public async Task A_stated_charge_in_the_response_reads_into_decimal_exactly()
+    {
+        var (categorizer, handler) = Build();
+        handler.Enqueue(HttpStatusCode.OK, """
+            {"id":"msg_10","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
+             "content":[{"type":"tool_use","id":"toolu_10","name":"record_transaction","input":{"items":[{"description":"книга","amount":30,"currency":"USD","category_slug":"food-drink","merchant_name":null}],"occurred_on":null,"kind":"expense","wallet_id":null,"balance_amount":null,"balance_currency":null,"transfer":null,"charged":{"amount":15400.5,"currency":"KZT","fee_amount":0.30000000000000004,"fee_included":true}}}],
+             "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
+            """);
+
+        var proposal = await categorizer.ProposeAsync(Request("30 долларов с каспи, списали 15400.5"), TestContext.Current.CancellationToken);
+
+        proposal.Transfer.Should().BeNull();
+        proposal.Charged.Should().Be(new ProposedCharge(15400.5m, "KZT", 0.30000000000000004m, true));
+    }
+
+    [Fact]
+    public async Task An_answer_written_before_transfers_existed_reads_transfer_and_charged_as_null()
+    {
+        var (categorizer, handler) = Build();
+        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.RecordTransactionJsonAnswer);
+
+        var proposal = await categorizer.ProposeAsync(Request("Coffee 3.50 EUR"), TestContext.Current.CancellationToken);
+
+        proposal.Transfer.Should().BeNull();
+        proposal.Charged.Should().BeNull();
+    }
+
+    [Fact]
     public async Task A_model_that_asks_for_the_merchant_list_twice_never_gets_a_third_request()
     {
         var (categorizer, handler) = Build();
