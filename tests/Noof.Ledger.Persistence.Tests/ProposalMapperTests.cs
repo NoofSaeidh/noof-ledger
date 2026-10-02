@@ -464,7 +464,7 @@ public class ProposalMapperTests
             .Should().BeTrue();
 
         (mapped.Transfer?.To).Should().Be(Rsd(11650m), "the received amount said wins for the settlement");
-        (mapped.Transfer?.StatedRate).Should().Be(EuroAt117, "amendment 24: a valid stated rate is kept whenever it was said");
+        (mapped.Transfer?.StatedRate).Should().Be(EuroAt117, "A-21: a valid stated rate is kept whenever it was said");
     }
 
     [Fact]
@@ -682,7 +682,7 @@ public class ProposalMapperTests
         MapWith([.. Wallets, KaspiKzt], proposal, out var mapped, out _).Should().BeTrue();
 
         mapped.Charged.Should().Be(new StatedCharge(new Money(30m, CurrencyCode.Usd), null, false),
-            "a said charge counts as said even when it cannot be honoured, so no older stated charge survives it (review C-4)");
+            "a said charge counts as said even when it cannot be honoured, so no older stated charge survives it");
     }
 
     [Fact]

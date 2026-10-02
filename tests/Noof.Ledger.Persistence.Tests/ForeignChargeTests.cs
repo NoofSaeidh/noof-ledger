@@ -306,7 +306,7 @@ public class ForeignChargeTests(PostgresFixture fixture)
         await ApplyAsync(db, id, receipt with { Instruction = "это был кофе" });
 
         db.ChangeTracker.Clear();
-        (await ChargesOfAsync(db, id)).Should().BeEmpty("T-1, amendment 27: a fiscal receipt is never a foreign-currency spending");
+        (await ChargesOfAsync(db, id)).Should().BeEmpty("T-1, A-24: a fiscal receipt is never a foreign-currency spending");
         (await FeeLinesOfAsync(db, id)).Should().BeEmpty();
     }
 
