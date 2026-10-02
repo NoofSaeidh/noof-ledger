@@ -18,6 +18,7 @@ Each file starts with YAML front matter:
 ---
 title: <the entry's heading text>
 status: deferred        # deferred | ready | done
+priority: <high | low>  # optional; only when the operator has ranked it
 area: <web | telegram | ai | persistence | host | ops | tests | docs | hosting | security | other>
 since: <date or phase, when the text states one>
 related: [<other slugs this entry explicitly refers to>]
