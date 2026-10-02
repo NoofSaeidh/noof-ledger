@@ -144,4 +144,6 @@ One line per review: confirmed findings by tag. Dated history, not status.
   unreadable, the trace page hiding the failure reason, a stale comment). Rejected: `MissingReceivedAmount`
   naming the destination currency the record still holds (Fable; A-6, only the reason is stored), a
   both-sides-RSD misread failing as `SameWallet` (Fable; recoverable by reply). The Codex run took about
-  two minutes over the whole phase, so its coverage was thin.
+  two minutes over the whole phase, so its coverage was thin. Codex was at its usage limit for the fix
+  PRs, so opus reviewed them; it found 1 more, deferred to the backlog (a job failing while its record
+  is cancelled leaves no reason, and Restore strands the record).

@@ -93,7 +93,10 @@ operator 2026-10-02); a slip in a currency the ledger does not hold is worded as
 currency, not an unreadable one (A-30, PR 8b); Restore of an incomplete slip that was cancelled during
 extraction brings it back `Failed` and asking for the missing figure instead of stranding it (A-31, PR
 8b); and an amount said as what arrived includes a fee on its side, where the prompt had read it as not
-included and stored the received leg short by the fee (A-32, PR #55).
+included and stored the received leg short by the fee (A-32, PR #55). Deferred: the opus review of the
+fixes found the wider case A-31 leaves open — any job that fails while its record is cancelled leaves
+no reason, and Restore brings the record back with no job and no buttons
+(`docs/backlog/failed-job-on-a-cancelled-record.md`).
 
 ## Decisions made during implementation, worth knowing before revisiting this code
 
