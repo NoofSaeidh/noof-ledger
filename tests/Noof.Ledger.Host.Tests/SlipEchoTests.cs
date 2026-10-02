@@ -139,6 +139,15 @@ public class SlipEchoTests
     }
 
     [Fact]
+    public void A_negative_commission_is_shown_as_read_since_recording_the_slip_refuses_it()
+    {
+        var echo = Echo.ComposeSlipNeedsConfirmation(HeldSlip(
+            evidence: new ExtractedExchange(100.00m, "EUR", 11700.00m, "RSD", 117.0000m, -150.00m, "RSD", "PZ-2026-0917")));
+
+        echo.Text.Should().Contain("\nCommission: -150.00 RSD\n");
+    }
+
+    [Fact]
     public void Cancel_before_confirming_shows_the_slip_was_never_recorded_and_offers_restore()
     {
         var echo = Echo.ComposeSlipCancelledUnconfirmed(HeldSlip());

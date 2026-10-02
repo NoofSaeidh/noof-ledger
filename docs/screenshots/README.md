@@ -53,6 +53,10 @@ Do not edit by hand; a change to what the app shows regenerates them.
 
 <img src="app/trace-receipt-check-desktop.png" width="640" alt="A receipt waiting for Record anyway, desktop"> <img src="app/trace-receipt-check-phone.png" width="200" alt="A receipt waiting for Record anyway, phone">
 
+### An exchange slip waiting for Record anyway
+
+<img src="app/trace-slip-check-desktop.png" width="640" alt="An exchange slip waiting for Record anyway, desktop"> <img src="app/trace-slip-check-phone.png" width="200" alt="An exchange slip waiting for Record anyway, phone">
+
 ### Diagnostics
 
 <img src="app/diagnostics-desktop.png" width="640" alt="Diagnostics, desktop"> <img src="app/diagnostics-phone.png" width="200" alt="Diagnostics, phone">
@@ -134,6 +138,18 @@ Do not edit by hand; a change to what the app shows regenerates them.
 ### A receipt that doesn't add up
 
 <img src="telegram/receipt-check.png" width="300" alt="A receipt that doesn't add up">
+
+### An exchange-office slip, recorded as an exchange between the two cash wallets
+
+<img src="telegram/slip.png" width="300" alt="An exchange-office slip, recorded as an exchange between the two cash wallets">
+
+### An exchange slip whose figures don't match its printed rate
+
+<img src="telegram/slip-check.png" width="300" alt="An exchange slip whose figures don't match its printed rate">
+
+### An exchange slip whose amount received could not be read
+
+<img src="telegram/slip-incomplete.png" width="300" alt="An exchange slip whose amount received could not be read">
 
 ### /health
 

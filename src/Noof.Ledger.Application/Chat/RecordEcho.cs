@@ -340,7 +340,7 @@ internal sealed class RecordEcho : IRecordEcho
             yield return $"Rate: {printed}";
         else if (evidence.Rate is { } rate && rate > 0m)
             yield return $"Rate: {rate.ToString("0.0000", CultureInfo.InvariantCulture)}";
-        if (evidence.CommissionAmount is { } commission && commission > 0m)
+        if (evidence.CommissionAmount is { } commission && commission != 0m)
         {
             var currency = evidence.CommissionCurrencyOrDinars()?.Value ?? evidence.CommissionCurrency?.Trim().ToUpperInvariant();
             yield return $"Commission: {FormatAmount(commission)} {currency}";
