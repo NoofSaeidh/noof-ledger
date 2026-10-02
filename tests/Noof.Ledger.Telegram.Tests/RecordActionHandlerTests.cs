@@ -382,6 +382,25 @@ public class RecordActionHandlerTests
             Arg.Any<CancellationToken>());
     }
 
+    // A photo cancelled while it was read, then restored once its incomplete slip was saved, asks for the missing
+    // figure with Edit - never "Reading the receipt…" with no buttons.
+    [Fact]
+    public async Task Restore_of_a_slip_saved_incomplete_while_cancelled_asks_for_the_missing_figure()
+    {
+        var record = SlipRecord(TransactionStatus.Failed, RecordFailureReason.SlipIncomplete) with
+        {
+            Slip = new SlipFacts("Menjačnica Zlatnik", "PZ-2026-0917", HeldEvidence with { ReceivedAmount = null, Rate = null }),
+        };
+        var harness = CreateForSlip(record, awaiting: false);
+
+        await harness.Handler.HandleAsync(Restore(), Restore().Message!, TestContext.Current.CancellationToken);
+
+        await harness.Notifier.Received(1).EditAsync(555L, 42, Arg.Is<EchoMessage>(m =>
+                m.Text == "Slip read, but the amount received is unreadable — reply with it."
+                && m.Actions.SequenceEqual(new[] { RecordAction.Edit })),
+            Arg.Any<CancellationToken>());
+    }
+
     // A slip a reply completed, then cancelled, then restored, offers Cancel and Edit - never Record anyway.
     [Fact]
     public async Task Restore_of_a_slip_a_reply_completed_is_never_offered_record_anyway()

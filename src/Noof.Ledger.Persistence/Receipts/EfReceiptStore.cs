@@ -167,12 +167,16 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
                 .ExecuteUpdateAsync(set => set.SetProperty(t => t.OccurredOn, slipDay), cancellationToken);
         }
 
+        // A photo cancelled while it was read stays Cancelled but keeps the outcome, so Restore brings it back
+        // asking for the missing figure (EfRecordEditor.RestoreAsync) rather than as a Captured record no job is
+        // left to finish.
         if (disposition == AppReceipts.SlipDisposition.Incomplete)
         {
             await db.Transactions
-                .Where(t => t.Id == transactionId && t.Status == TransactionStatus.Captured)
+                .Where(t => t.Id == transactionId
+                    && (t.Status == TransactionStatus.Captured || t.Status == TransactionStatus.Cancelled))
                 .ExecuteUpdateAsync(set => set
-                    .SetProperty(t => t.Status, TransactionStatus.Failed)
+                    .SetProperty(t => t.Status, t => t.Status == TransactionStatus.Captured ? TransactionStatus.Failed : t.Status)
                     .SetProperty(t => t.FailureReason, RecordFailureReason.SlipIncomplete),
                     cancellationToken);
         }
@@ -396,8 +400,8 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
     // Amendment 8: a held slip only - never recorded by anything (no RecordExchange job, no Initial, Correction
     // or Edit revision) and not failed. Status-independent like the fiscal rule, so a Cancelled held slip still
     // offers Restore back to its prompt; an incomplete slip (failed) and one a reply completed (a Correction
-    // revision) never offer "Record anyway". The stored evidence must itself assess as Hold: a photo cancelled
-    // before its incomplete slip was saved is never marked failed, so only the slip can say it is incomplete.
+    // revision) never offer "Record anyway". The stored evidence must itself assess as Hold as well, so the prompt
+    // never depends on the failure reason alone.
     async Task<bool> IsHeldSlipAsync(Guid transactionId, CancellationToken cancellationToken) =>
         !await HasJobAsync(transactionId, JobKind.RecordExchange, cancellationToken)
         && !await db.TransactionRevisions.AsNoTracking().AnyAsync(
