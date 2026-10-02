@@ -996,6 +996,28 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
         queued.Should().BeTrue();
     }
 
+    // A-22: a reply sent while the photo was still being read is the operator's later word. Queued behind it, the
+    // caption would re-apply the older figures over the reply's; RecordExchange still follows and leaves the record
+    // the reply applied alone.
+    [Theory]
+    [InlineData(AppReceipts.SlipDisposition.Record, new[] { JobKind.RecordExchange })]
+    [InlineData(AppReceipts.SlipDisposition.Incomplete, new JobKind[0])]
+    public async Task A_reply_sent_while_the_slip_was_being_read_wins_over_the_photos_caption(
+        AppReceipts.SlipDisposition disposition, JobKind[] queuedBySave)
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var transaction = await SeedSlipTransactionAsync(db, caption: "получил 11650");
+        var replyJobId = await ReplyToAsync(db, transaction.Id, "получил 11700", replyMessageId: 1001);
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now.AddMinutes(1)));
+        var slip = disposition == AppReceipts.SlipDisposition.Record ? NewSlip() : NewSlip(received: null) with { Rate = null };
+
+        await store.SaveExchangeSlipAsync(
+            transaction.Id, NewSlipReceipt(), slip, "photo-file-1", disposition, TestContext.Current.CancellationToken);
+
+        (await JobsOfAsync(db, transaction.Id)).Where(j => j.Id != replyJobId).Select(j => j.Kind)
+            .Should().Equal(queuedBySave, "the reply, not the caption, is the operator's last word");
+    }
+
     [Fact]
     public async Task EnqueueCategorizationAsync_never_queues_anything_for_an_incomplete_slip()
     {

@@ -178,8 +178,11 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
         }
 
         // A held slip's caption waits for "Record anyway" (EnqueueCategorizationAsync); an incomplete one's goes
-        // at once, since it may carry the missing figure.
-        if (disposition != AppReceipts.SlipDisposition.Hold && CaptionJob(transactionId, transaction, now) is { } caption)
+        // at once, since it may carry the missing figure. A-22: a reply sent while the photo was being read is the
+        // operator's later word, and the caption queued behind it would re-apply the older figures over it.
+        if (disposition != AppReceipts.SlipDisposition.Hold
+            && CaptionJob(transactionId, transaction, now) is { } caption
+            && !await HasReplyInFlightAsync(transactionId, cancellationToken))
             db.CategorizationJobs.Add(caption);
 
         try
@@ -408,8 +411,7 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
     Task<bool> HasJobAsync(Guid transactionId, JobKind kind, CancellationToken cancellationToken) =>
         db.CategorizationJobs.AsNoTracking().AnyAsync(job => job.TransactionId == transactionId && job.Kind == kind, cancellationToken);
 
-    // On a held slip only a reply's job carries a source message: a caption's never does, and Record anyway's own
-    // RecordExchange has already ended the hold.
+    // Until Record anyway, only a reply's job on a slip carries a source message; a caption's never does.
     Task<bool> HasReplyInFlightAsync(Guid transactionId, CancellationToken cancellationToken) =>
         db.CategorizationJobs.AsNoTracking().AnyAsync(
             job => job.TransactionId == transactionId
