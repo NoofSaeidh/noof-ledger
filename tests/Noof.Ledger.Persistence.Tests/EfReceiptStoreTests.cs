@@ -903,6 +903,99 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
         (await JobsOfAsync(db, transaction.Id)).Should().HaveCount(2, "one RecordExchange and one caption, not two of each");
     }
 
+    static async Task<Guid> ReplyToAsync(LedgerDbContext db, Guid transactionId, string reply, int replyMessageId)
+    {
+        await new EfRecordEditor(db, new FakeTimeProvider(Now)).RequestCorrectionAsync(
+            transactionId, reply, replyMessageId, Now, TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+        return (await JobsOfAsync(db, transactionId)).Single(j => j.SourceMessageId == replyMessageId).Id;
+    }
+
+    // Amendment A-8: the reply records a held slip. Pressed while the reply's correction still waits, Record anyway
+    // would queue the caption behind it, and the caption would re-apply its own figures over the operator's reply.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Record_anyway_is_refused_while_a_reply_to_the_held_slip_is_still_being_applied(bool claimed)
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (store, transaction) = await SeedSlipAsync(db, AppReceipts.SlipDisposition.Hold, caption: "получил 11650");
+        var replyJobId = await ReplyToAsync(db, transaction.Id, "получил 11700", replyMessageId: 1001);
+        if (claimed)
+        {
+            (await new EfJobQueue(db, new FakeTimeProvider(Now), maxAttempts: 8)
+                .ClaimAsync("worker", [JobKind.Correct], TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken))
+                .Should().NotBeNull();
+        }
+
+        var queued = await store.EnqueueCategorizationAsync(transaction.Id, 999, TestContext.Current.CancellationToken);
+
+        queued.Should().BeFalse("the reply records the slip; the caption must not be queued behind it");
+        (await JobsOfAsync(db, transaction.Id)).Select(j => j.Id).Should().Equal(replyJobId);
+    }
+
+    [Fact]
+    public async Task Record_anyway_is_refused_while_a_voice_reply_to_the_held_slip_is_still_being_transcribed()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (store, transaction) = await SeedSlipAsync(db, AppReceipts.SlipDisposition.Hold, caption: "получил 11650");
+        await new EfRecordEditor(db, new FakeTimeProvider(Now)).RequestVoiceCorrectionAsync(
+            transaction.Id, "voice-file-1", 1001, Now, TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var queued = await store.EnqueueCategorizationAsync(transaction.Id, 999, TestContext.Current.CancellationToken);
+
+        queued.Should().BeFalse();
+        (await JobsOfAsync(db, transaction.Id)).Select(j => j.Kind).Should().Equal(JobKind.Transcribe);
+    }
+
+    // A reply that finished without recording the slip (nothing to correct, or out of attempts) leaves it held.
+    [Theory]
+    [InlineData(JobStatus.Succeeded)]
+    [InlineData(JobStatus.Failed)]
+    public async Task A_reply_that_finished_without_recording_the_held_slip_no_longer_holds_back_Record_anyway(JobStatus finished)
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (store, transaction) = await SeedSlipAsync(db, AppReceipts.SlipDisposition.Hold, caption: "получил 11650");
+        var replyJobId = await ReplyToAsync(db, transaction.Id, "спасибо", replyMessageId: 1001);
+        await db.CategorizationJobs
+            .Where(j => j.Id == replyJobId)
+            .ExecuteUpdateAsync(set => set.SetProperty(j => j.Status, finished), TestContext.Current.CancellationToken);
+
+        var queued = await store.EnqueueCategorizationAsync(transaction.Id, 999, TestContext.Current.CancellationToken);
+
+        queued.Should().BeTrue();
+        (await JobsOfAsync(db, transaction.Id)).Where(j => j.Id != replyJobId).Select(j => j.Kind)
+            .Should().Equal(JobKind.RecordExchange, JobKind.Correct);
+    }
+
+    // Only a reply to the echo carries a source message; a correction without one (the photo's own caption) is
+    // what Record anyway itself queues, not something waiting to record the slip.
+    [Fact]
+    public async Task A_queued_correction_with_no_reply_message_does_not_hold_back_Record_anyway()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (store, transaction) = await SeedSlipAsync(db, AppReceipts.SlipDisposition.Hold, caption: "получил 11650");
+        db.CategorizationJobs.Add(new CategorizationJob
+        {
+            Id = Guid.NewGuid(),
+            TransactionId = transaction.Id,
+            Kind = JobKind.Correct,
+            Instruction = "получил 11650",
+            Status = JobStatus.Pending,
+            AttemptCount = 0,
+            RunAfter = Now,
+            CreatedAt = Now,
+            UpdatedAt = Now,
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var queued = await store.EnqueueCategorizationAsync(transaction.Id, 999, TestContext.Current.CancellationToken);
+
+        queued.Should().BeTrue();
+    }
+
     [Fact]
     public async Task EnqueueCategorizationAsync_never_queues_anything_for_an_incomplete_slip()
     {
