@@ -27,9 +27,36 @@ related: [<ids/slugs the text explicitly refers to>]
 
 **To find open questions:** `git grep -n "^status: open" docs/decisions`.
 
-**A new decision is a new file.** **A changed decision gets a new file** that `supersedes` the old
-one, which is in turn marked `status: superseded` and points `superseded_by` at the new file — never
-rewrite a decision's own file to say something different than what was actually decided at the time.
+**A new decision is a new file** — except the answer to an `open` question, which goes into that
+question's own file. **A changed decision gets a new file** that `supersedes` the old one, which is in
+turn marked `status: superseded` and points `superseded_by` at the new file — never rewrite a
+decision's own file to say something different than what was actually decided at the time.
+
+Why: the file is the record of what was decided and why, with what was known then. Agents read the
+file, not its `git log`, so a rewritten file loses the reasoning behind the first choice — and with it
+the answer to "we tried that, here is why we stopped", which is what keeps a settled question from
+being re-litigated. CLAUDE.md, code comments and PRs also cite these files by name; a rewrite would
+silently change what an old citation means.
+
+Where the boundary sits:
+
+- **Edited in place** — anything that leaves the decision itself as it was: typos, wording, broken
+  links, a clarification of what was already meant, `related` entries; and an `open` question
+  receiving its answer, since nothing had been decided yet.
+- **Amended in place, while its phase is still open** — a decision the same phase's own reviews
+  correct before the phase is finalised. The amendment is marked where it is made and says what the
+  first cut was, as `O-9` and `O-13` in `p5-2-phase5-followups.md` do (`*(Amended, Phase 5 final
+  review …)*`, "Fixed (final review, major): the first cut used …").
+- **A new file** — anything that changes a decision after that: reversing it, choosing another
+  option, widening or narrowing what it covers. A `deferred` file counts as decided here — it records
+  the choice to defer and the default taken meanwhile — so settling it is a new file that supersedes it.
+- **The superseded file** keeps its text. Beyond the front matter, its body names the date and the
+  superseding file — ``Superseded <date> — see `<slug>.md`: <the reason in a sentence>`` — as `a1`
+  and `a2` do. Front matter alone, as in `p1-6-capture-relay-decision.md`, predates this rule.
+- **One item in a file that holds several** (a table of `O-*` decisions, a numbered list) is
+  superseded the same way, by a new file; the old item keeps its text behind a leading
+  `*(Superseded <date> by <ref>.)*`, as `O-11` in `p5-2-phase5-followups.md` and item 2 of `p1-4` do.
+  The file's own `status` changes only once every item in it is superseded.
 
 ## Preserved from `docs/OPEN-QUESTIONS.md`
 

@@ -1,6 +1,7 @@
 # noof-ledger — Design (revision 2)
 
-**Status:** awaiting your review · **Date:** 2026-09-19
+**Status:** approved 2026-09-19 (§15 was added after it as an addendum); later specs amend parts of it
+and name the sections they change · **Date:** 2026-09-19
 
 > **How to review:** questions are marked **❓ Q1 … Q8** inline. Annotate your answer next to any of them, or anywhere you want something changed. **Approve** to lock the spec and move to the implementation plan. No product code until then.
 
