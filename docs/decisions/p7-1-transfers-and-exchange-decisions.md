@@ -71,7 +71,7 @@ day; copied here verbatim from the spec's own table.
 | A-18 | *(Superseded for capture by A-27.)* A transfer leg the model leaves without a wallet goes to the cash default of its currency, else the currency's default — for capture and for slips alike. | "снял 10000 с райфа" belongs in Cash RSD; with the bank as the RSD default it would fail as `SameWallet`. Between banks the operator names both. |
 | A-19 | A kept `Stated` charge stays when the foreign sum it priced changes; its rate is derived from the new sum and still marked `stated`. | Operator's call at the plan review. |
 | A-20 | A fee said in exactly one side's currency is on that side, whatever leg the model named. | A menjačnica takes its commission in dinars on a EUR → RSD exchange; the default `from` leg would reject it as `InvalidFee`. |
-| A-21 | A transfer's correction input states each side as the operator would say it — the principal, plus the fee on that side as not included — and a side the ledger worked out as such, answered `null` unless the correction states it. A valid stated rate is kept even when both amounts are given. | Otherwise a date-only correction charges the fee twice and a rate-only correction is silently lost. |
+| A-21 | *(Destination framing superseded by A-33.)* A transfer's correction input states each side as the operator would say it — the principal, plus the fee on that side as not included — and a side the ledger worked out as such, answered `null` unless the correction states it. A valid stated rate is kept even when both amounts are given. | Otherwise a date-only correction charges the fee twice and a rate-only correction is silently lost. |
 | A-22 | *(Extended by A-31.)* Failure writes never overwrite a record that moved on: a failed first reading is marked `Failed` only while still `Captured`; Restore of a record a correction applied while it was cancelled restores `Completed`; `RecordExchange` leaves an already-applied record alone, so a reply queued during extraction wins. | Each was a race or ordering in which a booked record would leave the balances. |
 | A-23 | A slip's printed issue date is the record's date until a correction says otherwise. | A slip photographed the next day, completed by a reply, would otherwise land on the capture day. |
 | A-24 | Charges are never computed for a fiscal receipt's record (T-1); `DIN`/`ДИН` on a slip read as RSD; slip vision reports figures exactly as printed and never works one out; `/wallets` numeric fields take a comma as the decimal separator and refuse what they cannot parse. | The receipt echo cannot render a charge; Serbian slips print DIN; P6-2; MudBlazor's default converter reads `117,35` as 11735. |
@@ -83,6 +83,7 @@ day; copied here verbatim from the spec's own table.
 | A-30 | A slip whose currency was read but is not one the ledger holds is not called unreadable: `SlipIncomplete`'s echo reads `Slip read, but CHF isn't a currency this ledger holds — nothing recorded. If it was misread, reply with the right currency.` (`CHF and GBP aren't currencies this ledger holds` for two), ahead of any figure that is missing as well. | The code was read, not missed, and no reply can make the ledger hold it — only a misread can be corrected (closing review). |
 | A-31 | Extends A-22: an incomplete slip saved while its photo was cancelled keeps `SlipIncomplete` and is restored `Failed`, so Restore asks for the missing figure. | Otherwise a slip cancelled during extraction and then restored was stranded, with nothing asking for what was missing (closing review). |
 | A-32 | An amount said as what arrived ("получил", "пришло", "на руки") on the fee's side already includes the fee, so `included` is true unless the person says the fee was taken on top. Extends §2's *Prompt additions*, where `included` was true only when the operator said the amount includes it. | "получил 11700, комиссия 100 динар" stored the received leg as 11 600, though 11 700 is what arrived (closing review). |
+| A-33 | A transfer's correction input states each side as the operator would say it: the source as handed over less its fee, with the fee beside it "not included in the figure" (answered `included: false`); the destination as what arrived (the stored amount), with its fee "already taken out of the figure" (answered `included: true`) — on the current record and on a slip's text alike. A side the ledger worked out is shown as such and answered `null` unless the correction states it. A new amount for a side keeps its fee's framing unless the correction says otherwise. | A destination shown before its fee contradicted the echo and capture's reading of "получил" as net (A-32), so a fee-only or bare-amount correction shifted what arrived by the fee. Closing review, 2026-10-02. |
 
 ## Changed by the closing review (2026-10-02)
 
@@ -93,9 +94,11 @@ operator 2026-10-02); a slip in a currency the ledger does not hold is worded as
 currency, not an unreadable one (A-30, PR 8b); Restore of an incomplete slip that was cancelled during
 extraction brings it back `Failed` and asking for the missing figure instead of stranding it (A-31, PR
 8b); and an amount said as what arrived includes a fee on its side, where the prompt had read it as not
-included and stored the received leg short by the fee (A-32, PR #55). Deferred: the opus review of the
-fixes found the wider case A-31 leaves open — any job that fails while its record is cancelled leaves
-no reason, and Restore brings the record back with no job and no buttons
+included and stored the received leg short by the fee (A-32, PR #55); with it, a transfer's correction
+input shows the destination as what arrived, its fee already taken out, so a fee-only or bare-amount
+correction no longer shifts it by the fee (A-33, PR #55). Deferred: the opus review of the fixes found
+the wider case A-31 leaves open — any job that fails while its record is cancelled leaves no reason, and
+Restore brings the record back with no job and no buttons
 (`docs/backlog/failed-job-on-a-cancelled-record.md`).
 
 ## Decisions made during implementation, worth knowing before revisiting this code
