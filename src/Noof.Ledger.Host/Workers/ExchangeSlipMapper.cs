@@ -50,10 +50,10 @@ internal static class ExchangeSlipMapper
     static bool TryReadFee(ExtractedExchange slip, CurrencyCode given, CurrencyCode received, out TransferFeeRequest? fee)
     {
         fee = null;
-        if (slip.CommissionAmount is not { } commission || commission <= 0m)
+        if (slip.CommissionAmount is not { } commission || commission == 0m)
             return true;
 
-        if (slip.CommissionCurrencyOrDinars() is not { } currency)
+        if (commission < 0m || slip.CommissionCurrencyOrDinars() is not { } currency)
             return false;
 
         TransferLeg? leg = currency == given ? TransferLeg.From : currency == received ? TransferLeg.To : null;
