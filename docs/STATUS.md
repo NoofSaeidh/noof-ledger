@@ -8,7 +8,8 @@
 > authentication as the sole mode, the `user set-password` verb, the loopback interlock, a Blazor
 > Server shell, Telegram capture with a durable queue, natural-language capture, voice notes
 > transcribed by Groq's whisper-large-v3, the money model (every wallet's balance — opening balance,
-> minus spending, plus income, re-anchored by the operator's own balance statements — is exact in all
+> minus spending, plus income, plus or minus the transfers that move money between wallets, re-anchored
+> by the operator's own balance statements — is exact in all
 > five currencies (EUR, RSD, USD, RUB, KZT) under `ru-RU` and `sr-Latn-RS`), observability: the
 > host waits indefinitely for PostgreSQL instead of exiting when it is down, every page shows a waiting
 > banner until the database gate is `Ready`, Serilog logs to a rolling file and to the `app_log` table

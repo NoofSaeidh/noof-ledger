@@ -14,6 +14,6 @@ The balances come out right either way; only the link between the second fee and
 
 **What building it would take.** A fee per leg (or a list) in the tool schema, the leg becoming a
 property of each fee line rather than of the transfer, the posting and the echo showing both, and the
-correction input carrying each. `record_transaction` already sits one union-typed parameter under
-Anthropic's strict-schema limit (spec A-14), so a second fee object means reshaping the schema, not
+correction input carrying each. `record_transaction` already sits near Anthropic's strict-schema limit on
+union-typed parameters (A-14), so a second fee object means reshaping the schema, not
 adding a field.

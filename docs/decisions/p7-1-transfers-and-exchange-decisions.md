@@ -120,5 +120,6 @@ Restore brings the record back with no job and no buttons
   separate currency line and the echo's "no conversion yet" — as does a spending in a currency the
   wallet has no terms for, whose echo says how to set them.
 - **Parked by the operator at the phase's close (2026-10-02):** the trace page's rendering of an
-  exchange slip (`docs/backlog/trace-page-exchange-slip.md`) and the two-commit failure path every
-  worker shares (`docs/backlog/atomic-job-and-record-failure.md`).
+  exchange slip (`docs/backlog/trace-page-exchange-slip.md`), the trace page never showing a failure
+  reason (`docs/backlog/trace-page-failure-reason.md`), and the two-commit failure path every worker
+  shares (`docs/backlog/atomic-job-and-record-failure.md`).

@@ -7,10 +7,10 @@ each line item, and see where the money went on a local Blazor dashboard that un
 wallets and currencies.
 
 > **Status: capture, balances, transfers, backup and observability all work end to end.** A message typed to the
-> Telegram bot becomes a categorised expense, income, or balance statement on the dashboard — say it
+> Telegram bot becomes a categorised expense, income, balance statement or transfer on the dashboard — say it
 > the way you would say it, and the model reads the amount, the date, the kind and which wallet from
-> how you speak it. Every wallet's balance — opening balance, minus spending, plus income, corrected
-> by your own balance statements — is exact in all five supported currencies (EUR, RSD, USD, RUB,
+> how you speak it. Every wallet's balance — opening balance, minus spending, plus income, plus or
+> minus the transfers that moved money between your wallets, corrected by your own balance statements — is exact in all five supported currencies (EUR, RSD, USD, RUB,
 > KZT), proven under both `ru-RU` and `sr-Latn-RS`. Wallets are created and managed on a `/wallets`
 > page; income and balance statements are ordinary messages to the bot, typed or spoken. The app
 > backs its own database up daily, and `ops/restore-check.ps1` restores a dump into a scratch
@@ -43,7 +43,9 @@ wallets and currencies.
 > and only its fee counts as spending, under *Fees & Charges*. Photograph a menjačnica's exchange slip
 > and it becomes the same kind of exchange, read from the photo and correctable like anything you say.
 > A purchase in a currency other than its wallet's is charged to the wallet at the rate and fee you set
-> for that currency on `/wallets` — or at the amount you say was charged. The dashboard keeps two
+> for that currency on `/wallets` — or at the amount you say was charged; with no rate set, the amount
+> stays unconverted in its own currency and the echo says how to set one, or to correct the record once
+> it is set. The dashboard keeps two
 > lenses apart: spending and income this month, and the month's transfers on their own.
 >
 > The test suite passes; the tests that call a live model or a live voice provider are skipped
