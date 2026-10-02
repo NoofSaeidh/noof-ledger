@@ -371,7 +371,7 @@ internal sealed class ReceiptCategorizationWorker(
 
         if (isLastAttempt)
         {
-            await NotifyFailureAsync(store, notifier, subject, cancellationToken);
+            await NotifyFailureAsync(store, notifier, subject, job, cancellationToken);
             return;
         }
 
@@ -407,7 +407,7 @@ internal sealed class ReceiptCategorizationWorker(
 
         var outcome = await jobQueue.FailAsync(job.Id, workerId, error, cancellationToken);
         if (outcome == JobCompletionOutcome.Applied)
-            await NotifyFailureAsync(store, notifier, subject, cancellationToken);
+            await NotifyFailureAsync(store, notifier, subject, job, cancellationToken);
     }
 
     async Task SucceedQuietlyAsync(IJobQueue jobQueue, CategorizationJob job, CancellationToken cancellationToken)
@@ -424,16 +424,21 @@ internal sealed class ReceiptCategorizationWorker(
     }
 
     async Task NotifyFailureAsync(
-        ICategorizationStore store, IChatNotifier notifier, CategorizationSubject? subject, CancellationToken cancellationToken)
+        ICategorizationStore store, IChatNotifier notifier, CategorizationSubject? subject, CategorizationJob job,
+        CancellationToken cancellationToken)
     {
         if (subject is not { BotMessageId: { } messageId } sub)
             return;
 
+        // The store marks only a still-Captured record, so a correction of a recorded receipt stays as it was.
         await store.MarkFailedAsync(sub.TransactionId, RecordFailureReason.None, cancellationToken);
 
         try
         {
-            await notifier.EditAsync(sub.TelegramChatId, messageId, recordEcho.Failure, cancellationToken);
+            var echo = job.Instruction is null
+                ? recordEcho.Failure
+                : recordEcho.ComposeCorrectionFailure(await store.GetSubjectAsync(sub.TransactionId, cancellationToken) ?? sub);
+            await notifier.EditAsync(sub.TelegramChatId, messageId, echo, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

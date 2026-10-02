@@ -120,7 +120,7 @@ public sealed class LiveModelTests
             .ProposeAsync(Request(rawText), TestContext.Current.CancellationToken);
 
         var mapped = new ProposalMapper().TryMap(
-            proposal, OfferedSlugs, offeredMerchantIds: [], wallets: OfferedWallets, defaultCurrency: "RSD", out var result, out var failure);
+            proposal, OfferedSlugs, offeredMerchantIds: [], wallets: OfferedWallets, defaultCurrency: "RSD", out var result, out var failure, out _);
 
         mapped.Should().BeTrue(failure);
         result.Items.Should().NotBeEmpty();

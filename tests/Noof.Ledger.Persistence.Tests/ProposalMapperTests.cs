@@ -30,7 +30,33 @@ public class ProposalMapperTests
 
     static bool MapWith(
         IReadOnlyList<WalletOption> wallets, CategorizationProposal proposal, out MappedProposal mapped, out string failure) =>
-        Mapper.TryMap(proposal, Slugs, [KnownMerchant], wallets, "RSD", out mapped, out failure);
+        Mapper.TryMap(proposal, Slugs, [KnownMerchant], wallets, "RSD", out mapped, out failure, out _);
+
+    static bool MapTransfer(
+        CategorizationProposal proposal, out MappedProposal mapped, out string failure, out RecordFailureReason reason,
+        IReadOnlyList<WalletOption>? wallets = null) =>
+        Mapper.TryMap(proposal, Slugs, [KnownMerchant], wallets ?? Wallets, "RSD", out mapped, out failure, out reason);
+
+    // The RSD cash and card defaults while Main Wallet stays the RSD default (spec A-27). Kept out of Wallets so every
+    // spending test above still sees the wallets it always saw.
+    static readonly WalletOption PurseRsd = new(
+        Guid.Parse("66666666-6666-6666-6666-666666666666"), "Cash RSD", CurrencyCode.Rsd, ["налик"], IsDefaultForCurrency: false,
+        DefaultForPayment: WalletPaymentDefault.Cash);
+    static readonly WalletOption RaiffeisenRsd = new(
+        Guid.Parse("77777777-7777-7777-7777-777777777777"), "Raiffeisen", CurrencyCode.Rsd, ["райф"], IsDefaultForCurrency: false,
+        DefaultForPayment: WalletPaymentDefault.Card);
+    static readonly WalletOption KaspiKzt = new(
+        Guid.Parse("55555555-5555-5555-5555-555555555555"), "Kaspi KZT", CurrencyCode.Kzt, ["каспи"], IsDefaultForCurrency: true);
+
+    static readonly ExchangeRate EuroAt117 = new(CurrencyCode.Eur, 117m, CurrencyCode.Rsd);
+
+    static CategorizationProposal Transfer(
+        decimal fromAmount, string fromCurrency = "RSD", string toCurrency = "RSD", decimal? toAmount = null,
+        Guid? fromWallet = null, Guid? toWallet = null, ProposedRate? rate = null, ProposedFee? fee = null) =>
+        new([], Kind: ProposedKind.Transfer,
+            Transfer: new ProposedTransfer(fromWallet, fromAmount, fromCurrency, toWallet, toAmount, toCurrency, rate, fee));
+
+    static Money Rsd(decimal amount) => new(amount, CurrencyCode.Rsd);
 
     [Fact]
     public void An_amount_the_message_never_wrote_in_digits_is_taken_as_the_model_gives_it()
@@ -228,11 +254,11 @@ public class ProposalMapperTests
     }
 
     [Fact]
-    public void A_kind_that_is_not_one_of_the_three_fails()
+    public void A_kind_that_is_not_one_of_the_four_fails()
     {
-        Map(new([Line(250m)], Kind: "transfer"), out _, out var failure).Should().BeFalse();
+        Map(new([Line(250m)], Kind: "gift"), out _, out var failure).Should().BeFalse();
 
-        failure.Should().Contain("transfer");
+        failure.Should().Be("kind \"gift\" is not expense, income, balance or transfer.");
     }
 
     [Fact]
@@ -293,5 +319,382 @@ public class ProposalMapperTests
             .Should().BeFalse();
 
         failure.Should().Contain("GBP");
+    }
+
+    [Fact]
+    public void A_transfer_between_named_wallets_maps_to_its_settled_legs_and_no_lines()
+    {
+        MapTransfer(Transfer(10000m, fromWallet: MainRsd.Id, toWallet: CashRsd.Id), out var mapped, out var failure, out var reason)
+            .Should().BeTrue();
+
+        failure.Should().BeEmpty();
+        reason.Should().Be(RecordFailureReason.None);
+        mapped.Kind.Should().Be(TransactionKind.Transfer);
+        mapped.WalletId.Should().Be(MainRsd.Id, "transactions.wallet_id holds the source");
+        mapped.Items.Should().BeEmpty();
+        mapped.Transfer.Should().Be(new TransferFacts(MainRsd.Id, Rsd(10000m), CashRsd.Id, Rsd(10000m), null, null, null));
+    }
+
+    [Fact]
+    public void A_leg_with_no_named_wallet_takes_the_default_wallet_of_its_own_currency()
+    {
+        MapTransfer(Transfer(100m, "EUR", "RSD", 11700m), out var mapped, out _, out _).Should().BeTrue();
+
+        mapped.Transfer.Should().Be(new TransferFacts(
+            WiseEur.Id, new Money(100m, CurrencyCode.Eur), MainRsd.Id, Rsd(11700m), null, null, null));
+    }
+
+    [Fact]
+    public void An_unnamed_destination_goes_to_the_cash_wallet_of_its_currency_before_the_currencys_default()
+    {
+        // "снял 10000 с райфа": the bank is named, the cash side is not.
+        MapTransfer(Transfer(10000m, fromWallet: MainRsd.Id), out var mapped, out _, out var reason, [.. Wallets, PurseRsd, RaiffeisenRsd])
+            .Should().BeTrue();
+
+        reason.Should().Be(RecordFailureReason.None);
+        mapped.Transfer.Should().Be(new TransferFacts(MainRsd.Id, Rsd(10000m), PurseRsd.Id, Rsd(10000m), null, null, null));
+    }
+
+    [Fact]
+    public void A_bare_withdrawal_takes_from_the_card_default_and_lands_in_the_cash_default()
+    {
+        // "снял 10000": neither side named. Under one cash rule for both legs this was SameWallet.
+        MapTransfer(Transfer(10000m), out var mapped, out _, out var reason, [.. Wallets, PurseRsd, RaiffeisenRsd])
+            .Should().BeTrue();
+
+        reason.Should().Be(RecordFailureReason.None);
+        mapped.Transfer.Should().Be(new TransferFacts(RaiffeisenRsd.Id, Rsd(10000m), PurseRsd.Id, Rsd(10000m), null, null, null));
+    }
+
+    [Fact]
+    public void An_unnamed_source_never_takes_the_cash_wallet()
+    {
+        // No RSD card default: the source falls to the RSD default, not to Cash RSD.
+        MapTransfer(Transfer(10000m), out var mapped, out _, out _, [.. Wallets, PurseRsd]).Should().BeTrue();
+
+        (mapped.Transfer?.FromWalletId).Should().Be(MainRsd.Id);
+        (mapped.Transfer?.ToWalletId).Should().Be(PurseRsd.Id);
+    }
+
+    [Fact]
+    public void A_top_up_naming_only_the_card_default_is_SameWallet()
+    {
+        // "положил 20000 на райф": the unnamed source takes the RSD card default, which is the named destination.
+        // A top-up from cash has to name the cash wallet.
+        MapTransfer(Transfer(20000m, toWallet: RaiffeisenRsd.Id), out _, out var failure, out var reason, [.. Wallets, PurseRsd, RaiffeisenRsd])
+            .Should().BeFalse();
+
+        reason.Should().Be(RecordFailureReason.SameWallet);
+        failure.Should().Be("SameWallet");
+    }
+
+    [Fact]
+    public void An_unnamed_leg_with_no_payment_default_in_its_currency_takes_the_currencys_default()
+    {
+        MapTransfer(Transfer(100m, "EUR", "RSD", 11700m), out var mapped, out _, out _, [.. Wallets, PurseRsd, RaiffeisenRsd]).Should().BeTrue();
+
+        (mapped.Transfer?.FromWalletId).Should().Be(WiseEur.Id, "there is no EUR card wallet");
+        (mapped.Transfer?.ToWalletId).Should().Be(PurseRsd.Id);
+    }
+
+    [Fact]
+    public void A_leg_whose_currency_has_no_default_wallet_is_a_currency_mismatch_not_the_default_currencys_wallet()
+    {
+        // Revolut USD exists but is not the USD default; a spending would fall back to RSD's default, a leg must not.
+        MapTransfer(Transfer(20m, "USD", "RSD", 2300m), out _, out var failure, out var reason).Should().BeFalse();
+
+        reason.Should().Be(RecordFailureReason.LegCurrencyMismatch);
+        failure.Should().Be("LegCurrencyMismatch");
+    }
+
+    [Fact]
+    public void A_named_wallet_in_another_currency_than_its_leg_is_a_currency_mismatch()
+    {
+        MapTransfer(Transfer(100m, "EUR", "RSD", 11700m, fromWallet: CashRsd.Id), out _, out _, out var reason).Should().BeFalse();
+
+        reason.Should().Be(RecordFailureReason.LegCurrencyMismatch);
+    }
+
+    [Fact]
+    public void Both_legs_on_one_wallet_is_SameWallet()
+    {
+        MapTransfer(Transfer(10000m), out _, out var failure, out var defaultedReason).Should().BeFalse();
+        MapTransfer(Transfer(10000m, fromWallet: CashRsd.Id, toWallet: CashRsd.Id), out _, out _, out var namedReason).Should().BeFalse();
+
+        defaultedReason.Should().Be(RecordFailureReason.SameWallet, "with no RSD card or cash default both legs fall to the one RSD default");
+        failure.Should().Be("SameWallet");
+        namedReason.Should().Be(RecordFailureReason.SameWallet);
+    }
+
+    [Fact]
+    public void A_leg_wallet_that_was_not_offered_fails_with_no_reason()
+    {
+        var stranger = Guid.Parse("99999999-9999-9999-9999-999999999999");
+
+        MapTransfer(Transfer(10000m, fromWallet: stranger, toWallet: CashRsd.Id), out _, out var failure, out var reason).Should().BeFalse();
+
+        failure.Should().Be($"wallet {stranger} was not offered");
+        reason.Should().Be(RecordFailureReason.None);
+    }
+
+    [Fact]
+    public void A_leg_currency_the_ledger_does_not_support_fails_with_no_reason()
+    {
+        MapTransfer(Transfer(10m, "GBP"), out _, out var failure, out var reason).Should().BeFalse();
+
+        failure.Should().Be("transfer from_currency \"GBP\" is not one this ledger supports.");
+        reason.Should().Be(RecordFailureReason.None);
+    }
+
+    [Fact]
+    public void A_rate_settles_the_received_amount_and_is_kept_as_stated()
+    {
+        MapTransfer(Transfer(100m, "EUR", "RSD", rate: new ProposedRate("EUR", 117m, "RSD")), out var mapped, out _, out _)
+            .Should().BeTrue();
+
+        mapped.Transfer.Should().Be(new TransferFacts(
+            WiseEur.Id, new Money(100m, CurrencyCode.Eur), MainRsd.Id, Rsd(11700m), null, null,
+            new ExchangeRate(CurrencyCode.Eur, 117m, CurrencyCode.Rsd)));
+    }
+
+    [Fact]
+    public void A_valid_rate_beside_a_received_amount_is_kept_as_stated_while_the_amount_settles()
+    {
+        MapTransfer(Transfer(100m, "EUR", "RSD", 11650m, rate: new ProposedRate("EUR", 117m, "RSD")), out var mapped, out _, out _)
+            .Should().BeTrue();
+
+        (mapped.Transfer?.To).Should().Be(Rsd(11650m), "the received amount said wins for the settlement");
+        (mapped.Transfer?.StatedRate).Should().Be(EuroAt117, "amendment 24: a valid stated rate is kept whenever it was said");
+    }
+
+    [Fact]
+    public void A_rate_that_cannot_convert_beside_a_received_amount_is_dropped_not_failed()
+    {
+        MapTransfer(Transfer(100m, "EUR", "RSD", 11650m, rate: new ProposedRate("USD", 117m, "RSD")), out var mapped, out _, out var reason)
+            .Should().BeTrue();
+
+        reason.Should().Be(RecordFailureReason.None);
+        (mapped.Transfer?.To).Should().Be(Rsd(11650m));
+        (mapped.Transfer?.StatedRate).Should().BeNull();
+    }
+
+    [Fact]
+    public void A_rate_in_a_currency_the_ledger_does_not_support_fails_with_no_reason()
+    {
+        MapTransfer(Transfer(100m, "EUR", "RSD", rate: new ProposedRate("GBP", 1.17m, "EUR")), out _, out var failure, out var reason)
+            .Should().BeFalse();
+
+        failure.Should().Be("rate currency \"GBP\" is not one this ledger supports.");
+        reason.Should().Be(RecordFailureReason.None);
+    }
+
+    [Fact]
+    public void A_rate_that_is_not_the_legs_currencies_fails_with_InvalidRate()
+    {
+        MapTransfer(Transfer(100m, "EUR", "RSD", rate: new ProposedRate("USD", 117m, "RSD")), out _, out var failure, out var reason)
+            .Should().BeFalse();
+
+        reason.Should().Be(RecordFailureReason.InvalidRate);
+        failure.Should().Be("InvalidRate");
+    }
+
+    [Fact]
+    public void An_exchange_with_no_received_amount_and_no_rate_fails_with_MissingReceivedAmount()
+    {
+        MapTransfer(Transfer(100m, "EUR", "RSD"), out _, out var failure, out var reason).Should().BeFalse();
+
+        reason.Should().Be(RecordFailureReason.MissingReceivedAmount);
+        failure.Should().Be("MissingReceivedAmount");
+    }
+
+    [Fact]
+    public void A_fee_becomes_the_fee_of_its_leg_inside_that_legs_stored_amount()
+    {
+        var proposal = Transfer(10000m, fromWallet: MainRsd.Id, toWallet: CashRsd.Id,
+            fee: new ProposedFee(150m, "RSD", ProposedLeg.From, false));
+
+        MapTransfer(proposal, out var mapped, out _, out _).Should().BeTrue();
+
+        mapped.Transfer.Should().Be(new TransferFacts(
+            MainRsd.Id, Rsd(10150m), CashRsd.Id, Rsd(10000m), Rsd(150m), TransferLeg.From, null));
+    }
+
+    [Fact]
+    public void A_fee_leg_is_read_whatever_its_casing()
+    {
+        var proposal = Transfer(10000m, fromWallet: MainRsd.Id, toWallet: CashRsd.Id, fee: new ProposedFee(150m, "RSD", "TO", false));
+
+        MapTransfer(proposal, out var mapped, out _, out _).Should().BeTrue();
+
+        (mapped.Transfer?.FeeLeg).Should().Be(TransferLeg.To);
+    }
+
+    [Fact]
+    public void A_fee_on_a_leg_that_is_neither_from_nor_to_fails_with_no_reason()
+    {
+        var proposal = Transfer(10000m, fromWallet: MainRsd.Id, toWallet: CashRsd.Id, fee: new ProposedFee(150m, "RSD", "both", false));
+
+        MapTransfer(proposal, out _, out var failure, out var reason).Should().BeFalse();
+
+        failure.Should().Be("fee leg \"both\" is not from or to.");
+        reason.Should().Be(RecordFailureReason.None);
+    }
+
+    [Fact]
+    public void A_fee_said_in_only_the_destinations_currency_is_on_the_destination_whatever_leg_the_model_named()
+    {
+        // "поменял 100 евро по 117, комиссия 150 динар" (amendment 23)
+        var proposal = Transfer(100m, "EUR", "RSD", rate: new ProposedRate("EUR", 117m, "RSD"),
+            fee: new ProposedFee(150m, "RSD", ProposedLeg.From, false));
+
+        MapTransfer(proposal, out var mapped, out _, out _).Should().BeTrue();
+
+        mapped.Transfer.Should().Be(new TransferFacts(
+            WiseEur.Id, new Money(100m, CurrencyCode.Eur), MainRsd.Id, Rsd(11550m), Rsd(150m), TransferLeg.To, EuroAt117));
+    }
+
+    [Fact]
+    public void A_fee_said_in_only_the_sources_currency_is_on_the_source_whatever_leg_the_model_named()
+    {
+        var proposal = Transfer(100m, "EUR", "RSD", rate: new ProposedRate("EUR", 117m, "RSD"),
+            fee: new ProposedFee(2m, "EUR", ProposedLeg.To, false));
+
+        MapTransfer(proposal, out var mapped, out _, out _).Should().BeTrue();
+
+        mapped.Transfer.Should().Be(new TransferFacts(
+            WiseEur.Id, new Money(102m, CurrencyCode.Eur), MainRsd.Id, Rsd(11700m), new Money(2m, CurrencyCode.Eur),
+            TransferLeg.From, EuroAt117));
+    }
+
+    [Fact]
+    public void A_fee_in_neither_sides_currency_fails_with_InvalidFee()
+    {
+        var proposal = Transfer(10000m, fromWallet: MainRsd.Id, toWallet: CashRsd.Id, fee: new ProposedFee(1m, "EUR", ProposedLeg.From, false));
+
+        MapTransfer(proposal, out _, out _, out var reason).Should().BeFalse();
+
+        reason.Should().Be(RecordFailureReason.InvalidFee);
+    }
+
+    // Amendment 24's round trip, last step. 2a renders a withdrawal stored as 10150 → 10000 with the 150 fee on the source
+    // as "- from …: 10000 RSD, plus a fee of 150 RSD on this side (not included in the figure)" and "- to …: 10000 RSD,
+    // worked out by the ledger"; answered back unchanged (the worker keeps both wallets) it settles to the stored legs.
+    [Fact]
+    public void A_withdrawal_answered_back_unchanged_settles_to_the_stored_legs()
+    {
+        var unchanged = Transfer(10000m, fromWallet: MainRsd.Id, toWallet: CashRsd.Id,
+            fee: new ProposedFee(150m, "RSD", ProposedLeg.From, false));
+
+        MapTransfer(unchanged, out var mapped, out _, out _).Should().BeTrue();
+
+        mapped.Transfer.Should().Be(new TransferFacts(
+            MainRsd.Id, Rsd(10150m), CashRsd.Id, Rsd(10000m), Rsd(150m), TransferLeg.From, null));
+    }
+
+    // The exchange 2a renders and reads back (An_exchange_answered_back_unchanged_reads_into_the_proposal_the_rendering_implies):
+    // stored 100 EUR → 11562.35 RSD, 150 RSD fee on the destination, stated rate 117.1235. "это было позавчера" answered
+    // back unchanged moves the day and keeps every figure and the rate - also when the model repeats the worked-out
+    // 11712.35 instead of leaving it null.
+    [Fact]
+    public void A_date_only_correction_answered_back_unchanged_keeps_the_legs_fee_and_stated_rate()
+    {
+        var stored = new TransferFacts(
+            WiseEur.Id, new Money(100m, CurrencyCode.Eur), MainRsd.Id, Rsd(11562.35m), Rsd(150m), TransferLeg.To,
+            new ExchangeRate(CurrencyCode.Eur, 117.1235m, CurrencyCode.Rsd));
+        var said = new ProposedTransfer(
+            WiseEur.Id, 100m, "EUR", MainRsd.Id, null, "RSD",
+            new ProposedRate("EUR", 117.1235m, "RSD"), new ProposedFee(150m, "RSD", ProposedLeg.To, false));
+        var unchanged = new CategorizationProposal([], OccurredOn: "2026-09-20", Kind: ProposedKind.Transfer, Transfer: said);
+        var repeated = unchanged with { Transfer = said with { ToAmount = 11712.35m } };
+
+        MapTransfer(unchanged, out var mapped, out _, out _).Should().BeTrue();
+        MapTransfer(repeated, out var mappedRepeated, out _, out _).Should().BeTrue();
+
+        mapped.Transfer.Should().Be(stored);
+        mapped.OccurredOn.Should().Be(new DateOnly(2026, 9, 20));
+        mappedRepeated.Transfer.Should().Be(stored);
+    }
+
+    [Fact]
+    public void A_transfer_amount_that_is_not_positive_fails_with_InvalidAmount()
+    {
+        MapTransfer(Transfer(0m, fromWallet: MainRsd.Id, toWallet: CashRsd.Id), out _, out _, out var reason).Should().BeFalse();
+
+        reason.Should().Be(RecordFailureReason.InvalidAmount);
+    }
+
+    [Fact]
+    public void A_transfer_keeps_no_line_items_even_when_the_model_sent_some()
+    {
+        var proposal = Transfer(10000m, fromWallet: MainRsd.Id, toWallet: CashRsd.Id) with { Items = [Line(250m)] };
+
+        MapTransfer(proposal, out var mapped, out _, out _).Should().BeTrue();
+
+        mapped.Items.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_transfer_kind_with_no_transfer_object_fails_with_no_reason()
+    {
+        MapTransfer(new([], Kind: ProposedKind.Transfer), out _, out var failure, out var reason).Should().BeFalse();
+
+        failure.Should().Be("a transfer with no transfer object");
+        reason.Should().Be(RecordFailureReason.None);
+    }
+
+    [Fact]
+    public void A_transfer_takes_the_day_it_names()
+    {
+        var proposal = Transfer(10000m, fromWallet: MainRsd.Id, toWallet: CashRsd.Id) with { OccurredOn = "2026-09-20" };
+
+        MapTransfer(proposal, out var mapped, out _, out _).Should().BeTrue();
+
+        mapped.OccurredOn.Should().Be(new DateOnly(2026, 9, 20));
+    }
+
+    [Fact]
+    public void A_spending_still_maps_with_no_reason()
+    {
+        Mapper.TryMap(new([Line(250m)]), Slugs, [KnownMerchant], Wallets, "RSD", out _, out var failure, out var reason)
+            .Should().BeTrue();
+
+        failure.Should().BeEmpty();
+        reason.Should().Be(RecordFailureReason.None);
+    }
+
+    [Fact]
+    public void A_charge_stated_in_the_wallets_currency_reaches_the_mapped_spending()
+    {
+        var proposal = new CategorizationProposal(
+            [Line(30m, "USD")], WalletId: KaspiKzt.Id, Charged: new ProposedCharge(15400m, "kzt", 154m, true));
+
+        MapWith([.. Wallets, KaspiKzt], proposal, out var mapped, out _).Should().BeTrue();
+
+        mapped.Charged.Should().Be(new StatedCharge(new Money(15400m, CurrencyCode.Kzt), 154m, true));
+    }
+
+    [Fact]
+    public void A_charge_stated_in_another_supported_currency_still_passes_through_for_the_store_to_judge()
+    {
+        var proposal = new CategorizationProposal(
+            [Line(30m, "USD")], WalletId: KaspiKzt.Id, Charged: new ProposedCharge(30m, "USD", null, false));
+
+        MapWith([.. Wallets, KaspiKzt], proposal, out var mapped, out _).Should().BeTrue();
+
+        mapped.Charged.Should().Be(new StatedCharge(new Money(30m, CurrencyCode.Usd), null, false),
+            "a said charge counts as said even when it cannot be honoured, so no older stated charge survives it (review C-4)");
+    }
+
+    [Fact]
+    public void A_charge_in_a_currency_the_ledger_does_not_support_fails_with_no_reason()
+    {
+        var proposal = new CategorizationProposal(
+            [Line(30m, "USD")], WalletId: KaspiKzt.Id, Charged: new ProposedCharge(25m, "GBP", null, false));
+
+        Mapper.TryMap(proposal, Slugs, [KnownMerchant], [.. Wallets, KaspiKzt], "RSD", out _, out var failure, out var reason)
+            .Should().BeFalse();
+
+        failure.Should().Be("charged currency \"GBP\" is not one this ledger supports.");
+        reason.Should().Be(RecordFailureReason.None);
     }
 }
