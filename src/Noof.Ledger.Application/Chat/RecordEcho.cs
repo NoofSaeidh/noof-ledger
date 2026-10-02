@@ -359,11 +359,29 @@ internal sealed class RecordEcho : IRecordEcho
         _ => problem.ToString(),
     };
 
-    // The plain sentence is for a SlipIncomplete record with no slip row, where nothing names the missing figure.
+    // The plain sentence is for a SlipIncomplete record with no slip row, where nothing names the missing figure. A
+    // code the ledger lacks (CHF) was read, not missed, and no reply can make the ledger hold it - only a misread can be
+    // corrected - so it is named for what it is, ahead of any figure that is missing as well.
     static string SlipIncompleteText(SlipFacts? slip) =>
-        SlipMissingClause(slip) is { } missing
+        UnheldCurrencies(slip) is { Count: > 0 } codes
+            ? $"Slip read, but {UnheldClause(codes)} — nothing recorded. If it was misread, reply with the right currency."
+        : SlipMissingClause(slip) is { } missing
             ? $"Slip read, but {missing} is unreadable — reply with it."
             : "Slip read, but a figure is unreadable — reply with it.";
+
+    static List<string> UnheldCurrencies(SlipFacts? slip) =>
+        slip is null
+            ? []
+            : [.. new[] { slip.Evidence.GivenCurrency, slip.Evidence.ReceivedCurrency }
+                .OfType<string>()
+                .Select(code => code.Trim().ToUpperInvariant())
+                .Where(code => code.Length > 0 && ExtractedExchange.SupportedCurrency(code) is null)
+                .Distinct()];
+
+    static string UnheldClause(List<string> codes) =>
+        codes.Count == 1
+            ? $"{codes[0]} isn't a currency this ledger holds"
+            : $"{string.Join(" and ", codes)} aren't currencies this ledger holds";
 
     // The figures Assess found missing - not every null field: a received amount the printed rate can fill is never
     // what made a slip incomplete, so the bot never asks for it.
