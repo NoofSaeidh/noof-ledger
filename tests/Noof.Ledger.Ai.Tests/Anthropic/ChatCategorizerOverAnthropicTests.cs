@@ -279,7 +279,7 @@ public class ChatCategorizerOverAnthropicTests
 
     // The round trip of amendment 24, middle step. Task 2a.4 renders an exchange stored as 100 EUR → 11562.35 RSD with a
     // 150 RSD fee on the destination and a stated rate of 117.1235 as "- from Cash EUR: 100 EUR", "- to Cash RSD:
-    // 11712.35 RSD, worked out by the ledger, plus a fee of 150 RSD on this side (not included in the figure)" and
+    // 11562.35 RSD, worked out by the ledger, after a fee of 150 RSD on this side (already taken out of the figure)" and
     // "- rate as stated: 1 EUR = 117.1235 RSD". A date-only correction answers that back unchanged as below; 2b's
     // A_date_only_correction_answered_back_unchanged_keeps_the_legs_fee_and_stated_rate settles this same
     // ProposedTransfer to the stored figures.
@@ -289,7 +289,7 @@ public class ChatCategorizerOverAnthropicTests
         var (categorizer, handler) = Build();
         handler.Enqueue(HttpStatusCode.OK, """
             {"id":"msg_11","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
-             "content":[{"type":"tool_use","id":"toolu_11","name":"record_transaction","input":{"items":[],"occurred_on":"2026-09-20","kind":"transfer","wallet_id":null,"balance_amount":null,"balance_currency":null,"transfer":{"from_wallet_id":null,"from_amount":100,"from_currency":"EUR","to_wallet_id":null,"to_amount":null,"to_currency":"RSD","rate":{"base_currency":"EUR","quote_amount":117.1235,"quote_currency":"RSD"},"fee":{"amount":150,"currency":"RSD","leg":"to","included":false}},"charged":null}}],
+             "content":[{"type":"tool_use","id":"toolu_11","name":"record_transaction","input":{"items":[],"occurred_on":"2026-09-20","kind":"transfer","wallet_id":null,"balance_amount":null,"balance_currency":null,"transfer":{"from_wallet_id":null,"from_amount":100,"from_currency":"EUR","to_wallet_id":null,"to_amount":null,"to_currency":"RSD","rate":{"base_currency":"EUR","quote_amount":117.1235,"quote_currency":"RSD"},"fee":{"amount":150,"currency":"RSD","leg":"to","included":true}},"charged":null}}],
              "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}
             """);
 
@@ -299,7 +299,7 @@ public class ChatCategorizerOverAnthropicTests
         proposal.Transfer.Should().Be(new ProposedTransfer(
             null, 100m, "EUR", null, null, "RSD",
             new ProposedRate("EUR", 117.1235m, "RSD"),
-            new ProposedFee(150m, "RSD", ProposedLeg.To, false)));
+            new ProposedFee(150m, "RSD", ProposedLeg.To, true)));
     }
 
     [Fact]
