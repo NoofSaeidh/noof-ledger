@@ -987,9 +987,46 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
         jobs.Single(j => j.Kind == JobKind.Correct).Instruction.Should().Be("получил 11700");
     }
 
+    // ExtractReceiptWorker saves the slip while it still holds the capture's ExtractReceipt claim.
+    static async Task<Guid> SeedClaimedExtractionAsync(LedgerDbContext db, Guid transactionId)
+    {
+        var extraction = new CategorizationJob
+        {
+            Id = Guid.NewGuid(),
+            TransactionId = transactionId,
+            Kind = JobKind.ExtractReceipt,
+            Status = JobStatus.Claimed,
+            AttemptCount = 1,
+            ClaimedAt = Now,
+            ClaimedBy = "extract-worker",
+            RunAfter = Now.AddMinutes(5),
+            CreatedAt = SlipSentAt,
+            UpdatedAt = Now,
+        };
+        db.CategorizationJobs.Add(extraction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+        return extraction.Id;
+    }
+
+    [Fact]
+    public async Task A_slip_saved_under_its_own_extraction_claim_still_queues_its_caption()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var transaction = await SeedSlipTransactionAsync(db, caption: "получил 11650");
+        var extractionJobId = await SeedClaimedExtractionAsync(db, transaction.Id);
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+
+        await store.SaveExchangeSlipAsync(
+            transaction.Id, NewSlipReceipt(), NewSlip(), "photo-file-1", AppReceipts.SlipDisposition.Record, TestContext.Current.CancellationToken);
+
+        (await JobsOfAsync(db, transaction.Id)).Where(j => j.Id != extractionJobId).Select(j => j.Kind)
+            .Should().Equal([JobKind.RecordExchange, JobKind.Correct], "the capture's own job is not a reply");
+    }
+
     // A-22: a reply sent while the photo was still being read is the operator's later word. Queued behind it, the
-    // caption would re-apply the older figures over the reply's; RecordExchange still follows and leaves the record
-    // the reply applied alone.
+    // caption would re-apply the older figures over the reply's, so the save queues no caption; RecordExchange is
+    // still queued, after the reply.
     [Theory]
     [InlineData(AppReceipts.SlipDisposition.Record, new[] { JobKind.RecordExchange })]
     [InlineData(AppReceipts.SlipDisposition.Incomplete, new JobKind[0])]
@@ -998,6 +1035,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
     {
         await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = await SeedSlipTransactionAsync(db, caption: "получил 11650");
+        var extractionJobId = await SeedClaimedExtractionAsync(db, transaction.Id);
         var replyJobId = await ReplyToAsync(db, transaction.Id, "получил 11700", replyMessageId: 1001);
         var store = new EfReceiptStore(db, new FakeTimeProvider(Now.AddMinutes(1)));
         var slip = disposition == AppReceipts.SlipDisposition.Record ? NewSlip() : NewSlip(received: null) with { Rate = null };
@@ -1005,7 +1043,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
         await store.SaveExchangeSlipAsync(
             transaction.Id, NewSlipReceipt(), slip, "photo-file-1", disposition, TestContext.Current.CancellationToken);
 
-        (await JobsOfAsync(db, transaction.Id)).Where(j => j.Id != replyJobId).Select(j => j.Kind)
+        (await JobsOfAsync(db, transaction.Id)).Where(j => j.Id != replyJobId && j.Id != extractionJobId).Select(j => j.Kind)
             .Should().Equal(queuedBySave, "the reply, not the caption, is the operator's last word");
     }
 
