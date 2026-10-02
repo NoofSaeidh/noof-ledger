@@ -49,7 +49,7 @@ internal sealed class RecordEcho : IRecordEcho
     public EchoMessage NewReceiptLinkMustBeSentSeparately { get; } = new(
         "This looks like a different receipt — send it as its own new message. Nothing changed here.", []);
 
-    public EchoMessage Compose(CategorizationSubject record) => WithWhatWasHeard(record, record switch
+    public EchoMessage Compose(CategorizationSubject record) => WithSlip(record, WithWhatWasHeard(record, record switch
     {
         { Kind: TransactionKind.Transfer, Transfer: { } transfer, Status: TransactionStatus.Cancelled } =>
             new(TransferText(record, transfer, cancelled: true), [RecordAction.Restore]),
@@ -73,7 +73,7 @@ internal sealed class RecordEcho : IRecordEcho
         { Kind: TransactionKind.Income } =>
             new($"Income — {record.WalletName} · balance {Balances(record)}\n{Body(record)}", [RecordAction.Cancel, RecordAction.Edit]),
         _ => new($"Recorded — {record.WalletName} · balance {Balances(record)}\n{Body(record)}", [RecordAction.Cancel, RecordAction.Edit]),
-    });
+    }));
 
     public EchoMessage ComposeHeardNothing(CategorizationSubject record)
     {
@@ -110,7 +110,7 @@ internal sealed class RecordEcho : IRecordEcho
         RecordFailureReason.InvalidRate => "Exchange not recorded: couldn't use that rate. Reply with the amount you got.",
         RecordFailureReason.InvalidFee => "Transfer not recorded: couldn't place that fee. Reply with the amounts.",
         RecordFailureReason.InvalidAmount => "Transfer not recorded: an amount wasn't positive. Reply with the amounts.",
-        RecordFailureReason.SlipIncomplete => "Slip read, but a figure is unreadable — reply with it.",
+        RecordFailureReason.SlipIncomplete => SlipIncompleteText(record.Slip),
         _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, "No echo text for this failure reason."),
     };
 
@@ -163,6 +163,10 @@ internal sealed class RecordEcho : IRecordEcho
     public EchoMessage ComposeReceipt(
         CategorizationSubject record, ReceiptView receipt, UnsupportedChangeKind unsupportedChange = UnsupportedChangeKind.None)
     {
+        // A slip is not a fiscal receipt (T-8): it has no shop lines to show, only the exchange it recorded.
+        if (receipt.Kind == ReceiptKind.Exchange)
+            return Compose(record);
+
         // N-5 (Phase 6 re-review): M-4 (a non-money slip's own Cancelled) and M-11 (a duplicate's
         // Restore) both leave RecordActionHandler re-rendering a receipt record that never reached
         // Persisted - Captured (Restore before ApplyAsync ever ran) or Failed. Neither is
@@ -263,6 +267,119 @@ internal sealed class RecordEcho : IRecordEcho
         return new($"{header}\n{total}\n\nThis receipt was never categorised — press Restore to bring it back for confirmation.",
             [RecordAction.Restore]);
     }
+
+    public string RecordingExchange => "Recording the exchange…";
+
+    const string SlipVisionWarning = "⚠️ Read from the slip photo — check the figures.";
+
+    public EchoMessage ComposeSlipNeedsConfirmation(ExchangeSlipView slip)
+    {
+        List<string> lines = [$"This exchange slip doesn't look right — {SlipOffice(slip.SellerName)}"];
+        if (slip.SellerTaxId is { Length: > 0 } taxId)
+            lines.Add($"PIB: {taxId}");
+        if (slip.SlipNumber is { Length: > 0 } number)
+            lines.Add($"Slip #: {number}");
+        lines.AddRange(SlipFigures(slip.Evidence));
+        lines.Add(string.Empty);
+        lines.AddRange(slip.Evidence.Assess(slip.SellerTaxId, taxIdMalformed: false).Problems.Select(problem => $"⚠️ {SlipProblemText(problem)}"));
+        lines.Add(SlipVisionWarning);
+        lines.Add(string.Empty);
+        lines.Add("Record it anyway, or cancel?");
+
+        return new(string.Join('\n', lines), [RecordAction.RecordAnyway, RecordAction.Cancel]);
+    }
+
+    public EchoMessage ComposeSlipCancelledUnconfirmed(ExchangeSlipView slip)
+    {
+        List<string> lines = [$"Cancelled — {SlipOffice(slip.SellerName)}", .. SlipFigures(slip.Evidence)];
+        lines.Add(string.Empty);
+        lines.Add("This slip was never recorded — press Restore to bring it back for confirmation.");
+
+        return new(string.Join('\n', lines), [RecordAction.Restore]);
+    }
+
+    public EchoMessage ComposeSlipDuplicate(DateOnly? occurredOn, ExtractedExchange evidence, bool originalCancelled = false)
+    {
+        var given = SlipAmount(evidence.GivenAmount, evidence.GivenCurrency);
+        var received = SlipAmount(evidence.ReceivedAmount, evidence.ReceivedCurrency);
+        var figures = given is not null && received is not null ? $"{given} → {received}" : given;
+        string?[] parts = [occurredOn?.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture), figures];
+        var reference = string.Join(", ", parts.Where(part => part is not null));
+        var sentBefore = reference.Length > 0
+            ? $"this exchange slip was sent before ({reference})"
+            : "this exchange slip was sent before";
+
+        return originalCancelled
+            ? new($"Already recorded — {sentBefore} and cancelled. Press Restore on that message to bring it back.", [])
+            : new($"Already recorded — {sentBefore}.", []);
+    }
+
+    // Spec §4's slip row: the exchange as any exchange echoes it, then the office and the warning a slip carries in
+    // place of the receipt's QR advice, which means nothing for a slip.
+    static EchoMessage WithSlip(CategorizationSubject record, EchoMessage echo) =>
+        record is { Slip: { } slip, Transfer: not null, Status: TransactionStatus.Completed or TransactionStatus.Cancelled }
+            ? echo with { Text = $"{echo.Text}\n{SlipVenueLine(slip.VenueName)}\n{SlipVisionWarning}" }
+            : echo;
+
+    // A slip prints the office's business name, which often already says "Menjačnica"; it is never said twice.
+    static string SlipVenueLine(string? venueName) =>
+        string.IsNullOrWhiteSpace(venueName) ? "Menjačnica · from a slip photo"
+        : venueName.Contains("menjačnica", StringComparison.OrdinalIgnoreCase)
+            || venueName.Contains("menjacnica", StringComparison.OrdinalIgnoreCase) ? $"{venueName} · from a slip photo"
+        : $"Menjačnica {venueName} · from a slip photo";
+
+    static string SlipOffice(string? sellerName) => sellerName is { Length: > 0 } ? sellerName : "Exchange office";
+
+    static IEnumerable<string> SlipFigures(ExtractedExchange evidence)
+    {
+        if (SlipAmount(evidence.GivenAmount, evidence.GivenCurrency) is { } given)
+            yield return $"Given: {given}";
+        if (SlipAmount(evidence.ReceivedAmount, evidence.ReceivedCurrency) is { } received)
+            yield return $"Received: {received}";
+        if (evidence.PrintedRate() is { } printed)
+            yield return $"Rate: {printed}";
+        else if (evidence.Rate is { } rate && rate > 0m)
+            yield return $"Rate: {rate.ToString("0.0000", CultureInfo.InvariantCulture)}";
+        if (evidence.CommissionAmount is { } commission && commission != 0m)
+        {
+            var currency = evidence.CommissionCurrencyOrDinars()?.Value ?? evidence.CommissionCurrency?.Trim().ToUpperInvariant();
+            yield return $"Commission: {FormatAmount(commission)} {currency}";
+        }
+    }
+
+    static string? SlipAmount(decimal? amount, string? currency) =>
+        amount is { } value && ExtractedExchange.SupportedCurrency(currency) is { } code ? $"{FormatAmount(value)} {code}" : null;
+
+    // Worded exactly as Persistence's EfTransactionTrace.DescribeSlipProblem, which keeps its own copy - change both together.
+    static string SlipProblemText(SlipProblem problem) => problem switch
+    {
+        SlipProblem.AmountsDisagree => "The given and received amounts don't match the printed rate",
+        SlipProblem.TaxIdUnreadable => "The office's PIB is unreadable or not 9 digits",
+        SlipProblem.SlipNumberUnreadable => "The slip number is unreadable, so a repeat of this slip can't be caught",
+        _ => problem.ToString(),
+    };
+
+    // The plain sentence is for a SlipIncomplete record with no slip row, where nothing names the missing figure.
+    static string SlipIncompleteText(SlipFacts? slip) =>
+        SlipMissingClause(slip) is { } missing
+            ? $"Slip read, but {missing} is unreadable — reply with it."
+            : "Slip read, but a figure is unreadable — reply with it.";
+
+    // The figures Assess found missing - not every null field: a received amount the printed rate can fill is never
+    // what made a slip incomplete, so the bot never asks for it.
+    static string? SlipMissingClause(SlipFacts? slip) =>
+        slip?.Evidence.Assess(sellerTaxId: null, taxIdMalformed: false).Missing is { Count: > 0 } missing
+            ? string.Join(", ", missing.Select(SlipMissingText))
+            : null;
+
+    static string SlipMissingText(SlipMissing missing) => missing switch
+    {
+        SlipMissing.GivenAmount => "the amount given",
+        SlipMissing.GivenCurrency => "the currency given",
+        SlipMissing.ReceivedAmount => "the amount received",
+        SlipMissing.ReceivedCurrency => "the currency received",
+        _ => missing.ToString(),
+    };
 
     static string ShopHeader(ReceiptView receipt)
     {

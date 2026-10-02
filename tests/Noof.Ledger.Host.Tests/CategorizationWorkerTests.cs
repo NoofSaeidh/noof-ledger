@@ -2112,6 +2112,28 @@ public class CategorizationWorkerTests
         await categorizer.Received(1).ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task A_correction_on_an_exchange_slip_runs_record_transaction_never_the_receipt_categorizer()
+    {
+        var jobQueue = QueueWith(Job(kind: JobKind.Correct, instruction: "получил 11650"));
+        var receiptStore = NoReceiptStore();
+        receiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Receipt(kind: ReceiptKind.Exchange));
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
+            .Returns(Subject(status: TransactionStatus.Completed, lines: [StoredBread], captureKind: CaptureKind.Photo));
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(OneGroceryLine());
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer, receiptStore: receiptStore),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await jobQueue.DidNotReceiveWithAnyArgs().HandOffToReceiptCorrectionAsync(
+            default, default!, default, default, default, default, Arg.Any<CancellationToken>());
+        await categorizer.Received(1).ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>());
+    }
+
     // Important finding, fix round 2 (Fable 5.1 review): a link capture whose extraction failed
     // terminally has no receipt row, so TryRouteToReceiptAsync falls through and RawText - the whole
     // verification URL, vl payload included - would otherwise reach categorize_receipt's Message

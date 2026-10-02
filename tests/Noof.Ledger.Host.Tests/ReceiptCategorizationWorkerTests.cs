@@ -564,6 +564,38 @@ public class ReceiptCategorizationWorkerTests
     }
 
     [Fact]
+    public async Task An_exchange_slip_is_never_categorised_from_receipt_lines_and_only_its_job_fails()
+    {
+        var receiptStore = DefaultReceiptStore();
+        receiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Receipt(kind: ReceiptKind.Exchange, lines: []));
+        var store = DefaultStore();
+        var notifier = Substitute.For<IChatNotifier>();
+        var recordEditor = Substitute.For<IRecordEditor>();
+        var categorizer = DefaultCategorizer();
+        var jobQueue = QueueWith(Job());
+        var logger = new CapturingLogger<ReceiptCategorizationWorker>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, receiptStore: receiptStore, categorizer: categorizer, notifier: notifier,
+                recordEditor: recordEditor),
+            Time(), logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await jobQueue.Received(1).FailAsync(
+            JobId, WorkerId, "an exchange slip is recorded by RecordExchange, never categorised from receipt lines", Arg.Any<CancellationToken>());
+        await categorizer.DidNotReceiveWithAnyArgs().CategorizeAsync(default!, Arg.Any<CancellationToken>());
+        await store.DidNotReceiveWithAnyArgs().ApplyAsync(default, default!, Arg.Any<CancellationToken>());
+        await store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, default, Arg.Any<CancellationToken>());
+        await recordEditor.DidNotReceiveWithAnyArgs().CancelAsync(default, Arg.Any<CancellationToken>());
+        await notifier.DidNotReceiveWithAnyArgs().EditAsync(default, default, default!, Arg.Any<CancellationToken>());
+
+        var stageFailed = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.StageFailedEventId).Subject;
+        stageFailed.Stage.Should().Be(TransactionStages.StageFailed);
+        stageFailed.Properties["FailedStage"].Should().Be(TransactionStages.Categorized);
+        stageFailed.Exception.Should().NotBeNull();
+    }
+
+    [Fact]
     public async Task A_missing_ordinal_from_the_categorizer_falls_back_to_the_catalogue_s_other_category()
     {
         var categorizer = DefaultCategorizer();

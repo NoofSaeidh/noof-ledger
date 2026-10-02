@@ -5,6 +5,7 @@ using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Domain;
+using Noof.Ledger.Persistence.Receipts;
 using Noof.Ledger.Telegram;
 
 namespace Noof.Ledger.Demo.Shots;
@@ -157,6 +158,21 @@ internal static class TelegramScenes
                 Photo("09:20"),
                 Reply(echo.ComposeReceiptNeedsConfirmation(View(MockData.UnconfirmedReceiptTransactionId)), "09:20"),
             ]),
+            new("slip", "An exchange-office slip, recorded as an exchange between the two cash wallets",
+            [
+                Photo("13:15"),
+                Reply(echo.Compose(SlipExchange()), "13:15"),
+            ]),
+            new("slip-check", "An exchange slip whose figures don't match its printed rate",
+            [
+                Photo("13:40"),
+                Reply(echo.ComposeSlipNeedsConfirmation(SlipView(MockData.HeldSlipTransactionId)), "13:40"),
+            ]),
+            new("slip-incomplete", "An exchange slip whose amount received could not be read",
+            [
+                Photo("13:55"),
+                Reply(echo.Compose(IncompleteSlip()), "13:55"),
+            ]),
             new("health", "/health",
             [
                 Operator("/health", "08:00"),
@@ -222,4 +238,35 @@ internal static class TelegramScenes
         new(Guid.Empty, raw, MockData.TelegramChatId, 1, transfer.FromWalletName, TransactionStatus.Completed, Day, Day, lines ?? [],
             Kind: TransactionKind.Transfer, WalletCurrency: transfer.From.Currency, WalletBalances: transfer.FromBalances,
             WalletId: transfer.FromWalletId, Transfer: transfer);
+
+    static CategorizationSubject SlipExchange() =>
+        TransferRecord(string.Empty, Legs(
+            "Cash EUR", new Money(100.00m, CurrencyCode.Eur), 150.00m,
+            "Cash RSD", new Money(11700.00m, CurrencyCode.Rsd), 23700.00m) with { VenueName = "Menjačnica Zlatnik" }) with
+        {
+            CaptureKind = CaptureKind.Photo,
+            Slip = new SlipFacts("Menjačnica Zlatnik", "PZ-2026-0917",
+                new ExtractedExchange(100.00m, "EUR", 11700.00m, "RSD", 117.0000m, null, null, "PZ-2026-0917")),
+        };
+
+    // No rate was read either, so the amount received can't be worked out from it.
+    static CategorizationSubject IncompleteSlip() =>
+        Expense(string.Empty, string.Empty, CurrencyCode.Rsd, 0m, []) with
+        {
+            Status = TransactionStatus.Failed,
+            CaptureKind = CaptureKind.Photo,
+            WalletCurrency = null,
+            WalletBalances = null,
+            FailureReason = RecordFailureReason.SlipIncomplete,
+            Slip = new SlipFacts("Menjačnica Zlatnik", "PZ-2026-0919",
+                new ExtractedExchange(100.00m, "EUR", null, "RSD", null, null, null, "PZ-2026-0919")),
+        };
+
+    // The same held slip the demo database holds, so the picture and its trace page agree.
+    static ExchangeSlipView SlipView(Guid id)
+    {
+        var receipt = MockData.Records.Single(record => record.Id == id).Receipt!;
+        return new(id, receipt.SellerTaxId, receipt.SellerName, receipt.IssuedAt,
+            EfReceiptStore.NormalisedSlipNumber(receipt.Exchange!.SlipNumber), receipt.Exchange);
+    }
 }

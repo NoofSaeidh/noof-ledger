@@ -1,4 +1,5 @@
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
 
@@ -40,6 +41,7 @@ internal static class MockData
     public static readonly Guid ExchangeTransactionId = Id(906);
     public static readonly Guid ForeignSpendingTransactionId = Id(907);
     public static readonly Guid TransferTransactionId = Id(908);
+    public static readonly Guid HeldSlipTransactionId = Id(909);
 
     public static IReadOnlyList<MockLogRow> LogRows { get; } =
     [
@@ -116,6 +118,13 @@ internal static class MockData
                 new("Jogurt 1L", 1m, "kom", 150.00m, 150.00m, null),
                 new("Kifla", 3m, "kom", 40.00m, 120.00m, null),
             ])),
+
+        // An exchange-office slip whose figures miss its printed rate by 50 dinars: held for Record anyway, so
+        // nothing has moved between the cash wallets yet.
+        Receipt(TransactionStatus.Captured, Day(18), HeldSlipTransactionId, new(
+            ReceiptSource.Vision, "Menjačnica Zlatnik", null, null, "123456789", null,
+            At(18, 13, 40), 11650.00m, PaymentMethod.Cash, QrTotal: null, [],
+            ReceiptKind.Exchange, new ExtractedExchange(100.00m, "EUR", 11650.00m, "RSD", 117.0000m, null, null, "PZ-2026-0918"))),
     ];
 
     // Two legs each, so they do not fit MockRecord; MockDataWriter posts them through LedgerPostings, as the app does.
@@ -210,7 +219,9 @@ internal sealed record MockReceipt(
     decimal Total,
     PaymentMethod Payment,
     decimal? QrTotal,
-    IReadOnlyList<MockReceiptLine> Lines);
+    IReadOnlyList<MockReceiptLine> Lines,
+    ReceiptKind Kind = ReceiptKind.Sale,
+    ExtractedExchange? Exchange = null);
 
 internal sealed record MockReceiptLine(string Name, decimal Quantity, string Unit, decimal UnitPrice, decimal Total, string? CategorySlug);
 
