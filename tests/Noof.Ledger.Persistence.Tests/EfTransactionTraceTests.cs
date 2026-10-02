@@ -2,6 +2,7 @@ using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Application.Reporting;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Diagnostics;
@@ -827,5 +828,62 @@ public class EfTransactionTraceTests(PostgresFixture fixture)
         trace.History[2].Snapshot.Should().BeNull("a snapshot that parses but cannot be shown is damage too");
         trace.History.Select(h => h.SnapshotUnreadable).Should().Equal(
             [true, false, true], "the page must tell a damaged snapshot from one that kept no record");
+    }
+
+    static Transaction SlipPhotoCapture() => new()
+    {
+        Id = TransactionId,
+        WalletId = null,
+        Kind = TransactionKind.Expense,
+        RawText = null,
+        CaptureKind = CaptureKind.Photo,
+        TelegramFileId = "photo-1",
+        Status = TransactionStatus.Captured,
+        TimeZoneId = "Europe/Belgrade",
+        OccurredAt = new DateTimeOffset(2026, 9, 25, 10, 0, 0, TimeSpan.Zero),
+        OccurredOn = new DateOnly(2026, 9, 25),
+        TelegramChatId = 1,
+        TelegramMessageId = 1,
+        CreatedAt = new DateTimeOffset(2026, 9, 25, 10, 0, 0, TimeSpan.Zero),
+    };
+
+    static ExtractedReceipt SlipReceipt(string? sellerTaxId) => new(
+        ReceiptSource.Vision, null, sellerTaxId, "Menjačnica Zlatnik", null, null, null,
+        new DateTimeOffset(2026, 9, 25, 9, 0, 0, TimeSpan.Zero), 11650.00m, CurrencyCode.Rsd, ReceiptKind.Exchange, null, null, []);
+
+    [Fact]
+    public async Task A_held_slip_is_awaiting_confirmation_with_its_slip_problems_named_never_a_line_sum()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        db.Transactions.Add(SlipPhotoCapture());
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await new EfReceiptStore(db, TimeProvider.System).SaveExchangeSlipAsync(
+            TransactionId, SlipReceipt(sellerTaxId: null),
+            new ExtractedExchange(100.00m, "EUR", 11650.00m, "RSD", 117.0000m, null, null, "PZ-2026-0917"),
+            "photo-1", SlipDisposition.Hold, TestContext.Current.CancellationToken);
+
+        var trace = await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+
+        trace.Receipt!.AwaitingConfirmation.Should().BeTrue();
+        trace.Receipt.Problems.Should().Equal(
+            "The given and received amounts don't match the printed rate",
+            "The office's PIB is unreadable or not 9 digits");
+    }
+
+    [Fact]
+    public async Task A_clean_slip_is_not_awaiting_and_names_no_problem()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        db.Transactions.Add(SlipPhotoCapture());
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await new EfReceiptStore(db, TimeProvider.System).SaveExchangeSlipAsync(
+            TransactionId, SlipReceipt(sellerTaxId: "123456789"),
+            new ExtractedExchange(100.00m, "EUR", 11700.00m, "RSD", 117.0000m, null, null, "PZ-2026-0917"),
+            "photo-1", SlipDisposition.Record, TestContext.Current.CancellationToken);
+
+        var trace = await Trace(db).GetAsync(TransactionId, TestContext.Current.CancellationToken);
+
+        trace.Receipt!.AwaitingConfirmation.Should().BeFalse();
+        trace.Receipt.Problems.Should().BeEmpty();
     }
 }

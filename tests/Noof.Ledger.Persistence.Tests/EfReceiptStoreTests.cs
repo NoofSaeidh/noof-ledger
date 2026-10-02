@@ -2,7 +2,10 @@ using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Noof.Ledger.Domain;
+using Noof.Ledger.Persistence.Editing;
+using Noof.Ledger.Persistence.Jobs;
 using Noof.Ledger.Persistence.Receipts;
+using Noof.Ledger.Persistence.Revisions;
 using Npgsql;
 using AppReceipts = Noof.Ledger.Application.Receipts;
 
@@ -507,6 +510,509 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         db.ChangeTracker.Clear();
         var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+
+        (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken)).Should().BeFalse();
+    }
+
+    // 00:30 in Belgrade on 26 September is still the 25th in UTC: a caption's InstructionDay is the local day.
+    static readonly DateTimeOffset SlipSentAt = new(2026, 9, 25, 22, 30, 0, TimeSpan.Zero);
+
+    static Transaction NewSlipPhotoTransaction(string? caption) => new()
+    {
+        Id = Guid.NewGuid(),
+        WalletId = null,
+        RawText = caption,
+        CaptureKind = CaptureKind.Photo,
+        TelegramFileId = "photo-file-1",
+        Status = TransactionStatus.Captured,
+        TimeZoneId = "Europe/Belgrade",
+        OccurredAt = SlipSentAt,
+        OccurredOn = new DateOnly(2026, 9, 26),
+        TelegramChatId = 222,
+        TelegramMessageId = Interlocked.Increment(ref nextMessageId),
+        CreatedAt = SlipSentAt,
+    };
+
+    static async Task<Transaction> SeedSlipTransactionAsync(LedgerDbContext db, string? caption = null)
+    {
+        var transaction = NewSlipPhotoTransaction(caption);
+        db.Transactions.Add(transaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+        return transaction;
+    }
+
+    static AppReceipts.ExtractedReceipt NewSlipReceipt(string? sellerTaxId = "123456789") => new(
+        ReceiptSource.Vision,
+        VerificationUrl: null,
+        SellerTaxId: sellerTaxId,
+        SellerName: "Menjačnica Zlatnik",
+        SellerAddress: null,
+        LocationName: null,
+        FiscalNumber: null,
+        IssuedAt: new DateTimeOffset(2026, 9, 26, 0, 25, 0, TimeSpan.FromHours(2)),
+        Total: 11700.00m,
+        Currency: CurrencyCode.Rsd,
+        Kind: ReceiptKind.Exchange,
+        PaymentMethod: PaymentMethod.Cash,
+        QrTotal: null,
+        Lines: []);
+
+    static AppReceipts.ExtractedExchange NewSlip(string? slipNumber = " pz-2026-0917 ", decimal? received = 11700.00m) => new(
+        GivenAmount: 100.00m,
+        GivenCurrency: "EUR",
+        ReceivedAmount: received,
+        ReceivedCurrency: "RSD",
+        Rate: 117.123456789012m,
+        CommissionAmount: null,
+        CommissionCurrency: null,
+        SlipNumber: slipNumber);
+
+    static async Task<List<CategorizationJob>> JobsOfAsync(LedgerDbContext db, Guid transactionId) =>
+        await db.CategorizationJobs.AsNoTracking()
+            .Where(j => j.TransactionId == transactionId)
+            .OrderBy(j => j.CreatedAt)
+            .ToListAsync(TestContext.Current.CancellationToken);
+
+    [Fact]
+    public async Task SaveExchangeSlipAsync_writes_the_slip_as_evidence_with_its_number_normalised_and_every_figure_as_read()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var transaction = await SeedSlipTransactionAsync(db);
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+
+        var result = await store.SaveExchangeSlipAsync(
+            transaction.Id, NewSlipReceipt(), NewSlip(), "photo-file-1", AppReceipts.SlipDisposition.Record,
+            TestContext.Current.CancellationToken);
+
+        result.DuplicateOfTransactionId.Should().BeNull();
+        var receipt = await db.Receipts.AsNoTracking().SingleAsync(r => r.TransactionId == transaction.Id, TestContext.Current.CancellationToken);
+        receipt.Id.Should().Be(result.ReceiptId!.Value);
+        receipt.Kind.Should().Be(ReceiptKind.Exchange);
+        receipt.Source.Should().Be(ReceiptSource.Vision);
+        receipt.SlipNumber.Should().Be("PZ-2026-0917");
+        receipt.SellerTaxId.Should().Be("123456789");
+        receipt.SellerName.Should().Be("Menjačnica Zlatnik");
+        receipt.Total.Should().Be(new Money(11700.00m, CurrencyCode.Rsd));
+        receipt.IssuedAt.Should().Be(new DateTimeOffset(2026, 9, 25, 22, 25, 0, TimeSpan.Zero));
+        receipt.TelegramFileId.Should().Be("photo-file-1");
+        (await db.ReceiptLines.CountAsync(l => l.ReceiptId == receipt.Id, TestContext.Current.CancellationToken))
+            .Should().Be(0, "a slip has no lines");
+
+        var evidence = await db.ReceiptExchanges.AsNoTracking().SingleAsync(e => e.ReceiptId == receipt.Id, TestContext.Current.CancellationToken);
+        evidence.GivenAmount.Should().Be(100.00m);
+        evidence.GivenCurrency.Should().Be("EUR");
+        evidence.ReceivedAmount.Should().Be(11700.00m);
+        evidence.ReceivedCurrency.Should().Be("RSD");
+        evidence.Rate.Should().Be(117.123456789012m, "numeric(24,12) keeps a rate's twelve decimals");
+        evidence.CommissionAmount.Should().BeNull();
+        evidence.CommissionCurrency.Should().BeNull();
+        evidence.SlipNumber.Should().Be(" pz-2026-0917 ", "the evidence keeps the slip number exactly as vision read it");
+    }
+
+    [Fact]
+    public async Task GetExchangeSlipAsync_reads_the_slip_back_and_is_null_for_a_fiscal_receipt()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var slipTransaction = await SeedSlipTransactionAsync(db);
+        var fiscalTransaction = NewPhotoTransaction();
+        db.Transactions.Add(fiscalTransaction);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+        var slip = NewSlip();
+        var saved = await store.SaveExchangeSlipAsync(
+            slipTransaction.Id, NewSlipReceipt(), slip, "photo-file-1", AppReceipts.SlipDisposition.Hold, TestContext.Current.CancellationToken);
+        await store.SaveExtractedAsync(fiscalTransaction.Id, NewExtractedReceipt(), "photo-file-2", true, TestContext.Current.CancellationToken);
+
+        var view = await store.GetExchangeSlipAsync(slipTransaction.Id, TestContext.Current.CancellationToken);
+        var fiscal = await store.GetExchangeSlipAsync(fiscalTransaction.Id, TestContext.Current.CancellationToken);
+
+        view.Should().Be(new AppReceipts.ExchangeSlipView(
+            saved.ReceiptId!.Value, "123456789", "Menjačnica Zlatnik", new DateTimeOffset(2026, 9, 25, 22, 25, 0, TimeSpan.Zero),
+            "PZ-2026-0917", slip));
+        fiscal.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_clean_slip_queues_RecordExchange_and_nothing_more_when_the_photo_had_no_caption()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var transaction = await SeedSlipTransactionAsync(db);
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+
+        await store.SaveExchangeSlipAsync(
+            transaction.Id, NewSlipReceipt(), NewSlip(), "photo-file-1", AppReceipts.SlipDisposition.Record, TestContext.Current.CancellationToken);
+
+        var jobs = await JobsOfAsync(db, transaction.Id);
+        jobs.Select(j => j.Kind).Should().Equal(JobKind.RecordExchange);
+        jobs[0].Status.Should().Be(JobStatus.Pending);
+        jobs[0].CreatedAt.Should().Be(Now);
+        jobs[0].SourceMessageId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_clean_slip_queues_its_caption_as_a_correction_one_microsecond_after_RecordExchange()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var transaction = await SeedSlipTransactionAsync(db, caption: "  получил 11650 ");
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+
+        await store.SaveExchangeSlipAsync(
+            transaction.Id, NewSlipReceipt(), NewSlip(), "photo-file-1", AppReceipts.SlipDisposition.Record, TestContext.Current.CancellationToken);
+
+        var jobs = await JobsOfAsync(db, transaction.Id);
+        jobs.Select(j => j.Kind).Should().Equal(JobKind.RecordExchange, JobKind.Correct);
+        var caption = jobs[1];
+        caption.Instruction.Should().Be("получил 11650");
+        caption.InstructionDay.Should().Be(new DateOnly(2026, 9, 26), "the caption was written with the photo, on its local day in Belgrade");
+        caption.SourceMessageId.Should().BeNull("a caption is not a reply");
+        caption.RunAfter.Should().Be(Now);
+        caption.CreatedAt.Should().Be(jobs[0].CreatedAt.AddTicks(10));
+        (await db.Transactions.AsNoTracking().SingleAsync(t => t.Id == transaction.Id, TestContext.Current.CancellationToken))
+            .Status.Should().Be(TransactionStatus.Captured, "a clean slip is recorded by RecordExchange, not by saving it");
+    }
+
+    // Review focus 3: a slip photo with the caption "получил 11650" - RecordExchange runs first, then the
+    // caption's correction replaces the received amount; never both at once, never the other way round.
+    [Fact]
+    public async Task The_caption_job_of_a_clean_slip_is_claimable_only_after_its_record_exchange_job()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var transaction = await SeedSlipTransactionAsync(db, caption: "получил 11650");
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+        await store.SaveExchangeSlipAsync(
+            transaction.Id, NewSlipReceipt(), NewSlip(), "photo-file-1", AppReceipts.SlipDisposition.Record, TestContext.Current.CancellationToken);
+        var queue = new EfJobQueue(db, new FakeTimeProvider(Now.AddMinutes(1)), maxAttempts: 8);
+        var lease = TimeSpan.FromMinutes(5);
+
+        (await queue.ClaimAsync("caption-worker", [JobKind.Correct], lease, TestContext.Current.CancellationToken))
+            .Should().BeNull("the caption must wait for the RecordExchange job created before it");
+
+        var recordJob = await queue.ClaimAsync("record-worker", [JobKind.RecordExchange], lease, TestContext.Current.CancellationToken);
+        recordJob.Should().NotBeNull();
+        (await queue.ClaimAsync("caption-worker", [JobKind.Correct], lease, TestContext.Current.CancellationToken))
+            .Should().BeNull("a claimed RecordExchange still holds the caption back");
+
+        await queue.SucceedAsync(recordJob!.Id, "record-worker", TestContext.Current.CancellationToken);
+        var captionJob = await queue.ClaimAsync("caption-worker", [JobKind.Correct], lease, TestContext.Current.CancellationToken);
+
+        captionJob.Should().NotBeNull();
+        captionJob!.CreatedAt.Should().BeAfter(recordJob.CreatedAt);
+    }
+
+    [Fact]
+    public async Task A_blank_caption_queues_no_correction()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var transaction = await SeedSlipTransactionAsync(db, caption: "   ");
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+
+        await store.SaveExchangeSlipAsync(
+            transaction.Id, NewSlipReceipt(), NewSlip(), "photo-file-1", AppReceipts.SlipDisposition.Record, TestContext.Current.CancellationToken);
+
+        (await JobsOfAsync(db, transaction.Id)).Select(j => j.Kind).Should().Equal(JobKind.RecordExchange);
+    }
+
+    [Fact]
+    public async Task A_held_slip_queues_nothing_not_even_its_caption()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var transaction = await SeedSlipTransactionAsync(db, caption: "получил 11650");
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+
+        var result = await store.SaveExchangeSlipAsync(
+            transaction.Id, NewSlipReceipt(), NewSlip(received: 11650.00m), "photo-file-1", AppReceipts.SlipDisposition.Hold,
+            TestContext.Current.CancellationToken);
+
+        result.ReceiptId.Should().NotBeNull();
+        (await JobsOfAsync(db, transaction.Id)).Should().BeEmpty("a held slip's caption waits for Record anyway");
+        var stored = await db.Transactions.AsNoTracking().SingleAsync(t => t.Id == transaction.Id, TestContext.Current.CancellationToken);
+        stored.Status.Should().Be(TransactionStatus.Captured);
+        stored.FailureReason.Should().Be(RecordFailureReason.None);
+    }
+
+    [Fact]
+    public async Task An_incomplete_slip_fails_the_record_with_SlipIncomplete_and_queues_its_caption_at_once()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var transaction = await SeedSlipTransactionAsync(db, caption: "получил 11650");
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+
+        await store.SaveExchangeSlipAsync(
+            transaction.Id, NewSlipReceipt(), NewSlip(received: null) with { Rate = null }, "photo-file-1",
+            AppReceipts.SlipDisposition.Incomplete, TestContext.Current.CancellationToken);
+
+        var stored = await db.Transactions.AsNoTracking().SingleAsync(t => t.Id == transaction.Id, TestContext.Current.CancellationToken);
+        stored.Status.Should().Be(TransactionStatus.Failed);
+        stored.FailureReason.Should().Be(RecordFailureReason.SlipIncomplete);
+        var jobs = await JobsOfAsync(db, transaction.Id);
+        jobs.Select(j => j.Kind).Should().Equal(JobKind.Correct);
+        jobs[0].Instruction.Should().Be("получил 11650", "the caption may carry the missing figure");
+    }
+
+    [Fact]
+    public async Task A_second_slip_with_the_same_PIB_and_slip_number_writes_nothing_and_names_the_first_transaction()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var first = await SeedSlipTransactionAsync(db);
+        var second = await SeedSlipTransactionAsync(db, caption: "получил 11650");
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+        await store.SaveExchangeSlipAsync(
+            first.Id, NewSlipReceipt(), NewSlip(slipNumber: "PZ-2026-0917"), "photo-file-1", AppReceipts.SlipDisposition.Record,
+            TestContext.Current.CancellationToken);
+
+        var secondResult = await store.SaveExchangeSlipAsync(
+            second.Id, NewSlipReceipt(), NewSlip(slipNumber: " pz-2026-0917"), "photo-file-2", AppReceipts.SlipDisposition.Record,
+            TestContext.Current.CancellationToken);
+
+        secondResult.Should().Be(new AppReceipts.ReceiptSaveResult(null, first.Id));
+        (await db.Receipts.CountAsync(r => r.TransactionId == second.Id, TestContext.Current.CancellationToken)).Should().Be(0);
+        (await db.ReceiptExchanges.CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
+        (await JobsOfAsync(db, second.Id)).Should().BeEmpty("the duplicate's RecordExchange and caption roll back with its receipt");
+    }
+
+    [Fact]
+    public async Task A_replayed_slip_save_for_the_same_transaction_returns_its_own_receipt_not_a_duplicate()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var transaction = await SeedSlipTransactionAsync(db);
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+        var first = await store.SaveExchangeSlipAsync(
+            transaction.Id, NewSlipReceipt(), NewSlip(), "photo-file-1", AppReceipts.SlipDisposition.Record, TestContext.Current.CancellationToken);
+
+        var replay = await store.SaveExchangeSlipAsync(
+            transaction.Id, NewSlipReceipt(), NewSlip(), "photo-file-1", AppReceipts.SlipDisposition.Record, TestContext.Current.CancellationToken);
+
+        replay.Should().Be(new AppReceipts.ReceiptSaveResult(first.ReceiptId, null));
+        (await db.Receipts.CountAsync(r => r.TransactionId == transaction.Id, TestContext.Current.CancellationToken)).Should().Be(1);
+        (await JobsOfAsync(db, transaction.Id)).Select(j => j.Kind).Should().Equal(JobKind.RecordExchange);
+    }
+
+    [Fact]
+    public async Task Slips_with_no_slip_number_are_never_duplicates_of_each_other()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var first = await SeedSlipTransactionAsync(db);
+        var second = await SeedSlipTransactionAsync(db);
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+
+        var firstResult = await store.SaveExchangeSlipAsync(
+            first.Id, NewSlipReceipt(), NewSlip(slipNumber: null), "photo-file-1", AppReceipts.SlipDisposition.Hold,
+            TestContext.Current.CancellationToken);
+        var secondResult = await store.SaveExchangeSlipAsync(
+            second.Id, NewSlipReceipt(), NewSlip(slipNumber: "  "), "photo-file-2", AppReceipts.SlipDisposition.Hold,
+            TestContext.Current.CancellationToken);
+
+        firstResult.ReceiptId.Should().NotBeNull();
+        secondResult.ReceiptId.Should().NotBeNull();
+        secondResult.DuplicateOfTransactionId.Should().BeNull();
+    }
+
+    // Amendment 26: a slip changed money the evening before its photo was sent; the record is dated by the slip.
+    [Theory]
+    [InlineData(AppReceipts.SlipDisposition.Record)]
+    [InlineData(AppReceipts.SlipDisposition.Hold)]
+    [InlineData(AppReceipts.SlipDisposition.Incomplete)]
+    public async Task A_slip_dated_the_day_before_its_photo_dates_the_record_by_the_slip(AppReceipts.SlipDisposition disposition)
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var transaction = await SeedSlipTransactionAsync(db);
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+
+        await store.SaveExchangeSlipAsync(
+            transaction.Id, NewSlipReceipt() with { IssuedAt = new DateTimeOffset(2026, 9, 25, 20, 15, 0, TimeSpan.FromHours(2)) },
+            NewSlip(), "photo-file-1", disposition, TestContext.Current.CancellationToken);
+
+        (await db.Transactions.AsNoTracking().SingleAsync(t => t.Id == transaction.Id, TestContext.Current.CancellationToken))
+            .OccurredOn.Should().Be(new DateOnly(2026, 9, 25), "the photo was sent on the 26th, the exchange happened on the 25th");
+    }
+
+    [Fact]
+    public async Task A_slip_with_no_readable_date_keeps_the_day_its_photo_was_sent()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var transaction = await SeedSlipTransactionAsync(db);
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+
+        await store.SaveExchangeSlipAsync(
+            transaction.Id, NewSlipReceipt() with { IssuedAt = null }, NewSlip(), "photo-file-1", AppReceipts.SlipDisposition.Hold,
+            TestContext.Current.CancellationToken);
+
+        (await db.Transactions.AsNoTracking().SingleAsync(t => t.Id == transaction.Id, TestContext.Current.CancellationToken))
+            .OccurredOn.Should().Be(new DateOnly(2026, 9, 26));
+    }
+
+    // Amendment 26 and spec §3: a held slip a reply completes keeps the slip's day - the correction that names no day
+    // keeps the record's (CategorizationWorker.DefaultDay), and the record's day is now the slip's. PR 7c's worker test
+    // covers the worker half; this pins that the day a reply finds is the slip's, through the subject it reads.
+    [Fact]
+    public async Task A_held_slips_subject_carries_the_slips_day_for_the_reply_that_completes_it()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var transaction = await SeedSlipTransactionAsync(db);
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+        await store.SaveExchangeSlipAsync(
+            transaction.Id, NewSlipReceipt() with { IssuedAt = new DateTimeOffset(2026, 9, 25, 20, 15, 0, TimeSpan.FromHours(2)) },
+            NewSlip(received: 11650.00m), "photo-file-1", AppReceipts.SlipDisposition.Hold, TestContext.Current.CancellationToken);
+
+        var subject = await new Noof.Ledger.Persistence.Categorization.EfCategorizationStore(db, new FakeTimeProvider(Now))
+            .GetSubjectAsync(transaction.Id, TestContext.Current.CancellationToken);
+
+        subject!.OccurredOn.Should().Be(new DateOnly(2026, 9, 25));
+        subject.SentOn.Should().Be(new DateOnly(2026, 9, 26));
+    }
+
+    static async Task<(EfReceiptStore Store, Transaction Transaction)> SeedSlipAsync(
+        LedgerDbContext db, AppReceipts.SlipDisposition disposition, string? caption = null)
+    {
+        var transaction = await SeedSlipTransactionAsync(db, caption);
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+        await store.SaveExchangeSlipAsync(
+            transaction.Id, NewSlipReceipt(), NewSlip(received: 11650.00m), "photo-file-1", disposition, TestContext.Current.CancellationToken);
+        return (store, transaction);
+    }
+
+    [Fact]
+    public async Task EnqueueCategorizationAsync_on_a_held_slip_queues_RecordExchange_with_the_echo_message_id_then_the_caption()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (store, transaction) = await SeedSlipAsync(db, AppReceipts.SlipDisposition.Hold, caption: "получил 11650");
+
+        var queued = await store.EnqueueCategorizationAsync(transaction.Id, 999, TestContext.Current.CancellationToken);
+
+        queued.Should().BeTrue();
+        var jobs = await JobsOfAsync(db, transaction.Id);
+        jobs.Select(j => j.Kind).Should().Equal(JobKind.RecordExchange, JobKind.Correct);
+        jobs[0].SourceMessageId.Should().Be(999);
+        jobs[1].Instruction.Should().Be("получил 11650");
+        jobs[1].CreatedAt.Should().Be(jobs[0].CreatedAt.AddTicks(10));
+    }
+
+    [Fact]
+    public async Task EnqueueCategorizationAsync_on_a_held_slip_pressed_twice_is_a_no_op_the_second_time()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (store, transaction) = await SeedSlipAsync(db, AppReceipts.SlipDisposition.Hold, caption: "получил 11650");
+
+        var first = await store.EnqueueCategorizationAsync(transaction.Id, 999, TestContext.Current.CancellationToken);
+        var second = await store.EnqueueCategorizationAsync(transaction.Id, 999, TestContext.Current.CancellationToken);
+
+        first.Should().BeTrue();
+        second.Should().BeFalse();
+        (await JobsOfAsync(db, transaction.Id)).Should().HaveCount(2, "one RecordExchange and one caption, not two of each");
+    }
+
+    [Fact]
+    public async Task EnqueueCategorizationAsync_never_queues_anything_for_an_incomplete_slip()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (store, transaction) = await SeedSlipAsync(db, AppReceipts.SlipDisposition.Incomplete);
+
+        var queued = await store.EnqueueCategorizationAsync(transaction.Id, 999, TestContext.Current.CancellationToken);
+
+        queued.Should().BeFalse("confirmation cannot supply an amount; only a reply can");
+        (await JobsOfAsync(db, transaction.Id)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task IsAwaitingConfirmationAsync_is_true_for_a_held_slip()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (store, transaction) = await SeedSlipAsync(db, AppReceipts.SlipDisposition.Hold);
+
+        (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken)).Should().BeTrue();
+    }
+
+    // Review focus 2: Cancel, then Restore, must bring back the "Record anyway" prompt for a held slip.
+    [Fact]
+    public async Task A_cancelled_held_slip_is_still_awaiting_confirmation()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (store, transaction) = await SeedSlipAsync(db, AppReceipts.SlipDisposition.Hold);
+
+        await new EfRecordEditor(db, new FakeTimeProvider(Now)).CancelAsync(transaction.Id, TestContext.Current.CancellationToken);
+
+        (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken))
+            .Should().BeTrue("a Cancel is not an apply: Restore must return to the slip's confirmation prompt");
+    }
+
+    // Review focus 2: a slip a reply completed (amendment 9) and then cancelled offers Restore only.
+    [Fact]
+    public async Task A_slip_a_reply_completed_is_never_awaiting_even_when_cancelled()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (store, transaction) = await SeedSlipAsync(db, AppReceipts.SlipDisposition.Hold);
+        var completed = await db.Transactions.SingleAsync(t => t.Id == transaction.Id, TestContext.Current.CancellationToken);
+        completed.Status = TransactionStatus.Completed;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await RevisionLog.AppendAsync(
+            db, completed, RevisionKind.Correction, "получил 11650", TransactionStatus.Captured, Now, TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken)).Should().BeFalse();
+
+        await new EfRecordEditor(db, new FakeTimeProvider(Now)).CancelAsync(transaction.Id, TestContext.Current.CancellationToken);
+
+        (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken))
+            .Should().BeFalse("a reply already recorded it; Restore must never offer Record anyway again");
+    }
+
+    // Review focus 2: an incomplete slip is Failed with SlipIncomplete - only a reply completes it.
+    [Fact]
+    public async Task An_incomplete_slip_is_never_awaiting()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (store, transaction) = await SeedSlipAsync(db, AppReceipts.SlipDisposition.Incomplete);
+
+        (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken)).Should().BeFalse();
+
+        await new EfRecordEditor(db, new FakeTimeProvider(Now)).CancelAsync(transaction.Id, TestContext.Current.CancellationToken);
+
+        (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken)).Should().BeFalse();
+    }
+
+    // A photo cancelled before its incomplete slip is saved keeps no failure reason (the Incomplete
+    // update only touches a Captured record), so only the slip's own evidence can say it is incomplete.
+    [Fact]
+    public async Task An_incomplete_slip_saved_after_a_Cancel_is_never_recorded_anyway_after_Restore()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var transaction = await SeedSlipTransactionAsync(db);
+        var editor = new EfRecordEditor(db, new FakeTimeProvider(Now));
+        var store = new EfReceiptStore(db, new FakeTimeProvider(Now));
+        await editor.CancelAsync(transaction.Id, TestContext.Current.CancellationToken);
+        await store.SaveExchangeSlipAsync(
+            transaction.Id, NewSlipReceipt(), NewSlip(received: null) with { Rate = null }, "photo-file-1",
+            AppReceipts.SlipDisposition.Incomplete, TestContext.Current.CancellationToken);
+        await editor.RestoreAsync(transaction.Id, TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var queued = await store.EnqueueCategorizationAsync(transaction.Id, 999, TestContext.Current.CancellationToken);
+
+        var stored = await db.Transactions.AsNoTracking().SingleAsync(t => t.Id == transaction.Id, TestContext.Current.CancellationToken);
+        stored.Status.Should().Be(TransactionStatus.Captured);
+        stored.FailureReason.Should().Be(RecordFailureReason.None);
+        queued.Should().BeFalse("the slip is missing its received amount; only a reply can complete it");
+        (await JobsOfAsync(db, transaction.Id)).Should().BeEmpty();
+        (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task A_clean_slip_is_never_awaiting_confirmation()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (store, transaction) = await SeedSlipAsync(db, AppReceipts.SlipDisposition.Record);
+
+        (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task A_held_slip_is_no_longer_awaiting_once_Record_anyway_has_queued_RecordExchange()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (store, transaction) = await SeedSlipAsync(db, AppReceipts.SlipDisposition.Hold);
+        await store.EnqueueCategorizationAsync(transaction.Id, 999, TestContext.Current.CancellationToken);
 
         (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken)).Should().BeFalse();
     }
