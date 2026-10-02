@@ -245,7 +245,7 @@ public class RecordExchangeWorkerTests
     // The store fails only a still-Captured record, so a Cancel pressed after "Record anyway" stays a Cancel (spec A-22);
     // the worker's part is to fail its job and echo the record as the database holds it.
     [Fact]
-    public async Task A_record_cancelled_after_record_anyway_fails_only_its_job()
+    public async Task A_record_cancelled_after_record_anyway_fails_its_job_and_echoes_the_record_read_back()
     {
         var cancelled = SlipCapture(TransactionStatus.Cancelled);
         var harness = Setup(Slip(CleanSale with { CommissionAmount = 1.30m, CommissionCurrency = "USD" }), record: cancelled);
@@ -311,6 +311,7 @@ public class RecordExchangeWorkerTests
         await first.Queue.Received(1).RetryAsync(JobId, WorkerId, Arg.Any<DateTimeOffset>(), "the database went away", Arg.Any<CancellationToken>());
         await first.Store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<RecordFailureReason>(), Arg.Any<CancellationToken>());
         await last.Store.Received(1).MarkFailedAsync(TransactionId, RecordFailureReason.None, Arg.Any<CancellationToken>());
+        await last.Notifier.Received(1).EditAsync(111L, 42, Arg.Any<EchoMessage>(), Arg.Any<CancellationToken>());
     }
 
     static CategorizationSubject RepliedRecord(TransactionStatus status) =>
