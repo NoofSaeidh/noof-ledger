@@ -5,6 +5,7 @@ using Noof.Ledger.Application.Editing;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Editing;
 using Noof.Ledger.Persistence.Revisions;
+using Npgsql;
 
 namespace Noof.Ledger.Persistence.Tests;
 
@@ -244,5 +245,41 @@ public class EfRecordEditorTests(PostgresFixture fixture)
         job.SourceMessageId.Should().Be(900);
         job.Instruction.Should().BeNull("the instruction is whatever the transcript turns out to be");
         job.InstructionDay.Should().Be(new DateOnly(2026, 9, 24), "22:30 UTC on the 23rd is the 24th in Belgrade");
+    }
+
+    // A slip save and Record anyway decide under this row lock whether a reply is in flight. A reply that stamped its
+    // place in the queue before a slip save and committed after it would be invisible to that check and still be
+    // claimed before the caption queued behind it. The insert alone waits too (its foreign key's share lock), so what
+    // this pins is when the job is stamped: only once the reply holds the lock.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_reply_waits_for_the_records_row_lock_and_takes_its_queue_place_once_it_holds_it(bool spoken)
+    {
+        await using var dbA = await fixture.CreateMigratedContextAsync();
+        var transaction = await SeedAsync(dbA, TransactionStatus.Captured);
+        await using var dbB = new LedgerDbContext(
+            new DbContextOptionsBuilder<LedgerDbContext>().UseNpgsql(dbA.Database.GetConnectionString()).Options);
+        var clock = new FakeTimeProvider(Clock.GetUtcNow());
+        var editor = new EfRecordEditor(dbB, clock);
+
+        await using var lockingTx = await dbA.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
+        await dbA.Database.SqlQueryRaw<Guid>(
+            "SELECT id FROM transactions WHERE id = @transactionId FOR UPDATE",
+            new NpgsqlParameter("transactionId", transaction.Id))
+            .ToListAsync(TestContext.Current.CancellationToken);
+
+        var reply = spoken
+            ? editor.RequestVoiceCorrectionAsync(transaction.Id, "reply-voice", 900, Clock.GetUtcNow(), TestContext.Current.CancellationToken)
+            : editor.RequestCorrectionAsync(transaction.Id, "нет, 1500", 900, Clock.GetUtcNow(), TestContext.Current.CancellationToken);
+        await LockWaits.UntilABackendWaitsOnALockAsync(dbA, TestContext.Current.CancellationToken);
+        reply.IsCompleted.Should().BeFalse("the reply must wait for the lock a slip save holds");
+
+        clock.Advance(TimeSpan.FromMinutes(1));
+        await lockingTx.CommitAsync(TestContext.Current.CancellationToken);
+
+        (await reply).Should().BeTrue();
+        (await dbA.CategorizationJobs.AsNoTracking().SingleAsync(j => j.TransactionId == transaction.Id, TestContext.Current.CancellationToken))
+            .CreatedAt.Should().Be(Clock.GetUtcNow().AddMinutes(1), "the reply's place in the queue is taken once it holds the lock");
     }
 }
