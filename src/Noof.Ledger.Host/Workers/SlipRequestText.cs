@@ -1,0 +1,79 @@
+using System.Globalization;
+using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Application.Receipts;
+using Noof.Ledger.Domain;
+
+namespace Noof.Ledger.Host.Workers;
+
+// A correction of a slip's exchange reads the slip's own evidence as "the message" (spec A-12), so the caption reaches
+// the model once. A printed commission sits inside the amount of its side; it is shown the way the current record
+// shows a fee - the side without it, the fee beside it "not included in the figure" - so the slip text and the current
+// record agree and either answer settles to the slip's own amounts rather than charging the fee twice. C# does the sum.
+internal static class SlipRequestText
+{
+    const string NotRead = "not read";
+
+    sealed record SideFee(TransferLeg Leg, decimal Amount, CurrencyCode Currency);
+
+    public static string For(SlipFacts slip, string? note)
+    {
+        var evidence = slip.Evidence;
+        var fee = FeeBesideASide(evidence);
+        List<string> lines =
+        [
+            "A currency exchange at an exchange office, read from a photo of its slip. Both sides were cash.",
+            "Each side is the money handed over or received, as a person would say it: a commission the slip printed inside a side is shown beside it as a fee, not included in the figure.",
+            $"Office: {(string.IsNullOrWhiteSpace(slip.VenueName) ? NotRead : slip.VenueName)}",
+            $"Given: {Side(evidence.GivenAmount, evidence.GivenCurrency, TransferLeg.From, fee)}",
+            $"Received: {Side(evidence.ReceivedAmount, evidence.ReceivedCurrency, TransferLeg.To, fee)}",
+            $"Rate printed on the slip (dinars per one unit of the foreign currency): {Rate(evidence.Rate)}",
+        ];
+
+        if (fee is null)
+            lines.Add($"Commission: {Commission(evidence)}");
+
+        if (!string.IsNullOrWhiteSpace(note))
+            lines.Add($"The operator's note on the photo: {note.Trim()}");
+
+        return string.Join('\n', lines);
+    }
+
+    // The commission's leg is ExchangeSlipMapper's: the given side when it is in that currency, else the received one.
+    // It is shown beside its side only when that side's amount was read and stays positive without it.
+    static SideFee? FeeBesideASide(ExtractedExchange evidence)
+    {
+        if (evidence.CommissionAmount is not { } commission || commission <= 0m
+            || evidence.CommissionCurrencyOrDinars() is not { } currency)
+            return null;
+
+        if (currency == ExtractedExchange.SupportedCurrency(evidence.GivenCurrency))
+            return evidence.GivenAmount > commission ? new SideFee(TransferLeg.From, commission, currency) : null;
+
+        return currency == ExtractedExchange.SupportedCurrency(evidence.ReceivedCurrency) && evidence.ReceivedAmount > 0m
+            ? new SideFee(TransferLeg.To, commission, currency)
+            : null;
+    }
+
+    // The customer handed over the given side plus the fee, and got back the received side less it: so the given side
+    // is shown without the commission and the received side with it added back.
+    static string Side(decimal? amount, string? currency, TransferLeg leg, SideFee? fee) => (amount, fee) switch
+    {
+        ({ } printed, { } beside) when beside.Leg == leg =>
+            $"{Figure(leg == TransferLeg.From ? printed - beside.Amount : printed + beside.Amount, beside.Currency.Value)}, "
+            + $"plus a fee of {Figure(beside.Amount, beside.Currency.Value)} on this side (not included in the figure)",
+        _ => Figure(amount, currency),
+    };
+
+    // numeric(19,4) reads back as 100.0000; the model is shown money as money, without losing a fourth decimal.
+    static string Figure(decimal? amount, string? currency) => amount is { } value
+        ? $"{value.ToString("0.00##", CultureInfo.InvariantCulture)} {(string.IsNullOrWhiteSpace(currency) ? "(currency not read)" : currency.Trim().ToUpperInvariant())}"
+        : NotRead;
+
+    // numeric(24,12) reads back with twelve decimals: the four a slip prints, and any further ones that mean something.
+    static string Rate(decimal? rate) => rate?.ToString("0.0000########", CultureInfo.InvariantCulture) ?? NotRead;
+
+    // A commission printed with no currency is dinars, as ExtractedExchange reads it.
+    static string Commission(ExtractedExchange evidence) => evidence.CommissionAmount is { } value && value > 0m
+        ? $"{Figure(value, evidence.CommissionCurrencyOrDinars()?.Value ?? evidence.CommissionCurrency)} (printed inside the amount on its side)"
+        : NotRead;
+}
