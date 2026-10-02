@@ -14,7 +14,8 @@ public sealed record MerchantOption(Guid Id, string DisplayName);
 // it in speech ("с налички" for a wallet named "Cash"); IsDefaultForCurrency marks the wallet the
 // mapper falls back to when the model names none.
 // DefaultForPayment says which payment method this wallet is the default for in its currency, if any: a transfer
-// leg the model left without a wallet goes to that currency's cash default, else to its currency default.
+// leg the model left without a wallet takes, by side, the card default of its currency for the source and the cash
+// default for the destination, each else that currency's default (spec A-27). A slip keeps cash on both legs.
 public sealed record WalletOption(
     Guid Id, string Name, CurrencyCode Currency, IReadOnlyList<string> Aliases, bool IsDefaultForCurrency,
     WalletPaymentDefault? DefaultForPayment = null);

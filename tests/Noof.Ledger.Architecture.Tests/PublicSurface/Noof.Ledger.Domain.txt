@@ -30,11 +30,14 @@ ReceiptKindExtensions
 ReceiptLine
 ReceiptSource
 RecordFailureReason
+SettledTransfer
 Transaction
 TransactionKind
 TransactionStatus
 Transfer
+TransferFeeRequest
 TransferLeg
+TransferRequest
 Wallet
 WalletFxTerms
 WalletPaymentDefault

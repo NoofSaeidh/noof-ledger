@@ -837,6 +837,27 @@ public class ReceiptCategorizationWorkerTests
     }
 
     [Fact]
+    public async Task A_failed_receipt_correction_says_it_was_not_applied_instead_of_the_failure_echo()
+    {
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject(status: TransactionStatus.Completed));
+        var categorizer = Substitute.For<AppReceipts.IReceiptCategorizer>();
+        categorizer.CategorizeAsync(Arg.Any<AppReceipts.ReceiptCategorizationRequest>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new ModelCallException(ModelFailureKind.Terminal, "bad request"));
+        var notifier = Substitute.For<IChatNotifier>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job("это было вчера")), KeyPresent(), store, categorizer: categorizer, notifier: notifier), Time());
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text.StartsWith("Could not apply that correction — the record is unchanged.", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+        await notifier.DidNotReceive().EditAsync(
+            Arg.Any<long>(), Arg.Any<int>(), Arg.Is<EchoMessage>(m => m.Text == Echo.Failure.Text), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task A_retry_notice_names_roughly_when_the_next_attempt_runs_in_the_capture_time_zone()
     {
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 25, 9, 0, 0, TimeSpan.Zero));
