@@ -65,10 +65,16 @@ internal static class SlipRequestText
         _ => Figure(amount, currency),
     };
 
-    // numeric(19,4) reads back as 100.0000; the model is shown money as money, without losing a fourth decimal.
-    static string Figure(decimal? amount, string? currency) => amount is { } value
-        ? $"{value.ToString("0.00##", CultureInfo.InvariantCulture)} {(string.IsNullOrWhiteSpace(currency) ? "(currency not read)" : currency.Trim().ToUpperInvariant())}"
-        : NotRead;
+    // The amount and the currency are read independently, so each is shown or marked unread on its own: a side whose
+    // amount is unread still tells the model which currency the reply's bare number is in. numeric(19,4) reads back
+    // as 100.0000; the model is shown money as money, without losing a fourth decimal.
+    static string Figure(decimal? amount, string? currency) =>
+        (amount, string.IsNullOrWhiteSpace(currency) ? null : currency.Trim().ToUpperInvariant()) switch
+        {
+            (null, null) => NotRead,
+            ({ } value, var code) => $"{value.ToString("0.00##", CultureInfo.InvariantCulture)} {code ?? "(currency not read)"}",
+            (null, { } code) => $"(amount not read) {code}",
+        };
 
     // numeric(24,12) reads back with twelve decimals: the four a slip prints, and any further ones that mean something.
     static string Rate(decimal? rate) => rate?.ToString("0.0000########", CultureInfo.InvariantCulture) ?? NotRead;

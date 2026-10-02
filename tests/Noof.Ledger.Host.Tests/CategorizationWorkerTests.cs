@@ -2392,7 +2392,7 @@ public class CategorizationWorkerTests
         + "Each side is the money handed over or received, as a person would say it. A commission the slip printed inside a side's amount is shown beside that side as a fee, not included in the figure, or else on a line of its own.\n"
         + "Office: Menjačnica Zlatnik\n"
         + "Given: 100.00 EUR\n"
-        + "Received: not read\n"
+        + "Received: (amount not read) RSD\n"
         + "Rate printed on the slip (dinars per one unit of the foreign currency): not read\n"
         + "Commission: not read";
 
@@ -2658,6 +2658,23 @@ public class CategorizationWorkerTests
 
         await store.Received(1).ApplyAsync(TransactionId, Arg.Is<CategorizationOutcome>(outcome =>
                 outcome.Transfer!.FromWalletId == CashRsd.Id && outcome.Transfer.ToWalletId == CashEur.Id),
+            Arg.Any<CancellationToken>());
+    }
+
+    // The received amount is unread but its currency was read: a reply "получил 100" names no currency, so the slip's
+    // USD must reach the model, or it could answer EUR and credit the EUR cash wallet.
+    [Fact]
+    public async Task A_reply_to_an_incomplete_slip_sees_the_currency_of_the_side_whose_amount_was_not_read()
+    {
+        var evidence = new AppReceipts.ExtractedExchange(11700.0000m, "RSD", null, "USD", null, null, null, "PZ-2026-0917");
+        var record = SlipRecord(TransactionStatus.Failed, RecordFailureReason.SlipIncomplete, rawText: "", evidence: evidence);
+        var (store, categorizer) = SlipFakes(record, SlipExchange(11650m));
+
+        await SlipWorker(Job(kind: JobKind.Correct, instruction: "получил 100"), categorizer, store)
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        await categorizer.Received(1).ProposeAsync(Arg.Is<CategorizationRequest>(request =>
+                request.RawText.Contains("\nGiven: 11700.00 RSD\nReceived: (amount not read) USD\n", StringComparison.Ordinal)),
             Arg.Any<CancellationToken>());
     }
 

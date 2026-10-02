@@ -33,10 +33,23 @@ public class SlipRequestTextTests
 
         FiguresOf(evidence).Should().Be(
             "Office: not read\n"
-            + "Given: not read\n"
+            + "Given: (amount not read) RSD\n"
             + "Received: 100.00 EUR\n"
             + "Rate printed on the slip (dinars per one unit of the foreign currency): not read\n"
             + "Commission: 150.00 RSD (printed inside the amount on its side)");
+    }
+
+    // A side's currency is read on its own: an unread amount must not take the currency with it, or a reply that says
+    // only "received 100" would leave the model guessing which currency arrived.
+    [Fact]
+    public void A_side_whose_amount_was_not_read_still_names_its_currency()
+    {
+        var evidence = new ExtractedExchange(null, "usd", null, "RSD", null, null, null, null);
+
+        FiguresOf(evidence).Should().StartWith(
+            "Office: not read\n"
+            + "Given: (amount not read) USD\n"
+            + "Received: (amount not read) RSD\n");
     }
 
     [Fact]
