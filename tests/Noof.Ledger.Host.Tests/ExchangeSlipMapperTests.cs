@@ -96,6 +96,16 @@ public class ExchangeSlipMapperTests
         failure.Should().Be(RecordFailureReason.InvalidFee);
     }
 
+    [Fact]
+    public void A_commission_in_a_currency_the_ledger_does_not_hold_cannot_be_placed()
+    {
+        ExchangeSlipMapper.TryRead(Slip(commission: 150.00m, commissionCurrency: "XYZ"), out var request, out var failure)
+            .Should().BeFalse();
+
+        request.Should().BeNull();
+        failure.Should().Be(RecordFailureReason.InvalidFee);
+    }
+
     public static TheoryData<ExtractedExchange> SlipsMissingWhatTheTransferNeeds => new()
     {
         Slip(given: null),

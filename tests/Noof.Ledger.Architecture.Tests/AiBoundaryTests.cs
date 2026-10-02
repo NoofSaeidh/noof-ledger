@@ -94,8 +94,8 @@ public class AiBoundaryTests
         var receiptWorker = Path.Combine(root, "src", "Noof.Ledger.Host", "Workers", "ReceiptCategorizationWorker.cs");
 
         // A third door of the same kind (transfers spec §3, Recording 2): an exchange slip's transfer is built
-        // from its stored receipt_exchanges row with no model call, its two sites being the amount given and
-        // the printed commission.
+        // from the slip's stored vision reading, not a record_transaction answer, its two sites being the
+        // amount given and the printed commission.
         var slipMapper = Path.Combine(root, "src", "Noof.Ledger.Host", "Workers", "ExchangeSlipMapper.cs");
         string[] scannedRoots =
         [
