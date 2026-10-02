@@ -10,6 +10,7 @@ using Noof.Ledger.Persistence;
 using Noof.Ledger.Persistence.Backup;
 using Noof.Ledger.Persistence.Balances;
 using Noof.Ledger.Persistence.Diagnostics;
+using Noof.Ledger.Persistence.Receipts;
 using Noof.Ledger.Persistence.Revisions;
 
 namespace Noof.Ledger.Demo;
@@ -296,12 +297,29 @@ internal static class MockDataWriter
             FiscalNumber = receipt.FiscalNumber,
             IssuedAt = receipt.IssuedAt,
             Total = new Money(receipt.Total, CurrencyCode.Rsd),
-            Kind = ReceiptKind.Sale,
+            Kind = receipt.Kind,
             PaymentMethod = receipt.Payment,
             QrTotal = receipt.QrTotal,
             TelegramFileId = transaction.TelegramFileId,
+            SlipNumber = EfReceiptStore.NormalisedSlipNumber(receipt.Exchange?.SlipNumber),
             CreatedAt = transaction.OccurredAt.AddSeconds(3),
         });
+
+        if (receipt.Exchange is { } exchange)
+        {
+            db.ReceiptExchanges.Add(new ReceiptExchange
+            {
+                ReceiptId = receiptId,
+                GivenAmount = exchange.GivenAmount,
+                GivenCurrency = exchange.GivenCurrency,
+                ReceivedAmount = exchange.ReceivedAmount,
+                ReceivedCurrency = exchange.ReceivedCurrency,
+                Rate = exchange.Rate,
+                CommissionAmount = exchange.CommissionAmount,
+                CommissionCurrency = exchange.CommissionCurrency,
+                SlipNumber = exchange.SlipNumber,
+            });
+        }
 
         var lineIds = receipt.Lines.Select((_, index) => MockData.Id(3000 + messageId * 10 + index)).ToList();
         db.ReceiptLines.AddRange(receipt.Lines.Select((line, index) => new ReceiptLine
@@ -316,10 +334,14 @@ internal static class MockDataWriter
             Total = line.Total,
         }));
 
-        // A receipt read from the photo counts as confirmed only once its CategorizeReceipt job exists.
+        // A receipt read from the photo counts as confirmed only once its CategorizeReceipt job exists, a slip once
+        // its RecordExchange job does: a Captured one gets neither, so it waits for Record anyway.
         AddSucceededJob(db, transaction, JobKind.ExtractReceipt, MockData.Id(5000 + messageId * 10));
         if (transaction.Status == TransactionStatus.Completed)
-            AddSucceededJob(db, transaction, JobKind.CategorizeReceipt, MockData.Id(5000 + messageId * 10 + 1));
+        {
+            var recordedBy = receipt.Kind == ReceiptKind.Exchange ? JobKind.RecordExchange : JobKind.CategorizeReceipt;
+            AddSucceededJob(db, transaction, recordedBy, MockData.Id(5000 + messageId * 10 + 1));
+        }
 
         return lineIds;
     }
@@ -369,6 +391,7 @@ internal static class MockDataWriter
         var qr = await db.Transactions.SingleAsync(transaction => transaction.Id == MockData.ReceiptTransactionId, cancellationToken);
         var vision = await db.Transactions.SingleAsync(transaction => transaction.Id == MockData.VisionReceiptTransactionId, cancellationToken);
         var unconfirmed = await db.Transactions.SingleAsync(transaction => transaction.Id == MockData.UnconfirmedReceiptTransactionId, cancellationToken);
+        var heldSlip = await db.Transactions.SingleAsync(transaction => transaction.Id == MockData.HeldSlipTransactionId, cancellationToken);
 
         db.AppLogs.AddRange(
             Stage(qr.Id, qr.OccurredAt, Router, TransactionStages.Received, TransactionStages.ReceivedEventId),
@@ -383,7 +406,9 @@ internal static class MockDataWriter
             Stage(vision.Id, vision.OccurredAt.AddMilliseconds(20190), Categorizer, TransactionStages.Persisted, TransactionStages.PersistedEventId),
             Stage(vision.Id, vision.OccurredAt.AddMilliseconds(20400), Notifier, TransactionStages.Replied, TransactionStages.RepliedEventId),
             Stage(unconfirmed.Id, unconfirmed.OccurredAt, Router, TransactionStages.Received, TransactionStages.ReceivedEventId),
-            Stage(unconfirmed.Id, unconfirmed.OccurredAt.AddMilliseconds(6480), Extractor, TransactionStages.Extracted, TransactionStages.ExtractedEventId));
+            Stage(unconfirmed.Id, unconfirmed.OccurredAt.AddMilliseconds(6480), Extractor, TransactionStages.Extracted, TransactionStages.ExtractedEventId),
+            Stage(heldSlip.Id, heldSlip.OccurredAt, Router, TransactionStages.Received, TransactionStages.ReceivedEventId),
+            Stage(heldSlip.Id, heldSlip.OccurredAt.AddMilliseconds(5920), Extractor, TransactionStages.Extracted, TransactionStages.ExtractedEventId));
 
         await db.SaveChangesAsync(cancellationToken);
     }

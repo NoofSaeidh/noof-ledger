@@ -5,6 +5,7 @@ using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Domain;
+using Noof.Ledger.Persistence.Receipts;
 using Noof.Ledger.Telegram;
 
 namespace Noof.Ledger.Demo.Shots;
@@ -165,7 +166,7 @@ internal static class TelegramScenes
             new("slip-check", "An exchange slip whose figures don't match its printed rate",
             [
                 Photo("13:40"),
-                Reply(echo.ComposeSlipNeedsConfirmation(HeldSlip()), "13:40"),
+                Reply(echo.ComposeSlipNeedsConfirmation(SlipView(MockData.HeldSlipTransactionId)), "13:40"),
             ]),
             new("health", "/health",
             [
@@ -243,7 +244,11 @@ internal static class TelegramScenes
                 new ExtractedExchange(100.00m, "EUR", 11700.00m, "RSD", 117.0000m, null, null, "PZ-2026-0917")),
         };
 
-    static ExchangeSlipView HeldSlip() => new(
-        Guid.Empty, "123456789", "Menjačnica Zlatnik", MockData.At(18, 13, 40), "PZ-2026-0918",
-        new ExtractedExchange(100.00m, "EUR", 11650.00m, "RSD", 117.0000m, null, null, "PZ-2026-0918"));
+    // The same held slip the demo database holds, so the picture and its trace page agree.
+    static ExchangeSlipView SlipView(Guid id)
+    {
+        var receipt = MockData.Records.Single(record => record.Id == id).Receipt!;
+        return new(id, receipt.SellerTaxId, receipt.SellerName, receipt.IssuedAt,
+            EfReceiptStore.NormalisedSlipNumber(receipt.Exchange!.SlipNumber), receipt.Exchange);
+    }
 }

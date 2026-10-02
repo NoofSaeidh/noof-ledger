@@ -71,6 +71,17 @@ public sealed class TelegramScenesTests
     }
 
     [Fact]
+    public void The_held_slip_picture_is_the_demo_databases_own_held_slip()
+    {
+        var bubbles = Scenes.Single(scene => scene.Name == "slip-check").Bubbles;
+        var slip = MockData.Records.Single(record => record.Id == MockData.HeldSlipTransactionId).Receipt!;
+
+        bubbles[0].Photo.Should().BeTrue();
+        bubbles[^1].Text.Should().Contain($"\nPIB: {slip.SellerTaxId}\nSlip #: {slip.Exchange!.SlipNumber}\n")
+            .And.Contain(FormattableString.Invariant($"\nReceived: {slip.Exchange.ReceivedAmount:0.00} {slip.Exchange.ReceivedCurrency}\n"));
+    }
+
+    [Fact]
     public void The_vision_receipt_says_the_tax_administration_was_unavailable()
     {
         Scenes.Single(scene => scene.Name == "receipt-vision").Bubbles[^1].Text.Should().Contain("Tax Administration unavailable");
