@@ -285,11 +285,12 @@ internal sealed class CategorizationWorker(
     }
 
     // Ruling F-2 (Phase 6 re-review): the one place that decides whether a Correct or Reinterpret job
-    // belongs to a receipt, instead of that decision being duplicated at every enqueue site (queue-time
-    // special-casing in EfRecordEditor used to route a text reply but not a voice one - N-1 - or an
-    // edited message - N-2 - and had no way to know a receipt was still being extracted - N-4). A
-    // reading (Categorize) is never routed here: only a correction can name a transaction that already
-    // has a receipt.
+    // belongs to a fiscal receipt (a sale or a refund) - a copy, training, proforma or advance slip, or an
+    // exchange-office slip, is corrected through record_transaction like any other record - instead of
+    // that decision being duplicated at every enqueue site (queue-time special-casing in EfRecordEditor
+    // used to route a text reply but not a voice one - N-1 - or an edited message - N-2 - and had no way
+    // to know a receipt was still being extracted - N-4). A reading (Categorize) is never routed here:
+    // only a correction can name a transaction that already has a receipt.
     static readonly TimeSpan ReceiptExtractionPendingDelay = TimeSpan.FromSeconds(5);
 
     async Task<bool> TryRouteToReceiptAsync(
@@ -302,7 +303,7 @@ internal sealed class CategorizationWorker(
         var receiptStore = scope.ServiceProvider.GetRequiredService<IReceiptStore>();
         var receipt = await receiptStore.GetByTransactionAsync(job.TransactionId, cancellationToken);
 
-        if (receipt is { } present && !present.Kind.IsNonMoneyKind())
+        if (receipt is { } present && present.Kind.IsFiscalMoneyKind())
         {
             // Correct carries the operator's words as Instruction already; Reinterpret (an edited
             // message) carries none - the edit itself already replaced RawText, so that IS the
