@@ -30,7 +30,7 @@ public sealed class LiveModelTests
 
     static readonly WalletOption Raiffeisen = new(
         Guid.Parse("10000000-0000-0000-0000-000000000001"), "Raiffeisen RSD", CurrencyCode.Rsd, ["райф"], true);
-    // The RSD cash default while Raiffeisen is the RSD default (amendment 21): an unnamed cash side lands here.
+    // The RSD cash default while Raiffeisen is the RSD default (A-27): an unnamed cash side lands here.
     static readonly WalletOption CashRsd = new(
         Guid.Parse("10000000-0000-0000-0000-000000000002"), "Cash RSD", CurrencyCode.Rsd, ["налик", "наличка"], false,
         DefaultForPayment: WalletPaymentDefault.Cash);

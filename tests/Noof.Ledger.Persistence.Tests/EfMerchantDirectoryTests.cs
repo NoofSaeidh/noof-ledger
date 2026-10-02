@@ -235,7 +235,7 @@ public class EfMerchantDirectoryTests(PostgresFixture fixture)
         venue.DisplayName.Should().Be("Menjačnica Zlatnik");
     }
 
-    // Amendment 10: one PIB is one legal entity - a shop that also runs an exchange desk stays the one merchant.
+    // A-9: one PIB is one legal entity - a shop that also runs an exchange desk stays the one merchant.
     [Fact]
     public async Task VenueForTaxIdAsync_returns_the_shop_that_already_carries_the_PIB_whatever_its_kind()
     {

@@ -85,7 +85,7 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
             db.ChangeTracker.Clear();
 
             // A job re-run (its lease expired between the commit below and the caller succeeding the
-            // job, C-1) lands here first: the receipt for THIS transaction already exists, whichever
+            // job) lands here first: the receipt for THIS transaction already exists, whichever
             // index caught it - IX_receipts_transaction_id for a vision receipt (no fiscal number to
             // collide on), or the seller+fiscal index when the same fiscal receipt is replayed for the
             // same transaction. Either way it is the caller's own earlier save, never a duplicate of
@@ -158,7 +158,7 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
         if (disposition == AppReceipts.SlipDisposition.Record)
             db.CategorizationJobs.Add(PendingJob(transactionId, JobKind.RecordExchange, now));
 
-        // Amendment 26: the slip's issue date is the record's date until a correction says otherwise.
+        // A-23: the slip's issue date is the record's date until a correction says otherwise.
         if (receipt.IssuedAt is { } issuedAt)
         {
             var slipDay = ZonedClock.LocalDate(issuedAt, transaction.TimeZoneId);
@@ -214,7 +214,7 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
                  evidence.Rate, evidence.CommissionAmount, evidence.CommissionCurrency, evidence.SlipNumber)))
         .SingleOrDefaultAsync(cancellationToken);
 
-    // A replay of this transaction's own save (C-1) returns the receipt it already has; anything else is a slip
+    // A replay of this transaction's own save returns the receipt it already has; anything else is a slip
     // another transaction already recorded - the same two answers SaveExtractedAsync gives a fiscal receipt.
     async Task<AppReceipts.ReceiptSaveResult> SlipSaveConflictAsync(
         Guid transactionId, string? sellerTaxId, string? slipNumber, CancellationToken cancellationToken)
@@ -277,7 +277,7 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
 
     // A slip photo's caption is the operator's own word on it, applied as a correction after RecordExchange
     // (spec §3) and dated the day the photo was sent, when the caption was written. One microsecond later than
-    // the job it follows (amendment 11): the claim query orders one transaction's jobs by a strict
+    // the job it follows (A-10): the claim query orders one transaction's jobs by a strict
     // created_at <, and timestamptz keeps microseconds. Only created_at moves - a later run_after would make it
     // look "not yet due" instead of "waiting its turn".
     static CategorizationJob? CaptionJob(Guid transactionId, LockedTransaction transaction, DateTimeOffset now) =>
@@ -397,7 +397,7 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
             : !await HasJobAsync(transactionId, JobKind.CategorizeReceipt, cancellationToken);
     }
 
-    // Amendment 8: a held slip only - never recorded by anything (no RecordExchange job, no Initial, Correction
+    // A-7: a held slip only - never recorded by anything (no RecordExchange job, no Initial, Correction
     // or Edit revision) and not failed. Status-independent like the fiscal rule, so a Cancelled held slip still
     // offers Restore back to its prompt; an incomplete slip (failed) and one a reply completed (a Correction
     // revision) never offer "Record anyway". The stored evidence must itself assess as Hold as well, so the prompt

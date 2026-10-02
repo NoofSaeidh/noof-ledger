@@ -464,7 +464,7 @@ public class ProposalMapperTests
             .Should().BeTrue();
 
         (mapped.Transfer?.To).Should().Be(Rsd(11650m), "the received amount said wins for the settlement");
-        (mapped.Transfer?.StatedRate).Should().Be(EuroAt117, "amendment 24: a valid stated rate is kept whenever it was said");
+        (mapped.Transfer?.StatedRate).Should().Be(EuroAt117, "A-21: a valid stated rate is kept whenever it was said");
     }
 
     [Fact]
@@ -543,7 +543,7 @@ public class ProposalMapperTests
     [Fact]
     public void A_fee_said_in_only_the_destinations_currency_is_on_the_destination_whatever_leg_the_model_named()
     {
-        // "поменял 100 евро по 117, комиссия 150 динар" (amendment 23)
+        // "поменял 100 евро по 117, комиссия 150 динар" (A-20)
         var proposal = Transfer(100m, "EUR", "RSD", rate: new ProposedRate("EUR", 117m, "RSD"),
             fee: new ProposedFee(150m, "RSD", ProposedLeg.From, false));
 
@@ -576,7 +576,7 @@ public class ProposalMapperTests
         reason.Should().Be(RecordFailureReason.InvalidFee);
     }
 
-    // Amendment 24's round trip, last step. 2a renders a withdrawal stored as 10150 → 10000 with the 150 fee on the source
+    // A-21's round trip, last step. 2a renders a withdrawal stored as 10150 → 10000 with the 150 fee on the source
     // as "- from …: 10000 RSD, plus a fee of 150 RSD on this side (not included in the figure)" and "- to …: 10000 RSD,
     // worked out by the ledger"; answered back unchanged (the worker keeps both wallets) it settles to the stored legs.
     [Fact]
@@ -682,7 +682,7 @@ public class ProposalMapperTests
         MapWith([.. Wallets, KaspiKzt], proposal, out var mapped, out _).Should().BeTrue();
 
         mapped.Charged.Should().Be(new StatedCharge(new Money(30m, CurrencyCode.Usd), null, false),
-            "a said charge counts as said even when it cannot be honoured, so no older stated charge survives it (review C-4)");
+            "a said charge counts as said even when it cannot be honoured, so no older stated charge survives it");
     }
 
     [Fact]

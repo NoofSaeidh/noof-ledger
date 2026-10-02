@@ -275,7 +275,7 @@ public sealed class WalletsTests(CookieModeHostFixture fixture) : PageTest, ICla
     [Fact]
     public async Task Terms_typed_with_a_decimal_point_keep_their_fractions()
     {
-        // Review focus 4: the operator's Windows is ru-RU or sr-Latn-RS, where a field parsing with the server's
+        // The operator's Windows is ru-RU or sr-Latn-RS, where a field parsing with the server's
         // culture refuses "117.35" (comma is the decimal separator there) or reads it as 11735. This only bites on a
         // comma-decimal host, and the E2E suite is not run by CI.
         if (fixture.DatabaseUnavailable)
@@ -362,7 +362,7 @@ public sealed class WalletsTests(CookieModeHostFixture fixture) : PageTest, ICla
     [Fact]
     public async Task Terms_typed_with_a_decimal_comma_keep_their_fractions_and_an_unreadable_figure_is_refused()
     {
-        // Amendment 27: the operator types a decimal comma, and MudBlazor's own converter reads "117,35" as 11735 under
+        // A-24: the operator types a decimal comma, and MudBlazor's own converter reads "117,35" as 11735 under
         // the invariant culture and an unreadable "1.234,5" as no fee at all. This bites on any host - but the E2E
         // suite is not run by CI; DecimalFieldConverterTests is the guard CI runs.
         if (fixture.DatabaseUnavailable)

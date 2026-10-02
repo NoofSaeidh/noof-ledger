@@ -317,8 +317,8 @@ public class ReceiptEchoTests
         echo.Actions.Should().Equal(RecordAction.RecordAnyway, RecordAction.Cancel);
     }
 
-    // The ReceiptView overload (RecordActionHandler's Cancel/Restore, ExtractReceiptWorker's own C-1
-    // replay) must produce the identical prompt a fresh ExtractedReceipt would have - same arithmetic,
+    // The ReceiptView overload (RecordActionHandler's Cancel/Restore, ExtractReceiptWorker's own
+    // lease-expiry replay) must produce the identical prompt a fresh ExtractedReceipt would have - same arithmetic,
     // same wording, read from what was actually stored instead of a live model call.
     [Fact]
     public void ComposeReceiptNeedsConfirmation_from_a_stored_ReceiptView_matches_the_ExtractedReceipt_wording()
