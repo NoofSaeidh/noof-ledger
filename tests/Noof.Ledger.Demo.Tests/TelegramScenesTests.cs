@@ -13,7 +13,7 @@ public sealed class TelegramScenesTests
         Scenes.Select(scene => scene.Name).Should().Equal(
             "expense", "multi-line", "income", "balance", "cancel-restore", "correction", "failure",
             "transfer", "transfer-fee", "exchange", "foreign-spending", "no-terms", "exchange-question",
-            "receipt-qr", "receipt-vision", "receipt-check", "health");
+            "receipt-qr", "receipt-vision", "receipt-check", "slip", "slip-check", "slip-incomplete", "health");
     }
 
     [Theory]
@@ -30,6 +30,9 @@ public sealed class TelegramScenesTests
     [InlineData("receipt-qr", "Recorded — Maxi — Dorćol · Raiffeisen", new[] { "Cancel", "Edit" })]
     [InlineData("receipt-vision", "Recorded — Apoteka Zdravlje · Raiffeisen", new[] { "Cancel", "Edit" })]
     [InlineData("receipt-check", "This receipt doesn't look right — Pekara Centar", new[] { "Record anyway", "Cancel" })]
+    [InlineData("slip", "Exchange — 100.00 EUR (Cash EUR) → 11700.00 RSD (Cash RSD)", new[] { "Cancel", "Edit" })]
+    [InlineData("slip-check", "This exchange slip doesn't look right — Menjačnica Zlatnik", new[] { "Record anyway", "Cancel" })]
+    [InlineData("slip-incomplete", "Slip read, but", new[] { "Edit" })]
     public void The_bot_bubble_carries_the_apps_own_text_and_buttons(string scene, string start, string[] buttons)
     {
         var reply = Scenes.Single(candidate => candidate.Name == scene).Bubbles.Last(bubble => bubble.Side == ChatSide.Bot);
@@ -57,6 +60,35 @@ public sealed class TelegramScenesTests
         bubbles[0].Photo.Should().BeTrue();
         foreach (var line in receipt.Lines)
             bubbles[^1].Text.Should().Contain(line.Name);
+    }
+
+    [Fact]
+    public void A_slip_picture_starts_from_a_photo_and_names_its_office_and_where_it_was_read()
+    {
+        var bubbles = Scenes.Single(scene => scene.Name == "slip").Bubbles;
+
+        bubbles[0].Photo.Should().BeTrue();
+        bubbles[^1].Text.Should().EndWith("\nMenjačnica Zlatnik · from a slip photo\n⚠️ Read from the slip photo — check the figures.");
+    }
+
+    [Fact]
+    public void The_held_slip_picture_is_the_demo_databases_own_held_slip()
+    {
+        var bubbles = Scenes.Single(scene => scene.Name == "slip-check").Bubbles;
+        var slip = MockData.Records.Single(record => record.Id == MockData.HeldSlipTransactionId).Receipt!;
+
+        bubbles[0].Photo.Should().BeTrue();
+        bubbles[^1].Text.Should().Contain($"\nPIB: {slip.SellerTaxId}\nSlip #: {slip.Exchange!.SlipNumber}\n")
+            .And.Contain(FormattableString.Invariant($"\nReceived: {slip.Exchange.ReceivedAmount:0.00} {slip.Exchange.ReceivedCurrency}\n"));
+    }
+
+    [Fact]
+    public void An_incomplete_slip_picture_starts_from_a_photo_and_asks_only_for_the_unread_figure()
+    {
+        var bubbles = Scenes.Single(scene => scene.Name == "slip-incomplete").Bubbles;
+
+        bubbles[0].Photo.Should().BeTrue();
+        bubbles[^1].Text.Should().Be("Slip read, but the amount received is unreadable — reply with it.");
     }
 
     [Fact]

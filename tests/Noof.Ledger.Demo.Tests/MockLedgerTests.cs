@@ -161,13 +161,30 @@ public sealed class MockLedgerTests(DemoTestDatabase database) : IClassFixture<D
         await using var scope = services.CreateAsyncScope();
         var trace = scope.ServiceProvider.GetRequiredService<ITransactionTrace>();
 
-        foreach (var record in MockData.Records.Where(record => record.Receipt is not null))
+        foreach (var record in MockData.Records.Where(record => record.Receipt is { Kind: ReceiptKind.Sale }))
         {
             var receipt = (await trace.GetAsync(record.Id!.Value, TestContext.Current.CancellationToken)).Receipt!;
 
             receipt.Lines.Select(line => line.Name).Should().Equal(record.Receipt!.Lines.Select(line => line.Name));
             receipt.AwaitingConfirmation.Should().Be(record.Status == TransactionStatus.Captured, record.Receipt.SellerName);
         }
+    }
+
+    [Fact]
+    public async Task The_held_slip_waits_for_record_anyway_and_its_trace_names_the_one_problem()
+    {
+        if (database.Unavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        await Refresh.RunAsync(database.Admin, database.Name, database.Paths, TestContext.Current.CancellationToken);
+
+        await using var services = DemoServices.Build(database.ConnectionString, database.Paths);
+        await using var scope = services.CreateAsyncScope();
+        var receipt = (await scope.ServiceProvider.GetRequiredService<ITransactionTrace>()
+            .GetAsync(MockData.HeldSlipTransactionId, TestContext.Current.CancellationToken)).Receipt!;
+
+        receipt.AwaitingConfirmation.Should().BeTrue();
+        receipt.Problems.Should().Equal("The given and received amounts don't match the printed rate");
     }
 
     [Fact]

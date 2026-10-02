@@ -97,4 +97,17 @@ public interface IRecordEcho
     // instead and offers only Restore, which RecordActionHandler routes back to
     // ComposeReceiptNeedsConfirmation rather than the dead-end "Reading the receipt…" with no buttons.
     EchoMessage ComposeReceiptCancelledUnconfirmed(CategorizationSubject record, ReceiptView receipt);
+
+    // Phase 7 exchange-office slips (spec §3-§4). A clean slip saved for RecordExchange.
+    string RecordingExchange { get; }
+
+    // A held slip (ExtractedExchange.Assess): what was read and why it was held, with RecordAnyway and Cancel.
+    // Built from the stored slip, so the first echo, a replayed job and a Restore print the same prompt.
+    EchoMessage ComposeSlipNeedsConfirmation(ExchangeSlipView slip);
+
+    // Cancel on a held slip: nothing was recorded, so it shows the slip itself and offers only Restore.
+    EchoMessage ComposeSlipCancelledUnconfirmed(ExchangeSlipView slip);
+
+    // A slip number another transaction already recorded under the same PIB (IReceiptStore.SaveExchangeSlipAsync).
+    EchoMessage ComposeSlipDuplicate(DateOnly? occurredOn, ExtractedExchange evidence, bool originalCancelled = false);
 }
