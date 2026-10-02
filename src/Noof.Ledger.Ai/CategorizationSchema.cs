@@ -199,7 +199,7 @@ internal static class CategorizationSchema
             }),
             ("included", Boolean(
                 "True only when the person says the amount they gave for that side already includes the fee, "
-                + "or when the fee is on \"to\" and to_amount is what they say arrived.")))));
+                + "or when the fee is on \"to\" and to_amount is what they say arrived, unless they say the fee was taken out of it afterwards.")))));
 
     static JsonObject Charged() => NullableObject.Of(
         ChargedDescription,
