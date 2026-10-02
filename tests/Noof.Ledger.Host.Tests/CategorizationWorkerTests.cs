@@ -2379,4 +2379,362 @@ public class CategorizationWorkerTests
             Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<DateTimeOffset>(),
             Arg.Any<CancellationToken>());
     }
+
+    // Read back from numeric(19,4) / numeric(24,12): four (and twelve) decimals, as the store returns them.
+    static readonly AppReceipts.ExtractedExchange SlipEvidence = new(100.0000m, "EUR", null, "RSD", null, null, null, "PZ-2026-0917");
+
+    // A slip that printed 11850 RSD given, a 150 RSD commission and 100 EUR received at 117.
+    static readonly AppReceipts.ExtractedExchange SlipEvidenceWithCommission = new(
+        11850.0000m, "RSD", 100.0000m, "EUR", 117.000000000000m, 150.0000m, "RSD", "PZ-2026-0917");
+
+    const string SlipText =
+        "A currency exchange at an exchange office, read from a photo of its slip. Both sides were cash.\n"
+        + "Each side is the money handed over or received, as a person would say it. A commission the slip printed inside a side's amount is shown beside that side as a fee, not included in the figure, or else on a line of its own.\n"
+        + "Office: Menjačnica Zlatnik\n"
+        + "Given: 100.00 EUR\n"
+        + "Received: (amount not read) RSD\n"
+        + "Rate printed on the slip (dinars per one unit of the foreign currency): not read\n"
+        + "Commission: not read";
+
+    static readonly WalletOption CashRsdForCash = CashRsd with { DefaultForPayment = WalletPaymentDefault.Cash };
+    static readonly WalletOption CashEurForCash = CashEur with { DefaultForPayment = WalletPaymentDefault.Cash };
+
+    // Main Wallet stays the RSD default (the card wallet) and Wise EUR the EUR default; the cash wallets are the Cash
+    // payment defaults of their currencies, listed after the defaults so "the first wallet of that currency" is wrong.
+    static IWalletDirectory CashDefaultWallets() => WalletDirectoryOf(MainWallet, CashRsdForCash, WiseEur, CashEurForCash);
+
+    static CategorizationSubject SlipRecord(
+        TransactionStatus status, RecordFailureReason failure = RecordFailureReason.None, string rawText = "получил 11650",
+        AppReceipts.ExtractedExchange? evidence = null, DateOnly? occurredOn = null) =>
+        Subject(rawText: rawText, status: status, captureKind: CaptureKind.Photo, occurredOn: occurredOn) with
+        {
+            FailureReason = failure,
+            Slip = new SlipFacts("Menjačnica Zlatnik", "PZ-2026-0917", evidence ?? SlipEvidence),
+        };
+
+    static CategorizationSubject RecordedSlip(DateOnly? occurredOn = null) =>
+        SlipRecord(TransactionStatus.Completed, occurredOn: occurredOn) with
+        {
+            Kind = TransactionKind.Transfer,
+            WalletId = WiseEur.Id,
+            WalletCurrency = CurrencyCode.Eur,
+            Transfer = new TransferView(
+                WiseEur.Id, "Wise EUR", new Money(100.00m, CurrencyCode.Eur), CashRsd.Id, "Cash", new Money(11700.00m, CurrencyCode.Rsd),
+                null, null, new ExchangeRate(CurrencyCode.Eur, 117.0000m, CurrencyCode.Rsd), "Menjačnica Zlatnik", [], []),
+        };
+
+    static AppReceipts.IReceiptStore SlipReceiptStore(string? sellerTaxId = "123456789")
+    {
+        var receiptStore = NoReceiptStore();
+        receiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Receipt(kind: ReceiptKind.Exchange));
+        receiptStore.GetExchangeSlipAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(new AppReceipts.ExchangeSlipView(
+            Guid.NewGuid(), sellerTaxId, "Menjačnica Zlatnik", null, "PZ-2026-0917", SlipEvidence));
+        return receiptStore;
+    }
+
+    static CategorizationProposal SlipExchange(decimal received, Guid? fromWalletId = null, Guid? toWalletId = null) => new(
+        [], Kind: ProposedKind.Transfer,
+        Transfer: new ProposedTransfer(fromWalletId, 100m, "EUR", toWalletId, received, "RSD", Rate: null, Fee: null));
+
+    static CategorizationWorker SlipWorker(
+        CategorizationJob job, ICategorizer categorizer, ICategorizationStore store,
+        IMerchantDirectory? merchants = null) =>
+        CreateWorker(
+            ScopeFactoryFor(QueueWith(job), KeyPresent(), store, merchantDirectory: merchants, categorizer: categorizer,
+                walletDirectory: CashDefaultWallets(), receiptStore: SlipReceiptStore()),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+    static (ICategorizationStore Store, ICategorizer Categorizer) SlipFakes(CategorizationSubject record, CategorizationProposal answer)
+    {
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(record);
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(answer);
+        return (store, categorizer);
+    }
+
+    // The caption's own Correct job on a clean slip (Completed after RecordExchange, or after Record anyway on a held
+    // one) and on an incomplete one (Failed): the caption is the instruction, so it is not repeated as a note.
+    [Theory]
+    [InlineData(TransactionStatus.Completed, RecordFailureReason.None)]
+    [InlineData(TransactionStatus.Failed, RecordFailureReason.SlipIncomplete)]
+    public async Task The_caption_job_of_a_slip_reads_the_slip_evidence_and_the_caption_once_as_the_instruction(
+        TransactionStatus status, RecordFailureReason failure)
+    {
+        var (store, categorizer) = SlipFakes(SlipRecord(status, failure), SlipExchange(11650m));
+
+        await SlipWorker(Job(kind: JobKind.Correct, instruction: "получил 11650"), categorizer, store)
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        await categorizer.Received(1).ProposeAsync(Arg.Is<CategorizationRequest>(request =>
+                request.RawText == SlipText
+                && request.Correction != null
+                && request.Correction.Instruction == "получил 11650"),
+            Arg.Any<CancellationToken>());
+    }
+
+    // Spec A-8: a reply to a held slip records it - an ordinary correction, never deferred as "still extracting" - and
+    // the caption, whose own job waited for "Record anyway" and never ran, reaches the model as a note.
+    [Fact]
+    public async Task A_reply_to_a_held_slip_records_it_and_reads_its_caption_as_a_note()
+    {
+        var record = SlipRecord(TransactionStatus.Captured, rawText: "обменник у вокзала");
+        var (store, categorizer) = SlipFakes(record, SlipExchange(11650m));
+        var job = Job(kind: JobKind.Correct, instruction: "да, получил 11650");
+        var jobQueue = QueueWith(job);
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer, walletDirectory: CashDefaultWallets(),
+                receiptStore: SlipReceiptStore()),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await jobQueue.DidNotReceiveWithAnyArgs().RetryAsync(default, default!, default, default!, Arg.Any<CancellationToken>());
+        await categorizer.Received(1).ProposeAsync(Arg.Is<CategorizationRequest>(request =>
+                request.RawText == SlipText + "\nThe operator's note on the photo: обменник у вокзала"
+                && request.Correction!.Instruction == "да, получил 11650"),
+            Arg.Any<CancellationToken>());
+        await store.Received(1).ApplyAsync(TransactionId,
+            Arg.Is<CategorizationOutcome>(outcome => outcome.TransactionKind == TransactionKind.Transfer), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task An_edited_caption_on_a_slip_reaches_the_model_once_inside_the_slip_text()
+    {
+        var (store, categorizer) = SlipFakes(RecordedSlip(), SlipExchange(11650m));
+
+        await SlipWorker(Job(kind: JobKind.Reinterpret), categorizer, store).RunTickAsync(TestContext.Current.CancellationToken);
+
+        await categorizer.Received(1).ProposeAsync(Arg.Is<CategorizationRequest>(request =>
+                request.RawText == SlipText + "\nThe operator's note on the photo: получил 11650" && request.Correction == null),
+            Arg.Any<CancellationToken>());
+    }
+
+    // The caption already reached the model as the caption job's instruction; a later reply that changed the figures
+    // would otherwise sit beside a note still carrying the old ones.
+    [Fact]
+    public async Task A_reply_to_a_recorded_slip_reads_the_slip_evidence_without_the_caption()
+    {
+        var (store, categorizer) = SlipFakes(RecordedSlip(), SlipExchange(11600m, WiseEur.Id, CashRsd.Id));
+
+        await SlipWorker(Job(kind: JobKind.Correct, instruction: "нет, 11600"), categorizer, store)
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        await categorizer.Received(1).ProposeAsync(Arg.Is<CategorizationRequest>(request =>
+                request.RawText == SlipText && request.Correction!.Instruction == "нет, 11600"),
+            Arg.Any<CancellationToken>());
+    }
+
+    // The planning review's case: a slip that printed 11850 RSD given, a 150 RSD commission and 100 EUR received. The
+    // given side is shown as the current record shows a fee - 11700, plus a fee of 150 not included - so the answer
+    // settles to the 11850 the slip printed, not 11850 + 150.
+    [Fact]
+    public async Task A_held_slip_with_a_commission_completed_by_a_reply_takes_11850_RSD_out_not_12000()
+    {
+        var record = SlipRecord(TransactionStatus.Captured, rawText: "", evidence: SlipEvidenceWithCommission);
+        var answer = new CategorizationProposal(
+            [], Kind: ProposedKind.Transfer,
+            Transfer: new ProposedTransfer(null, 11700m, "RSD", null, 100m, "EUR", Rate: null,
+                Fee: new ProposedFee(150m, "RSD", ProposedLeg.From, Included: false)));
+        var (store, categorizer) = SlipFakes(record, answer);
+
+        await SlipWorker(Job(kind: JobKind.Correct, instruction: "да, всё верно"), categorizer, store)
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        await categorizer.Received(1).ProposeAsync(Arg.Is<CategorizationRequest>(request =>
+                request.RawText.EndsWith(
+                    "Office: Menjačnica Zlatnik\n"
+                    + "Given: 11700.00 RSD, plus a fee of 150.00 RSD on this side (not included in the figure)\n"
+                    + "Received: 100.00 EUR\n"
+                    + "Rate printed on the slip (dinars per one unit of the foreign currency): 117.0000",
+                    StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+        await store.Received(1).ApplyAsync(TransactionId, Arg.Is<CategorizationOutcome>(outcome =>
+                outcome.Transfer!.From == new Money(11850m, CurrencyCode.Rsd)
+                && outcome.Transfer.Fee == new Money(150m, CurrencyCode.Rsd)
+                && outcome.Transfer.FeeLeg == TransferLeg.From
+                && outcome.Transfer.To == new Money(100m, CurrencyCode.Eur)),
+            Arg.Any<CancellationToken>());
+    }
+
+    // The caption job right after RecordExchange stored 11850 RSD with the 150 fee inside it: the current record shows
+    // "11700 RSD, plus a fee of 150 RSD on this side (not included in the figure)", and the slip text must say the same,
+    // or an answer mixing the two framings (11850, fee not included) would take 12000 out of the dinar wallet.
+    [Fact]
+    public async Task A_recorded_slip_with_a_commission_shows_its_given_side_as_the_current_record_does()
+    {
+        var transfer = new TransferView(
+            CashRsd.Id, "Cash", new Money(11850.00m, CurrencyCode.Rsd), CashEur.Id, "Cash EUR", new Money(100.00m, CurrencyCode.Eur),
+            new Money(150.00m, CurrencyCode.Rsd), TransferLeg.From, new ExchangeRate(CurrencyCode.Eur, 117.0000m, CurrencyCode.Rsd),
+            "Menjačnica Zlatnik", [], []);
+        var record = SlipRecord(TransactionStatus.Completed, rawText: "100 евро", evidence: SlipEvidenceWithCommission) with
+        {
+            Kind = TransactionKind.Transfer,
+            WalletId = CashRsd.Id,
+            WalletCurrency = CurrencyCode.Rsd,
+            Transfer = transfer,
+        };
+        var answer = new CategorizationProposal(
+            [], Kind: ProposedKind.Transfer,
+            Transfer: new ProposedTransfer(null, 11700m, "RSD", null, 100m, "EUR", Rate: null,
+                Fee: new ProposedFee(150m, "RSD", ProposedLeg.From, Included: false)));
+        var (store, categorizer) = SlipFakes(record, answer);
+
+        await SlipWorker(Job(kind: JobKind.Correct, instruction: "100 евро"), categorizer, store)
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        await categorizer.Received(1).ProposeAsync(Arg.Is<CategorizationRequest>(request =>
+                request.RawText.Contains(
+                    "\nGiven: 11700.00 RSD, plus a fee of 150.00 RSD on this side (not included in the figure)\n", StringComparison.Ordinal)
+                && !request.RawText.Contains("Commission:", StringComparison.Ordinal)
+                && request.Correction!.CurrentTransfer == transfer),
+            Arg.Any<CancellationToken>());
+        await store.Received(1).ApplyAsync(TransactionId, Arg.Is<CategorizationOutcome>(outcome =>
+                outcome.Transfer!.From == new Money(11850m, CurrencyCode.Rsd)
+                && outcome.Transfer.Fee == new Money(150m, CurrencyCode.Rsd)
+                && outcome.Transfer.FromWalletId == CashRsd.Id),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_correction_changing_the_received_amount_applies_the_new_amount()
+    {
+        var (store, categorizer) = SlipFakes(RecordedSlip(), SlipExchange(11650m, WiseEur.Id, CashRsd.Id));
+
+        await SlipWorker(Job(kind: JobKind.Correct, instruction: "получил 11650"), categorizer, store)
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        await store.Received(1).ApplyAsync(TransactionId, Arg.Is<CategorizationOutcome>(outcome =>
+                outcome.Kind == JobKind.Correct
+                && outcome.Transfer!.From == new Money(100m, CurrencyCode.Eur)
+                && outcome.Transfer.To == new Money(11650m, CurrencyCode.Rsd)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_correction_of_a_slip_keeps_the_office_as_the_venue()
+    {
+        var venueId = Guid.Parse("00000000-0000-0000-0007-000000000003");
+        var merchants = DefaultMerchantDirectory();
+        merchants.VenueForTaxIdAsync("123456789", "Menjačnica Zlatnik", Arg.Any<CancellationToken>()).Returns(venueId);
+        var (store, categorizer) = SlipFakes(RecordedSlip(), SlipExchange(11650m, WiseEur.Id, CashRsd.Id));
+
+        await SlipWorker(Job(kind: JobKind.Correct, instruction: "получил 11650"), categorizer, store, merchants)
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        await store.Received(1).ApplyAsync(TransactionId,
+            Arg.Is<CategorizationOutcome>(outcome => outcome.Transfer!.VenueMerchantId == venueId), Arg.Any<CancellationToken>());
+    }
+
+    // Spec A-8: whoever completes a slip, an unnamed leg lands on its currency's cash wallet - the source too, which
+    // capture's A-27 rule would put on the card (else currency) default, Wise EUR here.
+    [Fact]
+    public async Task An_incomplete_slip_completed_by_a_reply_lands_on_the_cash_wallets_not_the_currency_defaults()
+    {
+        var record = SlipRecord(TransactionStatus.Failed, RecordFailureReason.SlipIncomplete);
+        var (store, categorizer) = SlipFakes(record, SlipExchange(11650m));
+
+        await SlipWorker(Job(kind: JobKind.Correct, instruction: "получил 11650"), categorizer, store)
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        await store.Received(1).ApplyAsync(TransactionId, Arg.Is<CategorizationOutcome>(outcome =>
+                outcome.Transfer!.FromWalletId == CashEur.Id && outcome.Transfer.ToWalletId == CashRsd.Id),
+            Arg.Any<CancellationToken>());
+    }
+
+    // The dinar side is the source here: capture's rule (A-27) would take it from Main Wallet, the RSD default.
+    [Fact]
+    public async Task A_held_slip_selling_dinars_completed_by_a_reply_takes_them_from_the_cash_not_the_rsd_default()
+    {
+        var evidence = new AppReceipts.ExtractedExchange(11700.0000m, "RSD", null, "EUR", null, null, null, "PZ-2026-0917");
+        var record = SlipRecord(TransactionStatus.Captured, rawText: "", evidence: evidence);
+        var answer = new CategorizationProposal(
+            [], Kind: ProposedKind.Transfer,
+            Transfer: new ProposedTransfer(null, 11700m, "RSD", null, 100m, "EUR", Rate: null, Fee: null));
+        var (store, categorizer) = SlipFakes(record, answer);
+
+        await SlipWorker(Job(kind: JobKind.Correct, instruction: "получил 100 евро"), categorizer, store)
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        await store.Received(1).ApplyAsync(TransactionId, Arg.Is<CategorizationOutcome>(outcome =>
+                outcome.Transfer!.FromWalletId == CashRsd.Id && outcome.Transfer.ToWalletId == CashEur.Id),
+            Arg.Any<CancellationToken>());
+    }
+
+    // The received amount is unread but its currency was read: a reply "получил 100" names no currency, so the slip's
+    // USD must reach the model, or it could answer EUR and credit the EUR cash wallet.
+    [Fact]
+    public async Task A_reply_to_an_incomplete_slip_sees_the_currency_of_the_side_whose_amount_was_not_read()
+    {
+        var evidence = new AppReceipts.ExtractedExchange(11700.0000m, "RSD", null, "USD", null, null, null, "PZ-2026-0917");
+        var record = SlipRecord(TransactionStatus.Failed, RecordFailureReason.SlipIncomplete, rawText: "", evidence: evidence);
+        var (store, categorizer) = SlipFakes(record, SlipExchange(11650m));
+
+        await SlipWorker(Job(kind: JobKind.Correct, instruction: "получил 100"), categorizer, store)
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        await categorizer.Received(1).ProposeAsync(Arg.Is<CategorizationRequest>(request =>
+                request.RawText.Contains("\nGiven: 11700.00 RSD\nReceived: (amount not read) USD\n", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_reply_naming_a_wallet_for_a_slips_leg_keeps_the_named_one()
+    {
+        var record = SlipRecord(TransactionStatus.Failed, RecordFailureReason.SlipIncomplete);
+        var (store, categorizer) = SlipFakes(record, SlipExchange(11650m, fromWalletId: WiseEur.Id));
+
+        await SlipWorker(Job(kind: JobKind.Correct, instruction: "получил 11650, евро были с wise"), categorizer, store)
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        await store.Received(1).ApplyAsync(TransactionId, Arg.Is<CategorizationOutcome>(outcome =>
+                outcome.Transfer!.FromWalletId == WiseEur.Id && outcome.Transfer.ToWalletId == CashRsd.Id),
+            Arg.Any<CancellationToken>());
+    }
+
+    // Spec A-23: the held slip is dated by the slip (20 September), the photo was sent on the 21st; a reply that names
+    // no day keeps the slip's.
+    [Fact]
+    public async Task A_held_slip_completed_by_a_reply_keeps_the_slips_day()
+    {
+        var record = SlipRecord(TransactionStatus.Captured, rawText: "", occurredOn: new DateOnly(2026, 9, 20));
+        var (store, categorizer) = SlipFakes(record, SlipExchange(11650m));
+
+        await SlipWorker(Job(kind: JobKind.Correct, instruction: "получил 11650"), categorizer, store)
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        await store.Received(1).ApplyAsync(TransactionId,
+            Arg.Is<CategorizationOutcome>(outcome => outcome.OccurredOn == new DateOnly(2026, 9, 20)), Arg.Any<CancellationToken>());
+    }
+
+    // Spec A-23: an edited caption re-reads the slip, but the slip text carries no date - the slip's day is evidence,
+    // not something the caption said, so the edit does not move the record to the day the photo was sent.
+    [Fact]
+    public async Task An_edited_caption_on_a_slip_keeps_the_slips_day()
+    {
+        var (store, categorizer) = SlipFakes(RecordedSlip(occurredOn: new DateOnly(2026, 9, 20)), SlipExchange(11650m));
+
+        await SlipWorker(Job(kind: JobKind.Reinterpret), categorizer, store).RunTickAsync(TestContext.Current.CancellationToken);
+
+        await store.Received(1).ApplyAsync(TransactionId,
+            Arg.Is<CategorizationOutcome>(outcome => outcome.OccurredOn == new DateOnly(2026, 9, 20)), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_correction_of_an_ordinary_transfer_reads_its_own_words_and_asks_no_slip()
+    {
+        var receiptStore = NoReceiptStore();
+        var record = RecordedSlip() with { Slip = null, CaptureKind = CaptureKind.Text };
+        var (store, categorizer) = SlipFakes(record, SlipExchange(11650m, WiseEur.Id, CashRsd.Id));
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job(kind: JobKind.Correct, instruction: "получил 11650")), KeyPresent(), store,
+                categorizer: categorizer, receiptStore: receiptStore),
+            new FakeTimeProvider(DateTimeOffset.UtcNow));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await receiptStore.DidNotReceiveWithAnyArgs().GetExchangeSlipAsync(default, Arg.Any<CancellationToken>());
+        await categorizer.Received(1).ProposeAsync(
+            Arg.Is<CategorizationRequest>(request => request.RawText == "получил 11650"), Arg.Any<CancellationToken>());
+    }
 }
