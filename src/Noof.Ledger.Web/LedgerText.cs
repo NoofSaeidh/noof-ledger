@@ -17,7 +17,7 @@ internal static class LedgerText
     public static string TransferWithRate(TransferLine line) =>
         line.Rate is { } rate ? $"{TransferLegs(line)} · {rate}" : TransferLegs(line);
 
-    public static string SignedTransfer(TransferLine line) => $"-{Amount(line.From)} → +{Amount(line.To)}";
+    public static (string From, string To) SignedTransferLegs(TransferLine line) => ($"-{Amount(line.From)}", $"→ +{Amount(line.To)}");
 
     // The one test of "was a fee taken": a charge without one stores 0 (charges.fee_amount), and "+ fee 0.00" would
     // read as a fee that was taken.

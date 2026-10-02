@@ -536,6 +536,12 @@ summary:focus-visible,
     font-variant-numeric: tabular-nums;
 }
 
+/* A transfer's legs take a line each in the Wallet and Amounts cells: on one line, its two signed amounts widened
+   the grid past a desktop page and pushed Amounts and Categories out of view. */
+.noof-grid .noof-leg {
+    display: block;
+}
+
 .noof-grid .noof-col-message {
     overflow-wrap: anywhere;
     min-width: 16rem;
@@ -629,6 +635,10 @@ summary:focus-visible,
     .noof-grid-stack .noof-cell-main {
         order: 3;
         flex: 1 0 100%;
+    }
+
+    .noof-grid-stack .noof-leg {
+        display: inline;
     }
 
     .noof-grid-stack .noof-cell-meta {
