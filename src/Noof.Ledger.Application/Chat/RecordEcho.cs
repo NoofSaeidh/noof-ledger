@@ -218,7 +218,7 @@ internal sealed class RecordEcho : IRecordEcho
 
     // Owns both the mismatch arithmetic and the wording (the same split ReceiptWarnings already makes
     // for the recorded echo), so an ExtractedReceipt fresh off the vision fallback and a ReceiptView
-    // read back later (RecordActionHandler's Cancel/Restore, ExtractReceiptWorker's own C-1 replay)
+    // read back later (RecordActionHandler's Cancel/Restore, ExtractReceiptWorker's own lease-expiry replay)
     // produce byte-identical prompts instead of two hand-maintained copies of the same sentence.
     static EchoMessage ComposeReceiptNeedsConfirmationCore(
         string? sellerName, string? locationName, DateTimeOffset? issuedAt, string? sellerTaxId, string? fiscalNumber,

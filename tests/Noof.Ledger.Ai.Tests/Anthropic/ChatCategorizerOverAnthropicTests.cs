@@ -277,7 +277,7 @@ public class ChatCategorizerOverAnthropicTests
         proposal.Transfer.Should().Be(new ProposedTransfer(null, 100m, "EUR", null, null, "RSD", null, null));
     }
 
-    // The round trip of amendment 24, middle step. Task 2a.4 renders an exchange stored as 100 EUR → 11562.35 RSD with a
+    // The round trip of A-21, middle step. PR 2a renders an exchange stored as 100 EUR → 11562.35 RSD with a
     // 150 RSD fee on the destination and a stated rate of 117.1235 as "- from Cash EUR: 100 EUR", "- to Cash RSD:
     // 11712.35 RSD, worked out by the ledger, plus a fee of 150 RSD on this side (not included in the figure)" and
     // "- rate as stated: 1 EUR = 117.1235 RSD". A date-only correction answers that back unchanged as below; 2b's

@@ -267,7 +267,7 @@ internal static class CategorizationPrompt
         _ => ProposedKind.Expense,
     };
 
-    // Each side as the person would have said it (amendment 24): the principal, with the fee beside its own side as
+    // Each side as the person would have said it (A-21): the principal, with the fee beside its own side as
     // "not included in the figure". Answered back that way - included false, a worked-out side null - it settles to
     // exactly the stored amounts; the stored amounts themselves, fee inside, would be read back as said and charged
     // twice. A stated rate keeps its stated direction.

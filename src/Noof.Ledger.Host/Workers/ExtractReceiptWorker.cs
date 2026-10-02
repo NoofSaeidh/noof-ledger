@@ -96,7 +96,7 @@ internal sealed class ExtractReceiptWorker(
                 return;
             }
 
-            // C-1: a lease-expiry replay of a job whose earlier run already committed the receipt (the
+            // A lease-expiry replay of a job whose earlier run already committed the receipt (the
             // window between that commit and SucceedQuietlyAsync below, e.g. PostgreSQL going away in
             // between). The CategorizeReceipt job was inserted in the SAME SaveChangesAsync as the
             // receipt row (EfReceiptStore.SaveExtractedAsync; for an exchange slip, whatever its disposition
@@ -112,7 +112,7 @@ internal sealed class ExtractReceiptWorker(
                     await EchoSavedSlipAsync(receiptStore, notifier, job, record, cancellationToken);
                 else if (record.Status == TransactionStatus.Captured)
                 {
-                    // A replay landing here (C-1) after a save that skipped enqueueing CategorizeReceipt
+                    // A replay landing here after a save that skipped enqueueing CategorizeReceipt
                     // (2026-09-27) must not claim "Categorising…" when nothing is actually running. Job
                     // existence, not a recomputed sum-vs-total, is the derivation (shared with
                     // RecordActionHandler's Cancel/Restore, and EfTransactionTrace's own trace-page view,

@@ -263,7 +263,7 @@ public class ForeignChargeTests(PostgresFixture fixture)
         var otherCurrency = await CaptureAsync(db);
         var nothingLeft = await CaptureAsync(db);
 
-        // Amendment 14: a charge in a currency other than the wallet's prices nothing.
+        // A-13: a charge in a currency other than the wallet's prices nothing.
         await ApplyAsync(db, otherCurrency, Said(Spending(kaspi, Line(30m, CurrencyCode.Usd)), 27.50m, CurrencyCode.Eur));
         // "списали 150 включая комиссию 150": nothing positive is left to be the charge.
         await ApplyAsync(db, nothingLeft, Said(Spending(kaspi, Line(30m, CurrencyCode.Usd)), 150m, CurrencyCode.Kzt, fee: 150m, feeIncluded: true));
@@ -319,7 +319,7 @@ public class ForeignChargeTests(PostgresFixture fixture)
         var id = await CaptureAsync(db);
         await ApplyAsync(db, id, Said(Spending(kaspi, Line(30m, CurrencyCode.Usd)), 15_400m, CurrencyCode.Kzt));
 
-        // 2b passes a charge said in EUR through unjudged (contract, review C-4): not honoured on a KZT wallet, yet said.
+        // 2b passes a charge said in EUR through unjudged: not honoured on a KZT wallet, yet said.
         await ApplyAsync(db, id, AsCorrection(Said(Spending(kaspi, Line(30m, CurrencyCode.Usd)), 27.50m, CurrencyCode.Eur)));
 
         db.ChangeTracker.Clear();

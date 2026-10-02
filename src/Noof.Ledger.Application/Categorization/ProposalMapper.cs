@@ -112,7 +112,7 @@ internal sealed class ProposalMapper : IProposalMapper
         if (!TryParseDay(proposal.OccurredOn, out var occurredOn, out failure))
             return false;
 
-        // Amendment 24: a valid stated rate is kept whenever it was said, even beside a said received amount (which
+        // A-21: a valid stated rate is kept whenever it was said, even beside a said received amount (which
         // still wins for the settlement), so a date-only correction answered back unchanged keeps it. A rate that could
         // not convert between the legs - ignored by the settlement beside a said amount - is not kept.
         mapped = new MappedProposal(
@@ -165,7 +165,7 @@ internal sealed class ProposalMapper : IProposalMapper
         return null;
     }
 
-    // Amendment 23: a fee in exactly one side's currency is on that side, whatever leg the model named. Only a fee in
+    // A-20: a fee in exactly one side's currency is on that side, whatever leg the model named. Only a fee in
     // both sides' currency (a same-currency transfer) or in neither takes the model's leg.
     static TransferLeg? LegFor(ProposedFee fee, CurrencyCode feeCurrency, CurrencyCode from, CurrencyCode to) =>
         (feeCurrency == from, feeCurrency == to) switch
@@ -270,8 +270,8 @@ internal sealed class ProposalMapper : IProposalMapper
         return new Money(amount, currency);
     }
 
-    // Passed through unjudged: the store honours a charge only in the wallet's currency (amendment 14), but a charge said
-    // in another currency still counts as said, so it must reach the store rather than vanish here (review C-4).
+    // Passed through unjudged: the store honours a charge only in the wallet's currency (A-13), but a charge said
+    // in another currency still counts as said, so it must reach the store rather than vanish here.
     static bool TryStatedCharge(CategorizationProposal proposal, out StatedCharge? charge, out string failure)
     {
         charge = null;

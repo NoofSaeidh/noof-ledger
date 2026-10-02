@@ -135,7 +135,7 @@ internal sealed class EfRecordEditor(LedgerDbContext db, TimeProvider timeProvid
             .FirstAsync(cancellationToken);
 
         // ApplyAsync completes a record it applies while cancelled but leaves it cancelled. Putting back the status from
-        // before the cancel would then restore a Captured or Failed that no longer describes it (amendment 25).
+        // before the cancel would then restore a Captured or Failed that no longer describes it (A-22).
         var appliedSinceCancel = await db.TransactionRevisions.AnyAsync(
             r => r.TransactionId == transactionId
                 && r.RevisionNumber > cancel.RevisionNumber
