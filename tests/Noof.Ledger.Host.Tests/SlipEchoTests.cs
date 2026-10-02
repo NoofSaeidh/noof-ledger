@@ -89,12 +89,46 @@ public class SlipEchoTests
         echo.Text.Should().Be("Slip read, but the amount given, the amount received, the currency received is unreadable — reply with it.");
     }
 
+    // Vision keeps any three-letter code, so CHF was read, not missed - and no reply can make the ledger hold it.
     [Fact]
-    public void A_currency_the_ledger_does_not_hold_is_asked_for_as_unreadable()
+    public void A_currency_the_ledger_does_not_hold_is_named_as_such_never_as_unreadable()
     {
         var echo = Echo.Compose(IncompleteSlip(new ExtractedExchange(100.00m, "CHF", null, "RSD", 117.0000m, null, null, "PZ-2026-0917")));
 
-        echo.Text.Should().Be("Slip read, but the currency given, the amount received is unreadable — reply with it.");
+        echo.Text.Should().Be(
+            "Slip read, but CHF isn't a currency this ledger holds — nothing recorded. If it was misread, reply with the right currency.");
+        echo.Actions.Should().Equal(RecordAction.Edit);
+    }
+
+    [Fact]
+    public void A_received_currency_the_ledger_does_not_hold_is_named_as_read()
+    {
+        var echo = Echo.Compose(IncompleteSlip(new ExtractedExchange(11700.00m, "RSD", 100.00m, " gbp ", 117.0000m, null, null, "PZ-2026-0917")));
+
+        echo.Text.Should().Be(
+            "Slip read, but GBP isn't a currency this ledger holds — nothing recorded. If it was misread, reply with the right currency.");
+    }
+
+    [Fact]
+    public void Two_currencies_the_ledger_does_not_hold_are_named_together()
+    {
+        var echo = Echo.Compose(IncompleteSlip(new ExtractedExchange(100.00m, "CHF", 90.00m, "GBP", null, null, null, "PZ-2026-0917")));
+
+        echo.Text.Should().Be(
+            "Slip read, but CHF and GBP aren't currencies this ledger holds — nothing recorded. If it was misread, reply with the right currency.");
+    }
+
+    [Fact]
+    public void A_cancelled_slip_in_a_currency_the_ledger_does_not_hold_says_so_too()
+    {
+        var echo = Echo.Compose(IncompleteSlip(new ExtractedExchange(100.00m, "CHF", null, "RSD", null, null, null, "PZ-2026-0917")) with
+        {
+            Status = TransactionStatus.Cancelled,
+        });
+
+        echo.Text.Should().Be(
+            "Cancelled — Slip read, but CHF isn't a currency this ledger holds — nothing recorded. If it was misread, reply with the right currency.");
+        echo.Actions.Should().Equal(RecordAction.Restore);
     }
 
     [Fact]

@@ -142,7 +142,14 @@ internal sealed class EfRecordEditor(LedgerDbContext db, TimeProvider timeProvid
                 && (r.Kind == RevisionKind.Initial || r.Kind == RevisionKind.Correction || r.Kind == RevisionKind.Edit),
             cancellationToken);
 
-        transaction.Status = appliedSinceCancel ? TransactionStatus.Completed : cancel.StatusBefore;
+        // A Captured record holds no failure reason (amendment 26) unless an incomplete slip was saved while it was
+        // cancelled (EfReceiptStore.SaveExchangeSlipAsync): that outcome is what it now is.
+        transaction.Status = (appliedSinceCancel, cancel.StatusBefore, transaction.FailureReason) switch
+        {
+            (true, _, _) => TransactionStatus.Completed,
+            (false, TransactionStatus.Captured, not RecordFailureReason.None) => TransactionStatus.Failed,
+            _ => cancel.StatusBefore,
+        };
         await db.SaveChangesAsync(cancellationToken);
         await RevisionLog.AppendAsync(db, transaction, RevisionKind.Restore, null, TransactionStatus.Cancelled,
             timeProvider.GetUtcNow(), cancellationToken);
