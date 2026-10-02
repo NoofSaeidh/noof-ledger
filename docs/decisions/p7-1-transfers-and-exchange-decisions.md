@@ -91,9 +91,9 @@ Fable 5.1 and Codex reviewed `phase-7` against `master` at the close (`docs/REVI
 Four findings changed the phase before it merged, each now an amendment above: the slip tolerance is
 widened to one dinar, so a slip paid out in whole dinars is no longer held for "Record anyway" (A-29,
 operator 2026-10-02); a slip in a currency the ledger does not hold is worded as an unsupported
-currency, not an unreadable one (A-30, PR 8b); Restore of an incomplete slip that was cancelled during
+currency, not an unreadable one (A-30, PR #56); Restore of an incomplete slip that was cancelled during
 extraction brings it back `Failed` and asking for the missing figure instead of stranding it (A-31, PR
-8b); and an amount said as what arrived includes a fee on its side, where the prompt had read it as not
+#56); and an amount said as what arrived includes a fee on its side, where the prompt had read it as not
 included and stored the received leg short by the fee (A-32, PR #55); with it, a transfer's correction
 input shows the destination as what arrived, its fee already taken out, so a fee-only or bare-amount
 correction no longer shifts it by the fee (A-33, PR #55). Deferred: the opus review of the fixes found
