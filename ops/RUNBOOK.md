@@ -466,6 +466,22 @@ The operator can hand a PR to Copilot's cloud agent from a PR comment, e.g.
   Claude Code does not read this file. Copilot reads it from the branch it works on, so a branch cut
   before it existed needs it merged or cherry-picked in first.
 
+## Codex brokers and removing a worktree
+
+The Codex plugin starts a detached broker process (with a `codex app-server` chain under it) for
+every directory a companion review runs in, and stops only the Claude Code session's own one when the
+session ends. A broker left in a worktree holds it open, and removing the worktree fails with "being
+used by another process". `.\run.ps1 codex review` (`docs/REVIEWS.md`) stops its broker itself.
+
+**Don't run two reviews in one worktree at once.** They share that worktree's broker, and the first
+to finish stops it under the other. One PR per worktree, one review at a time, keeps this from
+arising; the wrapper does not coordinate concurrent reviews.
+
+- **Before removing a worktree:** `.\run.ps1 codex stop -Path <worktree>`, then `git worktree remove`.
+- **A removal already failed, or leftovers piled up:** `.\run.ps1 codex sweep` lists every broker;
+  `-Stop` stops those in folders under `.claude\worktrees\` that are no longer registered worktrees.
+  It never touches the main checkout's broker or a registered worktree's.
+
 ## run.ps1 — the one entry point
 
 `run.ps1` in the repo root is how the app is launched and operated from here on; `.\run.ps1` (or
@@ -490,6 +506,8 @@ detail — prerequisites included. `Get-Help .\run.ps1 -Full` works too. One lin
 - `logs [-Tail <n>] [-Follow]` — open, tail, or follow the log directory.
 - `backups` — open the backup directory.
 - `inspect` — the solution-wide accessibility sweep (`ops/inspect.ps1`).
+- `codex review|stop|sweep` — a Codex adversarial review that stops its broker afterwards, and
+  cleanup of brokers left in worktrees (`ops/codex-broker.ps1`; see above).
 
 Every `ops/*.ps1` script named above still exists and still works stand-alone; `run.ps1` is what
 calls it with the right arguments, not a replacement for it.
