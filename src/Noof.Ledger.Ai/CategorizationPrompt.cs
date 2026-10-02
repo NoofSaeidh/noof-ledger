@@ -62,7 +62,8 @@ internal static class CategorizationPrompt
         purchase in another currency what the wallet was charged. A charge already on the record
         stays as it is: answer charged only when the correction states a new one. Each side of a
         transfer shows its amount as the person would have said it, and a fee "not included in the
-        figure" is answered with included false. A side "worked out by the ledger" is answered
+        figure" is answered with included false while that figure stands; a new amount the
+        correction states for that side follows the fee rules below. A side "worked out by the ledger" is answered
         with to_amount null unless the correction states what arrived. When the current
         record says nothing was recorded, the first reading could not be recorded — read the
         message again and take the correction as the missing piece, such as the amount received in
@@ -99,9 +100,12 @@ internal static class CategorizationPrompt
 
         A fee is on leg "from" unless the person says the receiving side kept it. Set included
         to true only when the person says the amount they gave for that side already includes the
-        fee ("списали 10150 включая комиссию 150"); otherwise false. A fee said in only one
-        side's currency is on that side ("комиссия 150 динар" on euros changed into dinars is leg
-        "to").
+        fee ("списали 10150 включая комиссию 150"), or when the fee is on leg "to" and
+        to_amount is said as what arrived; otherwise false. An amount said as what arrived —
+        "получил", "пришло", "на руки" — is what was left after a fee on that side, so it already
+        includes the fee unless the person says the fee was taken out of it afterwards. A fee said
+        in only one side's currency is on that side
+        ("комиссия 150 динар" on euros changed into dinars is leg "to").
 
         Answer charged only when the person says what was actually taken from the wallet, in the
         wallet's own currency, for a purchase in another currency ("30 долларов с каспи, списали
@@ -182,6 +186,13 @@ internal static class CategorizationPrompt
         Answer with kind "transfer", no items, and transfer: from_amount 100, from_currency "EUR",
         to_amount null, to_currency "RSD", rate with base_currency "EUR", quote_amount 117 and
         quote_currency "RSD", fee null, both wallet ids null. Do not work out 11700 yourself.
+        </example>
+        <example>
+        Message: "поменял 100 евро, получил 11700 динар, комиссия 100 динар"
+        Answer with kind "transfer", no items, and transfer: from_amount 100, from_currency "EUR",
+        to_amount 11700, to_currency "RSD", rate null, and fee with amount 100, currency "RSD",
+        leg "to", included true, both wallet ids null. "Получил" is what the person was left with
+        after the office kept its fee, so 11700 already has the fee out of it.
         </example>
         <example>
         Message: "30 долларов с каспи на книгу, списали 15400"

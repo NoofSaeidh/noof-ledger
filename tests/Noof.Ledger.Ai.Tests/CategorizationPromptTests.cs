@@ -47,14 +47,14 @@ public class CategorizationPromptTests
     }
 
     [Fact]
-    public void System_prompt_has_between_three_and_ten_examples()
+    public void System_prompt_has_between_three_and_eleven_examples()
     {
-        // Widened from [3,7] (Phase 7): a withdrawal with a fee, an exchange at a stated rate and a stated charge
-        // bring the count to 10.
+        // Widened from [3,7] (Phase 7): a withdrawal with a fee, an exchange at a stated rate, a fee on the
+        // receiving side and a stated charge bring the count to 11.
         var opening = Regex.Matches(CategorizationPrompt.System, "<example>").Count;
         var closing = Regex.Matches(CategorizationPrompt.System, "</example>").Count;
 
-        opening.Should().BeInRange(3, 10);
+        opening.Should().BeInRange(3, 11);
         closing.Should().Be(opening);
     }
 
@@ -80,6 +80,32 @@ public class CategorizationPromptTests
     {
         CategorizationPrompt.System.Should().Contain("A fee is on leg \"from\" unless the person says the receiving side kept it");
         CategorizationPrompt.System.Should().Contain("true only when the person says the amount they gave for that side");
+    }
+
+    [Fact]
+    public void System_prompt_reads_an_amount_said_as_what_arrived_as_already_net_of_a_fee_on_leg_to()
+    {
+        // I-1 (Phase 7 closing review): "получил 11700, комиссия 100 динар" answered included false is settled as
+        // 11700 before the fee and stored as 11600, while the purse holds 11700.
+        CategorizationPrompt.System.Should().Contain("or when the fee is on leg \"to\" and");
+        CategorizationPrompt.System.Should().Contain("to_amount is said as what arrived; otherwise false.");
+        CategorizationPrompt.System.Should().Contain("\"получил\", \"пришло\", \"на руки\" — is what was left after a fee");
+        CategorizationPrompt.System.Should().Contain("unless the person says the fee was taken out of it afterwards");
+    }
+
+    [Fact]
+    public void System_prompt_has_an_example_of_a_fee_on_leg_to_beside_what_arrived()
+    {
+        CategorizationPrompt.System.Should().Contain("Message: \"поменял 100 евро, получил 11700 динар, комиссия 100 динар\"");
+        CategorizationPrompt.System.Should().Contain("leg \"to\", included true, both wallet ids null");
+        CategorizationPrompt.System.Should().Contain("so 11700 already has the fee out of it");
+    }
+
+    [Fact]
+    public void System_prompt_reads_a_new_amount_in_a_correction_by_the_fee_rules_not_by_the_shown_figure()
+    {
+        CategorizationPrompt.System.Should().Contain("is answered with included false while that figure stands; a new amount the");
+        CategorizationPrompt.System.Should().Contain("correction states for that side follows the fee rules below.");
     }
 
     [Fact]
