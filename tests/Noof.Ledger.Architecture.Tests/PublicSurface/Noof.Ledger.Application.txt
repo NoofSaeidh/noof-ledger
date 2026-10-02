@@ -96,6 +96,7 @@ ModelCallExceptionExtensions
 ModelFailureKind
 MonthSummary
 MonthTotal
+MonthTransfer
 NewWallet
 OperationTiming
 PasswordVerifyResult
@@ -122,9 +123,11 @@ ReceiptView
 ReceiptVisionResult
 RecentLineItem
 RecentTransaction
+RecentView
 RecordAction
 RecordedLine
 ResolvedLineItem
+RevisionSnapshotView
 RevisionView
 SecretKeys
 SecretResult
@@ -145,6 +148,8 @@ TransactionStages
 TransactionSummary
 TransactionTrace
 TransferFacts
+TransferLine
+TransferTraceView
 TransferView
 UnsupportedChangeKind
 WalletBalance

@@ -15,10 +15,16 @@ internal sealed class EfTransactionList(LedgerDbContext db) : ITransactionList
             query = query.Where(t => t.OccurredOn >= from);
         if (filter.To is { } to)
             query = query.Where(t => t.OccurredOn <= to);
+        // Either leg (transfers spec, A-16): transactions.wallet_id holds only a transfer's source, and entries would
+        // miss a Captured or Failed record, which has none - so the record's own wallet, or a transfer leg.
         if (filter.WalletId is { } walletId)
-            query = query.Where(t => t.WalletId == walletId);
+            query = query.Where(t => t.WalletId == walletId
+                || db.Transfers.Any(transfer => transfer.TransactionId == t.Id
+                    && (transfer.FromWalletId == walletId || transfer.ToWalletId == walletId)));
         if (filter.Kind is { } kind)
             query = query.Where(t => t.Kind == kind);
+        if (filter.ExcludeTransfers)
+            query = query.Where(t => t.Kind != TransactionKind.Transfer);
         if (filter.Status is { } status)
             query = query.Where(t => t.Status == status);
         // M-3 (Phase 5 final review): Blazor binds a cleared <input> to "", not null - an empty
@@ -63,7 +69,7 @@ internal sealed class EfTransactionList(LedgerDbContext db) : ITransactionList
             where transactionIds.Contains(li.TransactionId)
             join c in db.Categories.AsNoTracking() on li.CategoryId equals c.Id into categoryJoin
             from c in categoryJoin.DefaultIfEmpty()
-            select new { li.TransactionId, li.Amount, CategoryName = c == null ? null : c.NameEn })
+            select new { li.TransactionId, li.Amount, li.Role, CategoryName = c == null ? null : c.NameEn })
             .ToListAsync(cancellationToken);
         var lineItemsByTransaction = lineItemRows.ToLookup(r => r.TransactionId);
 
@@ -81,11 +87,15 @@ internal sealed class EfTransactionList(LedgerDbContext db) : ITransactionList
             .Where(r => transactionIds.Contains(r.TransactionId))
             .ToDictionaryAsync(r => r.TransactionId, r => r.SellerName, cancellationToken);
 
+        var transfers = await TransferLines.ForAsync(
+            db, [.. headers.Where(h => h.Kind == TransactionKind.Transfer).Select(h => h.Id)], cancellationToken);
+
         IReadOnlyList<Money> AmountsFor(Guid transactionId, TransactionKind kind) => kind switch
         {
             TransactionKind.Expense =>
             [
                 .. lineItemsByTransaction[transactionId]
+                    .Where(r => r.Role == EntryRole.Principal)
                     .GroupBy(r => r.Amount.Currency)
                     .Select(g => new Money(g.Sum(r => r.Amount.Amount), g.Key)),
             ],
@@ -96,6 +106,7 @@ internal sealed class EfTransactionList(LedgerDbContext db) : ITransactionList
                     .Select(g => new Money(g.Sum(r => r.Amount.Amount), g.Key)),
             ],
             TransactionKind.BalanceCheck => balanceChecksByTransaction.TryGetValue(transactionId, out var stated) ? [stated] : [],
+            TransactionKind.Transfer => transfers.TryGetValue(transactionId, out var transfer) ? [transfer.From, transfer.To] : [],
             _ => [],
         };
 
@@ -121,7 +132,8 @@ internal sealed class EfTransactionList(LedgerDbContext db) : ITransactionList
                 AmountsFor(h.Id, h.Kind),
                 CategoriesFor(h.Id),
                 shopNameByTransaction.ContainsKey(h.Id),
-                shopNameByTransaction.GetValueOrDefault(h.Id)))
+                shopNameByTransaction.GetValueOrDefault(h.Id),
+                transfers.GetValueOrDefault(h.Id)))
             .ToList();
 
         return new TransactionListPage(rows, totalCount);

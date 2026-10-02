@@ -265,7 +265,7 @@ else
 
         try
         {
-            recent = await ReadModel.RecentAsync(20, cancellation.Token);
+            recent = await ReadModel.RecentAsync(20, RecentView.SpendingAndIncome, cancellation.Token);
 
             var summary = await ReadModel.ThisMonthAsync(cancellation.Token);
             summaryFirstDay = summary.FirstDay;
