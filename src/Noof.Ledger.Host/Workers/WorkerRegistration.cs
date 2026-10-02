@@ -62,6 +62,16 @@ internal static class WorkerRegistration
             sp.GetRequiredService<IOperationTimer>(),
             sp.GetRequiredService<ILogger<ExtractReceiptWorker>>()));
 
+        services.AddHostedService(sp => new RecordExchangeWorker(
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            sp.GetRequiredService<TimeProvider>(),
+            options,
+            CategorizationWorker.CreateWorkerId(),
+            sp.GetRequiredService<IRecordEcho>(),
+            sp.GetRequiredService<IDatabaseGate>(),
+            sp.GetRequiredService<IOperationTimer>(),
+            sp.GetRequiredService<ILogger<RecordExchangeWorker>>()));
+
         if (backupOptions.Enabled)
         {
             services.AddHostedService(sp => new BackupWorker(
