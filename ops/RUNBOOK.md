@@ -473,6 +473,10 @@ every directory a companion review runs in, and stops only the Claude Code sessi
 session ends. A broker left in a worktree holds it open, and removing the worktree fails with "being
 used by another process". `.\run.ps1 codex review` (`docs/REVIEWS.md`) stops its broker itself.
 
+**Don't run two reviews in one worktree at once.** They share that worktree's broker, and the first
+to finish stops it under the other. One PR per worktree, one review at a time, keeps this from
+arising; the wrapper does not coordinate concurrent reviews.
+
 - **Before removing a worktree:** `.\run.ps1 codex stop -Path <worktree>`, then `git worktree remove`.
 - **A removal already failed, or leftovers piled up:** `.\run.ps1 codex sweep` lists every broker;
   `-Stop` stops those in folders under `.claude\worktrees\` that are no longer registered worktrees.

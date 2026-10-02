@@ -24,22 +24,37 @@ removing the worktree then fails with "being used by another process".
       -Stop stops the orphans. The main checkout and registered worktrees are never touched - other
       sessions run their reviews there - and neither is anything outside this repository.
 
-Stopping uses the plugin's own teardown (ops\codex-broker-teardown.mjs), then ends any process of the
-broker's chain that outlived it.
+Stopping asks the broker to shut down through the plugin's own code (ops\codex-broker-teardown.mjs),
+ends whatever of its process chain outlived that - each process verified by its start time and killed
+through a handle held since, so a reused process id is never hit - and then lets the plugin remove
+the broker's files.
+
+Arguments are parsed from $args by hand, not bound as named parameters: run.ps1 forwards its own
+arguments as an array of strings, and array splatting binds "-Path" as a positional value rather
+than as a parameter name.
 
 .OUTPUTS
 review: the companion's output and exit code. stop/sweep: one line per broker; exit 0.
 #>
-param(
-    [Parameter(Position = 0)][string]$Action,
-    [string]$Base,
-    [string]$Focus,
-    [string]$Cwd = (Get-Location).Path,
-    [string]$Path,
-    [switch]$Stop
-)
 
 $ErrorActionPreference = 'Stop'
+
+$Usage = 'Usage: codex-broker.ps1 review -Base <branch> -Focus <text> [-Cwd <dir>] | stop -Path <dir> | sweep [-Stop]'
+
+function ConvertFrom-CodexBrokerArguments {
+    param([string[]]$Arguments)
+    $options = @{ Action = $null; Base = $null; Focus = $null; Cwd = (Get-Location).Path; Path = $null; Stop = $false }
+    if (-not $Arguments) { return $options }
+    $options.Action = $Arguments[0]
+    for ($i = 1; $i -lt $Arguments.Count; $i++) {
+        $name = $Arguments[$i]
+        if ($name -eq '-Stop') { $options.Stop = $true; continue }
+        if ($name -notin '-Base', '-Focus', '-Cwd', '-Path') { throw "Unknown argument '$name'. $Usage" }
+        if ($i + 1 -ge $Arguments.Count) { throw "$name needs a value. $Usage" }
+        $options[$name.Substring(1)] = $Arguments[++$i]
+    }
+    $options
+}
 
 function ConvertTo-ComparablePath {
     param([string]$Value)
@@ -51,22 +66,25 @@ function Test-PathAtOrUnder {
     $Candidate -eq $Parent -or $Candidate.StartsWith("$Parent\")
 }
 
-function Get-QuotedOrBareValue {
-    param([string]$CommandLine, [string]$Before, [string]$ValuePattern = '[^"\s]+', [string]$After = '')
-    if ($CommandLine -notmatch "$Before(?:`"(?<value>[^`"]+)`"|(?<value>$ValuePattern))$After") { return $null }
+function Get-OptionValue {
+    param([string]$CommandLine, [string]$Option)
+    if ($CommandLine -notmatch "\s$Option\s+(?:`"(?<value>[^`"]+)`"|(?<value>[^`"\s]+))") { return $null }
     $Matches.value
 }
 
 function ConvertFrom-BrokerCommandLine {
     param([string]$CommandLine)
-    $scriptPath = Get-QuotedOrBareValue $CommandLine '(?<=\s)' '[^"\s]*app-server-broker\.mjs' '\s+serve\b'
-    if (-not $scriptPath) { return $null }
-    [PSCustomObject]@{
-        ScriptsDirectory = Split-Path $scriptPath -Parent
-        Endpoint         = Get-QuotedOrBareValue $CommandLine '--endpoint\s+'
-        Cwd              = Get-QuotedOrBareValue $CommandLine '--cwd\s+'
-        PidFile          = Get-QuotedOrBareValue $CommandLine '--pid-file\s+'
+    $quotedScript = '"(?<script>(?:[^"]*[\\/])?app-server-broker\.mjs)"'
+    $bareScript = '(?<script>(?:[^"\s]*[\\/])?app-server-broker\.mjs)'
+    if ($CommandLine -notmatch "\s(?:$quotedScript|$bareScript)\s+serve\s") { return $null }
+    $broker = [PSCustomObject]@{
+        ScriptsDirectory = Split-Path $Matches.script -Parent
+        Endpoint         = Get-OptionValue $CommandLine '--endpoint'
+        Cwd              = Get-OptionValue $CommandLine '--cwd'
+        PidFile          = Get-OptionValue $CommandLine '--pid-file'
     }
+    if (-not ($broker.ScriptsDirectory -and $broker.Endpoint -and $broker.Cwd -and $broker.PidFile)) { return $null }
+    $broker
 }
 
 function ConvertFrom-WorktreeList {
@@ -106,12 +124,12 @@ function Get-DescendantProcessIds {
 }
 
 function Get-ProcessSnapshot {
-    Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, CreationDate, CommandLine
+    Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, CreationDate, Name, CommandLine
 }
 
 function Get-CodexBrokers {
     param([object[]]$Processes)
-    foreach ($process in $Processes) {
+    foreach ($process in $Processes | Where-Object Name -eq 'node.exe') {
         $broker = ConvertFrom-BrokerCommandLine $process.CommandLine
         if ($broker) { $broker | Add-Member -NotePropertyName ProcessId -NotePropertyValue ([int]$process.ProcessId) -PassThru }
     }
@@ -133,22 +151,51 @@ function Get-WorkspaceRoot {
     $Directory
 }
 
+function Get-VerifiedProcess {
+    param([object]$Snapshot)
+    $process = Get-Process -Id $Snapshot.ProcessId -ErrorAction SilentlyContinue
+    if (-not $process) { return $null }
+    try {
+        # Reading Handle opens and keeps a handle to this very process, so a later Kill() can only
+        # reach it - never a process that takes over its id once it has exited.
+        $null = $process.Handle
+        if ([math]::Abs(($process.StartTime - $Snapshot.CreationDate).TotalSeconds) -lt 1) { return $process }
+    }
+    catch { }
+    $null
+}
+
+function Invoke-BrokerTeardown {
+    param([object]$Broker, [string]$Step)
+    node --no-deprecation (Join-Path $PSScriptRoot 'codex-broker-teardown.mjs') $Step $Broker.ScriptsDirectory $Broker.Endpoint $Broker.PidFile $Broker.Cwd
+    if ($LASTEXITCODE -ne 0) { Write-Host "The plugin's broker $Step failed for broker $($Broker.ProcessId)." -ForegroundColor Yellow }
+}
+
 function Stop-CodexBroker {
     param([object]$Broker, [object[]]$Processes)
-    $chain = @(Get-DescendantProcessIds -RootId $Broker.ProcessId -Processes $Processes)
-    node --no-deprecation (Join-Path $PSScriptRoot 'codex-broker-teardown.mjs') $Broker.ScriptsDirectory $Broker.Endpoint $Broker.ProcessId $Broker.PidFile $Broker.Cwd
-    if ($LASTEXITCODE -ne 0) { Write-Host "The plugin's teardown failed for broker $($Broker.ProcessId); ending its processes directly." -ForegroundColor Yellow }
-
     $byId = @{}
     foreach ($process in $Processes) { $byId[[int]$process.ProcessId] = $process }
-    foreach ($id in @($Broker.ProcessId) + $chain) {
-        $survivor = Get-Process -Id $id -ErrorAction SilentlyContinue
-        # Same id and same start time, so never a new process that took a dead one's id.
-        if ($survivor -and [math]::Abs(($survivor.StartTime - $byId[$id].CreationDate).TotalSeconds) -lt 1) {
-            Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
+    $chain = @(@($Broker.ProcessId) + @(Get-DescendantProcessIds -RootId $Broker.ProcessId -Processes $Processes) |
+        ForEach-Object { Get-VerifiedProcess $byId[$_] } | Where-Object { $_ })
+
+    Invoke-BrokerTeardown $Broker 'shutdown'
+    foreach ($process in $chain) {
+        try {
+            if (-not $process.HasExited) { $process.Kill() }
+            $null = $process.WaitForExit(5000)
         }
+        catch { }
     }
+    Invoke-BrokerTeardown $Broker 'cleanup'
     Write-Host "Stopped broker $($Broker.ProcessId) ($($Broker.Cwd))."
+}
+
+function Stop-EachCodexBroker {
+    param([object[]]$Brokers, [object[]]$Processes)
+    foreach ($broker in $Brokers) {
+        try { Stop-CodexBroker $broker $Processes }
+        catch { Write-Host "Could not stop broker $($broker.ProcessId) ($($broker.Cwd)): $($_.Exception.Message)" -ForegroundColor Yellow }
+    }
 }
 
 function Stop-CodexBrokerOf {
@@ -161,7 +208,17 @@ function Stop-CodexBrokerOf {
     $processes = @(Get-ProcessSnapshot)
     $brokers = @(Get-CodexBrokers $processes | Where-Object { (ConvertTo-ComparablePath $_.Cwd) -eq $root })
     if ($brokers.Count -eq 0) { Write-Host "No Codex broker runs in $Directory." }
-    foreach ($broker in $brokers) { Stop-CodexBroker $broker $processes }
+    Stop-EachCodexBroker $brokers $processes
+}
+
+function Invoke-WithBrokerCleanup {
+    param([scriptblock]$Review, [string]$Directory)
+    try { & $Review }
+    finally {
+        # A cleanup failure must not replace the review's own result.
+        try { Stop-CodexBrokerOf $Directory }
+        catch { Write-Host "Could not stop the Codex broker of ${Directory}: $($_.Exception.Message). Run .\run.ps1 codex sweep." -ForegroundColor Yellow }
+    }
 }
 
 function Get-CodexCompanionPath {
@@ -178,12 +235,10 @@ function Invoke-CodexReview {
     param([string]$BaseBranch, [string]$FocusText, [string]$Directory)
     if (-not $BaseBranch -or -not $FocusText) { throw 'Usage: review -Base <branch> -Focus <text> [-Cwd <dir>]' }
     $companion = Get-CodexCompanionPath
-    try {
+    Invoke-WithBrokerCleanup -Directory $Directory -Review {
         node $companion adversarial-review --wait --cwd $Directory --base $BaseBranch $FocusText | Out-Host
-        $reviewExitCode = $LASTEXITCODE
+        $LASTEXITCODE
     }
-    finally { Stop-CodexBrokerOf $Directory }
-    $reviewExitCode
 }
 
 function Invoke-CodexBrokerSweep {
@@ -192,25 +247,25 @@ function Invoke-CodexBrokerSweep {
     $processes = @(Get-ProcessSnapshot)
     $brokers = @(Get-CodexBrokers $processes)
     if ($brokers.Count -eq 0) { Write-Host 'No Codex brokers are running.'; return }
-    $orphans = 0
-    foreach ($broker in $brokers) {
+    $orphans = foreach ($broker in $brokers) {
         $verdict = Get-BrokerVerdict -BrokerCwd $broker.Cwd -Worktrees $worktrees -PathExists { param($p) Test-Path $p }
         Write-Host ('{0,7}  {1,-19}  {2}' -f $broker.ProcessId, $verdict, $broker.Cwd)
-        if ($verdict -ne 'orphan') { continue }
-        $orphans++
-        if ($StopOrphans) { Stop-CodexBroker $broker $processes }
+        if ($verdict -eq 'orphan') { $broker }
     }
-    if ($orphans -gt 0 -and -not $StopOrphans) { Write-Host 'Run with -Stop to stop the orphans.' }
+    if (-not $orphans) { return }
+    if ($StopOrphans) { Stop-EachCodexBroker @($orphans) $processes }
+    else { Write-Host 'Run with -Stop to stop the orphans.' }
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
-    switch ($Action) {
-        'review' { exit (Invoke-CodexReview -BaseBranch $Base -FocusText $Focus -Directory $Cwd) }
+    $options = ConvertFrom-CodexBrokerArguments $args
+    switch ($options.Action) {
+        'review' { exit (Invoke-CodexReview -BaseBranch $options.Base -FocusText $options.Focus -Directory $options.Cwd) }
         'stop' {
-            if (-not $Path) { throw 'Usage: stop -Path <dir>' }
-            Stop-CodexBrokerOf $Path
+            if (-not $options.Path) { throw 'Usage: stop -Path <dir>' }
+            Stop-CodexBrokerOf $options.Path
         }
-        'sweep' { Invoke-CodexBrokerSweep -StopOrphans:$Stop }
-        default { throw 'Usage: codex-broker.ps1 review -Base <branch> -Focus <text> [-Cwd <dir>] | stop -Path <dir> | sweep [-Stop]' }
+        'sweep' { Invoke-CodexBrokerSweep -StopOrphans:$options.Stop }
+        default { throw $Usage }
     }
 }

@@ -35,7 +35,8 @@ the plugin's stop-time review gate: it would review on every Stop and burn the q
   The focus asks it to challenge the approach, assumptions, trade-offs and failure modes — not just
   defects. Never call `codex-companion.mjs` directly: it leaves a broker process running in the
   worktree until reboot, and the worktree then cannot be removed. The wrapper stops it afterwards;
-  `.\run.ps1 codex sweep -Stop` clears any a direct call left behind.
+  `.\run.ps1 codex sweep -Stop` clears any a direct call left behind. One review per worktree at a
+  time — two would share the broker (`ops/RUNBOOK.md`).
 - Run either in the foreground with a 600000 ms timeout.
 - Findings are judged, not obeyed (triage per §1): fix what's confirmed, reply in the PR description
   to what's rejected and why.

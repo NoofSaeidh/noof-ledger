@@ -32,6 +32,52 @@ Assert-Equal 'quoted script path' 'C:\Users\A B\codex\scripts' $quoted.ScriptsDi
 
 Assert-Equal 'a companion review is not a broker' $null (ConvertFrom-BrokerCommandLine "node $plugin\codex-companion.mjs adversarial-review --wait --cwd C:\x")
 Assert-Equal 'no command line (a process we may not read) is not a broker' $null (ConvertFrom-BrokerCommandLine $null)
+$brokerArguments = 'serve --endpoint pipe:\\.\pipe\x --cwd C:\work --pid-file C:\t\broker.pid'
+Assert-Equal 'a quoted unrelated script with broker arguments is not a broker' $null (ConvertFrom-BrokerCommandLine "node `"C:\other\worker.mjs`" $brokerArguments")
+Assert-Equal 'a bare unrelated script with broker arguments is not a broker' $null (ConvertFrom-BrokerCommandLine "node C:\other\worker.mjs $brokerArguments")
+Assert-Equal 'a script merely ending in the broker''s name is not a broker' $null (ConvertFrom-BrokerCommandLine "node C:\other\my-app-server-broker.mjs $brokerArguments")
+Assert-Equal 'a broker command line missing its endpoint is not trusted' $null (ConvertFrom-BrokerCommandLine "node $plugin\app-server-broker.mjs serve --cwd C:\work --pid-file C:\t\broker.pid")
+
+# Get-CodexBrokers: only node.exe runs the broker.
+$brokerCommandLine = "node $plugin\app-server-broker.mjs $brokerArguments"
+$listed = @(Get-CodexBrokers @(
+    [PSCustomObject]@{ ProcessId = 1; Name = 'node.exe'; CommandLine = $brokerCommandLine }
+    [PSCustomObject]@{ ProcessId = 2; Name = 'pwsh.exe'; CommandLine = "pwsh -Command `"$brokerCommandLine`"" }
+))
+Assert-Equal 'only the node process is a broker' '1' (($listed | ForEach-Object ProcessId) -join ',')
+
+# ConvertFrom-CodexBrokerArguments: run.ps1 forwards plain strings, which array splatting would bind
+# positionally - so the script parses them itself.
+$review = ConvertFrom-CodexBrokerArguments @('review', '-Base', 'phase-8', '-Focus', 'challenge it', '-Cwd', 'C:\w')
+Assert-Equal 'review action' 'review' $review.Action
+Assert-Equal 'review base' 'phase-8' $review.Base
+Assert-Equal 'review focus keeps its spaces' 'challenge it' $review.Focus
+Assert-Equal 'review cwd' 'C:\w' $review.Cwd
+Assert-Equal 'review cwd defaults to the current directory' (Get-Location).Path (ConvertFrom-CodexBrokerArguments @('review', '-Base', 'b', '-Focus', 'f')).Cwd
+$stopArguments = ConvertFrom-CodexBrokerArguments @('stop', '-Path', 'C:\w')
+Assert-Equal 'stop action' 'stop' $stopArguments.Action
+Assert-Equal 'stop path' 'C:\w' $stopArguments.Path
+Assert-Equal 'sweep -Stop' $true (ConvertFrom-CodexBrokerArguments @('sweep', '-Stop')).Stop
+Assert-Equal 'sweep alone only lists' $false (ConvertFrom-CodexBrokerArguments @('sweep')).Stop
+
+$scriptPath = Join-Path $PSScriptRoot 'codex-broker.ps1'
+function Get-EntryError {
+    param([string[]]$Arguments)
+    try { & $scriptPath @Arguments; 'no error' } catch { $_.Exception.Message }
+}
+Assert-Equal 'entry: a value-less -Path is refused' $true ((Get-EntryError @('stop', '-Path')) -like '-Path needs a value*')
+Assert-Equal 'entry: stop without -Path is refused' 'Usage: stop -Path <dir>' (Get-EntryError @('stop'))
+Assert-Equal 'entry: an unknown switch is refused' $true ((Get-EntryError @('sweep', '-Force')) -like 'Unknown argument ''-Force''*')
+Assert-Equal 'entry: an unknown action prints usage' $true ((Get-EntryError @('bogus')) -like 'Usage: codex-broker.ps1*')
+
+# Invoke-WithBrokerCleanup: the broker is stopped whatever the review did, and a cleanup failure
+# never replaces the review's own exit code or error.
+$script:cleanups = 0
+function Stop-CodexBrokerOf { param([string]$Directory) $script:cleanups++; throw 'process listing failed' }
+Assert-Equal 'review exit code survives a failed cleanup' 7 (Invoke-WithBrokerCleanup -Directory 'C:\w' -Review { 7 } 6>$null)
+$reviewError = try { Invoke-WithBrokerCleanup -Directory 'C:\w' -Review { throw 'review failed' } 6>$null; 'no error' } catch { $_.Exception.Message }
+Assert-Equal 'a failed review''s error survives a failed cleanup' 'review failed' $reviewError
+Assert-Equal 'cleanup attempted after both reviews' 2 $script:cleanups
 
 # ConvertFrom-WorktreeList: `git worktree list --porcelain`; the first entry is the main checkout.
 $porcelain = @(
