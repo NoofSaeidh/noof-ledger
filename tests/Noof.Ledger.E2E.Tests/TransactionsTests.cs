@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Playwright;
@@ -282,7 +283,84 @@ public sealed class TransactionsTests(CookieModeHostFixture fixture) : PageTest,
         await Page.WaitForURLAsync($"**/transactions/{transactionId}/trace");
     }
 
-    async Task<Guid> SeedWalletAsync(string name)
+    [Fact]
+    public async Task The_spending_preset_hides_transfers_and_a_transfer_row_shows_what_each_wallet_moved()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var marker = Guid.NewGuid().ToString("N")[..8];
+        var euro = await SeedWalletAsync($"Preset EUR {marker}");
+        var dinar = await SeedWalletAsync($"Preset RSD {marker}", CurrencyCode.Rsd);
+        var now = DateTimeOffset.UtcNow;
+
+        await using (var db = OpenDb())
+        {
+            db.Transactions.Add(NewTransaction(Guid.NewGuid(), euro, TransactionKind.Expense, TransactionStatus.Completed,
+                $"preset expense {marker}", now.AddMinutes(-1)));
+            AddTransfer(db, Guid.NewGuid(), euro, new Money(100.00m, CurrencyCode.Eur), dinar, new Money(11700.00m, CurrencyCode.Rsd),
+                $"preset exchange {marker}", now);
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/transactions");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var grid = Page.Locator("#transactions-grid");
+        var exchangeRow = grid.Locator("tr", new LocatorLocatorOptions { HasText = $"preset exchange {marker}" });
+        await Expect(exchangeRow).ToContainTextAsync("-100.00 EUR → +11,700.00 RSD");
+        await Expect(exchangeRow).ToContainTextAsync($"Preset EUR {marker} → Preset RSD {marker}");
+
+        await Page.GotoAsync(fixture.BaseUrl + "/transactions?view=spending");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        await Expect(grid).ToContainTextAsync($"preset expense {marker}");
+        await Expect(grid).Not.ToContainTextAsync($"preset exchange {marker}");
+
+        // In-app navigation keeps this page's component and circuit, so only OnParametersSet sees the new ?view=.
+        await Page.EvaluateAsync("() => Blazor.navigateTo('/transactions?view=transfers')");
+        await Expect(Page).ToHaveURLAsync(new Regex(@"/transactions\?view=transfers$"));
+        await Expect(grid).Not.ToContainTextAsync($"preset expense {marker}", new() { Timeout = 10_000 });
+        await Expect(grid).ToContainTextAsync($"preset exchange {marker}");
+    }
+
+    [Fact]
+    public async Task Filtering_by_the_wallet_a_transfer_went_to_finds_the_transfer()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var marker = Guid.NewGuid().ToString("N")[..8];
+        var source = await SeedWalletAsync($"Leg source {marker}");
+        var destination = await SeedWalletAsync($"Leg destination {marker}", CurrencyCode.Rsd);
+        var now = DateTimeOffset.UtcNow;
+
+        await using (var db = OpenDb())
+        {
+            db.Transactions.Add(NewTransaction(Guid.NewGuid(), source, TransactionKind.Expense, TransactionStatus.Completed,
+                $"leg expense {marker}", now.AddMinutes(-1)));
+            AddTransfer(db, Guid.NewGuid(), source, new Money(50.00m, CurrencyCode.Eur), destination, new Money(5850.00m, CurrencyCode.Rsd),
+                $"leg exchange {marker}", now);
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/transactions");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var grid = Page.Locator("#transactions-grid");
+        await Expect(grid).ToContainTextAsync($"leg expense {marker}");
+
+        await Page.SelectOptionAsync("#transactions-filter-wallet", destination.ToString());
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        // The absence first: it waits out the reload, so the presence below is read from the filtered grid, not the
+        // unfiltered one that also held the transfer.
+        await Expect(grid).Not.ToContainTextAsync($"leg expense {marker}", new() { Timeout = 10_000 });
+        await Expect(grid).ToContainTextAsync($"leg exchange {marker}");
+    }
+
+    async Task<Guid> SeedWalletAsync(string name, CurrencyCode? currency = null)
     {
         var walletId = Guid.NewGuid();
         await using var db = OpenDb();
@@ -290,7 +368,7 @@ public sealed class TransactionsTests(CookieModeHostFixture fixture) : PageTest,
         {
             Id = walletId,
             Name = name,
-            Currency = CurrencyCode.Eur,
+            Currency = currency ?? CurrencyCode.Eur,
             Aliases = [],
             IsDefaultForCurrency = false,
             Archived = false,
@@ -316,6 +394,19 @@ public sealed class TransactionsTests(CookieModeHostFixture fixture) : PageTest,
         TelegramMessageId = null,
         CreatedAt = occurredAt,
     };
+
+    static void AddTransfer(LedgerDbContext db, Guid id, Guid fromWalletId, Money from, Guid toWalletId, Money to, string rawText, DateTimeOffset at)
+    {
+        db.Transactions.Add(NewTransaction(id, fromWalletId, TransactionKind.Transfer, TransactionStatus.Completed, rawText, at));
+        db.Transfers.Add(new Transfer
+        {
+            TransactionId = id,
+            FromWalletId = fromWalletId,
+            From = from,
+            ToWalletId = toWalletId,
+            To = to,
+        });
+    }
 
     LedgerDbContext OpenDb() =>
         new(new DbContextOptionsBuilder<LedgerDbContext>().UseNpgsql(fixture.ConnectionString).Options);

@@ -36,6 +36,10 @@ internal static class MockData
     public static readonly Guid ReceiptTransactionId = Id(902);
     public static readonly Guid UnconfirmedReceiptTransactionId = Id(903);
     public static readonly Guid VisionReceiptTransactionId = Id(904);
+    public static readonly Guid WithdrawalTransactionId = Id(905);
+    public static readonly Guid ExchangeTransactionId = Id(906);
+    public static readonly Guid ForeignSpendingTransactionId = Id(907);
+    public static readonly Guid TransferTransactionId = Id(908);
 
     public static IReadOnlyList<MockLogRow> LogRows { get; } =
     [
@@ -114,6 +118,24 @@ internal static class MockData
             ])),
     ];
 
+    // Two legs each, so they do not fit MockRecord; MockDataWriter posts them through LedgerPostings, as the app does.
+    // The plain transfer comes the day after Wise's statement, so that statement's computedBefore stays true.
+    public static IReadOnlyList<MockTransfer> Transfers { get; } =
+    [
+        new(WithdrawalTransactionId, "withdrew 10000 rsd from raif, fee 150", Day(6),
+            "Raiffeisen", 10150.00m, "Cash RSD", 10000.00m, Fee: 150.00m, FeeLeg: TransferLeg.From),
+        new(ExchangeTransactionId, "exchanged 100 eur for 11700 rsd", Day(7),
+            "Cash EUR", 100.00m, "Cash RSD", 11700.00m),
+        new(TransferTransactionId, "moved 200 eur from wise to cash", Day(16),
+            "Wise", 200.00m, "Cash EUR", 200.00m),
+    ];
+
+    // Charged at Kaspi's USD terms, 520 and 1 %: 15 600.00 KZT and a 156.00 KZT fee.
+    public static MockForeignSpending ForeignSpending { get; } = new(
+        ForeignSpendingTransactionId, "Kaspi", "app store 30 usd", Day(13),
+        new MockLine("App Store", 30.00m, "subscriptions", null), CurrencyCode.Usd,
+        Charged: 15600.00m, Fee: 156.00m, Rate: 520m, FeePercent: 1m);
+
     public static Guid Id(int number) => Guid.Parse($"7a1c0000-0000-4000-8000-{number:D12}");
 
     public static DateTimeOffset At(int day, int hour, int minute) =>
@@ -167,6 +189,15 @@ internal sealed record MockRecord(
     decimal? Stated = null,
     decimal? ComputedBefore = null,
     MockReceipt? Receipt = null);
+
+// Each amount is all that moved in its wallet, the fee inside its leg (T-12).
+internal sealed record MockTransfer(
+    Guid Id, string RawText, DateOnly Day, string From, decimal FromAmount, string To, decimal ToAmount,
+    decimal? Fee = null, TransferLeg? FeeLeg = null);
+
+internal sealed record MockForeignSpending(
+    Guid Id, string Wallet, string RawText, DateOnly Day, MockLine Line, CurrencyCode LineCurrency,
+    decimal Charged, decimal Fee, decimal Rate, decimal FeePercent);
 
 internal sealed record MockReceipt(
     ReceiptSource Source,
