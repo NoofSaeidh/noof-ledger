@@ -217,25 +217,30 @@ the code that builds the echo text.
   them to the operator (the command lists them; phone-sized copies are in `artifacts/screenshots/`).
   A new page or bot reply gets a screen or a scene added. Never from `noof_ledger`.
 
-**Pull requests are small** *(operator's decision, 2026-09-28)*
-- One topic per PR — a phase is a series of PRs, not one; the plan cuts it into PR-sized tasks up
-  front and names the PR boundaries.
-- Not too small either: a PR is one coherent change a reviewer reads in one sitting. Related edits
-  go together — e.g. several rules about how agents work are one PR, never a PR per paragraph of
-  CLAUDE.md. A follow-up that belongs to an open PR goes into that PR, not a new one.
-- Stop and propose a split (operator decides) past ~500 changed lines excluding generated files
-  (migrations' `.Designer.cs`, the model snapshot, `schema.expected.sql`), or past one *leaf*
-  assembly. A PR may touch `Domain`/`Application`, the one leaf assembly that implements the change
-  (`Persistence`, `Ai`, `Fx`, `Receipts`, `Telegram` or `Web`) and its `Host` wiring, with their
-  tests; a second leaf assembly (e.g. Persistence and Web) is the signal to propose a split.
+**Pull requests are few and coherent** *(operator's decisions, 2026-09-28; fewer per phase, 2026-10-02)*
+- A PR is one stage of the work, not one assembly's slice of it. A phase is a few PRs cut by stage
+  (e.g. the model and write path · the bot · the pages), never one per leaf assembly — Phase 7 was
+  cut that way and its PRs were too many to follow. The plan names the PR boundaries up front.
+- A PR may span several assemblies and run well past ~500 changed lines when that keeps a stage
+  whole; note the size in its body rather than splitting. It still has to be one coherent change a
+  reviewer can follow. Related edits go together — e.g. several rules about how agents work are one
+  PR, never a PR per paragraph of CLAUDE.md. A follow-up that belongs to an open PR goes into that
+  PR, not a new one.
 - Mechanical moves/renames get their own PR, separate from behaviour changes.
 - **A large phase or feature — one the plan cuts into several PRs — gets an aggregate branch**
   (`phase-7`, `feature-<name>`) *(operator's decision, 2026-10-01)*. It is cut from `master` with a
-  draft PR into `master` opened at once. Every PR of the phase targets it and is reviewed on its own;
-  fixes and the closing review's follow-ups land there too, as PRs. The phase's spec and its
-  amendments are the exception: they are committed straight to the aggregate branch, never cut into
-  PRs *(operator, 2026-10-01)*. The aggregate PR leaves draft only once the phase is finalised, and
-  then merges into `master`.
+  draft PR into `master` opened at once. Every PR of the phase targets it and is reviewed on its own.
+  The aggregate PR leaves draft only once the phase is finalised, and then merges into `master`.
+- **Committed straight to the aggregate branch, never as a PR:** the phase's spec and its
+  amendments *(operator, 2026-10-01)*, and small fixes *(operator, 2026-10-02)* — fixes from any
+  review (Codex, Fable, the phase's closing review), small bugs, follow-ups, plan and doc
+  corrections, reference sweeps: anything that adds no behaviour and changes no design. Run the
+  tests of the classes a fix touches before pushing; CI on the aggregate PR stays green. A direct
+  fix gets no Codex review of its own — the phase's closing review covers it. Fixes made *after*
+  the closing review are not covered by it: before the aggregate PR leaves draft, one opus review
+  (effort medium) reads their combined diff since the reviewed commit, and the "Ready to merge"
+  comment names that commit. New behaviour or a design change is a PR. **`master` takes nothing
+  directly** — only a merged PR.
 - Independent PRs branch from the aggregate branch, or from `master` when there is none; a PR
   needing another's changes is stacked on it (base = that branch) until that one merges, never
   merged into it.
