@@ -969,31 +969,22 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
             .Should().Equal(JobKind.RecordExchange, JobKind.Correct);
     }
 
-    // Only a reply to the echo carries a source message; a correction without one (the photo's own caption) is
-    // what Record anyway itself queues, not something waiting to record the slip.
+    // An edited caption is not a reply: the caption Record anyway queues already carries the edited text.
     [Fact]
-    public async Task A_queued_correction_with_no_reply_message_does_not_hold_back_Record_anyway()
+    public async Task An_edited_caption_still_being_reread_does_not_hold_back_Record_anyway()
     {
         await using var db = await fixture.CreateMigratedContextAsync();
         var (store, transaction) = await SeedSlipAsync(db, AppReceipts.SlipDisposition.Hold, caption: "получил 11650");
-        db.CategorizationJobs.Add(new CategorizationJob
-        {
-            Id = Guid.NewGuid(),
-            TransactionId = transaction.Id,
-            Kind = JobKind.Correct,
-            Instruction = "получил 11650",
-            Status = JobStatus.Pending,
-            AttemptCount = 0,
-            RunAfter = Now,
-            CreatedAt = Now,
-            UpdatedAt = Now,
-        });
-        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        (await new EfRecordEditor(db, new FakeTimeProvider(Now)).ReplaceRawTextAsync(
+            transaction.Id, "получил 11700", TestContext.Current.CancellationToken)).Should().BeTrue();
         db.ChangeTracker.Clear();
 
         var queued = await store.EnqueueCategorizationAsync(transaction.Id, 999, TestContext.Current.CancellationToken);
 
         queued.Should().BeTrue();
+        var jobs = await JobsOfAsync(db, transaction.Id);
+        jobs.Select(j => j.Kind).Should().BeEquivalentTo([JobKind.Reinterpret, JobKind.RecordExchange, JobKind.Correct]);
+        jobs.Single(j => j.Kind == JobKind.Correct).Instruction.Should().Be("получил 11700");
     }
 
     // A-22: a reply sent while the photo was still being read is the operator's later word. Queued behind it, the
