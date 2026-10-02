@@ -141,8 +141,12 @@ internal sealed class CategorizationWorker(
             // A link capture whose extraction failed terminally has no receipt row, so
             // TryRouteToReceiptAsync above never intercepted it - RawText here can still be the whole
             // fiscal verification URL, vl payload included, and that must never reach the model
-            // (CLAUDE.md, "...and never in a model prompt either").
-            var rawTextForModel = verificationUrl.StripUrl(sub.RawText) ?? "";
+            // (CLAUDE.md, "...and never in a model prompt either"). A slip's evidence is the message instead (spec A-12),
+            // its caption added as a note only where it never reached the model as an instruction.
+            var caption = verificationUrl.StripUrl(sub.RawText);
+            var rawTextForModel = sub.Slip is { } slip
+                ? SlipRequestText.For(slip, CaptionNote(job, sub, caption, verificationUrl.StripUrl(job.Instruction)))
+                : caption ?? "";
             var hints = merchantScan.Matches(rawTextForModel, aliases, options.MerchantHintLimit)
                 .DistinctBy(alias => alias.MerchantId)
                 .Select(alias => new MerchantOption(alias.MerchantId, alias.DisplayName))
@@ -172,7 +176,7 @@ internal sealed class CategorizationWorker(
             var offeredMerchantIds = allMerchants.Select(merchant => merchant.Id).ToHashSet();
 
             var kept = KeptWallets(job, sub, proposal);
-            var keptProposal = KeepingTheRecordsWallet(proposal, kept);
+            var keptProposal = WithSlipCashLegs(KeepingTheRecordsWallet(proposal, kept), sub, wallets);
             var walletsForMapping = WalletsIncludingKept(wallets, kept);
 
             if (!proposalMapper.TryMap(
@@ -230,7 +234,8 @@ internal sealed class CategorizationWorker(
             var occurredOn = mapped.OccurredOn ?? DefaultDay(job, sub);
             var outcome = new CategorizationOutcome(
                 categorizedItems, occurredOn, job.Kind, job.Instruction, mapped.Kind, mapped.WalletId, mapped.StatedBalance,
-                mapped.Transfer, mapped.Charged);
+                Transfer: await WithSlipVenueAsync(scope, merchantDirectory, job, sub, mapped.Transfer, cancellationToken),
+                Charged: mapped.Charged);
             currentStage = TransactionStages.Persisted;
             using (timer.Start(logger, TimedOperations.DbApplyCategorization))
                 await store.ApplyAsync(job.TransactionId, outcome, cancellationToken);
@@ -387,9 +392,10 @@ internal sealed class CategorizationWorker(
         job.InstructionDay ?? record.SentOn;
 
     // A correction that names no day keeps the record's day. Anything read from scratch starts from the
-    // day the message was sent (D2).
+    // day the message was sent (D2) - except a slip, whose day is its printed issue date, evidence the
+    // caption never said (spec A-23), so even a re-read of an edited caption keeps it.
     static DateOnly DefaultDay(CategorizationJob job, CategorizationSubject record) =>
-        job.Kind == JobKind.Correct ? record.OccurredOn : record.SentOn;
+        job.Kind == JobKind.Correct || record.Slip is not null ? record.OccurredOn : record.SentOn;
 
     // Which slot of the proposal a kept wallet fills: the record's one wallet, or one leg of a transfer.
     enum KeptSlot { Wallet, From, To }
@@ -485,6 +491,66 @@ internal sealed class CategorizationWorker(
                 : null)
             .OfType<WalletOption>(),
     ];
+
+    // A slip is cash on both sides, whoever completes it (spec A-8). The mapper's own rule for an unnamed leg is
+    // capture's (A-27: the source on the card default), so a slip's legs still unnamed after the keep are filled here
+    // with RecordExchange's rule. A leg the record holds or the reply names stays. The wallets are the active ones the
+    // model was offered, so a filled id is one the mapper accepts.
+    static CategorizationProposal WithSlipCashLegs(
+        CategorizationProposal proposal, CategorizationSubject record, IReadOnlyList<WalletOption> wallets) =>
+        (record.Slip, proposal.Transfer) switch
+        {
+            ({ }, { } transfer) => proposal with
+            {
+                Transfer = transfer with
+                {
+                    FromWalletId = transfer.FromWalletId ?? CashLegOf(wallets, transfer.FromCurrency),
+                    ToWalletId = transfer.ToWalletId ?? CashLegOf(wallets, transfer.ToCurrency),
+                },
+            },
+            _ => proposal,
+        };
+
+    // An unsupported currency stays unnamed, so the mapper fails it exactly as it would any transfer.
+    static Guid? CashLegOf(IReadOnlyList<WalletOption> wallets, string currency) =>
+        ExtractedExchange.SupportedCurrency(currency) is { } supported ? ExchangeSlipMapper.CashWalletOf(wallets, supported) : null;
+
+    // The caption reaches the model once. A Correct whose instruction is the caption is the caption's own job
+    // (EfReceiptStore queues it with the caption as its instruction); a record a reading already applied had its
+    // caption applied then, and a note carrying its old figures beside a since-corrected record would read as a new
+    // correction. Left: an edited caption (Reinterpret), and a reply to a slip nothing has recorded yet - a held one
+    // whose caption job waits for "Record anyway", or an incomplete one.
+    static string? CaptionNote(CategorizationJob job, CategorizationSubject record, string? caption, string? instruction)
+    {
+        if (string.IsNullOrWhiteSpace(caption))
+            return null;
+
+        var notYetApplied = record.Status == TransactionStatus.Captured
+            || record is { Status: TransactionStatus.Failed, Transfer: null };
+        var isTheCaptionsOwnJob = string.Equals(instruction?.Trim(), caption.Trim(), StringComparison.Ordinal);
+
+        return job.Kind switch
+        {
+            JobKind.Reinterpret => caption,
+            JobKind.Correct when notYetApplied && !isTheCaptionsOwnJob => caption,
+            _ => null,
+        };
+    }
+
+    // A correction re-maps a slip's exchange from record_transaction, which knows nothing of the office; the slip's PIB
+    // names it again, so the venue survives every correction (spec A-8, §3: the office is the venue).
+    static async Task<TransferFacts?> WithSlipVenueAsync(
+        IServiceScope scope, IMerchantDirectory merchantDirectory, CategorizationJob job, CategorizationSubject record,
+        TransferFacts? transfer, CancellationToken cancellationToken)
+    {
+        if (transfer is null || record.Slip is null)
+            return transfer;
+
+        var receiptStore = scope.ServiceProvider.GetRequiredService<IReceiptStore>();
+        return await receiptStore.GetExchangeSlipAsync(job.TransactionId, cancellationToken) is { } slip
+            ? transfer with { VenueMerchantId = await ExchangeSlipMapper.VenueOfAsync(slip, merchantDirectory, cancellationToken) }
+            : transfer;
+    }
 
     static string BuildSummary(MappedProposal mapped) => mapped switch
     {
