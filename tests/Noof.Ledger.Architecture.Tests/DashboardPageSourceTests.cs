@@ -86,4 +86,16 @@ public class DashboardPageSourceTests
         source.Should().NotContain("DescribeBackup",
             "same as BackupIsStale: the Backup check now phrases this, not the dashboard");
     }
+
+    [Fact]
+    public void Transfers_are_read_on_their_own_and_never_summed_into_this_month()
+    {
+        var source = SourceText();
+
+        source.Should().Contain("TransfersThisMonthAsync",
+            "transfers are seen on their own (T-9): the month's spending and income never carry a transfer's principal");
+        source.Should().Contain("id=\"month-transfers\"");
+        source.Should().Contain("month-received-",
+            "each currency's card shows what came in next to what was spent (spec §4)");
+    }
 }
