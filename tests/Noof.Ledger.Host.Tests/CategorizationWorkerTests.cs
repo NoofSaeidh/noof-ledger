@@ -1111,6 +1111,107 @@ public class CategorizationWorkerTests
     }
 
     [Fact]
+    public async Task A_first_reading_that_cannot_settle_is_marked_failed_with_its_reason_and_echoes_the_record()
+    {
+        var captured = Subject(rawText: "поменял 100 евро на динары");
+        var failed = captured with { Status = TransactionStatus.Failed, FailureReason = RecordFailureReason.MissingReceivedAmount };
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(captured, failed);
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(TransferAnswer(100m, "EUR", null, "RSD"));
+        var jobQueue = QueueWith(Job());
+        var notifier = Substitute.For<IChatNotifier>();
+        var echo = FakeEcho();
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, categorizer: categorizer, notifier: notifier),
+            new FakeTimeProvider(TickAt), echo: echo);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await jobQueue.Received(1).FailAsync(JobId, WorkerId, "MissingReceivedAmount", Arg.Any<CancellationToken>());
+        await store.Received(1).MarkFailedAsync(TransactionId, RecordFailureReason.MissingReceivedAmount, Arg.Any<CancellationToken>());
+        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), RecordFailureReason.None, Arg.Any<CancellationToken>());
+        await store.DidNotReceive().ApplyAsync(Arg.Any<Guid>(), Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
+        echo.Received(1).Compose(Arg.Is<CategorizationSubject>(subject => subject.FailureReason == RecordFailureReason.MissingReceivedAmount));
+        await notifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(message => message.Text == "composed"), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_correction_that_cannot_settle_leaves_the_record_untouched_and_says_why()
+    {
+        var record = Subject(status: TransactionStatus.Completed, lines: [StoredBread], walletId: MainWallet.Id, walletCurrency: CurrencyCode.Rsd);
+
+        var run = await RunAsync(record, TransferAnswer(100m, "EUR", null, "RSD"),
+            Job(kind: JobKind.Correct, instruction: "это был обмен 100 евро на динары"));
+
+        await run.JobQueue.Received(1).FailAsync(JobId, WorkerId, "MissingReceivedAmount", Arg.Any<CancellationToken>());
+        run.Applied.Should().BeNull("a failed correction never un-books a record (P2-3)");
+        await run.Store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<RecordFailureReason>(), Arg.Any<CancellationToken>());
+        run.Echo.Received(1).ComposeCorrectionFailure(record, RecordFailureReason.MissingReceivedAmount);
+        await run.Notifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(message => message.Text == "correction failed"), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_first_reading_that_fails_with_no_reason_keeps_the_failure_echo_and_the_plain_mark()
+    {
+        var run = await RunAsync(Subject(rawText: "перевёл 10 фунтов"), TransferAnswer(10m, "GBP", null, "RSD"), Job());
+
+        await run.JobQueue.Received(1).FailAsync(
+            JobId, WorkerId, "transfer from_currency \"GBP\" is not one this ledger supports.", Arg.Any<CancellationToken>());
+        await run.Store.Received(1).MarkFailedAsync(TransactionId, RecordFailureReason.None, Arg.Any<CancellationToken>());
+        await run.Store.DidNotReceive().MarkFailedAsync(
+            Arg.Any<Guid>(), Arg.Is<RecordFailureReason>(reason => reason != RecordFailureReason.None), Arg.Any<CancellationToken>());
+        run.Echo.DidNotReceive().Compose(Arg.Any<CategorizationSubject>());
+        await run.Notifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(message => message.Text == "failure"), Arg.Any<CancellationToken>());
+    }
+
+    // Through the real RecordEcho: on a record still Failed, a failed correction renders as the notice and the new
+    // reason line alone - never the stored reason under it.
+    [Fact]
+    public async Task A_correction_that_fails_on_a_failed_record_says_the_new_reason_once_and_writes_nothing()
+    {
+        // The first reading failed (MissingReceivedAmount); the reply gives a rate that is not the legs' currencies.
+        var failed = Subject(rawText: "поменял 100 евро на динары", status: TransactionStatus.Failed)
+            with { FailureReason = RecordFailureReason.MissingReceivedAmount };
+        var answer = new CategorizationProposal([], Kind: ProposedKind.Transfer,
+            Transfer: new ProposedTransfer(null, 100m, "EUR", null, null, "RSD", new ProposedRate("USD", 117m, "RSD"), null));
+
+        var run = await RunAsync(failed, answer, Job(kind: JobKind.Correct, instruction: "по 117"), echo: Echo);
+
+        await run.JobQueue.Received(1).FailAsync(JobId, WorkerId, "InvalidRate", Arg.Any<CancellationToken>());
+        run.Applied.Should().BeNull();
+        await run.Store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<RecordFailureReason>(), Arg.Any<CancellationToken>());
+        await run.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(message =>
+                message.Text == "Correction not applied — Exchange not recorded: couldn't use that rate. Reply with the amount you got."
+                && message.Actions.SequenceEqual(new[] { RecordAction.Edit })),
+            Arg.Any<CancellationToken>());
+    }
+
+    // Through the real RecordEcho: the whole echo of a Failed first reading is its reason line; the record holds no
+    // transfer, so the plain variant applies.
+    [Fact]
+    public async Task A_first_reading_failed_for_a_reason_edits_the_echo_with_the_reason_text()
+    {
+        var captured = Subject(rawText: "поменял 100 евро на динары");
+        var failed = captured with { Status = TransactionStatus.Failed, FailureReason = RecordFailureReason.MissingReceivedAmount };
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(captured, failed);
+        var categorizer = Substitute.For<ICategorizer>();
+        categorizer.ProposeAsync(Arg.Any<CategorizationRequest>(), Arg.Any<CancellationToken>()).Returns(TransferAnswer(100m, "EUR", null, "RSD"));
+        var notifier = Substitute.For<IChatNotifier>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, categorizer: categorizer, notifier: notifier),
+            new FakeTimeProvider(TickAt));
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(message => message.Text == "Exchange not recorded: how much did you get? Reply with the amount or the rate."),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Idle_when_the_model_provider_is_not_configured()
     {
         var jobQueue = Substitute.For<IJobQueue>();

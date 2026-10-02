@@ -177,9 +177,9 @@ internal sealed class CategorizationWorker(
 
             if (!proposalMapper.TryMap(
                 keptProposal, offeredSlugs, offeredMerchantIds, walletsForMapping,
-                options.DefaultCurrency, out var mapped, out var failure, out _))
+                options.DefaultCurrency, out var mapped, out var failure, out var reason))
             {
-                await FailTerminallyAsync(jobQueue, store, notifier, job, subject, failure, currentStage, cancellationToken);
+                await FailTerminallyAsync(jobQueue, store, notifier, job, subject, failure, currentStage, cancellationToken, reason: reason);
                 return;
             }
 
@@ -572,38 +572,53 @@ internal sealed class CategorizationWorker(
     async Task FailTerminallyAsync(
         IJobQueue jobQueue, ICategorizationStore store, IChatNotifier notifier,
         CategorizationJob job, CategorizationSubject? subject, string error, string failedStage, CancellationToken cancellationToken,
-        Exception? exception = null)
+        Exception? exception = null, RecordFailureReason reason = RecordFailureReason.None)
     {
         logger.LogStageFailed(TransactionStages.StageFailed, failedStage, exception ?? new InvalidOperationException(error));
 
         var outcome = await jobQueue.FailAsync(job.Id, workerId, error, cancellationToken);
         if (outcome == JobCompletionOutcome.Applied)
-            await NotifyFailureAsync(store, notifier, subject, job, cancellationToken);
+            await NotifyFailureAsync(store, notifier, subject, job, cancellationToken, reason);
     }
 
     async Task NotifyFailureAsync(
         ICategorizationStore store, IChatNotifier notifier, CategorizationSubject? subject, CategorizationJob job,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, RecordFailureReason reason = RecordFailureReason.None)
     {
-        // Only a first reading marks the transaction Failed. A correction or a re-read that fails leaves the
-        // record the person already saw confirmed exactly as it was.
+        // Only a first reading marks the transaction Failed - with its reason when the mapper named one, so the echo,
+        // a Cancel/Restore and the reply that completes it all read the same specific text. A correction or a re-read
+        // that fails leaves the record the person already saw confirmed exactly as it was.
         if (job.Kind == JobKind.Categorize)
-            await store.MarkFailedAsync(job.TransactionId, RecordFailureReason.None, cancellationToken);
+            await store.MarkFailedAsync(job.TransactionId, reason, cancellationToken);
 
         if (subject is not { BotMessageId: { } messageId } sub)
             return;
 
         try
         {
-            var echo = job.Kind == JobKind.Categorize
-                ? recordEcho.Failure
-                : recordEcho.ComposeCorrectionFailure(await store.GetSubjectAsync(job.TransactionId, cancellationToken) ?? sub);
+            var echo = await FailureEchoAsync(store, sub, job, reason, cancellationToken);
             await notifier.EditAsync(sub.TelegramChatId, messageId, echo, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.FailureEditFailed(ex, messageId, job.TransactionId);
         }
+    }
+
+    // Read back, not composed from the job: a reasoned first-reading failure shows what MarkFailedAsync stored.
+    async Task<EchoMessage> FailureEchoAsync(
+        ICategorizationStore store, CategorizationSubject sub, CategorizationJob job, RecordFailureReason reason,
+        CancellationToken cancellationToken)
+    {
+        if (job.Kind != JobKind.Categorize)
+            return recordEcho.ComposeCorrectionFailure(await store.GetSubjectAsync(job.TransactionId, cancellationToken) ?? sub, reason);
+
+        if (reason == RecordFailureReason.None)
+            return recordEcho.Failure;
+
+        return await store.GetSubjectAsync(job.TransactionId, cancellationToken) is { } failed
+            ? recordEcho.Compose(failed)
+            : recordEcho.Failure;
     }
 
     public static string CreateWorkerId()
