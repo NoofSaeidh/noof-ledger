@@ -2389,7 +2389,7 @@ public class CategorizationWorkerTests
 
     const string SlipText =
         "A currency exchange at an exchange office, read from a photo of its slip. Both sides were cash.\n"
-        + "Each side is the money handed over or received, as a person would say it. A commission the slip printed inside a side's amount is shown beside that side as a fee, not included in the figure, or else on a line of its own.\n"
+        + "Each side is the money handed over or received, as a person would say it. A commission the slip printed inside a side's amount is shown beside that side as a fee - not included in a figure handed over, already taken out of a figure received - or else on a line of its own.\n"
         + "Office: Menjačnica Zlatnik\n"
         + "Given: 100.00 EUR\n"
         + "Received: (amount not read) RSD\n"
@@ -2593,6 +2593,49 @@ public class CategorizationWorkerTests
                 outcome.Transfer!.From == new Money(11850m, CurrencyCode.Rsd)
                 && outcome.Transfer.Fee == new Money(150m, CurrencyCode.Rsd)
                 && outcome.Transfer.FromWalletId == CashRsd.Id),
+            Arg.Any<CancellationToken>());
+    }
+
+    // A slip that printed 100 EUR given, a 150 RSD commission and 11550 RSD paid out: RecordExchange stored 11550 RSD
+    // with the fee inside it on the destination. The slip text shows the received side as the current record does -
+    // 11550, after a fee of 150 already taken out - so a date-only correction answered back that way keeps the 11550
+    // the purse holds rather than taking the fee off a second time (11400) or adding it back (11700).
+    [Fact]
+    public async Task A_recorded_slip_with_a_commission_on_the_received_side_keeps_what_arrived_through_a_date_only_correction()
+    {
+        var evidence = new AppReceipts.ExtractedExchange(
+            100.0000m, "EUR", 11550.0000m, "RSD", 117.000000000000m, 150.0000m, "RSD", "PZ-2026-0917");
+        var transfer = new TransferView(
+            CashEur.Id, "Cash EUR", new Money(100.00m, CurrencyCode.Eur), CashRsd.Id, "Cash", new Money(11550.00m, CurrencyCode.Rsd),
+            new Money(150.00m, CurrencyCode.Rsd), TransferLeg.To, new ExchangeRate(CurrencyCode.Eur, 117.0000m, CurrencyCode.Rsd),
+            "Menjačnica Zlatnik", [], []);
+        var record = SlipRecord(TransactionStatus.Completed, rawText: "", evidence: evidence) with
+        {
+            Kind = TransactionKind.Transfer,
+            WalletId = CashEur.Id,
+            WalletCurrency = CurrencyCode.Eur,
+            Transfer = transfer,
+        };
+        var answeredAsShown = new CategorizationProposal(
+            [], OccurredOn: "2026-09-20", Kind: ProposedKind.Transfer,
+            Transfer: new ProposedTransfer(null, 100m, "EUR", null, 11550m, "RSD", Rate: new ProposedRate("EUR", 117m, "RSD"),
+                Fee: new ProposedFee(150m, "RSD", ProposedLeg.To, Included: true)));
+        var (store, categorizer) = SlipFakes(record, answeredAsShown);
+
+        await SlipWorker(Job(kind: JobKind.Correct, instruction: "это было позавчера"), categorizer, store)
+            .RunTickAsync(TestContext.Current.CancellationToken);
+
+        await categorizer.Received(1).ProposeAsync(Arg.Is<CategorizationRequest>(request =>
+                request.RawText.Contains(
+                    "\nReceived: 11550.00 RSD, after a fee of 150.00 RSD on this side (already taken out of the figure)\n",
+                    StringComparison.Ordinal)
+                && request.Correction!.CurrentTransfer == transfer),
+            Arg.Any<CancellationToken>());
+        await store.Received(1).ApplyAsync(TransactionId, Arg.Is<CategorizationOutcome>(outcome =>
+                outcome.Transfer!.To == new Money(11550m, CurrencyCode.Rsd)
+                && outcome.Transfer.From == new Money(100m, CurrencyCode.Eur)
+                && outcome.Transfer.Fee == new Money(150m, CurrencyCode.Rsd)
+                && outcome.Transfer.FeeLeg == TransferLeg.To),
             Arg.Any<CancellationToken>());
     }
 

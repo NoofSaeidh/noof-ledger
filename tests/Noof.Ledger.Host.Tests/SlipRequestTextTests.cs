@@ -10,17 +10,17 @@ public class SlipRequestTextTests
     static string FiguresOf(ExtractedExchange evidence) =>
         string.Join('\n', SlipRequestText.For(new SlipFacts(null, null, evidence), note: null).Split('\n')[2..]);
 
-    // A commission taken from what the customer got back: the received side as a person would say it is the amount
-    // before the fee came off, so "11700 plus a fee of 150 not included" settles to the 11550 actually received.
+    // A commission taken from what the customer got back: the received side as a person would say it is what was paid
+    // out (spec A-21), so "11550 after a fee of 150 already taken out" settles to the 11550 actually received.
     [Fact]
-    public void A_commission_on_the_received_side_is_added_back_and_shown_beside_it()
+    public void A_commission_on_the_received_side_is_shown_already_taken_out_of_what_arrived()
     {
         var evidence = new ExtractedExchange(100.0000m, "EUR", 11550.0000m, "RSD", 117.000000000000m, 150.0000m, null, null);
 
         FiguresOf(evidence).Should().Be(
             "Office: not read\n"
             + "Given: 100.00 EUR\n"
-            + "Received: 11700.00 RSD, plus a fee of 150.00 RSD on this side (not included in the figure)\n"
+            + "Received: 11550.00 RSD, after a fee of 150.00 RSD on this side (already taken out of the figure)\n"
             + "Rate printed on the slip (dinars per one unit of the foreign currency): 117.0000");
     }
 

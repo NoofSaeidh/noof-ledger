@@ -7,8 +7,9 @@ namespace Noof.Ledger.Host.Workers;
 
 // A correction of a slip's exchange reads the slip's own evidence as "the message" (spec A-12), so the caption reaches
 // the model once. A printed commission sits inside the amount of its side; it is shown the way the current record
-// shows a fee - the side without it, the fee beside it "not included in the figure" - so the slip text and the current
-// record agree and either answer settles to the slip's own amounts rather than charging the fee twice. C# does the sum.
+// shows a fee (A-21) - the given side without it, the fee beside it "not included in the figure"; the received side as
+// paid out, the fee "already taken out of the figure" - so the slip text and the current record agree and either
+// answer settles to the slip's own amounts rather than charging the fee twice. C# does the sum.
 internal static class SlipRequestText
 {
     const string NotRead = "not read";
@@ -22,7 +23,7 @@ internal static class SlipRequestText
         List<string> lines =
         [
             "A currency exchange at an exchange office, read from a photo of its slip. Both sides were cash.",
-            "Each side is the money handed over or received, as a person would say it. A commission the slip printed inside a side's amount is shown beside that side as a fee, not included in the figure, or else on a line of its own.",
+            "Each side is the money handed over or received, as a person would say it. A commission the slip printed inside a side's amount is shown beside that side as a fee - not included in a figure handed over, already taken out of a figure received - or else on a line of its own.",
             $"Office: {(string.IsNullOrWhiteSpace(slip.VenueName) ? NotRead : slip.VenueName)}",
             $"Given: {Side(evidence.GivenAmount, evidence.GivenCurrency, TransferLeg.From, fee)}",
             $"Received: {Side(evidence.ReceivedAmount, evidence.ReceivedCurrency, TransferLeg.To, fee)}",
@@ -55,13 +56,16 @@ internal static class SlipRequestText
         };
     }
 
-    // The customer handed over the given side plus the fee, and got back the received side less it: so the given side
-    // is shown without the commission and the received side with it added back.
+    // The customer handed over the given side with the fee inside it, and got back the received side with the fee
+    // already out of it: so the given side is shown without the commission and the received side as printed.
     static string Side(decimal? amount, string? currency, TransferLeg leg, SideFee? fee) => (amount, fee) switch
     {
-        ({ } printed, { } beside) when beside.Leg == leg =>
-            $"{Figure(leg == TransferLeg.From ? printed - beside.Amount : printed + beside.Amount, beside.Currency.Value)}, "
+        ({ } printed, { Leg: TransferLeg.From } beside) when leg == TransferLeg.From =>
+            $"{Figure(printed - beside.Amount, beside.Currency.Value)}, "
             + $"plus a fee of {Figure(beside.Amount, beside.Currency.Value)} on this side (not included in the figure)",
+        ({ } printed, { Leg: TransferLeg.To } beside) when leg == TransferLeg.To =>
+            $"{Figure(printed, beside.Currency.Value)}, "
+            + $"after a fee of {Figure(beside.Amount, beside.Currency.Value)} on this side (already taken out of the figure)",
         _ => Figure(amount, currency),
     };
 
