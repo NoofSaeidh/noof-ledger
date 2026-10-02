@@ -6,11 +6,11 @@ Capture spending through a Telegram bot — typed, spoken, or photographed — l
 each line item, and see where the money went on a local Blazor dashboard that understands multiple
 wallets and currencies.
 
-> **Status: capture, balances, backup and observability all work end to end.** A message typed to the
-> Telegram bot becomes a categorised expense, income, or balance statement on the dashboard — say it
+> **Status: capture, balances, transfers, backup and observability all work end to end.** A message typed to the
+> Telegram bot becomes a categorised expense, income, balance statement or transfer on the dashboard — say it
 > the way you would say it, and the model reads the amount, the date, the kind and which wallet from
-> how you speak it. Every wallet's balance — opening balance, minus spending, plus income, corrected
-> by your own balance statements — is exact in all five supported currencies (EUR, RSD, USD, RUB,
+> how you speak it. Every wallet's balance — opening balance, minus spending, plus income, plus or
+> minus the transfers that moved money between your wallets, corrected by your own balance statements — is exact in all five supported currencies (EUR, RSD, USD, RUB,
 > KZT), proven under both `ru-RU` and `sr-Latn-RS`. Wallets are created and managed on a `/wallets`
 > page; income and balance statements are ordinary messages to the bot, typed or spoken. The app
 > backs its own database up daily, and `ops/restore-check.ps1` restores a dump into a scratch
@@ -31,21 +31,30 @@ wallets and currencies.
 > transaction whose line items are the receipt's own lines, each categorised, in the receipt's own
 > order; the shop becomes a merchant row keyed by its tax id, so the same shop next time costs no
 > merchant tokens. A caption naming a wallet wins; otherwise the wallet marked default for the
-> receipt's card or cash payment (set per wallet on `/wallets`) is used, then the currency's own
+> receipt's card or cash payment (set on `/wallets`, one per currency) is used, then the currency's own
 > default. When the QR can't be read, or the Tax Administration is unreachable, a vision model reads
 > the photo instead and the echo carries a visible ⚠️ warning line — the same warning shows as an amber
 > **Receipts** check on the dashboard and `/diagnostics` whenever a lookup has failed in the last 24
 > hours. The photo itself is never stored — only Telegram's file id — and every step is on the
 > transaction's trace page.
 >
+> Money moving between your own wallets is a transfer, not spending: *"снял 10000 с райфа, комиссия
+> 150"* or *"поменял 100 евро на 11700 динар"* becomes one transfer with both wallets' balances right,
+> and only its fee counts as spending, under *Fees & Charges*. Photograph a menjačnica's exchange slip
+> and it becomes the same kind of exchange, read from the photo and correctable like anything you say.
+> A purchase in a currency other than its wallet's is charged to the wallet at the rate and fee you set
+> for that currency on `/wallets` — or at the amount you say was charged; with no rate set, the amount
+> stays unconverted in its own currency and the echo says how to set one, or to correct the record once
+> it is set. The dashboard keeps two
+> lenses apart: spending and income this month, and the month's transfers on their own.
+>
 > The test suite passes; the tests that call a live model or a live voice provider are skipped
 > unless their keys are set. One known timing race fails now and then under full-suite load
 > (`docs/backlog/loose-ends-phase-5-observability.md`). Browser
 > tests included.
 >
-> Still missing: **exchange-office slips** (Phase 7), **currency exchange** (a spend in a currency
-> other than its wallet's own is recorded as-is, in its own currency, not converted), and editing a
-> receipt's own lines.
+> Still missing: editing a receipt's own lines, and correcting the amounts of a receipt read by the
+> vision fallback.
 
 ## Why it looks the way it does
 

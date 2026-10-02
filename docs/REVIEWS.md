@@ -137,3 +137,13 @@ One line per review: confirmed findings by tag. Dated history, not status.
   predicate landing after the slip jobs, PR 8 unreviewed and stale backlog, a screenshot run deleting another PR's
   pictures, tests that could not go red). Rejected: dropping a kept stated charge when the foreign sum changes
   (Fable; the operator keeps it), refusing a same-currency transfer whose sides differ (Fable; P2-1).
+- **Phase 7 closing (phase-7 vs master), 2026-10-02:** none by both; 1 Codex only (an incomplete slip
+  cancelled during extraction and then restored was stranded); 2 Fable only, plus 3 minor (a
+  receiving-side fee read as not included, storing the received leg short by the fee; a slip tolerance
+  of about a para holding slips paid out in whole dinars; an unsupported slip currency called
+  unreadable, the trace page hiding the failure reason, a stale comment). Rejected: `MissingReceivedAmount`
+  naming the destination currency the record still holds (Fable; A-6, only the reason is stored), a
+  both-sides-RSD misread failing as `SameWallet` (Fable; recoverable by reply). The Codex run took about
+  two minutes over the whole phase, so its coverage was thin. Codex was at its usage limit for the fix
+  PRs, so opus reviewed them; it found 1 more, deferred to the backlog (a job failing while its record
+  is cancelled leaves no reason, and Restore strands the record).

@@ -40,8 +40,10 @@ paths:
   `--connection` — both resolve `noof_ledger` — point it at the template via
   `NOOF_LEDGER_EF_CONNECTION` instead.
 - **`transaction_revisions` is append-only** (a trigger refuses `UPDATE`/`DELETE`/`TRUNCATE`). Any
-  code that changes a record writes a revision inside the same database transaction, through
-  `RevisionLog.AppendAsync`.
+  code that changes a record that has been applied writes a revision inside the same database
+  transaction, through `RevisionLog.AppendAsync`. A record not yet applied gets no `Initial`/`Correction`/`Edit`
+  revision — Restore and the awaiting-confirmation check read those as applied; `Cancel` and `Restore`
+  write theirs whatever the status.
 - Tests run against a real database, never the EF InMemory provider.
 - **An external process never receives a secret as an argument** *(settled 2026-09-24, Phase 4)*.
   `BackupWorker`'s `pg_dump` is the first production code in this repo to shell out to another
