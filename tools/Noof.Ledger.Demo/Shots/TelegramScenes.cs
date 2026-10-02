@@ -173,6 +173,11 @@ internal static class TelegramScenes
                 Photo("13:55"),
                 Reply(echo.Compose(IncompleteSlip()), "13:55"),
             ]),
+            new("slip-unsupported-currency", "An exchange slip in a currency the ledger doesn't hold",
+            [
+                Photo("14:10"),
+                Reply(echo.Compose(UnsupportedCurrencySlip()), "14:10"),
+            ]),
             new("health", "/health",
             [
                 Operator("/health", "08:00"),
@@ -260,6 +265,14 @@ internal static class TelegramScenes
             FailureReason = RecordFailureReason.SlipIncomplete,
             Slip = new SlipFacts("Menjačnica Zlatnik", "PZ-2026-0919",
                 new ExtractedExchange(100.00m, "EUR", null, "RSD", null, null, null, "PZ-2026-0919")),
+        };
+
+    // Vision keeps any three-letter code, so the francs were read - the ledger just holds no CHF.
+    static CategorizationSubject UnsupportedCurrencySlip() =>
+        IncompleteSlip() with
+        {
+            Slip = new SlipFacts("Menjačnica Zlatnik", "PZ-2026-0920",
+                new ExtractedExchange(100.00m, "CHF", 12450.00m, "RSD", 124.5000m, null, null, "PZ-2026-0920")),
         };
 
     // The same held slip the demo database holds, so the picture and its trace page agree.
