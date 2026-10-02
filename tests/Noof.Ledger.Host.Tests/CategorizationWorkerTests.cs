@@ -2389,7 +2389,7 @@ public class CategorizationWorkerTests
 
     const string SlipText =
         "A currency exchange at an exchange office, read from a photo of its slip. Both sides were cash.\n"
-        + "Each side is the money handed over or received, as a person would say it: a commission the slip printed inside a side is shown beside it as a fee, not included in the figure.\n"
+        + "Each side is the money handed over or received, as a person would say it. A commission the slip printed inside a side's amount is shown beside that side as a fee, not included in the figure, or else on a line of its own.\n"
         + "Office: Menjačnica Zlatnik\n"
         + "Given: 100.00 EUR\n"
         + "Received: not read\n"

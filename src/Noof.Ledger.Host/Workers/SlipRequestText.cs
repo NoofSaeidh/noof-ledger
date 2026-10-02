@@ -22,7 +22,7 @@ internal static class SlipRequestText
         List<string> lines =
         [
             "A currency exchange at an exchange office, read from a photo of its slip. Both sides were cash.",
-            "Each side is the money handed over or received, as a person would say it: a commission the slip printed inside a side is shown beside it as a fee, not included in the figure.",
+            "Each side is the money handed over or received, as a person would say it. A commission the slip printed inside a side's amount is shown beside that side as a fee, not included in the figure, or else on a line of its own.",
             $"Office: {(string.IsNullOrWhiteSpace(slip.VenueName) ? NotRead : slip.VenueName)}",
             $"Given: {Side(evidence.GivenAmount, evidence.GivenCurrency, TransferLeg.From, fee)}",
             $"Received: {Side(evidence.ReceivedAmount, evidence.ReceivedCurrency, TransferLeg.To, fee)}",
@@ -38,20 +38,21 @@ internal static class SlipRequestText
         return string.Join('\n', lines);
     }
 
-    // The commission's leg is ExchangeSlipMapper's: the given side when it is in that currency, else the received one.
-    // It is shown beside its side only when that side's amount was read and stays positive without it.
+    // The commission sits on the leg RecordExchange stored it on - one rule, or the two would put the fee on different
+    // sides and charge it twice. It is shown beside its side only when that side's amount was read and stays positive
+    // without it.
     static SideFee? FeeBesideASide(ExtractedExchange evidence)
     {
         if (evidence.CommissionAmount is not { } commission || commission <= 0m
             || evidence.CommissionCurrencyOrDinars() is not { } currency)
             return null;
 
-        if (currency == ExtractedExchange.SupportedCurrency(evidence.GivenCurrency))
-            return evidence.GivenAmount > commission ? new SideFee(TransferLeg.From, commission, currency) : null;
-
-        return currency == ExtractedExchange.SupportedCurrency(evidence.ReceivedCurrency) && evidence.ReceivedAmount > 0m
-            ? new SideFee(TransferLeg.To, commission, currency)
-            : null;
+        return ExchangeSlipMapper.CommissionLegOf(evidence) switch
+        {
+            TransferLeg.From when evidence.GivenAmount > commission => new SideFee(TransferLeg.From, commission, currency),
+            TransferLeg.To when evidence.ReceivedAmount > 0m => new SideFee(TransferLeg.To, commission, currency),
+            _ => null,
+        };
     }
 
     // The customer handed over the given side plus the fee, and got back the received side less it: so the given side
