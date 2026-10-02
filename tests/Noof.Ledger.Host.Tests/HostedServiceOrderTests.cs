@@ -36,7 +36,7 @@ public class HostedServiceOrderTests
         // need InternalsVisibleTo from Noof.Ledger.Telegram (minimum accessibility - CLAUDE.md).
         var otherWorkerIndexes = hostedServices
             .Select((service, index) => (service, index))
-            .Where(entry => entry.service is SecretSnapshotRefreshWorker or CategorizationWorker
+            .Where(entry => entry.service is SecretSnapshotRefreshWorker or CategorizationWorker or RecordExchangeWorker
                 or TranscriptionWorker or LogRetentionWorker
                 || entry.service.GetType().Name == "TelegramPollingService")
             .Select(entry => entry.index)

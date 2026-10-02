@@ -78,4 +78,12 @@ public class CategorizationWiringTests
 
         factory.Services.GetServices<IHostedService>().Should().Contain(service => service is TranscriptionWorker);
     }
+
+    [Fact]
+    public void RecordExchangeWorker_is_registered_as_a_hosted_service()
+    {
+        using var factory = Factory();
+
+        factory.Services.GetServices<IHostedService>().Should().Contain(service => service is RecordExchangeWorker);
+    }
 }
