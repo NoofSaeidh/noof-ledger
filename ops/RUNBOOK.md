@@ -451,6 +451,21 @@ prints `noof-ledger-bot[bot]`.
 **Key rotation:** generate a new private key on the app's page, repeat step 5 with it (skipping the
 App ID line), check it works, then delete the old key on the app's page.
 
+## Copilot's cloud agent
+
+The operator can hand a PR to Copilot's cloud agent from a PR comment, e.g.
+`@copilot resolve the merge conflicts in this pull request`. Two files make that work:
+
+- `.github/workflows/copilot-setup-steps.yml` installs Node and the .NET SDK `global.json` pins
+  before the agent starts. Copilot reads it from `master` only, so a change to it does nothing until
+  it is merged there.
+- `.github/copilot/settings.json` sets `disableAllHooks`. Copilot also runs the hooks in
+  `.claude/settings.json`, but without `CLAUDE_PROJECT_DIR`, so `node` cannot find the hook scripts,
+  and a `preToolUse` hook that fails denies the call: every shell command the agent tried was refused.
+  The hooks guard Claude Code sessions on this machine and have nothing to do in Copilot's sandbox.
+  Claude Code does not read this file. Copilot reads it from the branch it works on, so a branch cut
+  before it existed needs it merged or cherry-picked in first.
+
 ## run.ps1 — the one entry point
 
 `run.ps1` in the repo root is how the app is launched and operated from here on; `.\run.ps1` (or
