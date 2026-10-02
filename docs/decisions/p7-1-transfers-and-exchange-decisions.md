@@ -80,6 +80,16 @@ day; copied here verbatim from the spec's own table.
 | A-27 | Replaces A-18 for capture: a transfer's **source** leg the model leaves without a wallet goes to the **card** default of its currency, its **destination** leg to the **cash** default of its currency, each else the currency's default. A slip keeps cash on both legs (A-8, §3). | "снял 10000" with no wallet named would otherwise put both legs on the cash wallet and fail as `SameWallet`; a withdrawal takes from the card and lands in cash. Operator, 2026-10-01. |
 | A-28 | The no-terms echo reads `{sum} {CUR} not converted — set a {CUR} rate for {Wallet} on /wallets, or correct this record to apply it` (`30.00 USD not converted — set a USD rate for Kaspi KZT on /wallets, or correct this record to apply it`), not §4's `not in the wallet's currency — set a USD rate for Kaspi KZT on /wallets`. | It leads with the amount, and the correction route keeps the hint true for a record saved before the rate existed, since rates are never applied retroactively (§1, "No backfill"). Operator, 2026-10-02. |
 
+## Changed by the closing review (2026-10-02)
+
+Fable 5.1 and Codex reviewed `phase-7` against `master` at the close (`docs/REVIEWS.md`, trial tally).
+Four findings changed the phase before it merged: a fee on the receiving side was read as not included,
+so the received leg was stored short by the fee — the prompt gained a received-side fee rule (PR 8c);
+Restore of an incomplete slip that was cancelled during extraction keeps its outcome instead of
+stranding it (PR 8b); the slip tolerance is widened to one dinar, so a slip paid out in whole dinars is
+no longer held for "Record anyway" (A-29, operator 2026-10-02); and a slip in a currency the ledger does
+not hold is worded as an unsupported currency, not an unreadable one (PR 8b).
+
 ## Decisions made during implementation, worth knowing before revisiting this code
 
 - **A reply to a slip wins over the photo's caption** (PR #48, extending A-8 and A-22). A held slip's
