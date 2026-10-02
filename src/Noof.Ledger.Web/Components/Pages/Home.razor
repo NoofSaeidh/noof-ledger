@@ -223,10 +223,23 @@ else
         <MudLink Href="/transactions">All transactions</MudLink>
     </div>
 
+    @* Links rather than tabs or a menu: this page renders statically, so the view lives in the URL (spec §4). *@
+    <div id="recent-views" class="d-flex gap-4 mb-3">
+        @foreach (var (view, query, label) in RecentViews)
+        {
+            <MudLink id="@($"recent-view-{query}")" Href="@($"/?view={query}")"
+                     Color="@(view == recentView ? Color.Primary : Color.Default)"
+                     Underline="@(view == recentView ? Underline.Always : Underline.Hover)"
+                     aria-current="@(view == recentView ? "page" : null)">@label</MudLink>
+        }
+    </div>
+
     @if (recent.Count == 0)
     {
         <MudPaper Outlined="true" Elevation="0" Class="pa-8">
-            <MudText Typo="Typo.body1" Align="Align.Center" Class="mud-text-secondary">Nothing captured yet.</MudText>
+            <MudText Typo="Typo.body1" Align="Align.Center" Class="mud-text-secondary">
+                @(recentView == RecentView.Transfers ? "No transfers yet." : "Nothing captured yet.")
+            </MudText>
         </MudPaper>
     }
     else
@@ -240,6 +253,11 @@ else
                         <MudText Typo="Typo.caption">@FormatOccurred(transaction)</MudText>
                     </MudLink>
                     <MudSpacer />
+                    @* Only a record that has been read has a known kind; until then it is stored as the default. *@
+                    @if (transaction.Status == TransactionStatus.Completed)
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text">@DescribeKind(transaction.Kind)</MudChip>
+                    }
                     <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
                              Color="@StatusColour(transaction.Status)">
                         @DescribeStatus(transaction.Status)
@@ -258,6 +276,20 @@ else
                 {
                     <MudText Typo="Typo.caption" Color="Color.Error">
                         Categorisation failed. Nothing was recorded for this message.
+                    </MudText>
+                }
+                else if (transaction.Transfer is { } transfer)
+                {
+                    <MudText Typo="Typo.body2" Class="mt-2 noof-amount">@LedgerText.TransferWithRate(transfer)</MudText>
+                    @if (LedgerText.TransferFee(transfer) is { } fee)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@fee</MudText>
+                    }
+                }
+                else if (transaction.Kind == TransactionKind.BalanceCheck)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        A balance statement - it sets what the wallet holds and is not spending.
                     </MudText>
                 }
                 else if (transaction.Items.Count == 0)
@@ -284,6 +316,10 @@ else
                                         {
                                             <span class="mud-text-secondary">&nbsp;&middot; @item.MerchantName</span>
                                         }
+                                        @if (item.Role == EntryRole.Fee)
+                                        {
+                                            <span class="mud-text-secondary">&nbsp;&middot; fee</span>
+                                        }
                                     </td>
                                     <td class="noof-amount noof-numeric">@FormatMoney(item.Amount)</td>
                                 </tr>
@@ -299,6 +335,19 @@ else
 
 @code {
     static readonly DonutChartOptions DonutOptions = new() { ChartPalette = NoofTheme.ChartPalette };
+
+    static readonly (RecentView View, string Query, string Label)[] RecentViews =
+    [
+        (RecentView.SpendingAndIncome, "spending", "Spending & income"),
+        (RecentView.Transfers, "transfers", "Transfers"),
+        (RecentView.All, "all", "All"),
+    ];
+
+    // SupplyParameterFromQuery does not bind enums, hence the string (DiagnosticsLogs does the same).
+    [SupplyParameterFromQuery]
+    public string? View { get; set; }
+
+    RecentView recentView;
 
     IReadOnlyList<RecentTransaction> recent = [];
     IReadOnlyList<CurrencyGroup> currencyGroups = [];
@@ -326,14 +375,16 @@ else
         public string[] Labels => [.. Totals.Select(total => total.CategoryName)];
     }
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnParametersSetAsync()
     {
+        recentView = ParseView(View);
+
         if (DatabaseGate.State != DatabaseState.Ready)
             return;
 
         try
         {
-            recent = await ReadModel.RecentAsync(20, RecentView.SpendingAndIncome, cancellation.Token);
+            recent = await ReadModel.RecentAsync(20, recentView, cancellation.Token);
 
             var summary = await ReadModel.ThisMonthAsync(cancellation.Token);
             summaryFirstDay = summary.FirstDay;
@@ -440,6 +491,22 @@ else
             ? $"{day} {time.ToString("HH:mm", CultureInfo.InvariantCulture)}"
             : day;
     }
+
+    static RecentView ParseView(string? view) => view?.ToLowerInvariant() switch
+    {
+        "transfers" => RecentView.Transfers,
+        "all" => RecentView.All,
+        _ => RecentView.SpendingAndIncome,
+    };
+
+    static string DescribeKind(TransactionKind kind) => kind switch
+    {
+        TransactionKind.Expense => "Spending",
+        TransactionKind.Income => "Income",
+        TransactionKind.BalanceCheck => "Balance statement",
+        TransactionKind.Transfer => "Transfer",
+        _ => kind.ToString(),
+    };
 
     static string DescribeStatus(TransactionStatus status) => status switch
     {

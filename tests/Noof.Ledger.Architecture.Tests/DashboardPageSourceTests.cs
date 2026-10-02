@@ -98,4 +98,16 @@ public class DashboardPageSourceTests
         source.Should().Contain("month-received-",
             "each currency's card shows what came in next to what was spent (spec §4)");
     }
+
+    [Fact]
+    public void The_recent_view_comes_from_the_query_string_as_links_never_a_menu_or_tabs()
+    {
+        var source = SourceText();
+
+        source.Should().Contain("[SupplyParameterFromQuery]",
+            "Home renders statically, so the view a link asks for can only arrive in the URL (spec §4)");
+        source.Should().Contain("/?view=");
+        source.Should().NotContain("MudMenu", "a menu needs the popover provider the static layout does not have");
+        source.Should().NotContain("MudTabs", "tabs switch over a circuit, and a statically rendered page has none");
+    }
 }
