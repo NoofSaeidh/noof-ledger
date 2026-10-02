@@ -94,64 +94,128 @@ else
         }
     </MudPaper>
 
-    <div class="noof-txn-header mb-3">
-        <MudText HtmlTag="h2" Typo="Typo.h6">This month</MudText>
-        <MudText Typo="Typo.body2" Class="mud-text-secondary">
-            from @summaryFirstDay.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
-        </MudText>
+    <div id="this-month">
+        <div class="noof-txn-header mb-3">
+            <MudText HtmlTag="h2" Typo="Typo.h6">This month</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                from @summaryFirstDay.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+            </MudText>
+        </div>
+
+        @if (currencyGroups.Count == 0)
+        {
+            <MudPaper Outlined="true" Elevation="0" Class="pa-8 mb-8">
+                <MudText Typo="Typo.body1" Align="Align.Center" Class="mud-text-secondary">
+                    No spending or income recorded this month.
+                </MudText>
+            </MudPaper>
+        }
+        else
+        {
+            <MudGrid Spacing="4" Class="mb-4 noof-month-grid">
+                @foreach (var group in currencyGroups)
+                {
+                    <MudItem xs="12" md="6">
+                        <MudPaper Outlined="true" Elevation="0" Class="pa-5">
+                            <MudText Typo="Typo.overline" Class="mud-text-secondary">@group.Currency this month</MudText>
+
+                            @if (group.Totals.Count > 0)
+                            {
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">Spent</MudText>
+                                <MudText Typo="Typo.h4" Class="noof-amount">@FormatAmount(group.Total)</MudText>
+
+                                @* One category is not a distribution, so a ring of a single slice would be a
+                                   decoration that says nothing. The table below is the real answer either
+                                   way; the chart only earns its space once there is a shape to see. *@
+                                @if (group.Totals.Count > 1)
+                                {
+                                    <div class="noof-chart">
+                                        <MudChart T="double"
+                                                  ChartType="ChartType.Donut"
+                                                  ChartSeries="@group.Series"
+                                                  ChartLabels="@group.Labels"
+                                                  LegendPosition="Position.Right"
+                                                  ChartOptions="@DonutOptions"
+                                                  Height="220px" />
+                                    </div>
+                                }
+
+                                <MudSimpleTable id="@($"month-totals-{group.Currency}")" Dense="true" Hover="true"
+                                                Elevation="0" Class="noof-totals-table mt-2">
+                                    <tbody>
+                                        @foreach (var total in group.Totals)
+                                        {
+                                            <tr>
+                                                <td>@total.CategoryName</td>
+                                                <td class="noof-amount noof-numeric">@FormatAmount(total.Amount)</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </MudSimpleTable>
+                            }
+
+                            @if (group.Received.Count > 0)
+                            {
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-4">Received</MudText>
+                                <MudText Typo="Typo.h6" Class="noof-amount">@FormatAmount(group.ReceivedTotal)</MudText>
+                                <MudSimpleTable id="@($"month-received-{group.Currency}")" Dense="true" Hover="true"
+                                                Elevation="0" Class="noof-totals-table mt-2">
+                                    <tbody>
+                                        @foreach (var total in group.Received)
+                                        {
+                                            <tr>
+                                                <td>@total.CategoryName</td>
+                                                <td class="noof-amount noof-numeric">@FormatAmount(total.Amount)</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </MudSimpleTable>
+                            }
+                        </MudPaper>
+                    </MudItem>
+                }
+            </MudGrid>
+        }
     </div>
 
-    @if (currencyGroups.Count == 0)
-    {
-        <MudPaper Outlined="true" Elevation="0" Class="pa-8 mb-8">
-            <MudText Typo="Typo.body1" Align="Align.Center" Class="mud-text-secondary">
-                No spending recorded this month.
-            </MudText>
-        </MudPaper>
-    }
-    else
-    {
-        <MudGrid Spacing="4" Class="mb-4 noof-month-grid">
-            @foreach (var group in currencyGroups)
-            {
-                <MudItem xs="12" md="6">
-                    <MudPaper Outlined="true" Elevation="0" Class="pa-5">
-                        <MudText Typo="Typo.overline" Class="mud-text-secondary">@group.Currency this month</MudText>
-                        <MudText Typo="Typo.h4" Class="noof-amount">@FormatAmount(group.Total)</MudText>
+    @* No donut: an amount moved between the operator's own wallets says nothing about spending (T-9). *@
+    <div class="noof-txn-header mt-8 mb-3">
+        <MudText HtmlTag="h2" Typo="Typo.h6">Transfers this month</MudText>
+    </div>
 
-                        @* One category is not a distribution, so a ring of a single slice would be a
-                           decoration that says nothing. The table below is the real answer either
-                           way; the chart only earns its space once there is a shape to see. *@
-                        @if (group.Totals.Count > 1)
-                        {
-                            <div class="noof-chart">
-                                <MudChart T="double"
-                                          ChartType="ChartType.Donut"
-                                          ChartSeries="@group.Series"
-                                          ChartLabels="@group.Labels"
-                                          LegendPosition="Position.Right"
-                                          ChartOptions="@DonutOptions"
-                                          Height="220px" />
-                            </div>
-                        }
-
-                        <MudSimpleTable id="@($"month-totals-{group.Currency}")" Dense="true" Hover="true"
-                                        Elevation="0" Class="noof-totals-table mt-2">
-                            <tbody>
-                                @foreach (var total in group.Totals)
+    <MudPaper id="month-transfers" Outlined="true" Elevation="0" Class="pa-5 mb-4">
+        @if (monthTransfers.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">No transfers this month.</MudText>
+        }
+        else
+        {
+            <MudSimpleTable Dense="true" Elevation="0" Class="noof-totals-table">
+                <tbody>
+                    @foreach (var transfer in monthTransfers)
+                    {
+                        <tr id="@($"month-transfer-{transfer.Id}")">
+                            <td class="mud-text-secondary">@transfer.OccurredOn.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)</td>
+                            <td>
+                                <MudLink Href="@($"/transactions/{transfer.Id}/trace")">@LedgerText.TransferWithRate(transfer.Transfer)</MudLink>
+                                @if (LedgerText.TransferFee(transfer.Transfer) is { } fee)
                                 {
-                                    <tr>
-                                        <td>@total.CategoryName</td>
-                                        <td class="noof-amount noof-numeric">@FormatAmount(total.Amount)</td>
-                                    </tr>
+                                    <div class="mud-text-secondary">@fee</div>
                                 }
-                            </tbody>
-                        </MudSimpleTable>
-                    </MudPaper>
-                </MudItem>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+
+            @if (transferFees.Count > 0)
+            {
+                <MudText id="month-transfer-fees" Typo="Typo.body2" Class="mt-3">
+                    Fees: @string.Join(", ", transferFees.Select(FormatMoney))
+                </MudText>
             }
-        </MudGrid>
-    }
+        }
+    </MudPaper>
 
     <div class="noof-txn-header mt-8 mb-3">
         <MudText HtmlTag="h2" Typo="Typo.h6">Recent transactions</MudText>
@@ -238,6 +302,8 @@ else
 
     IReadOnlyList<RecentTransaction> recent = [];
     IReadOnlyList<CurrencyGroup> currencyGroups = [];
+    IReadOnlyList<MonthTransfer> monthTransfers = [];
+    IReadOnlyList<Money> transferFees = [];
     IReadOnlyList<WalletBalance> activeBalances = [];
     IReadOnlyList<CurrencyTotal> currencyTotals = [];
     SystemHealthReport? health;
@@ -248,9 +314,11 @@ else
 
     sealed record CurrencyTotal(string Currency, decimal Amount);
 
-    sealed record CurrencyGroup(string Currency, IReadOnlyList<MonthTotal> Totals)
+    sealed record CurrencyGroup(string Currency, IReadOnlyList<MonthTotal> Totals, IReadOnlyList<MonthTotal> Received)
     {
         public decimal Total => Totals.Sum(total => total.Amount);
+
+        public decimal ReceivedTotal => Received.Sum(total => total.Amount);
 
         public List<ChartSeries<double>> Series =>
             [new() { Name = Currency, Data = new ChartData<double>([.. Totals.Select(total => (double)total.Amount)]) }];
@@ -269,17 +337,18 @@ else
 
             var summary = await ReadModel.ThisMonthAsync(cancellation.Token);
             summaryFirstDay = summary.FirstDay;
-            currencyGroups =
+            currencyGroups = GroupByCurrency(summary.Totals, summary.Received ?? []);
+
+            monthTransfers = await ReadModel.TransfersThisMonthAsync(cancellation.Token);
+            transferFees =
             [
-                .. summary.Totals
-                    .GroupBy(total => total.Currency.Value)
+                .. monthTransfers
+                    .Select(transfer => transfer.Transfer.Fee)
+                    .Where(LedgerText.IsFee)
+                    .OfType<Money>()
+                    .GroupBy(fee => fee.Currency.Value)
                     .OrderBy(group => group.Key, StringComparer.Ordinal)
-                    .Select(group => new CurrencyGroup(group.Key,
-                    [
-                        .. group
-                            .OrderByDescending(total => total.Amount)
-                            .ThenBy(total => total.CategoryName, StringComparer.Ordinal),
-                    ])),
+                    .Select(group => new Money(group.Sum(fee => fee.Amount), group.First().Currency)),
             ];
 
             var allBalances = await BalanceReadModel.BalancesAsync(cancellation.Token);
@@ -327,6 +396,23 @@ else
         cancellation.Cancel();
         cancellation.Dispose();
     }
+
+    static IReadOnlyList<CurrencyGroup> GroupByCurrency(IReadOnlyList<MonthTotal> spent, IReadOnlyList<MonthTotal> received) =>
+    [
+        .. spent.Concat(received)
+            .Select(total => total.Currency.Value)
+            .Distinct()
+            .Order(StringComparer.Ordinal)
+            .Select(currency => new CurrencyGroup(currency, InCurrency(spent, currency), InCurrency(received, currency))),
+    ];
+
+    static IReadOnlyList<MonthTotal> InCurrency(IReadOnlyList<MonthTotal> totals, string currency) =>
+    [
+        .. totals
+            .Where(total => total.Currency.Value == currency)
+            .OrderByDescending(total => total.Amount)
+            .ThenBy(total => total.CategoryName, StringComparer.Ordinal),
+    ];
 
     static bool IsDatabaseUnavailable(Exception exception) =>
         exception is DbException
