@@ -5,6 +5,7 @@ using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Domain;
+using Noof.Ledger.Persistence.Receipts;
 using Noof.Ledger.Telegram;
 
 namespace Noof.Ledger.Demo.Shots;
@@ -89,6 +90,66 @@ internal static class TelegramScenes
                 Operator("#@%& ???", "11:12"),
                 Reply(echo.Failure, "11:12"),
             ]),
+            new("transfer", "A cash withdrawal",
+            [
+                Operator("withdrew 10000 rsd from raif", "13:15"),
+                Reply(echo.Compose(TransferRecord("withdrew 10000 rsd from raif", Legs(
+                    "Raiffeisen", new Money(10000.00m, CurrencyCode.Rsd), 164150.00m,
+                    "Cash RSD", new Money(10000.00m, CurrencyCode.Rsd), 12000.00m))), "13:15"),
+            ]),
+            new("transfer-fee", "A withdrawal with a fee",
+            [
+                Operator("withdrew 10000 from raif, fee 150", "13:40"),
+                Reply(echo.Compose(TransferRecord("withdrew 10000 from raif, fee 150", Legs(
+                    "Raiffeisen", new Money(10150.00m, CurrencyCode.Rsd), 154000.00m,
+                    "Cash RSD", new Money(10000.00m, CurrencyCode.Rsd), 22000.00m,
+                    new Money(150.00m, CurrencyCode.Rsd), TransferLeg.From),
+                    [FeeLine("Fee", 150.00m, CurrencyCode.Rsd)])), "13:40"),
+            ]),
+            new("exchange", "A currency exchange",
+            [
+                Operator("exchanged 100 eur for 11700 dinars", "14:05"),
+                Reply(echo.Compose(TransferRecord("exchanged 100 eur for 11700 dinars", Legs(
+                    "Cash EUR", new Money(100.00m, CurrencyCode.Eur), 250.00m,
+                    "Cash RSD", new Money(11700.00m, CurrencyCode.Rsd), 33700.00m))), "14:05"),
+            ]),
+            new("foreign-spending", "Spending in dollars, charged to a tenge wallet at its own rate",
+            [
+                Operator("taxi 30 dollars from kaspi", "16:20"),
+                Reply(echo.Compose(Expense("taxi 30 dollars from kaspi", "Kaspi", CurrencyCode.Kzt, 169744.00m,
+                [
+                    Line("Taxi", 30.00m, CurrencyCode.Usd, "Transport", null),
+                    FeeLine("Fee · USD purchase", 156.00m, CurrencyCode.Kzt),
+                ]) with
+                {
+                    Charges =
+                    [
+                        new ChargeView(CurrencyCode.Usd, 30.00m, new Money(15600.00m, CurrencyCode.Kzt), new Money(156.00m, CurrencyCode.Kzt),
+                            520m, new FeeTerms(1m, null, null), ChargeSource.WalletTerms),
+                    ],
+                }), "16:20"),
+            ]),
+            new("no-terms", "A currency the wallet has no rate for",
+            [
+                Operator("museum 20 eur from kaspi", "17:10"),
+                Reply(echo.Compose(Expense("museum 20 eur from kaspi", "Kaspi", CurrencyCode.Kzt, 185500.00m,
+                    [Line("Museum", 20.00m, CurrencyCode.Eur, "Entertainment", null)]) with
+                {
+                    WalletBalances = [new Money(185500.00m, CurrencyCode.Kzt), new Money(-20.00m, CurrencyCode.Eur)],
+                }), "17:10"),
+            ]),
+            new("exchange-question", "An exchange with no amount received",
+            [
+                Operator("exchanged 100 eur for dinars", "10:30"),
+                Reply(echo.Compose(Expense("exchanged 100 eur for dinars", string.Empty, CurrencyCode.Rsd, 0m, []) with
+                {
+                    Status = TransactionStatus.Failed,
+                    Kind = TransactionKind.Transfer,
+                    WalletCurrency = null,
+                    WalletBalances = null,
+                    FailureReason = RecordFailureReason.MissingReceivedAmount,
+                }), "10:30"),
+            ]),
             ReceiptScene("receipt-qr", "A receipt photo, read from its fiscal QR", echo, MockData.ReceiptTransactionId, "17:42", 172096.06m),
             ReceiptScene("receipt-vision", "The tax site was down, so the lines were read from the photo", echo,
                 MockData.VisionReceiptTransactionId, "12:05", 174661.00m),
@@ -96,6 +157,26 @@ internal static class TelegramScenes
             [
                 Photo("09:20"),
                 Reply(echo.ComposeReceiptNeedsConfirmation(View(MockData.UnconfirmedReceiptTransactionId)), "09:20"),
+            ]),
+            new("slip", "An exchange-office slip, recorded as an exchange between the two cash wallets",
+            [
+                Photo("13:15"),
+                Reply(echo.Compose(SlipExchange()), "13:15"),
+            ]),
+            new("slip-check", "An exchange slip whose figures don't match its printed rate",
+            [
+                Photo("13:40"),
+                Reply(echo.ComposeSlipNeedsConfirmation(SlipView(MockData.HeldSlipTransactionId)), "13:40"),
+            ]),
+            new("slip-incomplete", "An exchange slip whose amount received could not be read",
+            [
+                Photo("13:55"),
+                Reply(echo.Compose(IncompleteSlip()), "13:55"),
+            ]),
+            new("slip-unsupported-currency", "An exchange slip in a currency the ledger doesn't hold",
+            [
+                Photo("14:10"),
+                Reply(echo.Compose(UnsupportedCurrencySlip()), "14:10"),
             ]),
             new("health", "/health",
             [
@@ -148,4 +229,57 @@ internal static class TelegramScenes
     static CategorizationSubject Expense(string raw, string wallet, CurrencyCode currency, decimal balance, IReadOnlyList<RecordedLine> lines) =>
         new(Guid.Empty, raw, MockData.TelegramChatId, 1, wallet, TransactionStatus.Completed, Day, Day, lines,
             WalletCurrency: currency, WalletBalances: [new Money(balance, currency)]);
+
+    static RecordedLine FeeLine(string description, decimal amount, CurrencyCode currency) =>
+        new(description, new Money(amount, currency), "fees-charges", "Fees & Charges", null, EntryRole.Fee);
+
+    static TransferView Legs(
+        string fromWallet, Money from, decimal fromBalance, string toWallet, Money to, decimal toBalance,
+        Money? fee = null, TransferLeg? feeLeg = null) =>
+        new(Guid.Empty, fromWallet, from, Guid.Empty, toWallet, to, fee, feeLeg, StatedRate: null, VenueName: null,
+            [new Money(fromBalance, from.Currency)], [new Money(toBalance, to.Currency)]);
+
+    static CategorizationSubject TransferRecord(string raw, TransferView transfer, IReadOnlyList<RecordedLine>? lines = null) =>
+        new(Guid.Empty, raw, MockData.TelegramChatId, 1, transfer.FromWalletName, TransactionStatus.Completed, Day, Day, lines ?? [],
+            Kind: TransactionKind.Transfer, WalletCurrency: transfer.From.Currency, WalletBalances: transfer.FromBalances,
+            WalletId: transfer.FromWalletId, Transfer: transfer);
+
+    static CategorizationSubject SlipExchange() =>
+        TransferRecord(string.Empty, Legs(
+            "Cash EUR", new Money(100.00m, CurrencyCode.Eur), 150.00m,
+            "Cash RSD", new Money(11700.00m, CurrencyCode.Rsd), 23700.00m) with { VenueName = "Menjačnica Zlatnik" }) with
+        {
+            CaptureKind = CaptureKind.Photo,
+            Slip = new SlipFacts("Menjačnica Zlatnik", "PZ-2026-0917",
+                new ExtractedExchange(100.00m, "EUR", 11700.00m, "RSD", 117.0000m, null, null, "PZ-2026-0917")),
+        };
+
+    // No rate was read either, so the amount received can't be worked out from it.
+    static CategorizationSubject IncompleteSlip() =>
+        Expense(string.Empty, string.Empty, CurrencyCode.Rsd, 0m, []) with
+        {
+            Status = TransactionStatus.Failed,
+            CaptureKind = CaptureKind.Photo,
+            WalletCurrency = null,
+            WalletBalances = null,
+            FailureReason = RecordFailureReason.SlipIncomplete,
+            Slip = new SlipFacts("Menjačnica Zlatnik", "PZ-2026-0919",
+                new ExtractedExchange(100.00m, "EUR", null, "RSD", null, null, null, "PZ-2026-0919")),
+        };
+
+    // Vision keeps any three-letter code, so the francs were read - the ledger just holds no CHF.
+    static CategorizationSubject UnsupportedCurrencySlip() =>
+        IncompleteSlip() with
+        {
+            Slip = new SlipFacts("Menjačnica Zlatnik", "PZ-2026-0920",
+                new ExtractedExchange(100.00m, "CHF", 12450.00m, "RSD", 124.5000m, null, null, "PZ-2026-0920")),
+        };
+
+    // The same held slip the demo database holds, so the picture and its trace page agree.
+    static ExchangeSlipView SlipView(Guid id)
+    {
+        var receipt = MockData.Records.Single(record => record.Id == id).Receipt!;
+        return new(id, receipt.SellerTaxId, receipt.SellerName, receipt.IssuedAt,
+            EfReceiptStore.NormalisedSlipNumber(receipt.Exchange!.SlipNumber), receipt.Exchange);
+    }
 }

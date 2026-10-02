@@ -233,4 +233,186 @@ public class RecordActionHandlerTests
 
         await receiptStore.DidNotReceiveWithAnyArgs().EnqueueCategorizationAsync(default, default, Arg.Any<CancellationToken>());
     }
+
+    static readonly ExtractedExchange HeldEvidence = new(100.00m, "EUR", 11650.00m, "RSD", 117.0000m, null, null, "PZ-2026-0917");
+
+    static ExchangeSlipView HeldSlipView() => new(
+        Guid.Parse("00000000-0000-0000-0007-000000000030"), null, "Menjačnica Zlatnik",
+        new DateTimeOffset(2026, 9, 27, 10, 0, 0, TimeSpan.Zero), "PZ-2026-0917", HeldEvidence);
+
+    static ReceiptView SlipReceipt() => new(
+        Guid.Parse("00000000-0000-0000-0007-000000000030"), ReceiptSource.Vision, null, "Menjačnica Zlatnik", null, null, null,
+        new DateTimeOffset(2026, 9, 27, 10, 0, 0, TimeSpan.Zero), 11650.00m, CurrencyCode.Rsd, ReceiptKind.Exchange, null, null, null, []);
+
+    static CategorizationSubject SlipRecord(TransactionStatus status, RecordFailureReason failure = RecordFailureReason.None) =>
+        new(TransactionId, "", 555L, 42, "", status, new DateOnly(2026, 9, 27), new DateOnly(2026, 9, 27), [], CaptureKind.Photo,
+            FailureReason: failure, Slip: new SlipFacts("Menjačnica Zlatnik", "PZ-2026-0917", HeldEvidence));
+
+    static CategorizationSubject RecordedSlip(TransactionStatus status) =>
+        SlipRecord(status) with
+        {
+            Kind = TransactionKind.Transfer,
+            WalletName = "Cash EUR",
+            WalletCurrency = CurrencyCode.Eur,
+            Transfer = new TransferView(
+                Guid.Parse("00000000-0000-0000-0007-0000000000e1"), "Cash EUR", new Money(100.00m, CurrencyCode.Eur),
+                Guid.Parse("00000000-0000-0000-0007-0000000000d1"), "Cash RSD", new Money(11650.00m, CurrencyCode.Rsd),
+                null, null, new ExchangeRate(CurrencyCode.Eur, 117.0000m, CurrencyCode.Rsd), "Menjačnica Zlatnik", [], []),
+        };
+
+    static Harness CreateForSlip(CategorizationSubject record, bool awaiting)
+    {
+        var editor = Substitute.For<IRecordEditor>();
+        editor.FindByBotMessageAsync(555L, 42, Arg.Any<CancellationToken>()).Returns(new EchoTarget(TransactionId, 42));
+        editor.CancelAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(true);
+        editor.RestoreAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(true);
+
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(record);
+
+        var receiptStore = Substitute.For<IReceiptStore>();
+        receiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(SlipReceipt());
+        receiptStore.GetExchangeSlipAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(HeldSlipView());
+        receiptStore.IsAwaitingConfirmationAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(awaiting);
+        receiptStore.EnqueueCategorizationAsync(TransactionId, 42, Arg.Any<CancellationToken>()).Returns(true);
+
+        var notifier = Substitute.For<IChatNotifier>();
+        return new Harness(new RecordActionHandler(editor, store, notifier, Echo, receiptStore), receiptStore, notifier, editor);
+    }
+
+    // Restore of a held slip brings back its "Record anyway" prompt.
+    [Fact]
+    public async Task Restore_of_a_held_slip_shows_its_confirmation_prompt_again()
+    {
+        var harness = CreateForSlip(SlipRecord(TransactionStatus.Captured), awaiting: true);
+
+        await harness.Handler.HandleAsync(Restore(), Restore().Message!, TestContext.Current.CancellationToken);
+
+        await harness.Editor.Received(1).RestoreAsync(TransactionId, Arg.Any<CancellationToken>());
+        var prompt = Echo.ComposeSlipNeedsConfirmation(HeldSlipView());
+        await harness.Notifier.Received(1).EditAsync(555L, 42, Arg.Is<EchoMessage>(m =>
+                m.Text == prompt.Text && m.Actions.SequenceEqual(new[] { RecordAction.RecordAnyway, RecordAction.Cancel })),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Cancel_on_a_held_slip_says_it_was_never_recorded_and_offers_restore()
+    {
+        var harness = CreateForSlip(SlipRecord(TransactionStatus.Cancelled), awaiting: true);
+
+        await harness.Handler.HandleAsync(Cancel(), Cancel().Message!, TestContext.Current.CancellationToken);
+
+        var expected = Echo.ComposeSlipCancelledUnconfirmed(HeldSlipView());
+        await harness.Notifier.Received(1).EditAsync(555L, 42, Arg.Is<EchoMessage>(m =>
+                m.Text == expected.Text && m.Actions.SequenceEqual(new[] { RecordAction.Restore })),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Record_anyway_on_a_held_slip_queues_it_and_says_the_exchange_is_being_recorded()
+    {
+        var harness = CreateForSlip(SlipRecord(TransactionStatus.Captured), awaiting: false);
+        var query = RecordAnyway();
+
+        await harness.Handler.HandleAsync(query, query.Message!, TestContext.Current.CancellationToken);
+
+        await harness.ReceiptStore.Received(1).EnqueueCategorizationAsync(TransactionId, 42, Arg.Any<CancellationToken>());
+        await harness.Notifier.Received(1).EditAsync(555L, 42,
+            Arg.Is<EchoMessage>(m => m.Text == Echo.RecordingExchange && m.Actions.Count == 0), Arg.Any<CancellationToken>());
+    }
+
+    // The store refuses Record anyway on a slip still held and still Captured (a reply to it in flight): the echo is
+    // the record as it stands - the held prompt - never "Cancelled", which the record is not.
+    [Fact]
+    public async Task A_refused_record_anyway_on_a_held_slip_still_captured_shows_its_confirmation_prompt()
+    {
+        var harness = CreateForSlip(SlipRecord(TransactionStatus.Captured), awaiting: true);
+        harness.ReceiptStore.EnqueueCategorizationAsync(TransactionId, 42, Arg.Any<CancellationToken>()).Returns(false);
+        var query = RecordAnyway();
+
+        await harness.Handler.HandleAsync(query, query.Message!, TestContext.Current.CancellationToken);
+
+        var prompt = Echo.ComposeSlipNeedsConfirmation(HeldSlipView());
+        await harness.Notifier.Received(1).EditAsync(555L, 42, Arg.Is<EchoMessage>(m =>
+                m.Text == prompt.Text && m.Actions.SequenceEqual(new[] { RecordAction.RecordAnyway, RecordAction.Cancel })),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_stale_record_anyway_on_a_cancelled_held_slip_keeps_it_never_recorded()
+    {
+        var harness = CreateForSlip(SlipRecord(TransactionStatus.Cancelled), awaiting: true);
+        harness.ReceiptStore.EnqueueCategorizationAsync(TransactionId, 42, Arg.Any<CancellationToken>()).Returns(false);
+        var query = RecordAnyway();
+
+        await harness.Handler.HandleAsync(query, query.Message!, TestContext.Current.CancellationToken);
+
+        var expected = Echo.ComposeSlipCancelledUnconfirmed(HeldSlipView());
+        await harness.Notifier.Received(1).EditAsync(555L, 42, Arg.Is<EchoMessage>(m =>
+                m.Text == expected.Text && m.Actions.SequenceEqual(new[] { RecordAction.Restore })),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Cancel_on_a_recorded_slip_renders_the_cancelled_exchange_never_a_shop_receipt()
+    {
+        var record = RecordedSlip(TransactionStatus.Cancelled);
+        var harness = CreateForSlip(record, awaiting: false);
+
+        await harness.Handler.HandleAsync(Cancel(), Cancel().Message!, TestContext.Current.CancellationToken);
+
+        var expected = Echo.Compose(record);
+        await harness.Notifier.Received(1).EditAsync(555L, 42, Arg.Is<EchoMessage>(m =>
+                m.Text == expected.Text && !m.Text.Contains("Lines add up to") && m.Actions.SequenceEqual(new[] { RecordAction.Restore })),
+            Arg.Any<CancellationToken>());
+    }
+
+    // An incomplete slip is never offered Record anyway: only a reply completes it.
+    [Fact]
+    public async Task Restore_of_an_incomplete_slip_is_never_offered_record_anyway()
+    {
+        var record = SlipRecord(TransactionStatus.Failed, RecordFailureReason.SlipIncomplete);
+        var harness = CreateForSlip(record, awaiting: false);
+
+        await harness.Handler.HandleAsync(Restore(), Restore().Message!, TestContext.Current.CancellationToken);
+
+        var expected = Echo.Compose(record);
+        await harness.Notifier.Received(1).EditAsync(555L, 42, Arg.Is<EchoMessage>(m =>
+                m.Text == expected.Text && !m.Actions.Contains(RecordAction.RecordAnyway)),
+            Arg.Any<CancellationToken>());
+    }
+
+    // A photo cancelled while it was read, then restored once its incomplete slip was saved, asks for the missing
+    // figure with Edit - never "Reading the receipt…" with no buttons.
+    [Fact]
+    public async Task Restore_of_a_slip_saved_incomplete_while_cancelled_asks_for_the_missing_figure()
+    {
+        var record = SlipRecord(TransactionStatus.Failed, RecordFailureReason.SlipIncomplete) with
+        {
+            Slip = new SlipFacts("Menjačnica Zlatnik", "PZ-2026-0917", HeldEvidence with { ReceivedAmount = null, Rate = null }),
+        };
+        var harness = CreateForSlip(record, awaiting: false);
+
+        await harness.Handler.HandleAsync(Restore(), Restore().Message!, TestContext.Current.CancellationToken);
+
+        await harness.Notifier.Received(1).EditAsync(555L, 42, Arg.Is<EchoMessage>(m =>
+                m.Text == "Slip read, but the amount received is unreadable — reply with it."
+                && m.Actions.SequenceEqual(new[] { RecordAction.Edit })),
+            Arg.Any<CancellationToken>());
+    }
+
+    // A slip a reply completed, then cancelled, then restored, offers Cancel and Edit - never Record anyway.
+    [Fact]
+    public async Task Restore_of_a_slip_a_reply_completed_is_never_offered_record_anyway()
+    {
+        var record = RecordedSlip(TransactionStatus.Completed);
+        var harness = CreateForSlip(record, awaiting: false);
+
+        await harness.Handler.HandleAsync(Restore(), Restore().Message!, TestContext.Current.CancellationToken);
+
+        var expected = Echo.Compose(record);
+        await harness.Notifier.Received(1).EditAsync(555L, 42, Arg.Is<EchoMessage>(m =>
+                m.Text == expected.Text && !m.Actions.Contains(RecordAction.RecordAnyway)),
+            Arg.Any<CancellationToken>());
+    }
 }

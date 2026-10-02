@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using AwesomeAssertions;
 
 namespace Noof.Ledger.Architecture.Tests;
@@ -6,6 +7,9 @@ public class WalletsPageSourceTests
 {
     static string SourceText() => File.ReadAllText(Path.Combine(
         RepoRoot.Find().FullName, "src", "Noof.Ledger.Web", "Components", "Pages", "Wallets.razor"));
+
+    static List<string> NumericFields() =>
+        [.. SourceText().Split("<MudNumericField").Skip(1).Select(rest => rest[..rest.IndexOf("/>", StringComparison.Ordinal)])];
 
     [Fact]
     public void Is_a_routable_authorised_page()
@@ -78,6 +82,36 @@ public class WalletsPageSourceTests
         var source = SourceText();
         var occurrences = source.Split("Culture=\"@CultureInfo.InvariantCulture\"").Length - 1;
 
-        occurrences.Should().BeGreaterThanOrEqualTo(2);
+        occurrences.Should().BeGreaterThanOrEqualTo(10,
+            "the opening balance and date, plus the rate and three fees of a terms row and of the new-terms row");
+    }
+
+    [Fact]
+    public void Every_numeric_field_parses_against_invariant_culture()
+    {
+        // A rate typed as 117.35 on the operator's ru-RU or sr-Latn-RS Windows would otherwise be refused or read as
+        // 11735 - each field is checked on its own, so a new one cannot hide behind the count above.
+        var fields = NumericFields();
+
+        fields.Should().HaveCount(9,
+            "the opening balance, plus the rate and three fees of a terms row and of the new-terms row");
+        fields.Should().AllSatisfy(field => field.Should().Contain("Culture=\"@CultureInfo.InvariantCulture\""));
+    }
+
+    [Fact]
+    public void Every_numeric_field_reads_a_decimal_comma_and_reports_what_it_cannot_read()
+    {
+        // MudBlazor's default converter reads "117,35" as 11735 under the invariant culture and an unreadable value as
+        // null (A-24); each field carries its own converter instance, because the instance remembers that its
+        // field failed - shared, one field's good value would clear another's refusal.
+        var fields = NumericFields();
+        var converters = fields
+            .Select(field => Regex.Match(field, @"Converter=""@(?<name>[A-Za-z_][\w.]*)"""))
+            .ToList();
+
+        fields.Should().NotBeEmpty();
+        fields.Should().AllSatisfy(field => field.Should().NotContain("Converter=\"@(new "));
+        converters.Should().AllSatisfy(match => match.Success.Should().BeTrue());
+        converters.Select(match => match.Groups["name"].Value).Should().OnlyHaveUniqueItems();
     }
 }

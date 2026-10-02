@@ -94,9 +94,9 @@ produced them.
 
 **What to expect from the bot.** Send a photo of a Serbian fiscal receipt, or paste its
 `https://suf.purs.gov.rs/v/?vl=...` QR link as plain text. A caption naming a wallet ("card", a wallet's
-own name) wins; otherwise the wallet marked default for the receipt's payment method
-(`/wallets` → "Default for card" / "Default for cash" per wallet) is used, then the currency's own
-default wallet. The echo lists every line with its category, in the receipt's own order, then the total.
+own name) wins; otherwise the wallet marked default for the receipt's payment method in the
+receipt's currency (`/wallets` → "Default {CUR} wallet for" · Card / Cash, set per currency) is used,
+then the currency's own default wallet. The echo lists every line with its category, in the receipt's own order, then the total.
 **For an exact read, send the receipt's own QR link as text** — scan the fiscal QR with the phone's own
 camera and paste the `vl=` link — **rather than a photo**; see "Send the QR's link, not a photo" below for
 why even a full-resolution photo sent as a file does not reliably decode the QR itself.

@@ -18,4 +18,9 @@ public interface IMerchantDirectory
     // merchant already carries a (necessarily identical, by the unique index) tax id, or when
     // another merchant claimed this one first.
     Task LinkTaxIdAsync(Guid merchantId, string taxId, CancellationToken cancellationToken);
+
+    // The office a slip names, keyed by its PIB as a shop is (spec §3). One PIB is one legal entity
+    // (A-9): a PIB a shop receipt already linked resolves to that merchant, whatever its kind; an
+    // unknown one creates an ExchangeVenue carrying it.
+    Task<Guid> VenueForTaxIdAsync(string taxId, string displayName, CancellationToken cancellationToken);
 }

@@ -141,8 +141,12 @@ internal sealed class CategorizationWorker(
             // A link capture whose extraction failed terminally has no receipt row, so
             // TryRouteToReceiptAsync above never intercepted it - RawText here can still be the whole
             // fiscal verification URL, vl payload included, and that must never reach the model
-            // (CLAUDE.md, "...and never in a model prompt either").
-            var rawTextForModel = verificationUrl.StripUrl(sub.RawText) ?? "";
+            // (CLAUDE.md, "...and never in a model prompt either"). A slip's evidence is the message instead (spec A-12),
+            // its caption added as a note only where it never reached the model as an instruction.
+            var caption = verificationUrl.StripUrl(sub.RawText);
+            var rawTextForModel = sub.Slip is { } slip
+                ? SlipRequestText.For(slip, CaptionNote(job, sub, caption, verificationUrl.StripUrl(job.Instruction)))
+                : caption ?? "";
             var hints = merchantScan.Matches(rawTextForModel, aliases, options.MerchantHintLimit)
                 .DistinctBy(alias => alias.MerchantId)
                 .Select(alias => new MerchantOption(alias.MerchantId, alias.DisplayName))
@@ -171,14 +175,15 @@ internal sealed class CategorizationWorker(
             // it influenced would fail to map.
             var offeredMerchantIds = allMerchants.Select(merchant => merchant.Id).ToHashSet();
 
-            var keptProposal = KeepingTheRecordsWallet(job, sub, proposal);
-            var walletsForMapping = WalletsIncludingKept(wallets, proposal, keptProposal, sub);
+            var kept = KeptWallets(job, sub, proposal);
+            var keptProposal = WithSlipCashLegs(KeepingTheRecordsWallet(proposal, kept), sub, wallets);
+            var walletsForMapping = WalletsIncludingKept(wallets, kept);
 
             if (!proposalMapper.TryMap(
                 keptProposal, offeredSlugs, offeredMerchantIds, walletsForMapping,
-                options.DefaultCurrency, out var mapped, out var failure))
+                options.DefaultCurrency, out var mapped, out var failure, out var reason))
             {
-                await FailTerminallyAsync(jobQueue, store, notifier, job, subject, failure, currentStage, cancellationToken);
+                await FailTerminallyAsync(jobQueue, store, notifier, job, subject, failure, currentStage, cancellationToken, reason: reason);
                 return;
             }
 
@@ -228,7 +233,9 @@ internal sealed class CategorizationWorker(
 
             var occurredOn = mapped.OccurredOn ?? DefaultDay(job, sub);
             var outcome = new CategorizationOutcome(
-                categorizedItems, occurredOn, job.Kind, job.Instruction, mapped.Kind, mapped.WalletId, mapped.StatedBalance);
+                categorizedItems, occurredOn, job.Kind, job.Instruction, mapped.Kind, mapped.WalletId, mapped.StatedBalance,
+                Transfer: await WithSlipVenueAsync(scope, merchantDirectory, job, sub, mapped.Transfer, cancellationToken),
+                Charged: mapped.Charged);
             currentStage = TransactionStages.Persisted;
             using (timer.Start(logger, TimedOperations.DbApplyCategorization))
                 await store.ApplyAsync(job.TransactionId, outcome, cancellationToken);
@@ -283,11 +290,12 @@ internal sealed class CategorizationWorker(
     }
 
     // Ruling F-2 (Phase 6 re-review): the one place that decides whether a Correct or Reinterpret job
-    // belongs to a receipt, instead of that decision being duplicated at every enqueue site (queue-time
-    // special-casing in EfRecordEditor used to route a text reply but not a voice one - N-1 - or an
-    // edited message - N-2 - and had no way to know a receipt was still being extracted - N-4). A
-    // reading (Categorize) is never routed here: only a correction can name a transaction that already
-    // has a receipt.
+    // belongs to a fiscal receipt (a sale or a refund) - a copy, training, proforma or advance slip, or an
+    // exchange-office slip, is corrected through record_transaction like any other record - instead of
+    // that decision being duplicated at every enqueue site (queue-time special-casing in EfRecordEditor
+    // used to route a text reply but not a voice one - N-1 - or an edited message - N-2 - and had no way
+    // to know a receipt was still being extracted - N-4). A reading (Categorize) is never routed here:
+    // only a correction can name a transaction that already has a receipt.
     static readonly TimeSpan ReceiptExtractionPendingDelay = TimeSpan.FromSeconds(5);
 
     async Task<bool> TryRouteToReceiptAsync(
@@ -300,7 +308,7 @@ internal sealed class CategorizationWorker(
         var receiptStore = scope.ServiceProvider.GetRequiredService<IReceiptStore>();
         var receipt = await receiptStore.GetByTransactionAsync(job.TransactionId, cancellationToken);
 
-        if (receipt is { } present && !present.Kind.IsNonMoneyKind())
+        if (receipt is { } present && present.Kind.IsFiscalMoneyKind())
         {
             // Correct carries the operator's words as Instruction already; Reinterpret (an edited
             // message) carries none - the edit itself already replaced RawText, so that IS the
@@ -366,9 +374,14 @@ internal sealed class CategorizationWorker(
     // to reach the model's prompt verbatim through here. Stripped with the same FiscalVerificationUrl
     // every other model-facing path uses; an instruction that turns out to be nothing but the URL
     // strips to null, and that means "no correction" rather than an empty one.
+    //
+    // Principal lines only (spec §2): a fee line is C#'s, and offered back as an item the model would answer it as a
+    // purchase. The kind, the transfer, the charges and a balance check's statement travel as facts of their own.
     CorrectionRequest? CorrectionFor(CategorizationJob job, CategorizationSubject record) =>
         job is { Kind: JobKind.Correct, Instruction: { } instruction } && verificationUrl.StripUrl(instruction) is { } stripped
-            ? new CorrectionRequest(record.OccurredOn, record.Lines, stripped)
+            ? new CorrectionRequest(
+                record.OccurredOn, [.. record.Lines.Where(line => line.Role == EntryRole.Principal)], stripped,
+                record.Kind, record.Transfer, record.Charges, record.Statement)
             : null;
 
     // A correction's "today" is the reply's own send day (job.InstructionDay), not the original
@@ -379,49 +392,173 @@ internal sealed class CategorizationWorker(
         job.InstructionDay ?? record.SentOn;
 
     // A correction that names no day keeps the record's day. Anything read from scratch starts from the
-    // day the message was sent (D2).
+    // day the message was sent (D2) - except a slip, whose day is its printed issue date, evidence the
+    // caption never said (spec A-23), so even a re-read of an edited caption keeps it.
     static DateOnly DefaultDay(CategorizationJob job, CategorizationSubject record) =>
-        job.Kind == JobKind.Correct ? record.OccurredOn : record.SentOn;
+        job.Kind == JobKind.Correct || record.Slip is not null ? record.OccurredOn : record.SentOn;
 
-    // The model is shown a correction's lines, not its wallet, so a correction that names no wallet means "leave it
+    // Which slot of the proposal a kept wallet fills: the record's one wallet, or one leg of a transfer.
+    enum KeptSlot { Wallet, From, To }
+
+    // A wallet the record already sits in, taken from the record, not from the offered list - so an archived one is
+    // still a fact. Currency is null only when the store could not read it.
+    sealed record KeptWallet(KeptSlot Slot, Guid Id, string Name, CurrencyCode? Currency);
+
+    // The model is shown a correction's lines, not its wallets, so a correction that names no wallet means "leave it
     // where it is", not "the default": otherwise "нет, 300" would quietly move a Raiffeisen purchase into the RSD
     // default and both balances would drift (M1). A re-read starts from scratch and resolves the wallet afresh (M3).
-    // Kept even when that wallet has since been archived (Phase 6 re-review, N-3): archiving a wallet must not
-    // rewrite a historical record's wallet out from under it - only a first categorisation, or a correction that
-    // names a wallet itself, may fall through to the payment/currency default, which does still skip archived
-    // wallets.
-    static CategorizationProposal KeepingTheRecordsWallet(
-        CategorizationJob job, CategorizationSubject record, CategorizationProposal proposal) =>
-        job.Kind == JobKind.Correct && proposal.WalletId is null && record.WalletId is { } current
-            ? proposal with { WalletId = current }
-            : proposal;
+    // Kept even when that wallet has since been archived: archiving a wallet must not rewrite a historical record's
+    // wallet out from under it. A transfer keeps per leg (the transfers spec, "Kind changes and wallets").
+    static IReadOnlyList<KeptWallet> KeptWallets(CategorizationJob job, CategorizationSubject record, CategorizationProposal proposal)
+    {
+        if (job.Kind != JobKind.Correct)
+            return [];
 
-    // ProposalMapper only accepts a WalletId that appears in the wallets it is given, because that
-    // list is also "what the model was offered": an id the model invented must fail terminally. A
-    // kept archived wallet was never offered to the model - it is a fact this worker already knows
-    // from the record, injected by KeepingTheRecordsWallet - so it is added here, not to the active
-    // list the model saw, using the currency the store already read for it
-    // (EfCategorizationStore's WalletCurrency). The gate is
-    // `proposal.WalletId is null`: only when the model itself named no wallet did the worker do the
-    // substituting, so only then is the kept wallet added on the worker's own authority. A model that
-    // names a wallet directly - including one the worker would have kept anyway - must still have
-    // named one that was actually offered, or the job fails.
-    static IReadOnlyList<WalletOption> WalletsIncludingKept(
-        IReadOnlyList<WalletOption> wallets, CategorizationProposal proposal, CategorizationProposal keptProposal,
-        CategorizationSubject record) =>
-        proposal.WalletId is null
-        && keptProposal.WalletId is { } kept
-        && !wallets.Any(wallet => wallet.Id == kept)
-        && record.WalletCurrency is { } currency
-            ? [.. wallets, new WalletOption(kept, record.WalletName, currency, [], IsDefaultForCurrency: false)]
-            : wallets;
+        // The kind decides, as it does in ProposalMapper: a spending answer that still carries the old transfer object
+        // must keep its one wallet, not legs the mapper never reads.
+        if (proposal.Kind == ProposedKind.Transfer)
+        {
+            return proposal.Transfer is { } transfer
+                ? [.. new[]
+                {
+                    transfer.FromWalletId is null ? KeptLeg(record, TransferLeg.From, transfer.FromCurrency) : null,
+                    transfer.ToWalletId is null ? KeptLeg(record, TransferLeg.To, transfer.ToCurrency) : null,
+                }.OfType<KeptWallet>()]
+                : [];
+        }
 
-    static string BuildSummary(MappedProposal mapped) =>
-        mapped.Items.Count > 0
-            ? string.Join("; ", mapped.Items.Select(item => $"{item.Amount} {item.CategorySlug}"))
-            : mapped.StatedBalance is { } stated
-                ? $"balance {stated}"
-                : "no line items";
+        return proposal.WalletId is null && KeptSingle(record, proposal.Kind) is { } kept ? [kept] : [];
+    }
+
+    // Expense or BalanceCheck → Transfer: the record's wallet is the source; Income → Transfer: the destination;
+    // Transfer → Transfer: each leg its own. A wallet holds a leg only in its own currency - a leg in another currency
+    // could never sit in it, so that leg resolves as a first reading would.
+    static KeptWallet? KeptLeg(CategorizationSubject record, TransferLeg leg, string legCurrency)
+    {
+        var slot = leg == TransferLeg.From ? KeptSlot.From : KeptSlot.To;
+        KeptWallet? kept = (record, leg) switch
+        {
+            ({ Kind: TransactionKind.Transfer, Transfer: { } transfer }, TransferLeg.From) =>
+                new KeptWallet(slot, transfer.FromWalletId, transfer.FromWalletName, transfer.From.Currency),
+            ({ Kind: TransactionKind.Transfer, Transfer: { } transfer }, TransferLeg.To) =>
+                new KeptWallet(slot, transfer.ToWalletId, transfer.ToWalletName, transfer.To.Currency),
+            ({ Kind: TransactionKind.Income, WalletId: { } receivedInto }, TransferLeg.To) =>
+                new KeptWallet(slot, receivedInto, record.WalletName, record.WalletCurrency),
+            ({ Kind: TransactionKind.Expense or TransactionKind.BalanceCheck, WalletId: { } spentFrom }, TransferLeg.From) =>
+                new KeptWallet(slot, spentFrom, record.WalletName, record.WalletCurrency),
+            _ => null,
+        };
+
+        return kept is { Currency: { } currency } && string.Equals(currency.Value, legCurrency, StringComparison.OrdinalIgnoreCase)
+            ? kept
+            : null;
+    }
+
+    // Transfer → Income keeps the destination leg's wallet; Transfer → Expense (or a balance) the source leg's, which is
+    // also transactions.wallet_id. Every other correction keeps the record's one wallet, whatever its lines' currency.
+    static KeptWallet? KeptSingle(CategorizationSubject record, string proposedKind) => record switch
+    {
+        { Kind: TransactionKind.Transfer, Transfer: { } transfer } when proposedKind == ProposedKind.Income =>
+            new KeptWallet(KeptSlot.Wallet, transfer.ToWalletId, transfer.ToWalletName, transfer.To.Currency),
+        { Kind: TransactionKind.Transfer, Transfer: { } transfer } =>
+            new KeptWallet(KeptSlot.Wallet, transfer.FromWalletId, transfer.FromWalletName, transfer.From.Currency),
+        { WalletId: { } id } => new KeptWallet(KeptSlot.Wallet, id, record.WalletName, record.WalletCurrency),
+        _ => null,
+    };
+
+    static CategorizationProposal KeepingTheRecordsWallet(CategorizationProposal proposal, IReadOnlyList<KeptWallet> kept) =>
+        kept.Aggregate(proposal, (current, wallet) => (wallet.Slot, current.Transfer) switch
+        {
+            (KeptSlot.From, { } transfer) => current with { Transfer = transfer with { FromWalletId = wallet.Id } },
+            (KeptSlot.To, { } transfer) => current with { Transfer = transfer with { ToWalletId = wallet.Id } },
+            (KeptSlot.Wallet, _) => current with { WalletId = wallet.Id },
+            _ => current,
+        });
+
+    // ProposalMapper only accepts a wallet id that appears in the wallets it is given, because that list is also "what
+    // the model was offered": an id the model invented must fail terminally. A kept wallet - archived or not - was put
+    // in the proposal by this worker from the record itself, so it is added here, not to the active list the model saw,
+    // with the currency the store read for it. Only the wallets actually substituted are added: a model that names a
+    // wallet directly - an archived one, even one the worker would have kept anyway - must have named one it was offered.
+    static IReadOnlyList<WalletOption> WalletsIncludingKept(IReadOnlyList<WalletOption> wallets, IReadOnlyList<KeptWallet> kept) =>
+    [
+        .. wallets,
+        .. kept
+            .Where(wallet => !wallets.Any(offered => offered.Id == wallet.Id))
+            .DistinctBy(wallet => wallet.Id)
+            .Select(wallet => wallet.Currency is { } currency
+                ? new WalletOption(wallet.Id, wallet.Name, currency, [], IsDefaultForCurrency: false)
+                : null)
+            .OfType<WalletOption>(),
+    ];
+
+    // A slip is cash on both sides, whoever completes it (spec A-8). The mapper's own rule for an unnamed leg is
+    // capture's (A-27: the source on the card default), so a slip's legs still unnamed after the keep are filled here
+    // with RecordExchange's rule. A leg the record holds or the reply names stays. The wallets are the active ones the
+    // model was offered, so a filled id is one the mapper accepts.
+    static CategorizationProposal WithSlipCashLegs(
+        CategorizationProposal proposal, CategorizationSubject record, IReadOnlyList<WalletOption> wallets) =>
+        (record.Slip, proposal.Transfer) switch
+        {
+            ({ }, { } transfer) => proposal with
+            {
+                Transfer = transfer with
+                {
+                    FromWalletId = transfer.FromWalletId ?? CashLegOf(wallets, transfer.FromCurrency),
+                    ToWalletId = transfer.ToWalletId ?? CashLegOf(wallets, transfer.ToCurrency),
+                },
+            },
+            _ => proposal,
+        };
+
+    // An unsupported currency stays unnamed, so the mapper fails it exactly as it would any transfer.
+    static Guid? CashLegOf(IReadOnlyList<WalletOption> wallets, string currency) =>
+        ExtractedExchange.SupportedCurrency(currency) is { } supported ? ExchangeSlipMapper.CashWalletOf(wallets, supported) : null;
+
+    // The caption reaches the model once. A Correct whose instruction is the caption is the caption's own job
+    // (EfReceiptStore queues it with the caption as its instruction); a record a reading already applied had its
+    // caption applied then, and a note carrying its old figures beside a since-corrected record would read as a new
+    // correction. Left: an edited caption (Reinterpret), and a reply to a slip nothing has recorded yet - a held one
+    // whose caption job waits for "Record anyway", or an incomplete one.
+    static string? CaptionNote(CategorizationJob job, CategorizationSubject record, string? caption, string? instruction)
+    {
+        if (string.IsNullOrWhiteSpace(caption))
+            return null;
+
+        var notYetApplied = record.Status == TransactionStatus.Captured
+            || record is { Status: TransactionStatus.Failed, Transfer: null };
+        var isTheCaptionsOwnJob = string.Equals(instruction?.Trim(), caption.Trim(), StringComparison.Ordinal);
+
+        return job.Kind switch
+        {
+            JobKind.Reinterpret => caption,
+            JobKind.Correct when notYetApplied && !isTheCaptionsOwnJob => caption,
+            _ => null,
+        };
+    }
+
+    // A correction re-maps a slip's exchange from record_transaction, which knows nothing of the office; the slip's PIB
+    // names it again, so the venue survives every correction (spec A-8, §3: the office is the venue).
+    static async Task<TransferFacts?> WithSlipVenueAsync(
+        IServiceScope scope, IMerchantDirectory merchantDirectory, CategorizationJob job, CategorizationSubject record,
+        TransferFacts? transfer, CancellationToken cancellationToken)
+    {
+        if (transfer is null || record.Slip is null)
+            return transfer;
+
+        var receiptStore = scope.ServiceProvider.GetRequiredService<IReceiptStore>();
+        return await receiptStore.GetExchangeSlipAsync(job.TransactionId, cancellationToken) is { } slip
+            ? transfer with { VenueMerchantId = await ExchangeSlipMapper.VenueOfAsync(slip, merchantDirectory, cancellationToken) }
+            : transfer;
+    }
+
+    static string BuildSummary(MappedProposal mapped) => mapped switch
+    {
+        { Transfer: { } transfer } => $"transfer {transfer.From} to {transfer.To}",
+        { Items.Count: > 0 } => string.Join("; ", mapped.Items.Select(item => $"{item.Amount} {item.CategorySlug}")),
+        { StatedBalance: { } stated } => $"balance {stated}",
+        _ => "no line items",
+    };
 
     async Task EchoAsync(ICategorizationStore store, IChatNotifier notifier, CategorizationJob job, CancellationToken cancellationToken)
     {
@@ -502,38 +639,53 @@ internal sealed class CategorizationWorker(
     async Task FailTerminallyAsync(
         IJobQueue jobQueue, ICategorizationStore store, IChatNotifier notifier,
         CategorizationJob job, CategorizationSubject? subject, string error, string failedStage, CancellationToken cancellationToken,
-        Exception? exception = null)
+        Exception? exception = null, RecordFailureReason reason = RecordFailureReason.None)
     {
         logger.LogStageFailed(TransactionStages.StageFailed, failedStage, exception ?? new InvalidOperationException(error));
 
         var outcome = await jobQueue.FailAsync(job.Id, workerId, error, cancellationToken);
         if (outcome == JobCompletionOutcome.Applied)
-            await NotifyFailureAsync(store, notifier, subject, job, cancellationToken);
+            await NotifyFailureAsync(store, notifier, subject, job, cancellationToken, reason);
     }
 
     async Task NotifyFailureAsync(
         ICategorizationStore store, IChatNotifier notifier, CategorizationSubject? subject, CategorizationJob job,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, RecordFailureReason reason = RecordFailureReason.None)
     {
-        // Only a first reading marks the transaction Failed. A correction or a re-read that fails leaves the
-        // record the person already saw confirmed exactly as it was.
+        // Only a first reading marks the transaction Failed - with its reason when the mapper named one, so the echo,
+        // a Cancel/Restore and the reply that completes it all read the same specific text. A correction or a re-read
+        // that fails leaves the record the person already saw confirmed exactly as it was.
         if (job.Kind == JobKind.Categorize)
-            await store.MarkFailedAsync(job.TransactionId, cancellationToken);
+            await store.MarkFailedAsync(job.TransactionId, reason, cancellationToken);
 
         if (subject is not { BotMessageId: { } messageId } sub)
             return;
 
         try
         {
-            var echo = job.Kind == JobKind.Categorize
-                ? recordEcho.Failure
-                : recordEcho.ComposeCorrectionFailure(await store.GetSubjectAsync(job.TransactionId, cancellationToken) ?? sub);
+            var echo = await FailureEchoAsync(store, sub, job, reason, cancellationToken);
             await notifier.EditAsync(sub.TelegramChatId, messageId, echo, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.FailureEditFailed(ex, messageId, job.TransactionId);
         }
+    }
+
+    // Read back, not composed from the job: a reasoned first-reading failure shows what MarkFailedAsync stored.
+    async Task<EchoMessage> FailureEchoAsync(
+        ICategorizationStore store, CategorizationSubject sub, CategorizationJob job, RecordFailureReason reason,
+        CancellationToken cancellationToken)
+    {
+        if (job.Kind != JobKind.Categorize)
+            return recordEcho.ComposeCorrectionFailure(await store.GetSubjectAsync(job.TransactionId, cancellationToken) ?? sub, reason);
+
+        if (reason == RecordFailureReason.None)
+            return recordEcho.Failure;
+
+        return await store.GetSubjectAsync(job.TransactionId, cancellationToken) is { } failed
+            ? recordEcho.Compose(failed)
+            : recordEcho.Failure;
     }
 
     public static string CreateWorkerId()

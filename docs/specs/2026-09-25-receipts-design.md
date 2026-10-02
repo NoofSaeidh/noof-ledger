@@ -23,6 +23,9 @@ logged on the transaction's trace; a degraded path is visible, never silent.
 | R-6 | Approach A: facts from C#, the model only categorises (and reads photos in the vision fallback). |
 | R-7 | Everything logged; QR read but the tax site failed → a visible warning (echo line, Warning event, health check). |
 
+*Amended by Phase 7 — `docs/specs/2026-10-01-transfers-and-exchange-design.md` (2026-10-01): R-1's exchange-office slips
+are built there (T-8), and R-3's payment-method default is per currency (T-13).*
+
 ## 1. Data
 
 - `receipts` (one per transaction that came from a receipt): `id uuid PK`, `transaction_id uuid FK unique`,

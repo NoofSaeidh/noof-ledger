@@ -5,6 +5,7 @@ using Noof.Ledger.Application.Jobs;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Jobs;
 using Noof.Ledger.Persistence.Transcription;
+using Npgsql;
 
 namespace Noof.Ledger.Persistence.Tests;
 
@@ -209,5 +210,35 @@ public class EfTranscriptionStoreTests(PostgresFixture fixture)
         var completed = await store.CompleteCorrectionAsync(transaction.Id, "нет, 1500", 900, null, TestContext.Current.CancellationToken);
 
         completed.Should().BeTrue("the unique key includes the kind");
+    }
+
+    // The same rule as a typed reply (EfRecordEditorTests): a spoken reply's correction waits for the row lock a slip
+    // save holds, and takes its place in the queue only once it holds it.
+    [Fact]
+    public async Task A_spoken_correction_waits_for_the_records_row_lock_and_takes_its_queue_place_once_it_holds_it()
+    {
+        await using var dbA = await fixture.CreateMigratedContextAsync();
+        var transaction = await SeedAsync(dbA, CaptureKind.Text);
+        await using var dbB = new LedgerDbContext(
+            new DbContextOptionsBuilder<LedgerDbContext>().UseNpgsql(dbA.Database.GetConnectionString()).Options);
+        var clock = new FakeTimeProvider(Clock.GetUtcNow());
+        var store = new EfTranscriptionStore(dbB, clock);
+
+        await using var lockingTx = await dbA.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
+        await dbA.Database.SqlQueryRaw<Guid>(
+            "SELECT id FROM transactions WHERE id = @transactionId FOR UPDATE",
+            new NpgsqlParameter("transactionId", transaction.Id))
+            .ToListAsync(TestContext.Current.CancellationToken);
+
+        var completing = store.CompleteCorrectionAsync(transaction.Id, "нет, 1500", 900, null, TestContext.Current.CancellationToken);
+        await LockWaits.UntilABackendWaitsOnALockAsync(dbA, TestContext.Current.CancellationToken);
+        completing.IsCompleted.Should().BeFalse("the correction must wait for the lock a slip save holds");
+
+        clock.Advance(TimeSpan.FromMinutes(1));
+        await lockingTx.CommitAsync(TestContext.Current.CancellationToken);
+
+        (await completing).Should().BeTrue();
+        (await dbA.CategorizationJobs.AsNoTracking().SingleAsync(j => j.TransactionId == transaction.Id, TestContext.Current.CancellationToken))
+            .CreatedAt.Should().Be(Clock.GetUtcNow().AddMinutes(1), "the correction's place in the queue is taken once it holds the lock");
     }
 }

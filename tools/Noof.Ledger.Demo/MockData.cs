@@ -1,4 +1,6 @@
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Receipts;
+using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Demo;
@@ -35,6 +37,11 @@ internal static class MockData
     public static readonly Guid ReceiptTransactionId = Id(902);
     public static readonly Guid UnconfirmedReceiptTransactionId = Id(903);
     public static readonly Guid VisionReceiptTransactionId = Id(904);
+    public static readonly Guid WithdrawalTransactionId = Id(905);
+    public static readonly Guid ExchangeTransactionId = Id(906);
+    public static readonly Guid ForeignSpendingTransactionId = Id(907);
+    public static readonly Guid TransferTransactionId = Id(908);
+    public static readonly Guid HeldSlipTransactionId = Id(909);
 
     public static IReadOnlyList<MockLogRow> LogRows { get; } =
     [
@@ -51,11 +58,15 @@ internal static class MockData
     public static IReadOnlyList<MockWallet> Wallets { get; } =
     [
         new("Wise", CurrencyCode.Eur, 3000.00m, ["wise"], Default: true),
-        new("Raiffeisen", CurrencyCode.Rsd, 180000.00m, ["raif"], Default: true, PaymentDefault: PaymentMethod.Card),
+        new("Raiffeisen", CurrencyCode.Rsd, 180000.00m, ["raif"], Default: true, PaymentDefault: PaymentMethod.Card,
+            Terms: [new(CurrencyCode.Eur, 117.35m, FeePercent: 0.5m, FeeFixed: null, FeeMinimum: 100.00m)]),
         new("Cash", CurrencyCode.Usd, 600.00m, [], Default: true, PaymentDefault: PaymentMethod.Cash),
         new("Tinkoff", CurrencyCode.Rub, 50000.00m, [], Default: true),
-        new("Kaspi", CurrencyCode.Kzt, 200000.00m, [], Default: true),
+        new("Kaspi", CurrencyCode.Kzt, 200000.00m, [], Default: true,
+            Terms: [new(CurrencyCode.Usd, 520m, FeePercent: 1m, FeeFixed: null, FeeMinimum: null)]),
         new("Old Revolut", CurrencyCode.Eur, 900.00m, [], Default: false, Archived: true),
+        new("Cash RSD", CurrencyCode.Rsd, 15000.00m, [], Default: false, PaymentDefault: PaymentMethod.Cash),
+        new("Cash EUR", CurrencyCode.Eur, 250.00m, [], Default: false, PaymentDefault: PaymentMethod.Cash),
     ];
 
     public static IReadOnlyList<MockRecord> Records { get; } =
@@ -107,7 +118,32 @@ internal static class MockData
                 new("Jogurt 1L", 1m, "kom", 150.00m, 150.00m, null),
                 new("Kifla", 3m, "kom", 40.00m, 120.00m, null),
             ])),
+
+        // An exchange-office slip whose figures miss its printed rate by 50 dinars: held for Record anyway, so
+        // nothing has moved between the cash wallets yet.
+        Receipt(TransactionStatus.Captured, Day(18), HeldSlipTransactionId, new(
+            ReceiptSource.Vision, "Menjačnica Zlatnik", null, null, "123456789", null,
+            At(18, 13, 40), 11650.00m, PaymentMethod.Cash, QrTotal: null, [],
+            ReceiptKind.Exchange, new ExtractedExchange(100.00m, "EUR", 11650.00m, "RSD", 117.0000m, null, null, "PZ-2026-0918"))),
     ];
+
+    // Two legs each, so they do not fit MockRecord; MockDataWriter posts them through LedgerPostings, as the app does.
+    // The plain transfer comes the day after Wise's statement, so that statement's computedBefore stays true.
+    public static IReadOnlyList<MockTransfer> Transfers { get; } =
+    [
+        new(WithdrawalTransactionId, "withdrew 10000 rsd from raif, fee 150", Day(6),
+            "Raiffeisen", 10150.00m, "Cash RSD", 10000.00m, Fee: 150.00m, FeeLeg: TransferLeg.From),
+        new(ExchangeTransactionId, "exchanged 100 eur for 11700 rsd", Day(7),
+            "Cash EUR", 100.00m, "Cash RSD", 11700.00m),
+        new(TransferTransactionId, "moved 200 eur from wise to cash", Day(16),
+            "Wise", 200.00m, "Cash EUR", 200.00m),
+    ];
+
+    // Charged at Kaspi's USD terms, 520 and 1 %: 15 600.00 KZT and a 156.00 KZT fee.
+    public static MockForeignSpending ForeignSpending { get; } = new(
+        ForeignSpendingTransactionId, "Kaspi", "app store 30 usd", Day(13),
+        new MockLine("App Store", 30.00m, "subscriptions", null), CurrencyCode.Usd,
+        Charged: 15600.00m, Fee: 156.00m, Rate: 520m, FeePercent: 1m);
 
     public static Guid Id(int number) => Guid.Parse($"7a1c0000-0000-4000-8000-{number:D12}");
 
@@ -140,13 +176,13 @@ internal static class MockData
                 : [],
             id, Receipt: receipt);
 
-    static string DinarWalletFor(PaymentMethod payment) =>
+    public static string DinarWalletFor(PaymentMethod payment) =>
         Wallets.Single(wallet => wallet.PaymentDefault == payment && wallet.Currency == CurrencyCode.Rsd).Name;
 }
 
 internal sealed record MockWallet(
     string Name, CurrencyCode Currency, decimal Opening, IReadOnlyList<string> Aliases, bool Default, bool Archived = false,
-    PaymentMethod? PaymentDefault = null);
+    PaymentMethod? PaymentDefault = null, IReadOnlyList<WalletTermsDetails>? Terms = null);
 
 internal sealed record MockLine(string Description, decimal Amount, string CategorySlug, string? Merchant);
 
@@ -163,6 +199,15 @@ internal sealed record MockRecord(
     decimal? ComputedBefore = null,
     MockReceipt? Receipt = null);
 
+// Each amount is all that moved in its wallet, the fee inside its leg (T-12).
+internal sealed record MockTransfer(
+    Guid Id, string RawText, DateOnly Day, string From, decimal FromAmount, string To, decimal ToAmount,
+    decimal? Fee = null, TransferLeg? FeeLeg = null);
+
+internal sealed record MockForeignSpending(
+    Guid Id, string Wallet, string RawText, DateOnly Day, MockLine Line, CurrencyCode LineCurrency,
+    decimal Charged, decimal Fee, decimal Rate, decimal FeePercent);
+
 internal sealed record MockReceipt(
     ReceiptSource Source,
     string SellerName,
@@ -174,7 +219,9 @@ internal sealed record MockReceipt(
     decimal Total,
     PaymentMethod Payment,
     decimal? QrTotal,
-    IReadOnlyList<MockReceiptLine> Lines);
+    IReadOnlyList<MockReceiptLine> Lines,
+    ReceiptKind Kind = ReceiptKind.Sale,
+    ExtractedExchange? Exchange = null);
 
 internal sealed record MockReceiptLine(string Name, decimal Quantity, string Unit, decimal UnitPrice, decimal Total, string? CategorySlug);
 

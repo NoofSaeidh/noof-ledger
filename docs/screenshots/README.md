@@ -13,6 +13,10 @@ Do not edit by hand; a change to what the app shows regenerates them.
 
 <img src="app/dashboard-desktop.png" width="640" alt="Dashboard, desktop"> <img src="app/dashboard-phone.png" width="200" alt="Dashboard, phone">
 
+### Dashboard: recent transfers
+
+<img src="app/dashboard-transfers-desktop.png" width="640" alt="Dashboard: recent transfers, desktop"> <img src="app/dashboard-transfers-phone.png" width="200" alt="Dashboard: recent transfers, phone">
+
 ### Wallets
 
 <img src="app/wallets-desktop.png" width="640" alt="Wallets, desktop"> <img src="app/wallets-phone.png" width="200" alt="Wallets, phone">
@@ -29,6 +33,14 @@ Do not edit by hand; a change to what the app shows regenerates them.
 
 <img src="app/trace-failed-desktop.png" width="640" alt="A failed transaction's trace, desktop"> <img src="app/trace-failed-phone.png" width="200" alt="A failed transaction's trace, phone">
 
+### An exchange's trace
+
+<img src="app/trace-exchange-desktop.png" width="640" alt="An exchange's trace, desktop"> <img src="app/trace-exchange-phone.png" width="200" alt="An exchange's trace, phone">
+
+### A foreign-currency spending's trace
+
+<img src="app/trace-foreign-spending-desktop.png" width="640" alt="A foreign-currency spending's trace, desktop"> <img src="app/trace-foreign-spending-phone.png" width="200" alt="A foreign-currency spending's trace, phone">
+
 ### A receipt's trace
 
 <img src="app/trace-receipt-desktop.png" width="640" alt="A receipt's trace, desktop"> <img src="app/trace-receipt-phone.png" width="200" alt="A receipt's trace, phone">
@@ -40,6 +52,10 @@ Do not edit by hand; a change to what the app shows regenerates them.
 ### A receipt waiting for Record anyway
 
 <img src="app/trace-receipt-check-desktop.png" width="640" alt="A receipt waiting for Record anyway, desktop"> <img src="app/trace-receipt-check-phone.png" width="200" alt="A receipt waiting for Record anyway, phone">
+
+### An exchange slip waiting for Record anyway
+
+<img src="app/trace-slip-check-desktop.png" width="640" alt="An exchange slip waiting for Record anyway, desktop"> <img src="app/trace-slip-check-phone.png" width="200" alt="An exchange slip waiting for Record anyway, phone">
 
 ### Diagnostics
 
@@ -87,6 +103,30 @@ Do not edit by hand; a change to what the app shows regenerates them.
 
 <img src="telegram/failure.png" width="300" alt="A message it could not read">
 
+### A cash withdrawal
+
+<img src="telegram/transfer.png" width="300" alt="A cash withdrawal">
+
+### A withdrawal with a fee
+
+<img src="telegram/transfer-fee.png" width="300" alt="A withdrawal with a fee">
+
+### A currency exchange
+
+<img src="telegram/exchange.png" width="300" alt="A currency exchange">
+
+### Spending in dollars, charged to a tenge wallet at its own rate
+
+<img src="telegram/foreign-spending.png" width="300" alt="Spending in dollars, charged to a tenge wallet at its own rate">
+
+### A currency the wallet has no rate for
+
+<img src="telegram/no-terms.png" width="300" alt="A currency the wallet has no rate for">
+
+### An exchange with no amount received
+
+<img src="telegram/exchange-question.png" width="300" alt="An exchange with no amount received">
+
 ### A receipt photo, read from its fiscal QR
 
 <img src="telegram/receipt-qr.png" width="300" alt="A receipt photo, read from its fiscal QR">
@@ -98,6 +138,22 @@ Do not edit by hand; a change to what the app shows regenerates them.
 ### A receipt that doesn't add up
 
 <img src="telegram/receipt-check.png" width="300" alt="A receipt that doesn't add up">
+
+### An exchange-office slip, recorded as an exchange between the two cash wallets
+
+<img src="telegram/slip.png" width="300" alt="An exchange-office slip, recorded as an exchange between the two cash wallets">
+
+### An exchange slip whose figures don't match its printed rate
+
+<img src="telegram/slip-check.png" width="300" alt="An exchange slip whose figures don't match its printed rate">
+
+### An exchange slip whose amount received could not be read
+
+<img src="telegram/slip-incomplete.png" width="300" alt="An exchange slip whose amount received could not be read">
+
+### An exchange slip in a currency the ledger doesn't hold
+
+<img src="telegram/slip-unsupported-currency.png" width="300" alt="An exchange slip in a currency the ledger doesn't hold">
 
 ### /health
 

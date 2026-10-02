@@ -48,4 +48,14 @@ public class TransactionsPageSourceTests
     {
         SourceText().Should().Contain("ITransactionList");
     }
+
+    [Fact]
+    public void A_view_in_the_url_presets_the_filter_to_leave_transfers_out()
+    {
+        var source = SourceText();
+
+        source.Should().Contain("[SupplyParameterFromQuery]");
+        source.Should().Contain("ExcludeTransfers",
+            "a URL preset without transfers keeps spending and income apart from money moved between wallets (spec §4)");
+    }
 }

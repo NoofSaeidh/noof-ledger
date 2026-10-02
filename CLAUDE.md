@@ -2,9 +2,9 @@
 
 Personal finance tracker. Telegram bot captures spending (text, voice, receipt photos), an LLM categorises it per line item, a local Blazor dashboard shows it across multiple wallets and currencies. C# / .NET 10, EF Core, strict TDD, local hosting, **public repo**.
 
-> **Status:** Phases 0, 0b, 1A, 1B, 1C, 1D, 2, 3, 4, 5 and 6 complete — full detail in `docs/STATUS.md`.
-> Cross-currency conversion, transfers, exchange-office slips and editing receipt lines remain future
-> phases. Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
+> **Status:** Phases 0, 0b, 1A, 1B, 1C, 1D, 2, 3, 4, 5, 6 and 7 complete — full detail in `docs/STATUS.md`.
+> Editing receipt lines and correcting a vision-read fiscal receipt's amounts remain future phases.
+> Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
 >
 > Deferred **decisions** live in `docs/decisions/`; deferred **work** lives in `docs/backlog/`. Check both before proposing something as missing.
 >
@@ -39,9 +39,10 @@ How to run each, and the trial tally, are in `docs/REVIEWS.md`.
 - **Per PR:** one Codex review, a family different from the implementer — plain for a mechanical PR,
   adversarial for one that makes design choices or when unsure. Codex at its usage limit → an opus
   review, said so in the PR. Never enable the Codex plugin's stop-time review gate.
-- **Per phase:** Fable 5.1 twice — at planning (reviews the decision before implementation starts)
-  and at the close of the phase or a batch of PRs; never per PR or per fix round. Trial for 3 phases:
-  each runs in parallel with a Codex adversarial review of the same scope, tallied per review.
+- **Per phase:** Fable 5.1 at three points — the spec, the implementation plan (once written, before
+  any implementation starts) *(operator, 2026-10-01)*, and the close of the phase or a batch of PRs;
+  never per PR or per fix round. Trial for 3 phases: each runs in parallel with a Codex adversarial
+  review of the same scope, tallied per review.
 - **Findings are triaged, not all fixed**, for Copilot and Codex alike: fix a critical finding (real
   bug, wrong money/balance, data loss, secret leak, security hole, broken build/test,
   *(settled)*-rule violation); reply with a sentence of reasoning and don't change code for a
@@ -228,8 +229,16 @@ the code that builds the echo text.
   (`Persistence`, `Ai`, `Fx`, `Receipts`, `Telegram` or `Web`) and its `Host` wiring, with their
   tests; a second leaf assembly (e.g. Persistence and Web) is the signal to propose a split.
 - Mechanical moves/renames get their own PR, separate from behaviour changes.
-- Independent PRs branch from `master`; a PR needing another's changes is stacked on it (base = that
-  branch), never merged into it.
+- **A large phase or feature — one the plan cuts into several PRs — gets an aggregate branch**
+  (`phase-7`, `feature-<name>`) *(operator's decision, 2026-10-01)*. It is cut from `master` with a
+  draft PR into `master` opened at once. Every PR of the phase targets it and is reviewed on its own;
+  fixes and the closing review's follow-ups land there too, as PRs. The phase's spec and its
+  amendments are the exception: they are committed straight to the aggregate branch, never cut into
+  PRs *(operator, 2026-10-01)*. The aggregate PR leaves draft only once the phase is finalised, and
+  then merges into `master`.
+- Independent PRs branch from the aggregate branch, or from `master` when there is none; a PR
+  needing another's changes is stacked on it (base = that branch) until that one merges, never
+  merged into it.
 - Shared hot files (backlog entries, per-assembly allowlists) are split across PRs so parallel work
   doesn't conflict.
 

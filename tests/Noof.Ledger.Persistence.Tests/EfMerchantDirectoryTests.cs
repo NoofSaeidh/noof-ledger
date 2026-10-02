@@ -2,6 +2,7 @@ using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Npgsql;
+using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Categorization;
 
 namespace Noof.Ledger.Persistence.Tests;
@@ -218,5 +219,94 @@ public class EfMerchantDirectoryTests(PostgresFixture fixture)
 
         (await directory.FindByTaxIdAsync(taxId, TestContext.Current.CancellationToken)).Should().Be(firstMerchant,
             "the first merchant to claim a PIB keeps it; a later claim by another merchant is dropped, not fought over");
+    }
+
+    [Fact]
+    public async Task VenueForTaxIdAsync_creates_an_exchange_venue_carrying_the_PIB()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var directory = new EfMerchantDirectory(db, new FakeTimeProvider());
+
+        var venueId = await directory.VenueForTaxIdAsync("123456789", "Menjačnica Zlatnik", TestContext.Current.CancellationToken);
+
+        var venue = await db.Merchants.AsNoTracking().SingleAsync(m => m.Id == venueId, TestContext.Current.CancellationToken);
+        venue.Kind.Should().Be(MerchantKind.ExchangeVenue);
+        venue.TaxId.Should().Be("123456789");
+        venue.DisplayName.Should().Be("Menjačnica Zlatnik");
+    }
+
+    // A-9: one PIB is one legal entity - a shop that also runs an exchange desk stays the one merchant.
+    [Fact]
+    public async Task VenueForTaxIdAsync_returns_the_shop_that_already_carries_the_PIB_whatever_its_kind()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var shop = new Merchant { Id = Guid.NewGuid(), DisplayName = "Maxi", Kind = MerchantKind.Retail, TaxId = "123456789" };
+        db.Merchants.Add(shop);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+        var merchantsBefore = await db.Merchants.CountAsync(TestContext.Current.CancellationToken);
+        var directory = new EfMerchantDirectory(db, new FakeTimeProvider());
+
+        var venueId = await directory.VenueForTaxIdAsync("123456789", "Menjačnica Maxi", TestContext.Current.CancellationToken);
+
+        venueId.Should().Be(shop.Id);
+        (await db.Merchants.CountAsync(TestContext.Current.CancellationToken)).Should().Be(merchantsBefore);
+        (await db.Merchants.AsNoTracking().SingleAsync(m => m.Id == shop.Id, TestContext.Current.CancellationToken))
+            .Kind.Should().Be(MerchantKind.Retail, "the existing row is used, never re-kinded");
+    }
+
+    [Fact]
+    public async Task VenueForTaxIdAsync_asked_again_returns_the_same_venue()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var directory = new EfMerchantDirectory(db, new FakeTimeProvider());
+
+        var first = await directory.VenueForTaxIdAsync("123456789", "Menjačnica Zlatnik", TestContext.Current.CancellationToken);
+        var second = await directory.VenueForTaxIdAsync("123456789", "MENJAČNICA ZLATNIK", TestContext.Current.CancellationToken);
+
+        second.Should().Be(first);
+    }
+
+    [Fact]
+    public async Task VenueForTaxIdAsync_the_loser_of_a_race_returns_the_winners_venue_and_adds_no_second_merchant()
+    {
+        await using var dbA = await fixture.CreateMigratedContextAsync();
+        var optionsB = new DbContextOptionsBuilder<LedgerDbContext>()
+            .UseNpgsql(dbA.Database.GetConnectionString())
+            .Options;
+        await using var dbB = new LedgerDbContext(optionsB);
+        var directoryA = new EfMerchantDirectory(dbA, new FakeTimeProvider());
+        var directoryB = new EfMerchantDirectory(dbB, new FakeTimeProvider());
+
+        await using var txA = await dbA.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
+
+        var idA = await directoryA.VenueForTaxIdAsync("123456789", "Menjačnica Zlatnik (winner)", TestContext.Current.CancellationToken);
+
+        var idBTask = directoryB.VenueForTaxIdAsync("123456789", "Menjačnica Zlatnik (loser)", TestContext.Current.CancellationToken);
+        var finished = await Task.WhenAny(idBTask, Task.Delay(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+
+        finished.Should().NotBeSameAs(idBTask,
+            "the loser's pre-check cannot see the winner's uncommitted venue, so its insert must block on the PIB's unique index");
+
+        await txA.CommitAsync(TestContext.Current.CancellationToken);
+
+        var idB = await idBTask;
+
+        idB.Should().Be(idA, "the PIB's unique index decides identity - the loser adopts the winner's venue");
+        var venues = await dbA.Merchants.AsNoTracking()
+            .Where(m => m.TaxId == "123456789")
+            .ToListAsync(TestContext.Current.CancellationToken);
+        venues.Should().ContainSingle().Which.DisplayName.Should().Be("Menjačnica Zlatnik (winner)");
+    }
+
+    [Fact]
+    public async Task VenueForTaxIdAsync_rejects_a_display_name_longer_than_256_characters()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var directory = new EfMerchantDirectory(db, new FakeTimeProvider());
+
+        var act = () => directory.VenueForTaxIdAsync("123456789", new string('x', 257), TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<ArgumentException>().WithParameterName("displayName");
     }
 }

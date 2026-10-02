@@ -62,6 +62,46 @@ else
                     <td>Occurred on</td>
                     <td>@summary.OccurredOn.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)</td>
                 </tr>
+                @if (summary.Transfer is { } transfer)
+                {
+                    <tr id="trace-transfer">
+                        <td>Transfer</td>
+                        <td>@LedgerText.TransferLegs(transfer.Line)</td>
+                    </tr>
+                    @if (LedgerText.TransferFeeTaken(transfer.Line) is { } fee)
+                    {
+                        <tr id="trace-transfer-fee">
+                            <td>Fee</td>
+                            <td>@fee</td>
+                        </tr>
+                    }
+                    @if (transfer.Line.Rate is { } rate)
+                    {
+                        <tr>
+                            <td>Rate</td>
+                            <td>@rate · @(transfer.RateStated ? "as stated" : "from the amounts")</td>
+                        </tr>
+                    }
+                    @if (transfer.VenueName is { } venue)
+                    {
+                        <tr>
+                            <td>Venue</td>
+                            <td>@venue</td>
+                        </tr>
+                    }
+                }
+                @if (summary.Charges is { Count: > 0 } charges)
+                {
+                    <tr id="trace-charges">
+                        <td>Charges</td>
+                        <td>
+                            @foreach (var charge in charges)
+                            {
+                                <div>@LedgerText.Charge(charge)</div>
+                            }
+                        </td>
+                    </tr>
+                }
                 @if (summary.LineItems.Count > 0)
                 {
                     <tr>
@@ -69,7 +109,7 @@ else
                         <td>
                             @foreach (var item in summary.LineItems)
                             {
-                                <div>@item.Description — @item.Amount.Amount.ToString("N2", CultureInfo.InvariantCulture) @item.Amount.Currency @(item.CategoryName is not null ? $"({item.CategoryName})" : "")</div>
+                                <div>@item.Description — @item.Amount.Amount.ToString("N2", CultureInfo.InvariantCulture) @item.Amount.Currency @(item.CategoryName is not null ? $"({item.CategoryName})" : "")@(item.Role == EntryRole.Fee ? " · fee" : "")</div>
                             }
                         </td>
                     </tr>
@@ -229,6 +269,7 @@ else
                     <th>When</th>
                     <th>Change</th>
                     <th>Details</th>
+                    <th>Record</th>
                 </tr>
             </thead>
             <tbody>
@@ -238,6 +279,7 @@ else
                         <td>@revision.At.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", System.Globalization.CultureInfo.InvariantCulture)</td>
                         <td>@revision.ChangeKind</td>
                         <td>@revision.Details</td>
+                        <td>@(revision.SnapshotUnreadable ? "Snapshot unreadable" : DescribeSnapshot(revision.Snapshot))</td>
                     </tr>
                 }
             </tbody>
@@ -265,6 +307,26 @@ else
         TransactionStatus.Captured => Color.Warning,
         _ => Color.Default,
     };
+
+    static string DescribeSnapshot(RevisionSnapshotView? snapshot)
+    {
+        if (snapshot is null)
+            return "—";
+
+        if (snapshot.Transfer is { } transfer)
+            return LedgerText.TransferFee(transfer) is { } fee
+                ? $"Transfer · {LedgerText.TransferWithRate(transfer)} · {fee}"
+                : $"Transfer · {LedgerText.TransferWithRate(transfer)}";
+
+        string[] parts =
+        [
+            .. snapshot.Items.Select(item =>
+                $"{item.Description} {LedgerText.Amount(item.Amount)}{(item.Role == EntryRole.Fee ? " (fee)" : "")}"),
+            .. snapshot.Charges.Select(LedgerText.Charge),
+        ];
+        var kind = snapshot.Kind?.ToString() ?? "Record";
+        return parts.Length == 0 ? kind : $"{kind} · {string.Join("; ", parts)}";
+    }
 
     static string FormatShop(ReceiptTraceView receipt) => receipt switch
     {

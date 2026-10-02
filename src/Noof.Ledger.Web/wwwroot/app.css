@@ -280,6 +280,12 @@ summary:focus-visible,
     grid-column: 1 / -1;
 }
 
+/* A terms row holds five narrow fields and its buttons; the new-wallet grid's 14rem columns would give each its own line. */
+.noof-form-grid.noof-terms-grid {
+    grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+    margin-bottom: 0.75rem;
+}
+
 /* ---- Native form controls ----
    The sign-in form and the filter bars use native <input>/<select>: the sign-in POST must not depend
    on a component emitting a name attribute, a filter must re-query on every keystroke, and a
@@ -530,6 +536,12 @@ summary:focus-visible,
     font-variant-numeric: tabular-nums;
 }
 
+/* A transfer's legs take a line each in the Wallet and Amounts cells: on one line, its two signed amounts widened
+   the grid past a desktop page and pushed Amounts and Categories out of view. */
+.noof-grid .noof-leg {
+    display: block;
+}
+
 .noof-grid .noof-col-message {
     overflow-wrap: anywhere;
     min-width: 16rem;
@@ -623,6 +635,10 @@ summary:focus-visible,
     .noof-grid-stack .noof-cell-main {
         order: 3;
         flex: 1 0 100%;
+    }
+
+    .noof-grid-stack .noof-leg {
+        display: inline;
     }
 
     .noof-grid-stack .noof-cell-meta {

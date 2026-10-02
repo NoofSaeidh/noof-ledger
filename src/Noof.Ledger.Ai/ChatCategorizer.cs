@@ -14,7 +14,7 @@ internal sealed class ChatCategorizer(IChatClientFactory clientFactory, IOperati
 {
     const string RecordTransactionName = "record_transaction";
     const string RecordTransactionDescription =
-        "Record the spending, income or balance statement described in the message.";
+        "Record the spending, income, balance statement or transfer described in the message.";
 
     const string ListMerchantsName = "list_merchants";
     const string ListMerchantsDescription =
@@ -134,16 +134,20 @@ internal sealed class ChatCategorizer(IChatClientFactory clientFactory, IOperati
             [.. payload.Items.Select(i => i.ToProposedLineItem())],
             payload.OccurredOn,
             payload.Kind,
-            string.IsNullOrEmpty(payload.WalletId) ? null : Guid.Parse(payload.WalletId),
+            IdOf(payload.WalletId),
             payload.BalanceAmount,
-            payload.BalanceCurrency);
+            payload.BalanceCurrency,
+            payload.Transfer?.ToProposedTransfer(),
+            payload.Charged?.ToProposedCharge());
     }
+
+    static Guid? IdOf(string? id) => string.IsNullOrEmpty(id) ? null : Guid.Parse(id);
 
     // FunctionCallContent.Arguments holds one JsonElement per top-level parameter, produced by
     // System.Text.Json with no object converter - the response's own token text, not a re-encoded
     // value (decompiled, operator 2026-09-23; Verified facts table). Re-serialising the dictionary
-    // and deserialising it into the payload record in one step is what keeps "amount" and
-    // "balance_amount" decimals read straight off that token text, never a double.
+    // and deserialising it into the payload record in one step is what keeps every amount (line items,
+    // balance, transfer, rate, fee, charge) a decimal read straight off that token text, never a double.
     static T? ToPayload<T>(FunctionCallContent call) =>
         JsonSerializer.Deserialize<T>(JsonSerializer.SerializeToElement(call.Arguments));
 
@@ -173,7 +177,9 @@ internal sealed class ChatCategorizer(IChatClientFactory clientFactory, IOperati
         [property: JsonPropertyName("kind")] string Kind,
         [property: JsonPropertyName("wallet_id")] string? WalletId,
         [property: JsonPropertyName("balance_amount")] decimal? BalanceAmount,
-        [property: JsonPropertyName("balance_currency")] string? BalanceCurrency);
+        [property: JsonPropertyName("balance_currency")] string? BalanceCurrency,
+        [property: JsonPropertyName("transfer")] TransferDto? Transfer,
+        [property: JsonPropertyName("charged")] ChargedDto? Charged);
 
     sealed record ProposedLineItemDto(
         [property: JsonPropertyName("description")] string Description,
@@ -184,8 +190,48 @@ internal sealed class ChatCategorizer(IChatClientFactory clientFactory, IOperati
         [property: JsonPropertyName("merchant_name")] string? MerchantName)
     {
         public ProposedLineItem ToProposedLineItem() => new(
-            Description, Amount, Currency, CategorySlug,
-            string.IsNullOrEmpty(KnownMerchantId) ? null : Guid.Parse(KnownMerchantId), MerchantName);
+            Description, Amount, Currency, CategorySlug, IdOf(KnownMerchantId), MerchantName);
+    }
+
+    sealed record TransferDto(
+        [property: JsonPropertyName("from_wallet_id")] string? FromWalletId,
+        [property: JsonPropertyName("from_amount")] decimal FromAmount,
+        [property: JsonPropertyName("from_currency")] string FromCurrency,
+        [property: JsonPropertyName("to_wallet_id")] string? ToWalletId,
+        [property: JsonPropertyName("to_amount")] decimal? ToAmount,
+        [property: JsonPropertyName("to_currency")] string ToCurrency,
+        [property: JsonPropertyName("rate")] RateDto? Rate,
+        [property: JsonPropertyName("fee")] FeeDto? Fee)
+    {
+        public ProposedTransfer ToProposedTransfer() => new(
+            IdOf(FromWalletId), FromAmount, FromCurrency, IdOf(ToWalletId), ToAmount, ToCurrency,
+            Rate?.ToProposedRate(), Fee?.ToProposedFee());
+    }
+
+    sealed record RateDto(
+        [property: JsonPropertyName("base_currency")] string BaseCurrency,
+        [property: JsonPropertyName("quote_amount")] decimal QuoteAmount,
+        [property: JsonPropertyName("quote_currency")] string QuoteCurrency)
+    {
+        public ProposedRate ToProposedRate() => new(BaseCurrency, QuoteAmount, QuoteCurrency);
+    }
+
+    sealed record FeeDto(
+        [property: JsonPropertyName("amount")] decimal Amount,
+        [property: JsonPropertyName("currency")] string Currency,
+        [property: JsonPropertyName("leg")] string Leg,
+        [property: JsonPropertyName("included")] bool Included)
+    {
+        public ProposedFee ToProposedFee() => new(Amount, Currency, Leg, Included);
+    }
+
+    sealed record ChargedDto(
+        [property: JsonPropertyName("amount")] decimal Amount,
+        [property: JsonPropertyName("currency")] string Currency,
+        [property: JsonPropertyName("fee_amount")] decimal? FeeAmount,
+        [property: JsonPropertyName("fee_included")] bool FeeIncluded)
+    {
+        public ProposedCharge ToProposedCharge() => new(Amount, Currency, FeeAmount, FeeIncluded);
     }
 
     sealed record CanonicalizeMerchantPayload([property: JsonPropertyName("display_name")] string DisplayName);

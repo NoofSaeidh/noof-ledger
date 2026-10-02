@@ -30,18 +30,22 @@ internal sealed class EfRecordEditor(LedgerDbContext db, TimeProvider timeProvid
     // it at every enqueue site was exactly what let a voice correction (N-1) and an edited message
     // (N-2) skip the rule a typed reply already followed.
     public async Task<bool> RequestCorrectionAsync(
-        Guid transactionId, string instruction, int sourceMessageId, DateTimeOffset sentAt, CancellationToken cancellationToken) =>
-        await TryQueueAsync(
-            NewJob(transactionId, JobKind.Correct, instruction, sourceMessageId,
-                await InstructionDayAsync(transactionId, sentAt, cancellationToken)),
+        Guid transactionId, string instruction, int sourceMessageId, DateTimeOffset sentAt, CancellationToken cancellationToken)
+    {
+        var instructionDay = await InstructionDayAsync(transactionId, sentAt, cancellationToken);
+        return await TryQueueReplyAsync(
+            transactionId, () => NewJob(transactionId, JobKind.Correct, instruction, sourceMessageId, instructionDay),
             cancellationToken);
+    }
 
     public async Task<bool> RequestVoiceCorrectionAsync(
-        Guid transactionId, string voiceFileId, int sourceMessageId, DateTimeOffset sentAt, CancellationToken cancellationToken) =>
-        await TryQueueAsync(
-            NewJob(transactionId, JobKind.Transcribe, instruction: null, sourceMessageId,
-                await InstructionDayAsync(transactionId, sentAt, cancellationToken), voiceFileId),
+        Guid transactionId, string voiceFileId, int sourceMessageId, DateTimeOffset sentAt, CancellationToken cancellationToken)
+    {
+        var instructionDay = await InstructionDayAsync(transactionId, sentAt, cancellationToken);
+        return await TryQueueReplyAsync(
+            transactionId, () => NewJob(transactionId, JobKind.Transcribe, instruction: null, sourceMessageId, instructionDay, voiceFileId),
             cancellationToken);
+    }
 
     // sentAt is the correction reply's own send instant, so the model's "today" for this correction is the
     // reply's local day, not the original message's (docs/decisions/p2-2-correction-today-anchor.md).
@@ -56,13 +60,19 @@ internal sealed class EfRecordEditor(LedgerDbContext db, TimeProvider timeProvid
     }
 
     // False when this exact reply is already queued: Telegram redelivers an update whose handling failed partway.
-    async Task<bool> TryQueueAsync(CategorizationJob job, CancellationToken cancellationToken)
+    // The job is stamped under the row lock a slip save and Record anyway check for a reply under: stamped before it,
+    // a reply committed after their check would still be claimed ahead of the caption they queued.
+    async Task<bool> TryQueueReplyAsync(Guid transactionId, Func<CategorizationJob> newJob, CancellationToken cancellationToken)
     {
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+        await LockRowAsync(transactionId, cancellationToken);
+        var job = newJob();
         db.CategorizationJobs.Add(job);
 
         try
         {
             await db.SaveChangesAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
             return true;
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException
@@ -118,13 +128,28 @@ internal sealed class EfRecordEditor(LedgerDbContext db, TimeProvider timeProvid
             return false;
 
         // CancelAsync is the only way a record becomes Cancelled, and it always writes this revision.
-        var statusBeforeCancel = await db.TransactionRevisions
+        var cancel = await db.TransactionRevisions
             .Where(r => r.TransactionId == transactionId && r.Kind == RevisionKind.Cancel)
             .OrderByDescending(r => r.RevisionNumber)
-            .Select(r => r.StatusBefore)
+            .Select(r => new { r.RevisionNumber, r.StatusBefore })
             .FirstAsync(cancellationToken);
 
-        transaction.Status = statusBeforeCancel;
+        // ApplyAsync completes a record it applies while cancelled but leaves it cancelled. Putting back the status from
+        // before the cancel would then restore a Captured or Failed that no longer describes it (A-22).
+        var appliedSinceCancel = await db.TransactionRevisions.AnyAsync(
+            r => r.TransactionId == transactionId
+                && r.RevisionNumber > cancel.RevisionNumber
+                && (r.Kind == RevisionKind.Initial || r.Kind == RevisionKind.Correction || r.Kind == RevisionKind.Edit),
+            cancellationToken);
+
+        // A Captured record holds no failure reason (amendment 26) unless an incomplete slip was saved while it was
+        // cancelled (EfReceiptStore.SaveExchangeSlipAsync): that outcome is what it now is.
+        transaction.Status = (appliedSinceCancel, cancel.StatusBefore, transaction.FailureReason) switch
+        {
+            (true, _, _) => TransactionStatus.Completed,
+            (false, TransactionStatus.Captured, not RecordFailureReason.None) => TransactionStatus.Failed,
+            _ => cancel.StatusBefore,
+        };
         await db.SaveChangesAsync(cancellationToken);
         await RevisionLog.AppendAsync(db, transaction, RevisionKind.Restore, null, TransactionStatus.Cancelled,
             timeProvider.GetUtcNow(), cancellationToken);
@@ -158,11 +183,13 @@ internal sealed class EfRecordEditor(LedgerDbContext db, TimeProvider timeProvid
     // same record serialise instead of interleaving their revisions.
     async Task<Transaction?> LockAsync(Guid transactionId, CancellationToken cancellationToken)
     {
-        await db.Database.SqlQueryRaw<Guid>(
+        await LockRowAsync(transactionId, cancellationToken);
+        return await db.Transactions.SingleOrDefaultAsync(t => t.Id == transactionId, cancellationToken);
+    }
+
+    Task LockRowAsync(Guid transactionId, CancellationToken cancellationToken) =>
+        db.Database.SqlQueryRaw<Guid>(
             "SELECT id FROM transactions WHERE id = @transactionId FOR UPDATE",
             new NpgsqlParameter("transactionId", transactionId))
             .ToListAsync(cancellationToken);
-
-        return await db.Transactions.SingleOrDefaultAsync(t => t.Id == transactionId, cancellationToken);
-    }
 }

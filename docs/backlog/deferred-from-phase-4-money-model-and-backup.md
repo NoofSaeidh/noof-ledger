@@ -4,32 +4,21 @@ status: deferred
 area: persistence
 since: 2026-09-24
 ---
-**Cross-currency conversion.** A spend in a currency other than its wallet's own (M10) is recorded as
-a separate currency line on that wallet's balance, not converted. Building this needs a rate source
-decision (Q4 in the original design's open questions) the operator has not made, and a rate is a
-moving target that would need its own history to stay honest in a re-read old transaction. Not
-scheduled until a rate source is chosen.
+**Income in a foreign currency is still not converted (M10, narrowed by Phase 7).** Phase 7 converts a
+spending in a currency other than its wallet's at the wallet's own terms set on `/wallets` (T-6,
+`docs/decisions/p7-1-transfers-and-exchange-decisions.md`), so M10 survives only where no charge is
+computed: income in another currency, and a spending in a currency the wallet has no terms for (whose
+echo says how to set them). Both keep a separate currency line on the wallet's balance. Converting income
+the same way would mean charges on `Income` records and an income-side reading of the terms; the
+transfers spec left Income's posting unchanged (§1), and the operator has not asked for it.
 
-**Transfers between wallets (Phase 7).** `TransactionKind.Transfer = 3` and `EntryRole.Fee` are
-reserved values, not declared members of the enum (`MoneyModelEnumTests` pins the current member
-counts) — a transfer becomes two entries (one per wallet) with no schema change needed when that
-phase arrives. Moving cash between wallets today is two separate manual transactions (an expense
-from one, an income to the other), which loses the "this was the same money" relationship a real
-transfer would keep.
-
-**Loans are recorded as other-income until Phase 7 models transfers/liabilities.** A loan received
+**Loans are recorded as other-income; there is no liability kind.** A loan received
 ("заняла у Маши 5000 рсд") is recorded as kind `income` under the `other-income` category
 (`CategorizationPrompt`'s I-3 fix, Phase 4 final review) so the wallet matches the bank — but a loan
-is a liability, not earned income, and there is no `Transfer`/liability kind yet to record it more
-precisely. Until Phase 7, this means the dashboard's income totals include money that was borrowed,
-not earned. Revisit once transfers (above) are built.
-
-**The Recent list shows income and opening balances indistinguishable from spending.**
-`RecentTransaction` (`src/Noof.Ledger.Application/Reporting/ISpendingReadModel.cs`) carries no
-`Kind`, so a 2000 EUR salary and a wallet's "Opening balance" checkpoint appear in the dashboard's
-"Recent" list exactly like an expense — money is not wrong ("This month" is filtered by kind), but a
-reader cannot tell +2000 from −2000 at a glance (M-6, Phase 4 final review). Fix by carrying `Kind`
-into `RecentTransaction` and giving the list a marker (a chip, a sign) per row.
+is a liability, not earned income. Phase 7 added the `Transfer` kind for money moving between the
+operator's own wallets, but a loan is money owed to someone else, and no liability is modelled (the
+transfers spec's "Out of scope"), so the dashboard's income totals still include money that was
+borrowed, not earned.
 
 **A correction to a record whose wallet was archived no longer falls back to the default (resolved
 2026-09-27, PR #3).** M-7 (Phase 4 final review) is reversed: a correction that names no wallet now

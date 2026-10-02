@@ -8,4 +8,5 @@ public enum JobKind
     Transcribe = 3,
     ExtractReceipt = 4,
     CategorizeReceipt = 5,
+    RecordExchange = 6,
 }

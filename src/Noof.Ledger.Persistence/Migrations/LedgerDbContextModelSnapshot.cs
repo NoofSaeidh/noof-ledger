@@ -213,6 +213,59 @@ namespace Noof.Ledger.Persistence.Migrations
                     b.ToTable("categories", "public");
                 });
 
+            modelBuilder.Entity("Noof.Ledger.Domain.Charge", b =>
+                {
+                    b.Property<Guid>("TransactionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("transaction_id");
+
+                    b.Property<string>("Currency")
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("currency");
+
+                    b.Property<decimal>("ChargedAmount")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("charged_amount");
+
+                    b.Property<decimal>("FeeAmount")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("fee_amount");
+
+                    b.Property<decimal?>("FeeFixed")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("fee_fixed");
+
+                    b.Property<decimal?>("FeeMinimum")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("fee_minimum");
+
+                    b.Property<decimal?>("FeePercent")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("numeric(9,4)")
+                        .HasColumnName("fee_percent");
+
+                    b.Property<decimal>("RateUsed")
+                        .HasPrecision(24, 12)
+                        .HasColumnType("numeric(24,12)")
+                        .HasColumnName("rate_used");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("integer")
+                        .HasColumnName("source");
+
+                    b.HasKey("TransactionId", "Currency");
+
+                    b.ToTable("charges", "public", t =>
+                        {
+                            t.HasCheckConstraint("ck_charges_amounts", "charged_amount > 0 AND fee_amount >= 0 AND rate_used > 0");
+                        });
+                });
+
             modelBuilder.Entity("Noof.Ledger.Domain.Entry", b =>
                 {
                     b.Property<Guid>("Id")
@@ -290,6 +343,10 @@ namespace Noof.Ledger.Persistence.Migrations
                     b.Property<Guid?>("ReceiptLineId")
                         .HasColumnType("uuid")
                         .HasColumnName("receipt_line_id");
+
+                    b.Property<int>("Role")
+                        .HasColumnType("integer")
+                        .HasColumnName("role");
 
                     b.Property<Guid>("TransactionId")
                         .HasColumnType("uuid")
@@ -430,6 +487,10 @@ namespace Noof.Ledger.Persistence.Migrations
                         .HasColumnType("character varying(32)")
                         .HasColumnName("seller_tax_id");
 
+                    b.Property<string>("SlipNumber")
+                        .HasColumnType("text")
+                        .HasColumnName("slip_number");
+
                     b.Property<int>("Source")
                         .HasColumnType("integer")
                         .HasColumnName("source");
@@ -472,7 +533,62 @@ namespace Noof.Ledger.Persistence.Migrations
                         .HasDatabaseName("ix_receipts_seller_tax_id_fiscal_number")
                         .HasFilter("seller_tax_id IS NOT NULL AND fiscal_number IS NOT NULL");
 
+                    b.HasIndex("SellerTaxId", "SlipNumber")
+                        .IsUnique()
+                        .HasDatabaseName("ix_receipts_seller_tax_id_slip_number")
+                        .HasFilter("receipt_kind = 6 AND seller_tax_id IS NOT NULL AND slip_number IS NOT NULL");
+
                     b.ToTable("receipts", "public");
+                });
+
+            modelBuilder.Entity("Noof.Ledger.Domain.ReceiptExchange", b =>
+                {
+                    b.Property<Guid>("ReceiptId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("receipt_id");
+
+                    b.Property<decimal?>("CommissionAmount")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("commission_amount");
+
+                    b.Property<string>("CommissionCurrency")
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("commission_currency");
+
+                    b.Property<decimal?>("GivenAmount")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("given_amount");
+
+                    b.Property<string>("GivenCurrency")
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("given_currency");
+
+                    b.Property<decimal?>("Rate")
+                        .HasPrecision(24, 12)
+                        .HasColumnType("numeric(24,12)")
+                        .HasColumnName("rate");
+
+                    b.Property<decimal?>("ReceivedAmount")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("received_amount");
+
+                    b.Property<string>("ReceivedCurrency")
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("received_currency");
+
+                    b.Property<string>("SlipNumber")
+                        .HasColumnType("text")
+                        .HasColumnName("slip_number");
+
+                    b.HasKey("ReceiptId");
+
+                    b.ToTable("receipt_exchanges", "public");
                 });
 
             modelBuilder.Entity("Noof.Ledger.Domain.ReceiptLine", b =>
@@ -548,6 +664,10 @@ namespace Noof.Ledger.Persistence.Migrations
                         .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
 
+                    b.Property<int>("FailureReason")
+                        .HasColumnType("integer")
+                        .HasColumnName("failure_reason");
+
                     b.Property<int>("Kind")
                         .HasColumnType("integer")
                         .HasColumnName("kind");
@@ -622,6 +742,90 @@ namespace Noof.Ledger.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Noof.Ledger.Domain.Transfer", b =>
+                {
+                    b.Property<Guid>("TransactionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("transaction_id");
+
+                    b.Property<int?>("FeeLeg")
+                        .HasColumnType("integer")
+                        .HasColumnName("fee_leg");
+
+                    b.Property<Guid>("FromWalletId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("from_wallet_id");
+
+                    b.Property<decimal?>("StatedRate")
+                        .HasPrecision(24, 12)
+                        .HasColumnType("numeric(24,12)")
+                        .HasColumnName("stated_rate");
+
+                    b.Property<string>("StatedRateBase")
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("stated_rate_base");
+
+                    b.Property<Guid>("ToWalletId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("to_wallet_id");
+
+                    b.Property<Guid?>("VenueMerchantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("venue_merchant_id");
+
+                    b.ComplexProperty(typeof(Dictionary<string, object>), "From", "Noof.Ledger.Domain.Transfer.From#Money", b1 =>
+                        {
+                            b1.IsRequired();
+
+                            b1.Property<decimal>("Amount")
+                                .HasPrecision(19, 4)
+                                .HasColumnType("numeric(19,4)")
+                                .HasColumnName("from_amount");
+
+                            b1.Property<string>("Currency")
+                                .IsRequired()
+                                .HasMaxLength(3)
+                                .HasColumnType("character varying(3)")
+                                .HasColumnName("from_currency");
+                        });
+
+                    b.ComplexProperty(typeof(Dictionary<string, object>), "To", "Noof.Ledger.Domain.Transfer.To#Money", b1 =>
+                        {
+                            b1.IsRequired();
+
+                            b1.Property<decimal>("Amount")
+                                .HasPrecision(19, 4)
+                                .HasColumnType("numeric(19,4)")
+                                .HasColumnName("to_amount");
+
+                            b1.Property<string>("Currency")
+                                .IsRequired()
+                                .HasMaxLength(3)
+                                .HasColumnType("character varying(3)")
+                                .HasColumnName("to_currency");
+                        });
+
+                    b.HasKey("TransactionId");
+
+                    b.HasIndex("FromWalletId")
+                        .HasDatabaseName("ix_transfers_from_wallet_id");
+
+                    b.HasIndex("ToWalletId")
+                        .HasDatabaseName("ix_transfers_to_wallet_id");
+
+                    b.HasIndex("VenueMerchantId");
+
+                    b.ToTable("transfers", "public", t =>
+                        {
+                            t.HasCheckConstraint("ck_transfers_amounts_positive", "from_amount > 0 AND to_amount > 0");
+
+                            t.HasCheckConstraint("ck_transfers_stated_rate_has_base", "(stated_rate IS NULL) = (stated_rate_base IS NULL)");
+
+                            t.HasCheckConstraint("ck_transfers_wallets_differ", "from_wallet_id <> to_wallet_id");
+                        });
+                });
+
             modelBuilder.Entity("Noof.Ledger.Domain.Wallet", b =>
                 {
                     b.Property<Guid>("Id")
@@ -675,12 +879,51 @@ namespace Noof.Ledger.Persistence.Migrations
                         .HasDatabaseName("ix_wallets_one_default_per_currency")
                         .HasFilter("is_default_for_currency");
 
-                    b.HasIndex("DefaultForPayment")
+                    b.HasIndex("DefaultForPayment", "Currency")
                         .IsUnique()
-                        .HasDatabaseName("ix_wallets_one_default_per_payment_method")
+                        .HasDatabaseName("ix_wallets_one_default_per_payment_method_and_currency")
                         .HasFilter("default_for_payment IS NOT NULL");
 
                     b.ToTable("wallets", "public");
+                });
+
+            modelBuilder.Entity("Noof.Ledger.Domain.WalletFxTerms", b =>
+                {
+                    b.Property<Guid>("WalletId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("wallet_id");
+
+                    b.Property<string>("Currency")
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("currency");
+
+                    b.Property<decimal?>("FeeFixed")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("fee_fixed");
+
+                    b.Property<decimal?>("FeeMinimum")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("fee_minimum");
+
+                    b.Property<decimal?>("FeePercent")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("numeric(9,4)")
+                        .HasColumnName("fee_percent");
+
+                    b.Property<decimal>("Rate")
+                        .HasPrecision(24, 12)
+                        .HasColumnType("numeric(24,12)")
+                        .HasColumnName("rate");
+
+                    b.HasKey("WalletId", "Currency");
+
+                    b.ToTable("wallet_fx_terms", "public", t =>
+                        {
+                            t.HasCheckConstraint("ck_wallet_fx_terms_rate_positive", "rate > 0");
+                        });
                 });
 
             modelBuilder.Entity("Noof.Ledger.Persistence.Backup.BackupRun", b =>
@@ -893,6 +1136,15 @@ namespace Noof.Ledger.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
+            modelBuilder.Entity("Noof.Ledger.Domain.Charge", b =>
+                {
+                    b.HasOne("Noof.Ledger.Domain.Transaction", null)
+                        .WithMany()
+                        .HasForeignKey("TransactionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Noof.Ledger.Domain.Entry", b =>
                 {
                     b.HasOne("Noof.Ledger.Domain.Transaction", null)
@@ -950,6 +1202,15 @@ namespace Noof.Ledger.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Noof.Ledger.Domain.ReceiptExchange", b =>
+                {
+                    b.HasOne("Noof.Ledger.Domain.Receipt", null)
+                        .WithOne()
+                        .HasForeignKey("Noof.Ledger.Domain.ReceiptExchange", "ReceiptId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Noof.Ledger.Domain.ReceiptLine", b =>
                 {
                     b.HasOne("Noof.Ledger.Domain.Receipt", null)
@@ -965,6 +1226,41 @@ namespace Noof.Ledger.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("WalletId")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Noof.Ledger.Domain.Transfer", b =>
+                {
+                    b.HasOne("Noof.Ledger.Domain.Wallet", null)
+                        .WithMany()
+                        .HasForeignKey("FromWalletId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Noof.Ledger.Domain.Wallet", null)
+                        .WithMany()
+                        .HasForeignKey("ToWalletId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Noof.Ledger.Domain.Transaction", null)
+                        .WithOne()
+                        .HasForeignKey("Noof.Ledger.Domain.Transfer", "TransactionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Noof.Ledger.Domain.Merchant", null)
+                        .WithMany()
+                        .HasForeignKey("VenueMerchantId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Noof.Ledger.Domain.WalletFxTerms", b =>
+                {
+                    b.HasOne("Noof.Ledger.Domain.Wallet", null)
+                        .WithMany()
+                        .HasForeignKey("WalletId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Noof.Ledger.Persistence.Revisions.TransactionRevision", b =>

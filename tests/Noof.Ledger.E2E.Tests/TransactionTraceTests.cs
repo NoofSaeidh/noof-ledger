@@ -762,6 +762,282 @@ public sealed class TransactionTraceTests(CookieModeHostFixture fixture) : PageT
         await Expect(Page.Locator("text=No transaction with this id.")).ToBeVisibleAsync();
     }
 
+    [Fact]
+    public async Task A_transfers_trace_shows_both_legs_the_fee_the_rate_the_venue_and_the_transfer_in_its_history()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var marker = Guid.NewGuid().ToString("N")[..8];
+        var transactionId = Guid.NewGuid();
+        var wiseId = Guid.NewGuid();
+        var cashId = Guid.NewGuid();
+        var venueId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+
+        await using (var db = OpenDb())
+        {
+            db.Wallets.AddRange(
+                new Wallet { Id = wiseId, Name = $"Wise {marker}", Currency = CurrencyCode.Eur, Aliases = [], CreatedAt = now },
+                new Wallet { Id = cashId, Name = $"Cash RSD {marker}", Currency = CurrencyCode.Rsd, Aliases = [], CreatedAt = now });
+            db.Merchants.Add(new Merchant { Id = venueId, DisplayName = $"Menjačnica {marker}", Kind = MerchantKind.ExchangeVenue });
+            var record = new Transaction
+            {
+                Id = transactionId,
+                WalletId = wiseId,
+                RawText = $"exchange {marker}",
+                CaptureKind = CaptureKind.Manual,
+                Kind = TransactionKind.Transfer,
+                Status = TransactionStatus.Completed,
+                TimeZoneId = "Europe/Belgrade",
+                OccurredAt = now,
+                OccurredOn = ZonedClock.LocalDate(now, "Europe/Belgrade"),
+                TelegramChatId = null,
+                TelegramMessageId = null,
+                CreatedAt = now,
+            };
+            db.Transactions.Add(record);
+            db.Transfers.Add(new Transfer
+            {
+                TransactionId = transactionId,
+                FromWalletId = wiseId,
+                From = new Money(101.00m, CurrencyCode.Eur),
+                ToWalletId = cashId,
+                To = new Money(11700.00m, CurrencyCode.Rsd),
+                FeeLeg = TransferLeg.From,
+                VenueMerchantId = venueId,
+            });
+            db.LineItems.Add(new LineItem
+            {
+                Id = Guid.NewGuid(),
+                TransactionId = transactionId,
+                Description = "Fee",
+                Amount = new Money(1.00m, CurrencyCode.Eur),
+                CategoryId = new Guid("00000000-0000-0000-0001-000000000013"),
+                CategorizedBy = CategorizationAuthority.Rule,
+                MerchantId = null,
+                Ordinal = 1,
+                Role = EntryRole.Fee,
+            });
+            await db.SaveChangesAsync(cancellationToken);
+            await RevisionLog.AppendAsync(db, record, RevisionKind.Initial, null, TransactionStatus.Captured, now, cancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync($"{fixture.BaseUrl}/transactions/{transactionId}/trace");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var summary = Page.Locator("#trace-summary");
+        await Expect(Page.Locator("#trace-transfer")).ToContainTextAsync($"Wise {marker} → Cash RSD {marker} · 101.00 EUR → 11,700.00 RSD");
+        await Expect(Page.Locator("#trace-transfer-fee")).ToHaveTextAsync($"Fee 1.00 EUR from Wise {marker}");
+        await Expect(summary).ToContainTextAsync("1 EUR = 117.0000 RSD · from the amounts");
+        await Expect(summary).ToContainTextAsync($"Menjačnica {marker}");
+        await Expect(summary).ToContainTextAsync("1.00 EUR (Fees & Charges) · fee");
+        await Expect(Page.Locator("#trace-history")).ToContainTextAsync(
+            $"Transfer · Wise {marker} → Cash RSD {marker} · 101.00 EUR → 11,700.00 RSD · 1 EUR = 117.0000 RSD · Fee 1.00 EUR from Wise {marker}");
+    }
+
+    [Fact]
+    public async Task A_charge_that_cost_no_fee_never_shows_a_fee_of_zero()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var marker = Guid.NewGuid().ToString("N")[..8];
+        var transactionId = Guid.NewGuid();
+        var kaspiId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+
+        await using (var db = OpenDb())
+        {
+            db.Wallets.Add(new Wallet { Id = kaspiId, Name = $"Kaspi {marker}", Currency = CurrencyCode.Kzt, Aliases = [], CreatedAt = now });
+            var record = new Transaction
+            {
+                Id = transactionId,
+                WalletId = kaspiId,
+                RawText = $"30 usd, charged 15400 {marker}",
+                CaptureKind = CaptureKind.Manual,
+                Kind = TransactionKind.Expense,
+                Status = TransactionStatus.Completed,
+                TimeZoneId = "Europe/Belgrade",
+                OccurredAt = now,
+                OccurredOn = ZonedClock.LocalDate(now, "Europe/Belgrade"),
+                TelegramChatId = null,
+                TelegramMessageId = null,
+                CreatedAt = now,
+            };
+            db.Transactions.Add(record);
+            db.LineItems.Add(new LineItem
+            {
+                Id = Guid.NewGuid(),
+                TransactionId = transactionId,
+                Description = "App Store",
+                Amount = new Money(30.00m, CurrencyCode.Usd),
+                CategoryId = new Guid("00000000-0000-0000-0001-000000000011"),
+                CategorizedBy = CategorizationAuthority.Model,
+                MerchantId = null,
+                Ordinal = 1,
+            });
+            // A stated charge with no fee: charges.fee_amount is 0, never null.
+            db.Charges.Add(new Charge
+            {
+                TransactionId = transactionId,
+                Currency = CurrencyCode.Usd,
+                ChargedAmount = 15400.00m,
+                FeeAmount = 0m,
+                RateUsed = 513.333333333333m,
+                Source = ChargeSource.Stated,
+            });
+            await db.SaveChangesAsync(cancellationToken);
+            await RevisionLog.AppendAsync(db, record, RevisionKind.Initial, null, TransactionStatus.Captured, now, cancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync($"{fixture.BaseUrl}/transactions/{transactionId}/trace");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var charges = Page.Locator("#trace-charges");
+        await Expect(charges).ToContainTextAsync("30.00 USD → charged 15,400.00 KZT (1 USD = 513.3333 KZT, stated)");
+        await Expect(charges).Not.ToContainTextAsync("+ fee");
+        var history = Page.Locator("#trace-history");
+        await Expect(history).ToContainTextAsync(
+            "Expense · App Store 30.00 USD; 30.00 USD → charged 15,400.00 KZT (1 USD = 513.3333 KZT, stated)");
+        await Expect(history).Not.ToContainTextAsync("+ fee");
+    }
+
+    [Fact]
+    public async Task A_charge_at_the_wallets_rate_shows_its_fee_and_the_terms_it_was_priced_on()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var marker = Guid.NewGuid().ToString("N")[..8];
+        var transactionId = Guid.NewGuid();
+        var kaspiId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+
+        await using (var db = OpenDb())
+        {
+            db.Wallets.Add(new Wallet { Id = kaspiId, Name = $"Kaspi {marker}", Currency = CurrencyCode.Kzt, Aliases = [], CreatedAt = now });
+            db.Transactions.Add(new Transaction
+            {
+                Id = transactionId,
+                WalletId = kaspiId,
+                RawText = $"app store 30 usd {marker}",
+                CaptureKind = CaptureKind.Manual,
+                Kind = TransactionKind.Expense,
+                Status = TransactionStatus.Completed,
+                TimeZoneId = "Europe/Belgrade",
+                OccurredAt = now,
+                OccurredOn = ZonedClock.LocalDate(now, "Europe/Belgrade"),
+                TelegramChatId = null,
+                TelegramMessageId = null,
+                CreatedAt = now,
+            });
+            db.LineItems.Add(new LineItem
+            {
+                Id = Guid.NewGuid(),
+                TransactionId = transactionId,
+                Description = "App Store",
+                Amount = new Money(30.00m, CurrencyCode.Usd),
+                CategoryId = new Guid("00000000-0000-0000-0001-000000000011"),
+                CategorizedBy = CategorizationAuthority.Model,
+                MerchantId = null,
+                Ordinal = 1,
+            });
+            db.Charges.Add(new Charge
+            {
+                TransactionId = transactionId,
+                Currency = CurrencyCode.Usd,
+                ChargedAmount = 15600.00m,
+                FeeAmount = 156.00m,
+                RateUsed = 520m,
+                FeePercent = 1m,
+                FeeMinimum = 100.00m,
+                Source = ChargeSource.WalletTerms,
+            });
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync($"{fixture.BaseUrl}/transactions/{transactionId}/trace");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        await Expect(Page.Locator("#trace-charges")).ToContainTextAsync(
+            "30.00 USD → charged 15,600.00 KZT (1 USD = 520.0000 KZT, wallet rate) + fee 156.00 KZT · terms 1 %, minimum 100.00");
+    }
+
+    [Fact]
+    public async Task A_damaged_snapshot_reads_as_unreadable_and_an_empty_one_as_a_dash()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var transactionId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var walletId = await SeedWalletAsync();
+
+        await using (var db = OpenDb())
+        {
+            db.Transactions.Add(new Transaction
+            {
+                Id = transactionId,
+                WalletId = walletId,
+                RawText = "seeded damaged snapshot transaction",
+                CaptureKind = CaptureKind.Manual,
+                Kind = TransactionKind.Expense,
+                Status = TransactionStatus.Completed,
+                TimeZoneId = "Europe/Belgrade",
+                OccurredAt = now,
+                OccurredOn = ZonedClock.LocalDate(now, "Europe/Belgrade"),
+                TelegramChatId = null,
+                TelegramMessageId = null,
+                CreatedAt = now,
+            });
+            db.TransactionRevisions.AddRange(
+                new TransactionRevision
+                {
+                    Id = Guid.NewGuid(),
+                    TransactionId = transactionId,
+                    RevisionNumber = 1,
+                    Kind = RevisionKind.Initial,
+                    Instruction = null,
+                    StatusBefore = TransactionStatus.Captured,
+                    StatusAfter = TransactionStatus.Completed,
+                    Snapshot = "{}",
+                    CreatedAt = now,
+                },
+                new TransactionRevision
+                {
+                    Id = Guid.NewGuid(),
+                    TransactionId = transactionId,
+                    RevisionNumber = 2,
+                    Kind = RevisionKind.Correction,
+                    Instruction = "make it 1500",
+                    StatusBefore = TransactionStatus.Completed,
+                    StatusAfter = TransactionStatus.Completed,
+                    // An item with no amount: the reader refuses it rather than read it as zero.
+                    Snapshot = """{"kind":"Expense","items":[{"description":"x","currency":"RSD"}]}""",
+                    CreatedAt = now.AddMinutes(1),
+                });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync($"{fixture.BaseUrl}/transactions/{transactionId}/trace");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var history = Page.Locator("#trace-history");
+        var initialRow = history.Locator("tbody tr", new LocatorLocatorOptions { HasText = nameof(RevisionKind.Initial) });
+        var correctionRow = history.Locator("tbody tr", new LocatorLocatorOptions { HasText = nameof(RevisionKind.Correction) });
+        await Expect(correctionRow).ToContainTextAsync("Snapshot unreadable");
+        await Expect(initialRow).ToContainTextAsync("—");
+        await Expect(initialRow).Not.ToContainTextAsync("Snapshot unreadable");
+    }
+
     async Task<Guid> SeedWalletAsync()
     {
         var walletId = Guid.NewGuid();

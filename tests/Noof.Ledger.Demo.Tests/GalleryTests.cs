@@ -28,7 +28,8 @@ public sealed class GalleryTests
     public void Every_page_of_the_app_has_a_screen()
     {
         AppScreens.All.Select(screen => screen.Name).Should().Equal(
-            "login", "dashboard", "wallets", "transactions", "trace", "trace-failed",
-            "trace-receipt", "trace-receipt-vision", "trace-receipt-check", "diagnostics", "logs", "log-settings", "secrets");
+            "login", "dashboard", "dashboard-transfers", "wallets", "transactions", "trace", "trace-failed",
+            "trace-exchange", "trace-foreign-spending", "trace-receipt", "trace-receipt-vision", "trace-receipt-check",
+            "trace-slip-check", "diagnostics", "logs", "log-settings", "secrets");
     }
 }

@@ -147,6 +147,18 @@ internal sealed class ReceiptCategorizationWorker(
                 return;
             }
 
+            // An exchange slip is recorded by RecordExchange from its own evidence, never categorised from receipt
+            // lines (spec §3): a slip has no lines whose sum is its money. Extraction saves a vision-read slip through
+            // its own branch, so none reaches this job; the guard keeps it so. Only the job fails - the record stays
+            // whatever RecordExchange or a correction made of it.
+            if (!receipt.Kind.IsFiscalMoneyKind())
+            {
+                const string notFiscal = "an exchange slip is recorded by RecordExchange, never categorised from receipt lines";
+                logger.LogStageFailed(TransactionStages.StageFailed, TransactionStages.Categorized, new InvalidOperationException(notFiscal));
+                await jobQueue.FailAsync(job.Id, workerId, notFiscal, cancellationToken);
+                return;
+            }
+
             var aliases = await merchantDirectory.AliasesAsync(cancellationToken);
             var aliasByFolded = aliases.ToDictionary(alias => alias.Folded, alias => alias);
 
@@ -284,7 +296,7 @@ internal sealed class ReceiptCategorizationWorker(
             return current;
 
         if (receipt.PaymentMethod is PaymentMethod.Card or PaymentMethod.Cash
-            && await walletDirectory.DefaultForPaymentAsync(receipt.PaymentMethod.Value, cancellationToken) is { } forPayment)
+            && await walletDirectory.DefaultForPaymentAsync(receipt.PaymentMethod.Value, receipt.Currency, cancellationToken) is { } forPayment)
             return forPayment;
 
         return DefaultWalletFor(receipt.Currency.Value, wallets);
@@ -371,7 +383,7 @@ internal sealed class ReceiptCategorizationWorker(
 
         if (isLastAttempt)
         {
-            await NotifyFailureAsync(store, notifier, subject, cancellationToken);
+            await NotifyFailureAsync(store, notifier, subject, job, cancellationToken);
             return;
         }
 
@@ -407,7 +419,7 @@ internal sealed class ReceiptCategorizationWorker(
 
         var outcome = await jobQueue.FailAsync(job.Id, workerId, error, cancellationToken);
         if (outcome == JobCompletionOutcome.Applied)
-            await NotifyFailureAsync(store, notifier, subject, cancellationToken);
+            await NotifyFailureAsync(store, notifier, subject, job, cancellationToken);
     }
 
     async Task SucceedQuietlyAsync(IJobQueue jobQueue, CategorizationJob job, CancellationToken cancellationToken)
@@ -424,16 +436,21 @@ internal sealed class ReceiptCategorizationWorker(
     }
 
     async Task NotifyFailureAsync(
-        ICategorizationStore store, IChatNotifier notifier, CategorizationSubject? subject, CancellationToken cancellationToken)
+        ICategorizationStore store, IChatNotifier notifier, CategorizationSubject? subject, CategorizationJob job,
+        CancellationToken cancellationToken)
     {
         if (subject is not { BotMessageId: { } messageId } sub)
             return;
 
-        await store.MarkFailedAsync(sub.TransactionId, cancellationToken);
+        // The store marks only a still-Captured record, so a correction of a recorded receipt stays as it was.
+        await store.MarkFailedAsync(sub.TransactionId, RecordFailureReason.None, cancellationToken);
 
         try
         {
-            await notifier.EditAsync(sub.TelegramChatId, messageId, recordEcho.Failure, cancellationToken);
+            var echo = job.Instruction is null
+                ? recordEcho.Failure
+                : recordEcho.ComposeCorrectionFailure(await store.GetSubjectAsync(sub.TransactionId, cancellationToken) ?? sub);
+            await notifier.EditAsync(sub.TelegramChatId, messageId, echo, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

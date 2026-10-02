@@ -28,6 +28,19 @@ public sealed class LiveModelTests
     static readonly IReadOnlyList<WalletOption> OfferedWallets =
         [new WalletOption(Guid.Parse("00000000-0000-0000-0000-000000000001"), "Main Wallet", CurrencyCode.Rsd, [], true)];
 
+    static readonly WalletOption Raiffeisen = new(
+        Guid.Parse("10000000-0000-0000-0000-000000000001"), "Raiffeisen RSD", CurrencyCode.Rsd, ["райф"], true);
+    // The RSD cash default while Raiffeisen is the RSD default (A-27): an unnamed cash side lands here.
+    static readonly WalletOption CashRsd = new(
+        Guid.Parse("10000000-0000-0000-0000-000000000002"), "Cash RSD", CurrencyCode.Rsd, ["налик", "наличка"], false,
+        DefaultForPayment: WalletPaymentDefault.Cash);
+    static readonly WalletOption Wise = new(
+        Guid.Parse("10000000-0000-0000-0000-000000000003"), "Wise EUR", CurrencyCode.Eur, ["вайз", "wise"], true);
+    static readonly WalletOption Revolut = new(
+        Guid.Parse("10000000-0000-0000-0000-000000000004"), "Revolut EUR", CurrencyCode.Eur, ["ревут", "revolut"], false);
+    static readonly WalletOption Kaspi = new(
+        Guid.Parse("10000000-0000-0000-0000-000000000005"), "Kaspi KZT", CurrencyCode.Kzt, ["каспи"], true);
+
     // Both the categoriser and the probe go through AnthropicChatClientFactory, never a raw client:
     // the factory is what reads the key through ISecretStore and applies MaxRetries = 0. Building a
     // client here instead would test a client configured differently from the one that actually runs.
@@ -40,6 +53,26 @@ public sealed class LiveModelTests
 
     static CategorizationRequest Request(string rawText, IReadOnlyList<CategoryOption>? categories = null) =>
         new(rawText, DateOnly.FromDateTime(DateTime.Today), categories ?? OfferedCategories, [], []);
+
+    static CategorizationRequest WithWallets(string rawText) =>
+        Request(rawText,
+        [
+            .. OfferedCategories,
+            new CategoryOption("fees-charges", "Fees & Charges", "Комиссии и сборы", null),
+            new CategoryOption("books", "Books", "Книги", null),
+        ]) with { Wallets = [Raiffeisen, CashRsd, Wise, Revolut, Kaspi] };
+
+    // What the destination wallet actually stores once the ledger settles the model's answer (spec §2, rules 2-3).
+    static Money StoredTo(CategorizationProposal proposal)
+    {
+        var mapped = new ProposalMapper().TryMap(
+            proposal, OfferedSlugs, offeredMerchantIds: [], wallets: [Raiffeisen, CashRsd, Wise, Revolut, Kaspi], defaultCurrency: "RSD",
+            out var result, out var failure, out _);
+
+        mapped.Should().BeTrue(failure);
+        result.Transfer.Should().NotBeNull();
+        return result.Transfer!.To;
+    }
 
     [Fact]
     public async Task A_single_coffee_purchase_produces_one_line_item_with_the_amount_and_currency()
@@ -99,7 +132,7 @@ public sealed class LiveModelTests
             .ProposeAsync(Request(rawText), TestContext.Current.CancellationToken);
 
         var mapped = new ProposalMapper().TryMap(
-            proposal, OfferedSlugs, offeredMerchantIds: [], wallets: OfferedWallets, defaultCurrency: "RSD", out var result, out var failure);
+            proposal, OfferedSlugs, offeredMerchantIds: [], wallets: OfferedWallets, defaultCurrency: "RSD", out var result, out var failure, out _);
 
         mapped.Should().BeTrue(failure);
         result.Items.Should().NotBeEmpty();
@@ -173,6 +206,177 @@ public sealed class LiveModelTests
 
         proposal.OccurredOn.Should().Be("2026-09-21");
         proposal.Items.Should().ContainSingle().Which.Amount.Should().Be(1000m);
+    }
+
+    [Fact]
+    public async Task A_withdrawal_is_one_transfer_not_an_expense()
+    {
+        if (!LiveModelGate.TryGetApiKey(out var apiKey))
+            Assert.Skip(LiveModelGate.SkipMessage);
+
+        var proposal = await CreateCategorizer(apiKey)
+            .ProposeAsync(WithWallets("снял 10000 с райфа"), TestContext.Current.CancellationToken);
+
+        proposal.Kind.Should().Be(ProposedKind.Transfer);
+        proposal.Items.Should().BeEmpty();
+        proposal.Transfer.Should().NotBeNull();
+        var transfer = proposal.Transfer!;
+        transfer.FromAmount.Should().Be(10000m);
+        transfer.FromCurrency.Should().Be("RSD");
+        transfer.ToCurrency.Should().Be("RSD");
+        transfer.FromWalletId.Should().Be(Raiffeisen.Id);
+        // Left null, 2b puts the cash side in Cash RSD (the RSD cash default); named, it must be Cash RSD itself.
+        // Either way it never lands in Raiffeisen, the RSD default.
+        (transfer.ToWalletId is null || transfer.ToWalletId == CashRsd.Id).Should().BeTrue($"to_wallet_id was {transfer.ToWalletId}");
+    }
+
+    [Fact]
+    public async Task A_top_up_between_own_accounts_is_a_transfer()
+    {
+        if (!LiveModelGate.TryGetApiKey(out var apiKey))
+            Assert.Skip(LiveModelGate.SkipMessage);
+
+        var proposal = await CreateCategorizer(apiKey)
+            .ProposeAsync(WithWallets("пополнил ревут на 200 евро с вайза"), TestContext.Current.CancellationToken);
+
+        proposal.Kind.Should().Be(ProposedKind.Transfer);
+        proposal.Transfer.Should().NotBeNull();
+        var transfer = proposal.Transfer!;
+        transfer.FromAmount.Should().Be(200m);
+        transfer.FromWalletId.Should().Be(Wise.Id);
+        transfer.ToWalletId.Should().Be(Revolut.Id);
+        transfer.FromCurrency.Should().Be("EUR");
+        transfer.ToCurrency.Should().Be("EUR");
+    }
+
+    [Fact]
+    public async Task An_exchange_at_a_stated_rate_copies_the_rate_and_leaves_the_received_amount_null()
+    {
+        if (!LiveModelGate.TryGetApiKey(out var apiKey))
+            Assert.Skip(LiveModelGate.SkipMessage);
+
+        var proposal = await CreateCategorizer(apiKey)
+            .ProposeAsync(WithWallets("поменял 100 евро на динары по 117"), TestContext.Current.CancellationToken);
+
+        proposal.Kind.Should().Be(ProposedKind.Transfer);
+        proposal.Transfer.Should().NotBeNull();
+        var transfer = proposal.Transfer!;
+        transfer.FromAmount.Should().Be(100m);
+        transfer.FromCurrency.Should().Be("EUR");
+        transfer.ToCurrency.Should().Be("RSD");
+        transfer.ToAmount.Should().BeNull("the model never works out 11700 itself");
+        transfer.Rate.Should().Be(new ProposedRate("EUR", 117m, "RSD"));
+    }
+
+    [Fact]
+    public async Task An_exchange_with_both_amounts_copies_both()
+    {
+        if (!LiveModelGate.TryGetApiKey(out var apiKey))
+            Assert.Skip(LiveModelGate.SkipMessage);
+
+        var proposal = await CreateCategorizer(apiKey)
+            .ProposeAsync(WithWallets("поменял 100 евро на 11700 динар"), TestContext.Current.CancellationToken);
+
+        proposal.Transfer.Should().NotBeNull();
+        var transfer = proposal.Transfer!;
+        transfer.FromAmount.Should().Be(100m);
+        transfer.ToAmount.Should().Be(11700m);
+        transfer.ToCurrency.Should().Be("RSD");
+    }
+
+    [Fact]
+    public async Task A_fee_on_the_sending_side_is_on_leg_from_and_not_included()
+    {
+        if (!LiveModelGate.TryGetApiKey(out var apiKey))
+            Assert.Skip(LiveModelGate.SkipMessage);
+
+        var proposal = await CreateCategorizer(apiKey)
+            .ProposeAsync(WithWallets("снял 10000 с райфа, комиссия 150"), TestContext.Current.CancellationToken);
+
+        proposal.Transfer.Should().NotBeNull();
+        var transfer = proposal.Transfer!;
+        transfer.FromAmount.Should().Be(10000m, "the ledger adds the fee, the model does not");
+        transfer.Fee.Should().Be(new ProposedFee(150m, "RSD", ProposedLeg.From, false));
+    }
+
+    [Fact]
+    public async Task An_amount_said_to_include_the_fee_marks_it_included()
+    {
+        if (!LiveModelGate.TryGetApiKey(out var apiKey))
+            Assert.Skip(LiveModelGate.SkipMessage);
+
+        var proposal = await CreateCategorizer(apiKey)
+            .ProposeAsync(WithWallets("с райфа списали 10150 при снятии наличных, включая комиссию 150"), TestContext.Current.CancellationToken);
+
+        proposal.Transfer.Should().NotBeNull();
+        var transfer = proposal.Transfer!;
+        transfer.FromAmount.Should().Be(10150m);
+        transfer.Fee.Should().Be(new ProposedFee(150m, "RSD", ProposedLeg.From, true));
+    }
+
+    [Fact]
+    public async Task A_fee_the_receiving_side_kept_is_on_leg_to()
+    {
+        if (!LiveModelGate.TryGetApiKey(out var apiKey))
+            Assert.Skip(LiveModelGate.SkipMessage);
+
+        var proposal = await CreateCategorizer(apiKey).ProposeAsync(
+            WithWallets("перевёл 100 евро с вайза на ревут, ревут при зачислении удержал комиссию 1 евро"),
+            TestContext.Current.CancellationToken);
+
+        proposal.Transfer.Should().NotBeNull();
+        proposal.Transfer!.Fee.Should().NotBeNull();
+        var fee = proposal.Transfer.Fee!;
+        fee.Leg.Should().Be(ProposedLeg.To);
+        fee.Amount.Should().Be(1m);
+        fee.Currency.Should().Be("EUR");
+    }
+
+    [Fact]
+    public async Task A_received_amount_beside_a_fee_on_the_receiving_side_is_stored_as_what_arrived()
+    {
+        if (!LiveModelGate.TryGetApiKey(out var apiKey))
+            Assert.Skip(LiveModelGate.SkipMessage);
+
+        // I-1 (Phase 7 closing review): "получил" is what the purse holds after the office's dinar fee, never 11600.
+        var proposal = await CreateCategorizer(apiKey).ProposeAsync(
+            WithWallets("поменял 100 евро, получил 11700 динар, комиссия 100 динар"), TestContext.Current.CancellationToken);
+
+        StoredTo(proposal).Should().Be(new Money(11700m, CurrencyCode.Rsd));
+    }
+
+    [Fact]
+    public async Task An_amount_said_only_as_what_arrived_beside_a_fee_is_stored_as_what_arrived()
+    {
+        if (!LiveModelGate.TryGetApiKey(out var apiKey))
+            Assert.Skip(LiveModelGate.SkipMessage);
+
+        // The source is named because an unnamed EUR source would fall to Wise, the EUR default, and put both legs on
+        // one wallet. Whichever leg the model gives the fee, Wise must end up with the 9950 that arrived, not 9900.
+        var proposal = await CreateCategorizer(apiKey).ProposeAsync(
+            WithWallets("перевёл с ревута на вайз, пришло 9950, комиссия 50"), TestContext.Current.CancellationToken);
+
+        StoredTo(proposal).Should().Be(new Money(9950m, CurrencyCode.Eur));
+    }
+
+    [Fact]
+    public async Task A_stated_charge_is_copied_into_charged_without_arithmetic()
+    {
+        if (!LiveModelGate.TryGetApiKey(out var apiKey))
+            Assert.Skip(LiveModelGate.SkipMessage);
+
+        var proposal = await CreateCategorizer(apiKey)
+            .ProposeAsync(WithWallets("30 долларов с каспи на книгу, списали 15400"), TestContext.Current.CancellationToken);
+
+        proposal.Kind.Should().Be(ProposedKind.Expense);
+        var item = proposal.Items.Should().ContainSingle().Subject;
+        item.Amount.Should().Be(30m);
+        item.CurrencyCode.Should().Be("USD");
+        proposal.WalletId.Should().Be(Kaspi.Id);
+        proposal.Charged.Should().NotBeNull();
+        var charged = proposal.Charged!;
+        charged.Amount.Should().Be(15400m);
+        charged.Currency.Should().Be("KZT");
     }
 
     [Fact]

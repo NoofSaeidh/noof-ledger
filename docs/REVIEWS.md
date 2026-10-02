@@ -43,27 +43,40 @@ the plugin's stop-time review gate: it would review on every Stop and burn the q
 - Codex refuses on its usage limit → don't wait for the window; fall back to an opus review and say
   so in the PR description.
 
-## Per phase — Fable 5.1, twice
+## Per phase — Fable 5.1, three times
 
 Agent tool with `model: "fable"`. Never per PR, never per fix round or Copilot round — a Fable review
 per fix round cost ~5 hours on PR #3.
 
-- **At planning**, once, after the phase's spec and plan are written and before implementation
-  starts. It reviews the decision, not code: alternatives considered, risks and failure modes,
-  conflicts with *(settled)* rules and `docs/decisions/`, and whether the PR cut is right. Its
-  findings are triaged like any review.
+- **The spec**, once it is approved and before the plan is written. It reviews the decision, not
+  code: alternatives considered, risks and failure modes, conflicts with *(settled)* rules and
+  `docs/decisions/`, and whether the PR cut is right. Findings are triaged like any review; accepted
+  ones amend the spec.
+- **The implementation plan** *(operator, 2026-10-01)*, once it is written and before any
+  implementation starts. It reviews the plan as something an engineer will execute task by task:
+  money correctness against the code as it is, consistency across the plan's files and PRs (names,
+  signatures, strings, dependencies, two PRs of one wave editing the same code), *(settled)* rules,
+  tests that could not go red, and the failure modes a real user would hit that no task tests. It
+  does not re-review the spec's decisions. Accepted findings are folded into the plan by the agents
+  that wrote it, and into the spec as amendments where they change a decision. Phase 7's plan review
+  found a fee charged twice, terms stored ×100 and three races that un-booked records — none of them
+  visible in the spec.
 - **At the end**, closing the phase or a batch of PRs.
 
 ### The Codex/Fable trial — 3 phases *(operator, 2026-09-28)*
 
-Both Fable reviews run in parallel with a Codex adversarial review of the same scope:
+All three Fable reviews run in parallel with a Codex adversarial review of the same scope:
 
 - **Closing:** `.\run.ps1 codex review -Base <base>` as above.
-- **Planning:**
+- **Spec and plan:** one prompt, given verbatim to both reviewers, naming the files — the spec, and
+  for the plan review every plan file even under the ignored `.superpowers/` — and the focus above:
 
   ```
-  codex exec -s read-only "<prompt naming the spec and plan paths, even under the ignored .superpowers/, asking for an adversarial review of the decision>"
+  codex exec -s read-only "<that prompt>"
   ```
+
+  Run it in the background with a long timeout; a plan review reads tens of thousands of lines and
+  takes a while. Its findings are the text after the last `tokens used` line of the output.
 
 An opus pass merges both lists — deduped, each finding tagged *both* / *Fable only* / *Codex only* —
 then triages them. Each review adds one tally line to [the tally below](#trial-tally) (confirmed
@@ -105,3 +118,34 @@ One line per review: confirmed findings by tag. Dated history, not status.
   paths); 2 Codex only (pr-wait CI gating [high], template freshness coverage); 8 Fable only (CI
   compile gap, dangling refs, CLAUDE.md length, PR-size ambiguity, pr-wait timing, env-var test
   isolation, stale statements, hook tests unrun).
+- **Phase 7 planning, spec `2026-10-01-transfers-and-exchange-design.md`, 2026-10-01:** 8 by both
+  (gross vs net leg amounts and the fee's wallet, no recording path for a slip, slip duplicates
+  undetected, the failure reason lost and a failed correction un-booking a record, fee lines fed back
+  to the model on a correction, wallets across kind changes, rate edge cases, the PR cut); 3 Codex
+  only (a correction repricing at today's terms, principal lines surviving a change to Transfer,
+  acceptance wording); 5 Fable only (the one-wallet Cash default, a leg in a foreign currency, framing
+  the slip rule as fiscal-only, the negative-balance hint on credit wallets, old snapshots on the trace
+  page). Rejected: a pair-level default rate (Fable; the operator chose per wallet), gating a
+  capability until its echo (Codex; the aggregate branch ships whole), foreign spending on a fiscal
+  receipt (Codex; the operator has no such case).
+- **Phase 7 planning, implementation plan (`.superpowers/p7-plan/`), 2026-10-01:** 3 by both (the crossing-zero
+  line under a later checkpoint, 1c and 7b rewriting one method in one wave, a stated rate lost or ignored on a
+  correction); 6 Codex only (a reply queued during slip extraction overwritten by the first recording, Restore of a
+  record corrected while cancelled, failure writes racing a correction or Cancel, a said charge in another currency
+  keeping an older stated one, a slip's date lost on completion by reply, the slip correction text omitting that a
+  commission is included); 11 Fable only, plus 13 minor (a date-only correction charging a transfer's fee twice,
+  `/wallets` reading `117,35` as 11735, an unnamed cash leg failing as `SameWallet`, a dinar fee rejected on a
+  EUR → RSD exchange, charges on fiscal receipts, `DIN` not read as RSD, slip vision asked to compute, the routing
+  predicate landing after the slip jobs, PR 8 unreviewed and stale backlog, a screenshot run deleting another PR's
+  pictures, tests that could not go red). Rejected: dropping a kept stated charge when the foreign sum changes
+  (Fable; the operator keeps it), refusing a same-currency transfer whose sides differ (Fable; P2-1).
+- **Phase 7 closing (phase-7 vs master), 2026-10-02:** none by both; 1 Codex only (an incomplete slip
+  cancelled during extraction and then restored was stranded); 2 Fable only, plus 3 minor (a
+  receiving-side fee read as not included, storing the received leg short by the fee; a slip tolerance
+  of about a para holding slips paid out in whole dinars; an unsupported slip currency called
+  unreadable, the trace page hiding the failure reason, a stale comment). Rejected: `MissingReceivedAmount`
+  naming the destination currency the record still holds (Fable; A-6, only the reason is stored), a
+  both-sides-RSD misread failing as `SameWallet` (Fable; recoverable by reply). The Codex run took about
+  two minutes over the whole phase, so its coverage was thin. Codex was at its usage limit for the fix
+  PRs, so opus reviewed them; it found 1 more, deferred to the backlog (a job failing while its record
+  is cancelled leaves no reason, and Restore strands the record).

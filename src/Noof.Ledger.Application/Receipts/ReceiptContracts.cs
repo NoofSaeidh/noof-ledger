@@ -82,8 +82,10 @@ public enum ReceiptUnreadableReason { TooSmall, Blurry, NotAReceipt, CutOff, Oth
 // has no null to hold - but a guessed Sale on what is actually a refund would change the money
 // direction, so the caller must not categorise on the guess alone; it holds the receipt behind the
 // operator's own confirmation instead of trusting it silently.
+// Exchange is set only for a slip, alongside a Receipt whose Kind is Exchange.
 public sealed record ReceiptVisionResult(
-    ExtractedReceipt? Receipt, ReceiptUnreadableReason? Unreadable, bool SellerTaxIdMalformed = false, bool KindUnclear = false);
+    ExtractedReceipt? Receipt, ReceiptUnreadableReason? Unreadable, bool SellerTaxIdMalformed = false, bool KindUnclear = false,
+    ExtractedExchange? Exchange = null);
 
 public interface IReceiptVision
 {

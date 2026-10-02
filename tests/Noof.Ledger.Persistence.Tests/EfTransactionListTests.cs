@@ -72,6 +72,31 @@ public class EfTransactionListTests(PostgresFixture fixture)
         ComputedBefore = computedBefore,
     };
 
+    static readonly Guid FeesAndChargesId = new("00000000-0000-0000-0001-000000000013");
+
+    static Transfer NewTransfer(Guid transactionId, Wallet from, decimal fromAmount, Wallet to, decimal toAmount, TransferLeg? feeLeg = null) => new()
+    {
+        TransactionId = transactionId,
+        FromWalletId = from.Id,
+        From = new Money(fromAmount, from.Currency),
+        ToWalletId = to.Id,
+        To = new Money(toAmount, to.Currency),
+        FeeLeg = feeLeg,
+    };
+
+    static LineItem NewFeeLine(Guid transactionId, Money amount, int ordinal) => new()
+    {
+        Id = Guid.NewGuid(),
+        TransactionId = transactionId,
+        Description = "Fee",
+        Amount = amount,
+        CategoryId = FeesAndChargesId,
+        CategorizedBy = CategorizationAuthority.Rule,
+        MerchantId = null,
+        Ordinal = ordinal,
+        Role = EntryRole.Fee,
+    };
+
     [Fact]
     public async Task Rows_are_ordered_newest_first_by_occurred_on_then_occurred_at()
     {
@@ -391,5 +416,123 @@ public class EfTransactionListTests(PostgresFixture fixture)
         var page = await list.QueryAsync(new TransactionListFilter(), 0, 50, TestContext.Current.CancellationToken);
 
         page.Rows.Single().WalletName.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ExcludeTransfers_leaves_transfers_out_and_keeps_every_other_kind()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var euro = NewWallet("Wallet EUR", CurrencyCode.Eur);
+        var dinar = NewWallet("Wallet RSD", CurrencyCode.Rsd);
+        db.Wallets.AddRange(euro, dinar);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var now = new DateTimeOffset(2026, 9, 10, 12, 0, 0, TimeSpan.Zero);
+        var expense = NewTransaction(euro.Id, now, TransactionKind.Expense, TransactionStatus.Completed);
+        var income = NewTransaction(euro.Id, now, TransactionKind.Income, TransactionStatus.Completed);
+        var statement = NewTransaction(euro.Id, now, TransactionKind.BalanceCheck, TransactionStatus.Completed);
+        var exchange = NewTransaction(euro.Id, now, TransactionKind.Transfer, TransactionStatus.Completed);
+        db.Transactions.AddRange(expense, income, statement, exchange);
+        db.Transfers.Add(NewTransfer(exchange.Id, euro, 100m, dinar, 11700m));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var list = new EfTransactionList(db);
+
+        var withoutTransfers = await list.QueryAsync(new TransactionListFilter(ExcludeTransfers: true), 0, 50, TestContext.Current.CancellationToken);
+        var everything = await list.QueryAsync(new TransactionListFilter(), 0, 50, TestContext.Current.CancellationToken);
+
+        withoutTransfers.Rows.Select(r => r.Id).Should().BeEquivalentTo([expense.Id, income.Id, statement.Id]);
+        withoutTransfers.TotalCount.Should().Be(3);
+        everything.Rows.Select(r => r.Id).Should().BeEquivalentTo([expense.Id, income.Id, statement.Id, exchange.Id]);
+    }
+
+    [Fact]
+    public async Task The_wallet_filter_matches_a_transfer_through_either_leg()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var walletA = NewWallet("Wallet A", CurrencyCode.Eur);
+        var walletB = NewWallet("Wallet B", CurrencyCode.Rsd);
+        var walletC = NewWallet("Wallet C", CurrencyCode.Eur);
+        db.Wallets.AddRange(walletA, walletB, walletC);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var now = new DateTimeOffset(2026, 9, 10, 12, 0, 0, TimeSpan.Zero);
+        var exchange = NewTransaction(walletA.Id, now, TransactionKind.Transfer, TransactionStatus.Completed);
+        var failedOnB = NewTransaction(walletB.Id, now, TransactionKind.Expense, TransactionStatus.Failed);
+        var expenseOnC = NewTransaction(walletC.Id, now, TransactionKind.Expense, TransactionStatus.Completed);
+        db.Transactions.AddRange(exchange, failedOnB, expenseOnC);
+        db.Transfers.Add(NewTransfer(exchange.Id, walletA, 100m, walletB, 11700m));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var list = new EfTransactionList(db);
+
+        var byDestination = await list.QueryAsync(new TransactionListFilter(WalletId: walletB.Id), 0, 50, TestContext.Current.CancellationToken);
+        var bySource = await list.QueryAsync(new TransactionListFilter(WalletId: walletA.Id), 0, 50, TestContext.Current.CancellationToken);
+        var byOther = await list.QueryAsync(new TransactionListFilter(WalletId: walletC.Id), 0, 50, TestContext.Current.CancellationToken);
+
+        byDestination.Rows.Select(r => r.Id).Should().BeEquivalentTo([exchange.Id, failedOnB.Id],
+            "transactions.wallet_id holds only the source leg; the destination must find the transfer too, and a failed record "
+            + "with no entries must still match its own wallet");
+        byDestination.TotalCount.Should().Be(2);
+        bySource.Rows.Select(r => r.Id).Should().Equal(exchange.Id);
+        byOther.Rows.Select(r => r.Id).Should().Equal(expenseOnC.Id);
+    }
+
+    [Fact]
+    public async Task A_transfer_row_lists_what_each_wallet_moved_and_carries_its_transfer_line()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var cashEur = NewWallet("Cash EUR", CurrencyCode.Eur);
+        var cashRsd = NewWallet("Cash RSD", CurrencyCode.Rsd);
+        db.Wallets.AddRange(cashEur, cashRsd);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var now = new DateTimeOffset(2026, 9, 10, 12, 0, 0, TimeSpan.Zero);
+        var exchange = NewTransaction(cashEur.Id, now, TransactionKind.Transfer, TransactionStatus.Completed);
+        db.Transactions.Add(exchange);
+        db.Transfers.Add(NewTransfer(exchange.Id, cashEur, 101m, cashRsd, 11700m, TransferLeg.From));
+        db.LineItems.Add(NewFeeLine(exchange.Id, new Money(1m, CurrencyCode.Eur), ordinal: 1));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var list = new EfTransactionList(db);
+
+        var row = (await list.QueryAsync(new TransactionListFilter(), 0, 50, TestContext.Current.CancellationToken)).Rows.Single();
+
+        row.Kind.Should().Be(TransactionKind.Transfer);
+        row.WalletName.Should().Be("Cash EUR");
+        row.Amounts.Should().Equal(new Money(101m, CurrencyCode.Eur), new Money(11700m, CurrencyCode.Rsd));
+        row.Categories.Should().Equal(["Fees & Charges"]);
+        row.Transfer.Should().Be(new TransferLine(
+            "Cash EUR", new Money(101m, CurrencyCode.Eur), "Cash RSD", new Money(11700m, CurrencyCode.Rsd),
+            new Money(1m, CurrencyCode.Eur), TransferLeg.From, new ExchangeRate(CurrencyCode.Eur, 117m, CurrencyCode.Rsd)));
+    }
+
+    [Fact]
+    public async Task An_expenses_amounts_are_its_purchases_not_its_fee_line()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var kaspi = NewWallet("Kaspi KZT", CurrencyCode.Kzt);
+        db.Wallets.Add(kaspi);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var now = new DateTimeOffset(2026, 9, 10, 12, 0, 0, TimeSpan.Zero);
+        var spending = NewTransaction(kaspi.Id, now, TransactionKind.Expense, TransactionStatus.Completed);
+        db.Transactions.Add(spending);
+        db.LineItems.AddRange(
+            NewLineItem(spending.Id, "App Store", new Money(30m, CurrencyCode.Usd), null),
+            NewFeeLine(spending.Id, new Money(156m, CurrencyCode.Kzt), ordinal: 2));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var list = new EfTransactionList(db);
+
+        var row = (await list.QueryAsync(new TransactionListFilter(), 0, 50, TestContext.Current.CancellationToken)).Rows.Single();
+
+        row.Amounts.Should().ContainSingle().Which.Should().Be(new Money(30m, CurrencyCode.Usd),
+            "the list shows what was bought, in the currency it was bought in; the fee and the charge are on the trace page");
+        row.Transfer.Should().BeNull();
     }
 }

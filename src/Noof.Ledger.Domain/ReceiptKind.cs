@@ -8,4 +8,5 @@ public enum ReceiptKind
     Training = 3,
     Proforma = 4,
     Advance = 5,
+    Exchange = 6,
 }

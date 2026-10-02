@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Noof.Ledger.Ai.Anthropic;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Domain;
 
@@ -101,6 +102,33 @@ public class ChatReceiptVisionOverAnthropicTests
     }
 
     [Fact]
+    public async Task The_forced_strict_read_receipt_offers_kind_exchange_and_the_exchange_object_on_the_wire()
+    {
+        var (vision, handler) = Build();
+        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.ReadReceiptJsonAnswer);
+
+        await vision.ReadAsync(TinyImage, "image/jpeg", qrTotal: null, TestContext.Current.CancellationToken);
+
+        var sent = JsonDocument.Parse(handler.Requests[0].Body).RootElement;
+        var tool = sent.GetProperty("tools")[0];
+        tool.GetProperty("strict").GetBoolean().Should().BeTrue();
+        sent.GetProperty("tool_choice").GetProperty("type").GetString().Should().Be("tool");
+        sent.GetProperty("tool_choice").GetProperty("name").GetString().Should().Be("read_receipt");
+
+        var properties = tool.GetProperty("input_schema").GetProperty("properties");
+        properties.GetProperty("kind").GetProperty("anyOf")[0].GetProperty("enum")
+            .EnumerateArray().Select(e => e.GetString()).Should().BeEquivalentTo(["sale", "refund", "exchange"]);
+        var exchange = properties.GetProperty("exchange");
+        exchange.GetProperty("type").GetString().Should().Be("object");
+        exchange.GetProperty("additionalProperties").GetBoolean().Should().BeFalse();
+        exchange.GetProperty("properties").GetProperty("given_amount").GetProperty("type")
+            .EnumerateArray().Select(e => e.GetString()).Should().BeEquivalentTo(["number", "null"]);
+        var commission = exchange.GetProperty("properties").GetProperty("commission").GetProperty("anyOf");
+        commission[0].GetProperty("additionalProperties").GetBoolean().Should().BeFalse();
+        commission[1].GetProperty("type").GetString().Should().Be("null");
+    }
+
+    [Fact]
     public async Task Maps_the_answer_to_an_ExtractedReceipt_with_exact_decimals_and_ordinals()
     {
         var (vision, handler) = Build();
@@ -128,6 +156,30 @@ public class ChatReceiptVisionOverAnthropicTests
         receipt.Lines[1].Ordinal.Should().Be(2);
         receipt.Lines[1].UnitPrice.Should().Be(90.25m);
         receipt.Lines[1].Total.Should().Be(180.50m);
+        result.Exchange.Should().BeNull("a sale's all-null exchange object is not a slip");
+    }
+
+    [Fact]
+    public async Task Maps_a_slip_answer_to_an_exchange_receipt_with_exact_decimals()
+    {
+        var (vision, handler) = Build();
+        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.ReadExchangeJsonAnswer);
+
+        var result = await vision.ReadAsync(TinyImage, "image/jpeg", qrTotal: null, TestContext.Current.CancellationToken);
+
+        result.Unreadable.Should().BeNull();
+        result.KindUnclear.Should().BeFalse();
+        var slip = result.Receipt!;
+        slip.Source.Should().Be(ReceiptSource.Vision);
+        slip.Kind.Should().Be(ReceiptKind.Exchange);
+        slip.SellerName.Should().Be("Menjačnica Dukat");
+        slip.SellerTaxId.Should().Be("101234567");
+        slip.FiscalNumber.Should().BeNull();
+        slip.IssuedAt.Should().Be(new DateTimeOffset(2026, 9, 28, 11, 42, 0, TimeSpan.FromHours(2)));
+        slip.Currency.Should().Be(CurrencyCode.Rsd);
+        slip.Total.Should().Be(17568.51m);
+        slip.Lines.Should().BeEmpty();
+        result.Exchange.Should().Be(new ExtractedExchange(150.00m, "EUR", 17568.51m, "RSD", 117.1234m, null, null, "0004711/2026"));
     }
 
     [Fact]

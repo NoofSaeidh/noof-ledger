@@ -10,7 +10,8 @@ internal sealed class TransactionRevision
     public required RevisionKind Kind { get; init; }
     public string? Instruction { get; init; }
 
-    // StatusBefore is what Restore restores: the status a record had before the cancellation it undoes.
+    // StatusBefore is what Restore restores - the status a record had before the cancellation it undoes - unless the
+    // record was applied after that cancellation; Restore then makes it Completed (A-22).
     public required TransactionStatus StatusBefore { get; init; }
     public required TransactionStatus StatusAfter { get; init; }
 

@@ -10,7 +10,8 @@ public class MoneyModelEnumTests
         ((int)TransactionKind.Expense).Should().Be(0);
         ((int)TransactionKind.Income).Should().Be(1);
         ((int)TransactionKind.BalanceCheck).Should().Be(2);
-        Enum.GetValues<TransactionKind>().Should().HaveCount(3, "3 is kept for Phase 7's Transfer and is not declared until then");
+        ((int)TransactionKind.Transfer).Should().Be(3);
+        Enum.GetValues<TransactionKind>().Should().HaveCount(4);
     }
 
     [Fact]
@@ -31,6 +32,8 @@ public class MoneyModelEnumTests
         ((int)JobKind.Transcribe).Should().Be(3);
         ((int)JobKind.ExtractReceipt).Should().Be(4);
         ((int)JobKind.CategorizeReceipt).Should().Be(5);
+        ((int)JobKind.RecordExchange).Should().Be(6);
+        Enum.GetValues<JobKind>().Should().HaveCount(7);
     }
 
     [Fact]
@@ -42,7 +45,7 @@ public class MoneyModelEnumTests
             "a wallet is never the default for Transfer, Voucher, Other or Mixed (R-3)");
     }
 
-    // These three enums are stored as smallint (M-5, Phase 6 final review: Application no longer
+    // These three enums are stored as integer columns (M-5, Phase 6 final review: Application no longer
     // keeps its own copy). A value moving here would silently renumber every persisted receipt row.
     [Fact]
     public void Receipt_source_values_never_move()
@@ -61,6 +64,8 @@ public class MoneyModelEnumTests
         ((int)ReceiptKind.Training).Should().Be(3);
         ((int)ReceiptKind.Proforma).Should().Be(4);
         ((int)ReceiptKind.Advance).Should().Be(5);
+        ((int)ReceiptKind.Exchange).Should().Be(6);
+        Enum.GetValues<ReceiptKind>().Should().HaveCount(7);
     }
 
     [Fact]
@@ -78,6 +83,37 @@ public class MoneyModelEnumTests
     public void Entry_role_values_never_move()
     {
         ((int)EntryRole.Principal).Should().Be(0);
-        Enum.GetValues<EntryRole>().Should().HaveCount(1, "Fee is kept for Phase 7 and is not declared until then");
+        ((int)EntryRole.Fee).Should().Be(1);
+        Enum.GetValues<EntryRole>().Should().HaveCount(2, "line_items.role uses the same values as entries.role");
+    }
+
+    [Fact]
+    public void Transfer_leg_values_never_move()
+    {
+        ((int)TransferLeg.From).Should().Be(0);
+        ((int)TransferLeg.To).Should().Be(1);
+        Enum.GetValues<TransferLeg>().Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void Charge_source_values_never_move()
+    {
+        ((int)ChargeSource.WalletTerms).Should().Be(0);
+        ((int)ChargeSource.Stated).Should().Be(1);
+        Enum.GetValues<ChargeSource>().Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void Record_failure_reason_values_never_move()
+    {
+        ((int)RecordFailureReason.None).Should().Be(0);
+        ((int)RecordFailureReason.MissingReceivedAmount).Should().Be(1);
+        ((int)RecordFailureReason.SameWallet).Should().Be(2);
+        ((int)RecordFailureReason.LegCurrencyMismatch).Should().Be(3);
+        ((int)RecordFailureReason.InvalidRate).Should().Be(4);
+        ((int)RecordFailureReason.InvalidFee).Should().Be(5);
+        ((int)RecordFailureReason.SlipIncomplete).Should().Be(6);
+        ((int)RecordFailureReason.InvalidAmount).Should().Be(7);
+        Enum.GetValues<RecordFailureReason>().Should().HaveCount(8);
     }
 }

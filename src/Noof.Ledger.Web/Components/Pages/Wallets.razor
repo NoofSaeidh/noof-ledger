@@ -6,6 +6,7 @@
 @using Noof.Ledger.Application.Wallets
 @using Noof.Ledger.Domain
 @inject IWalletAdmin WalletAdmin
+@inject IWalletFxTerms WalletFxTerms
 @inject IDatabaseGate Gate
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 
@@ -13,7 +14,8 @@
 
 <MudText HtmlTag="h1" Typo="Typo.h4" Class="mb-2">Wallets</MudText>
 <MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">
-    Create, rename and archive wallets here. Income and balance statements are told to the bot.
+    Create, rename and archive wallets, and set what spending in another currency costs each one. Income and balance
+    statements are told to the bot.
 </MudText>
 
 @if (Gate.State != DatabaseState.Ready)
@@ -64,7 +66,7 @@ else
         @if (!wallet.Archived)
         {
             <div class="noof-wallet-row mt-4">
-                <MudText HtmlTag="label" for="@($"wallet-payment-default-{wallet.Id}")" Typo="Typo.caption" Class="mud-text-secondary">Default for</MudText>
+                <MudText HtmlTag="label" for="@($"wallet-payment-default-{wallet.Id}")" Typo="Typo.caption" Class="mud-text-secondary">Default @wallet.Currency wallet for</MudText>
                 <select id="@($"wallet-payment-default-{wallet.Id}")" @bind="wallet.PendingPaymentDefault"
                         @bind:after="@(() => SetPaymentDefaultAsync(wallet))" class="noof-native-select">
                     <option value="">None</option>
@@ -72,6 +74,9 @@ else
                     <option value="@PaymentMethod.Cash">Cash</option>
                 </select>
             </div>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">
+                Card and cash defaults are per currency: this one applies to @wallet.Currency only.
+            </MudText>
         }
         <div class="noof-wallet-actions mt-4">
             @if (wallet.IsDefaultForCurrency)
@@ -100,6 +105,115 @@ else
                 </MudButton>
             }
         </div>
+        @if (!wallet.Archived)
+        {
+            @* Keyed by the row model, which every reload rebuilds with fresh converters: the fields are rebuilt with it,
+               so a refused figure's error cannot outlive the converter that raised it. *@
+            <div id="@($"terms-{wallet.Id}")" class="mt-6" @key="wallet">
+                <MudText HtmlTag="h3" Typo="Typo.subtitle2">Foreign-currency terms</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-3">
+                    What a spending in another currency costs this wallet: @wallet.Currency per one unit, plus a fee as a
+                    percentage, a fixed amount, a minimum, or any mix. A currency with no terms stays in its own currency.
+                </MudText>
+
+                @foreach (var terms in wallet.Terms)
+                {
+                    <div id="@($"terms-row-{wallet.Id}-{terms.Currency}")" class="noof-form-grid noof-terms-grid">
+                        <div class="noof-field">
+                            <span class="noof-field-label">Currency</span>
+                            <MudText Typo="Typo.body1">@terms.Currency</MudText>
+                        </div>
+                        <div class="noof-field">
+                            <label class="noof-field-label" for="@($"terms-rate-{wallet.Id}-{terms.Currency}")">@wallet.Currency per 1 @terms.Currency</label>
+                            <MudNumericField T="decimal?" InputId="@($"terms-rate-{wallet.Id}-{terms.Currency}")" @bind-Value="terms.Rate"
+                                             Converter="@terms.RateConverter"
+                                             Culture="@CultureInfo.InvariantCulture" Format="0.############" HideSpinButtons="true"
+                                             Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </div>
+                        <div class="noof-field">
+                            <label class="noof-field-label" for="@($"terms-fee-percent-{wallet.Id}-{terms.Currency}")">Fee %</label>
+                            <MudNumericField T="decimal?" InputId="@($"terms-fee-percent-{wallet.Id}-{terms.Currency}")" @bind-Value="terms.FeePercent"
+                                             Converter="@terms.FeePercentConverter"
+                                             Culture="@CultureInfo.InvariantCulture" Format="0.####" HideSpinButtons="true"
+                                             Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </div>
+                        <div class="noof-field">
+                            <label class="noof-field-label" for="@($"terms-fee-fixed-{wallet.Id}-{terms.Currency}")">Fixed fee, @wallet.Currency</label>
+                            <MudNumericField T="decimal?" InputId="@($"terms-fee-fixed-{wallet.Id}-{terms.Currency}")" @bind-Value="terms.FeeFixed"
+                                             Converter="@terms.FeeFixedConverter"
+                                             Culture="@CultureInfo.InvariantCulture" Format="0.00##" HideSpinButtons="true"
+                                             Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </div>
+                        <div class="noof-field">
+                            <label class="noof-field-label" for="@($"terms-fee-minimum-{wallet.Id}-{terms.Currency}")">Minimum fee, @wallet.Currency</label>
+                            <MudNumericField T="decimal?" InputId="@($"terms-fee-minimum-{wallet.Id}-{terms.Currency}")" @bind-Value="terms.FeeMinimum"
+                                             Converter="@terms.FeeMinimumConverter"
+                                             Culture="@CultureInfo.InvariantCulture" Format="0.00##" HideSpinButtons="true"
+                                             Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </div>
+                        <div class="noof-wallet-actions">
+                            <MudButton id="@($"terms-save-{wallet.Id}-{terms.Currency}")" Variant="Variant.Outlined" Size="Size.Small"
+                                       OnClick="@(() => SaveTermsAsync(wallet, terms))">
+                                Save
+                            </MudButton>
+                            <MudButton id="@($"terms-remove-{wallet.Id}-{terms.Currency}")" Variant="Variant.Outlined" Size="Size.Small"
+                                       Color="Color.Error" OnClick="@(() => RemoveTermsAsync(wallet, terms))">
+                                Remove
+                            </MudButton>
+                        </div>
+                    </div>
+                }
+
+                @if (wallet.OfferedCurrencies.Count > 0)
+                {
+                    <div class="noof-form-grid noof-terms-grid">
+                        <div class="noof-field">
+                            <label class="noof-field-label" for="@($"terms-new-currency-{wallet.Id}")">Currency</label>
+                            <select id="@($"terms-new-currency-{wallet.Id}")" @bind="wallet.NewTerms.Currency" class="noof-native-select">
+                                @foreach (var currency in wallet.OfferedCurrencies)
+                                {
+                                    <option value="@currency.Value">@currency.Value</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="noof-field">
+                            <label class="noof-field-label" for="@($"terms-new-rate-{wallet.Id}")">@wallet.Currency per unit</label>
+                            <MudNumericField T="decimal?" InputId="@($"terms-new-rate-{wallet.Id}")" @bind-Value="wallet.NewTerms.Rate"
+                                             Converter="@wallet.NewTerms.RateConverter"
+                                             Culture="@CultureInfo.InvariantCulture" Format="0.############" HideSpinButtons="true"
+                                             Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </div>
+                        <div class="noof-field">
+                            <label class="noof-field-label" for="@($"terms-new-fee-percent-{wallet.Id}")">Fee %</label>
+                            <MudNumericField T="decimal?" InputId="@($"terms-new-fee-percent-{wallet.Id}")" @bind-Value="wallet.NewTerms.FeePercent"
+                                             Converter="@wallet.NewTerms.FeePercentConverter"
+                                             Culture="@CultureInfo.InvariantCulture" Format="0.####" HideSpinButtons="true"
+                                             Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </div>
+                        <div class="noof-field">
+                            <label class="noof-field-label" for="@($"terms-new-fee-fixed-{wallet.Id}")">Fixed fee, @wallet.Currency</label>
+                            <MudNumericField T="decimal?" InputId="@($"terms-new-fee-fixed-{wallet.Id}")" @bind-Value="wallet.NewTerms.FeeFixed"
+                                             Converter="@wallet.NewTerms.FeeFixedConverter"
+                                             Culture="@CultureInfo.InvariantCulture" Format="0.00##" HideSpinButtons="true"
+                                             Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </div>
+                        <div class="noof-field">
+                            <label class="noof-field-label" for="@($"terms-new-fee-minimum-{wallet.Id}")">Minimum fee, @wallet.Currency</label>
+                            <MudNumericField T="decimal?" InputId="@($"terms-new-fee-minimum-{wallet.Id}")" @bind-Value="wallet.NewTerms.FeeMinimum"
+                                             Converter="@wallet.NewTerms.FeeMinimumConverter"
+                                             Culture="@CultureInfo.InvariantCulture" Format="0.00##" HideSpinButtons="true"
+                                             Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </div>
+                        <div class="noof-wallet-actions">
+                            <MudButton id="@($"terms-add-{wallet.Id}")" Variant="Variant.Outlined" Size="Size.Small"
+                                       OnClick="@(() => AddTermsAsync(wallet))">
+                                Add terms
+                            </MudButton>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
     </MudPaper>
 }
 
@@ -127,7 +241,8 @@ else
 
         <div class="noof-field">
             <label class="noof-field-label" for="new-wallet-opening">Opening balance</label>
-            <MudNumericField T="decimal" InputId="new-wallet-opening" @bind-Value="newOpeningBalance"
+            <MudNumericField T="decimal?" InputId="new-wallet-opening" @bind-Value="newOpeningBalance"
+                             Converter="@newOpeningConverter"
                              Culture="@CultureInfo.InvariantCulture" HideSpinButtons="true"
                              Variant="Variant.Outlined" Margin="Margin.Dense" />
         </div>
@@ -167,6 +282,27 @@ else
         public string PendingName { get; set; } = string.Empty;
         public string PendingAliases { get; set; } = string.Empty;
         public PaymentMethod? PendingPaymentDefault { get; set; }
+        public List<TermsRow> Terms { get; set; } = [];
+        public List<CurrencyCode> OfferedCurrencies { get; set; } = [];
+        public TermsRow NewTerms { get; set; } = new();
+    }
+
+    // One shape for a saved row and the new row: each field's converter lives here, not in the markup, because its
+    // Failed must survive re-renders until the row is saved or reloaded.
+    sealed class TermsRow
+    {
+        public string Currency { get; set; } = string.Empty;
+        public decimal? Rate { get; set; }
+        public decimal? FeePercent { get; set; }
+        public decimal? FeeFixed { get; set; }
+        public decimal? FeeMinimum { get; set; }
+        public DecimalFieldConverter RateConverter { get; } = new();
+        public DecimalFieldConverter FeePercentConverter { get; } = new();
+        public DecimalFieldConverter FeeFixedConverter { get; } = new();
+        public DecimalFieldConverter FeeMinimumConverter { get; } = new();
+
+        public bool Unreadable =>
+            RateConverter.Failed || FeePercentConverter.Failed || FeeFixedConverter.Failed || FeeMinimumConverter.Failed;
     }
 
     List<Row> wallets = [];
@@ -176,7 +312,8 @@ else
 
     string newName = string.Empty;
     string newCurrency = CurrencyCode.Rsd.Value;
-    decimal newOpeningBalance;
+    decimal? newOpeningBalance;
+    readonly DecimalFieldConverter newOpeningConverter = new();
     DateOnly? newOpeningDate = DateOnly.FromDateTime(DateTime.Today);
     string newAliases = string.Empty;
     bool newIsDefault;
@@ -206,6 +343,9 @@ else
             }),
         ];
 
+        foreach (var wallet in wallets.Where(wallet => !wallet.Archived))
+            await LoadTermsAsync(wallet);
+
         missingDefaultCurrencies =
         [
             .. details
@@ -215,6 +355,33 @@ else
                 .Select(group => group.Key)
                 .OrderBy(currency => currency, StringComparer.Ordinal),
         ];
+    }
+
+    async Task LoadTermsAsync(Row wallet)
+    {
+        var terms = await WalletFxTerms.ListAsync(wallet.Id, cancellation.Token);
+
+        wallet.Terms =
+        [
+            .. terms.Select(stored => new TermsRow
+            {
+                Currency = stored.Currency.Value,
+                Rate = stored.Rate,
+                FeePercent = stored.FeePercent,
+                FeeFixed = stored.FeeFixed,
+                FeeMinimum = stored.FeeMinimum,
+            }),
+        ];
+        wallet.OfferedCurrencies =
+        [
+            .. CurrencyCode.Supported
+                .Where(currency => currency != wallet.Currency && terms.All(stored => stored.Currency != currency))
+                .Order(),
+        ];
+        wallet.NewTerms = new TermsRow
+        {
+            Currency = wallet.OfferedCurrencies.Count > 0 ? wallet.OfferedCurrencies[0].Value : string.Empty,
+        };
     }
 
     static IReadOnlyList<string> SplitAliases(string raw) =>
@@ -238,10 +405,16 @@ else
             return;
         }
 
+        if (newOpeningConverter.Failed)
+        {
+            error = "The opening balance is not a number.";
+            return;
+        }
+
         try
         {
             await WalletAdmin.CreateAsync(
-                new NewWallet(name, new CurrencyCode(newCurrency), newOpeningBalance, openingDate,
+                new NewWallet(name, new CurrencyCode(newCurrency), newOpeningBalance ?? 0m, openingDate,
                     SplitAliases(newAliases), newIsDefault),
                 cancellation.Token);
 
@@ -348,6 +521,99 @@ else
         {
             error = $"Could not archive the wallet: {exception.Message}";
         }
+    }
+
+    async Task AddTermsAsync(Row wallet)
+    {
+        error = null;
+        saved = null;
+
+        var terms = wallet.NewTerms;
+        if (TermsFrom(terms, out var problem) is not { } details)
+        {
+            error = problem;
+            return;
+        }
+
+        try
+        {
+            await WalletFxTerms.SetAsync(wallet.Id, details, cancellation.Token);
+            saved = $"{terms.Currency} terms added.";
+            await ReloadAsync();
+        }
+        catch (Exception exception)
+        {
+            error = $"Could not add the {terms.Currency} terms: {exception.Message}";
+        }
+    }
+
+    async Task SaveTermsAsync(Row wallet, TermsRow terms)
+    {
+        error = null;
+        saved = null;
+
+        if (TermsFrom(terms, out var problem) is not { } details)
+        {
+            error = problem;
+            return;
+        }
+
+        try
+        {
+            await WalletFxTerms.SetAsync(wallet.Id, details, cancellation.Token);
+            saved = $"{terms.Currency} terms saved.";
+            await ReloadAsync();
+        }
+        catch (Exception exception)
+        {
+            error = $"Could not save the {terms.Currency} terms: {exception.Message}";
+        }
+    }
+
+    async Task RemoveTermsAsync(Row wallet, TermsRow terms)
+    {
+        error = null;
+        saved = null;
+
+        try
+        {
+            await WalletFxTerms.RemoveAsync(wallet.Id, new CurrencyCode(terms.Currency), cancellation.Token);
+            saved = $"{terms.Currency} terms removed.";
+            await ReloadAsync();
+        }
+        catch (Exception exception)
+        {
+            error = $"Could not remove the {terms.Currency} terms: {exception.Message}";
+        }
+    }
+
+    // The page checks before it calls, as it does for a blank wallet name: the store's own refusals are bug guards. An
+    // unreadable field has already been turned into null by MudBlazor, so it is refused before its value is looked at -
+    // and once it loses focus MudBlazor empties it but keeps its error, so the alert says how to get out of that.
+    static WalletTermsDetails? TermsFrom(TermsRow terms, out string problem)
+    {
+        problem = string.Empty;
+
+        if (terms.Unreadable)
+        {
+            problem = $"The {terms.Currency} terms have a field that is not a number. "
+                + "Type the figure again in the field marked in red.";
+            return null;
+        }
+
+        if (terms.Rate is not { } rate || rate <= 0m)
+        {
+            problem = $"Enter a rate above zero for {terms.Currency}.";
+            return null;
+        }
+
+        if (terms.FeePercent < 0m || terms.FeeFixed < 0m || terms.FeeMinimum < 0m)
+        {
+            problem = $"A {terms.Currency} fee cannot be negative.";
+            return null;
+        }
+
+        return new WalletTermsDetails(new CurrencyCode(terms.Currency), rate, terms.FeePercent, terms.FeeFixed, terms.FeeMinimum);
     }
 
     public void Dispose()

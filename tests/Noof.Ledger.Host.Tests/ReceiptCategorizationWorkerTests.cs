@@ -160,7 +160,7 @@ public class ReceiptCategorizationWorkerTests
         var directory = Substitute.For<IWalletDirectory>();
         IReadOnlyList<WalletOption> active = [RsdDefault, EurDefault, CashWallet, NamedInCaption];
         directory.ActiveAsync(Arg.Any<CancellationToken>()).Returns(active);
-        directory.DefaultForPaymentAsync(Arg.Any<PaymentMethod>(), Arg.Any<CancellationToken>()).Returns((Guid?)null);
+        directory.DefaultForPaymentAsync(Arg.Any<PaymentMethod>(), Arg.Any<CurrencyCode>(), Arg.Any<CancellationToken>()).Returns((Guid?)null);
         return directory;
     }
 
@@ -285,7 +285,7 @@ public class ReceiptCategorizationWorkerTests
         categorizer.CategorizeAsync(Arg.Any<AppReceipts.ReceiptCategorizationRequest>(), Arg.Any<CancellationToken>())
             .Returns(Categorization(walletId: NamedInCaption.Id, merchantCanonicalName: "Test Market"));
         var walletDirectory = DefaultWalletDirectory();
-        walletDirectory.DefaultForPaymentAsync(PaymentMethod.Card, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
+        walletDirectory.DefaultForPaymentAsync(PaymentMethod.Card, CurrencyCode.Rsd, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
         var store = DefaultStore();
         var worker = CreateWorker(
             ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, categorizer: categorizer, walletDirectory: walletDirectory), Time());
@@ -361,7 +361,7 @@ public class ReceiptCategorizationWorkerTests
         store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
             .Returns(Subject(status: TransactionStatus.Completed) with { WalletId = NamedInCaption.Id });
         var walletDirectory = DefaultWalletDirectory();
-        walletDirectory.DefaultForPaymentAsync(PaymentMethod.Card, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
+        walletDirectory.DefaultForPaymentAsync(PaymentMethod.Card, CurrencyCode.Rsd, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
         var worker = CreateWorker(
             ScopeFactoryFor(QueueWith(Job("bread is groceries, not other")), KeyPresent(), store, walletDirectory: walletDirectory), Time());
 
@@ -379,7 +379,7 @@ public class ReceiptCategorizationWorkerTests
         store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>())
             .Returns(Subject(status: TransactionStatus.Completed) with { WalletId = archived });
         var walletDirectory = DefaultWalletDirectory();
-        walletDirectory.DefaultForPaymentAsync(PaymentMethod.Card, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
+        walletDirectory.DefaultForPaymentAsync(PaymentMethod.Card, CurrencyCode.Rsd, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
         var worker = CreateWorker(
             ScopeFactoryFor(QueueWith(Job("bread is groceries, not other")), KeyPresent(), store, walletDirectory: walletDirectory), Time());
 
@@ -411,7 +411,7 @@ public class ReceiptCategorizationWorkerTests
     public async Task A_first_categorization_that_names_no_wallet_still_falls_through_to_the_payment_default()
     {
         var walletDirectory = DefaultWalletDirectory();
-        walletDirectory.DefaultForPaymentAsync(PaymentMethod.Card, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
+        walletDirectory.DefaultForPaymentAsync(PaymentMethod.Card, CurrencyCode.Rsd, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
         var store = DefaultStore();
         // No Instruction (Job() with no argument): this is the first, Initial categorization, so the
         // payment/currency default still applies even though the subject's own WalletId happens to be
@@ -433,7 +433,7 @@ public class ReceiptCategorizationWorkerTests
         categorizer.CategorizeAsync(Arg.Any<AppReceipts.ReceiptCategorizationRequest>(), Arg.Any<CancellationToken>())
             .Returns(Categorization(walletId: Guid.NewGuid(), merchantCanonicalName: "Test Market"));
         var walletDirectory = DefaultWalletDirectory();
-        walletDirectory.DefaultForPaymentAsync(PaymentMethod.Card, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
+        walletDirectory.DefaultForPaymentAsync(PaymentMethod.Card, CurrencyCode.Rsd, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
         var store = DefaultStore();
         var worker = CreateWorker(
             ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, categorizer: categorizer, walletDirectory: walletDirectory), Time());
@@ -448,7 +448,7 @@ public class ReceiptCategorizationWorkerTests
     public async Task With_no_caption_wallet_a_card_payment_uses_the_wallet_marked_default_for_card()
     {
         var walletDirectory = DefaultWalletDirectory();
-        walletDirectory.DefaultForPaymentAsync(PaymentMethod.Card, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
+        walletDirectory.DefaultForPaymentAsync(PaymentMethod.Card, CurrencyCode.Rsd, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
         var store = DefaultStore();
         var worker = CreateWorker(
             ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, walletDirectory: walletDirectory), Time());
@@ -463,13 +463,29 @@ public class ReceiptCategorizationWorkerTests
     public async Task With_no_caption_wallet_a_cash_payment_uses_the_wallet_marked_default_for_cash()
     {
         var walletDirectory = DefaultWalletDirectory();
-        walletDirectory.DefaultForPaymentAsync(PaymentMethod.Cash, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
+        walletDirectory.DefaultForPaymentAsync(PaymentMethod.Cash, CurrencyCode.Rsd, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
         var receiptStore = DefaultReceiptStore();
         receiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>())
             .Returns(Receipt(paymentMethod: PaymentMethod.Cash));
         var store = DefaultStore();
         var worker = CreateWorker(
             ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, receiptStore: receiptStore, walletDirectory: walletDirectory), Time());
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await store.Received(1).ApplyAsync(
+            TransactionId, Arg.Is<CategorizationOutcome>(outcome => outcome.WalletId == CashWallet.Id), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task The_payment_default_is_the_one_for_the_receipts_own_currency()
+    {
+        var walletDirectory = DefaultWalletDirectory();
+        walletDirectory.DefaultForPaymentAsync(PaymentMethod.Card, CurrencyCode.Eur, Arg.Any<CancellationToken>()).Returns(EurDefault.Id);
+        walletDirectory.DefaultForPaymentAsync(PaymentMethod.Card, CurrencyCode.Rsd, Arg.Any<CancellationToken>()).Returns(CashWallet.Id);
+        var store = DefaultStore();
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job()), KeyPresent(), store, walletDirectory: walletDirectory), Time());
 
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
@@ -535,11 +551,43 @@ public class ReceiptCategorizationWorkerTests
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
         await recordEditor.Received(1).CancelAsync(TransactionId, Arg.Any<CancellationToken>());
-        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+        await store.DidNotReceive().MarkFailedAsync(Arg.Any<Guid>(), Arg.Any<RecordFailureReason>(), Arg.Any<CancellationToken>());
         await store.DidNotReceive().ApplyAsync(Arg.Any<Guid>(), Arg.Any<CategorizationOutcome>(), Arg.Any<CancellationToken>());
         await notifier.Received(1).EditAsync(
             111L, 42, Arg.Is<EchoMessage>(echo => echo.Text == $"This receipt is a {word} — not recorded"), Arg.Any<CancellationToken>());
         await jobQueue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
+
+        var stageFailed = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.StageFailedEventId).Subject;
+        stageFailed.Stage.Should().Be(TransactionStages.StageFailed);
+        stageFailed.Properties["FailedStage"].Should().Be(TransactionStages.Categorized);
+        stageFailed.Exception.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task An_exchange_slip_is_never_categorised_from_receipt_lines_and_only_its_job_fails()
+    {
+        var receiptStore = DefaultReceiptStore();
+        receiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Receipt(kind: ReceiptKind.Exchange, lines: []));
+        var store = DefaultStore();
+        var notifier = Substitute.For<IChatNotifier>();
+        var recordEditor = Substitute.For<IRecordEditor>();
+        var categorizer = DefaultCategorizer();
+        var jobQueue = QueueWith(Job());
+        var logger = new CapturingLogger<ReceiptCategorizationWorker>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(jobQueue, KeyPresent(), store, receiptStore: receiptStore, categorizer: categorizer, notifier: notifier,
+                recordEditor: recordEditor),
+            Time(), logger);
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await jobQueue.Received(1).FailAsync(
+            JobId, WorkerId, "an exchange slip is recorded by RecordExchange, never categorised from receipt lines", Arg.Any<CancellationToken>());
+        await categorizer.DidNotReceiveWithAnyArgs().CategorizeAsync(default!, Arg.Any<CancellationToken>());
+        await store.DidNotReceiveWithAnyArgs().ApplyAsync(default, default!, Arg.Any<CancellationToken>());
+        await store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, default, Arg.Any<CancellationToken>());
+        await recordEditor.DidNotReceiveWithAnyArgs().CancelAsync(default, Arg.Any<CancellationToken>());
+        await notifier.DidNotReceiveWithAnyArgs().EditAsync(default, default, default!, Arg.Any<CancellationToken>());
 
         var stageFailed = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.StageFailedEventId).Subject;
         stageFailed.Stage.Should().Be(TransactionStages.StageFailed);
@@ -816,8 +864,29 @@ public class ReceiptCategorizationWorkerTests
 
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
-        await store.Received(1).MarkFailedAsync(TransactionId, Arg.Any<CancellationToken>());
+        await store.Received(1).MarkFailedAsync(TransactionId, RecordFailureReason.None, Arg.Any<CancellationToken>());
         await notifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(m => m.Text == Echo.Failure.Text), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_failed_receipt_correction_says_it_was_not_applied_instead_of_the_failure_echo()
+    {
+        var store = Substitute.For<ICategorizationStore>();
+        store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(Subject(status: TransactionStatus.Completed));
+        var categorizer = Substitute.For<AppReceipts.IReceiptCategorizer>();
+        categorizer.CategorizeAsync(Arg.Any<AppReceipts.ReceiptCategorizationRequest>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new ModelCallException(ModelFailureKind.Terminal, "bad request"));
+        var notifier = Substitute.For<IChatNotifier>();
+        var worker = CreateWorker(
+            ScopeFactoryFor(QueueWith(Job("это было вчера")), KeyPresent(), store, categorizer: categorizer, notifier: notifier), Time());
+
+        await worker.RunTickAsync(TestContext.Current.CancellationToken);
+
+        await notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text.StartsWith("Could not apply that correction — the record is unchanged.", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+        await notifier.DidNotReceive().EditAsync(
+            Arg.Any<long>(), Arg.Any<int>(), Arg.Is<EchoMessage>(m => m.Text == Echo.Failure.Text), Arg.Any<CancellationToken>());
     }
 
     [Fact]

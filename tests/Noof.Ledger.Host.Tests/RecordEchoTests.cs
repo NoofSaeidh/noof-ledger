@@ -25,6 +25,49 @@ public class RecordEchoTests
         new(Guid.NewGuid(), "raw", 111L, 42, "Cash", status, Sent, occurredOn ?? Sent, lines ?? [Coffee],
             CaptureKind.Text, kind, walletCurrency ?? CurrencyCode.Rsd, walletBalances, statement);
 
+    static readonly Guid SourceWalletId = Guid.Parse("00000000-0000-0000-0000-0000000000a1");
+    static readonly Guid DestinationWalletId = Guid.Parse("00000000-0000-0000-0000-0000000000a2");
+
+    static Money Rsd(decimal amount) => new(amount, CurrencyCode.Rsd);
+    static Money Eur(decimal amount) => new(amount, CurrencyCode.Eur);
+    static Money Kzt(decimal amount) => new(amount, CurrencyCode.Kzt);
+
+    static TransferView Legs(
+        string fromWallet, Money from, Money fromBalance, string toWallet, Money to, Money toBalance,
+        Money? fee = null, TransferLeg? feeLeg = null, ExchangeRate? statedRate = null, decimal? fromBalanceWithoutThis = null) =>
+        new(SourceWalletId, fromWallet, from, DestinationWalletId, toWallet, to, fee, feeLeg, statedRate, VenueName: null,
+            [fromBalance], [toBalance], fromBalanceWithoutThis);
+
+    static CategorizationSubject TransferRecord(
+        TransferView transfer, TransactionStatus status = TransactionStatus.Completed,
+        IReadOnlyList<RecordedLine>? lines = null, DateOnly? occurredOn = null) =>
+        new(Guid.NewGuid(), "raw", 111L, 42, transfer.FromWalletName, status, Sent, occurredOn ?? Sent, lines ?? [],
+            CaptureKind.Text, TransactionKind.Transfer, transfer.From.Currency, transfer.FromBalances, Statement: null,
+            WalletId: SourceWalletId, Transfer: transfer);
+
+    static RecordedLine FeeLine(Money amount, string description = "Fee") =>
+        new(description, amount, "fees-charges", "Fees & Charges", null, EntryRole.Fee);
+
+    static TransferView Withdrawal =>
+        Legs("Raiffeisen RSD", Rsd(10000m), Rsd(164150m), "Cash RSD", Rsd(10000m), Rsd(12000m));
+
+    static TransferView ExchangeOf100Eur =>
+        Legs("Cash EUR", Eur(100m), Eur(400m), "Cash RSD", Rsd(11700m), Rsd(23700m));
+
+    static RecordedLine Taxi => new("taxi", new Money(30m, CurrencyCode.Usd), "transport", "Transport", null);
+
+    static RecordedLine UsdPurchaseFee(decimal amount) => FeeLine(Kzt(amount), "Fee · USD purchase");
+
+    static ChargeView UsdCharge(
+        decimal charged = 15600m, decimal fee = 156m, decimal rate = 520m, ChargeSource source = ChargeSource.WalletTerms) =>
+        new(CurrencyCode.Usd, 30m, Kzt(charged), Kzt(fee), rate, new FeeTerms(1m, null, null), source);
+
+    static CategorizationSubject KaspiSpending(
+        IReadOnlyList<RecordedLine> lines, IReadOnlyList<ChargeView> charges,
+        TransactionStatus status = TransactionStatus.Completed) =>
+        Record(status, lines: lines, walletCurrency: CurrencyCode.Kzt, walletBalances: [Kzt(184244m)])
+            with { WalletName = "Kaspi KZT", Charges = charges };
+
     [Fact]
     public void A_recorded_line_is_echoed_with_its_balance_total_and_the_cancel_and_edit_buttons()
     {
@@ -61,9 +104,8 @@ public class RecordEchoTests
             new RecordedLine("хлеб", new Money(100m, CurrencyCode.Rsd), "groceries", "Groceries", null),
         };
 
-        // Contains, not EndWith: this test's own EUR line differs from the wallet's RSD currency,
-        // which correctly appends the M10 conversion warning after the Total line - a deviation
-        // from the brief's literal EndWith, recorded in the task report.
+        // Contains, not EndWith: the EUR line differs from the wallet's RSD currency, so the no-terms hint
+        // follows the Total line.
         Echo.Compose(Record(lines: lines)).Text.Should().Contain("Total: 1000.00 EUR, 350.00 RSD");
     }
 
@@ -159,18 +201,18 @@ public class RecordEchoTests
     }
 
     [Fact]
-    public void A_line_in_a_currency_other_than_the_wallets_warns_that_it_is_not_converted()
+    public void A_foreign_currency_with_no_charge_asks_for_a_rate_on_the_wallets_page()
     {
         var line = new RecordedLine("такси", new Money(20m, CurrencyCode.Eur), "transport", "Transport", null);
 
         Echo.Compose(Record(lines: [Coffee, line])).Text
-            .Should().EndWith("Not in the wallet's currency — no conversion yet.");
+            .Should().EndWith("\n20.00 EUR not converted — set a EUR rate for Cash on /wallets, or correct this record to apply it");
     }
 
     [Fact]
-    public void A_line_in_the_wallets_own_currency_gets_no_conversion_warning()
+    public void A_line_in_the_wallets_own_currency_gets_no_conversion_line()
     {
-        Echo.Compose(Record()).Text.Should().NotContain("no conversion yet");
+        Echo.Compose(Record()).Text.Should().NotContain("not converted").And.NotContain("charged");
     }
 
     [Fact]
@@ -355,5 +397,370 @@ public class RecordEchoTests
         echo.Text.Should().Contain("a database error");
         echo.Text.Should().Contain("14:32");
         echo.Actions.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_transfer_names_its_amount_and_both_wallets_and_shows_both_balances()
+    {
+        var echo = Echo.Compose(TransferRecord(Withdrawal));
+
+        echo.Text.Should().Be(
+            "Transfer — 10000.00 RSD · Raiffeisen RSD → Cash RSD\n"
+            + "Raiffeisen RSD · balance 164150.00 RSD\n"
+            + "Cash RSD · balance 12000.00 RSD");
+        echo.Actions.Should().Equal(RecordAction.Cancel, RecordAction.Edit);
+    }
+
+    [Fact]
+    public void A_transfer_with_a_fee_on_the_source_shows_it_inside_the_source_leg_and_on_its_own_line()
+    {
+        var transfer = Legs("Raiffeisen RSD", Rsd(10150m), Rsd(164000m), "Cash RSD", Rsd(10000m), Rsd(12000m),
+            fee: Rsd(150m), feeLeg: TransferLeg.From);
+
+        var echo = Echo.Compose(TransferRecord(transfer, lines: [FeeLine(Rsd(150m))]));
+
+        echo.Text.Should().Be(
+            "Transfer — Raiffeisen RSD -10150.00 RSD (incl. fee 150.00) → Cash RSD +10000.00 RSD\n"
+            + "Fee 150.00 RSD · Fees & Charges\n"
+            + "Raiffeisen RSD · balance 164000.00 RSD\n"
+            + "Cash RSD · balance 12000.00 RSD");
+        echo.Actions.Should().Equal(RecordAction.Cancel, RecordAction.Edit);
+    }
+
+    [Fact]
+    public void A_transfer_with_a_fee_on_the_destination_shows_what_arrived_after_the_fee()
+    {
+        var transfer = Legs("Raiffeisen RSD", Rsd(10000m), Rsd(164150m), "Cash RSD", Rsd(9850m), Rsd(11850m),
+            fee: Rsd(150m), feeLeg: TransferLeg.To);
+
+        Echo.Compose(TransferRecord(transfer, lines: [FeeLine(Rsd(150m))])).Text.Should().Be(
+            "Transfer — Raiffeisen RSD -10000.00 RSD → Cash RSD +9850.00 RSD (after fee 150.00)\n"
+            + "Fee 150.00 RSD · Fees & Charges\n"
+            + "Raiffeisen RSD · balance 164150.00 RSD\n"
+            + "Cash RSD · balance 11850.00 RSD");
+    }
+
+    [Fact]
+    public void An_exchange_shows_both_sides_their_wallets_and_the_rate_derived_from_them()
+    {
+        var echo = Echo.Compose(TransferRecord(ExchangeOf100Eur));
+
+        echo.Text.Should().Be(
+            "Exchange — 100.00 EUR (Cash EUR) → 11700.00 RSD (Cash RSD) · 1 EUR = 117.0000 RSD\n"
+            + "Cash EUR · balance 400.00 EUR\n"
+            + "Cash RSD · balance 23700.00 RSD");
+        echo.Actions.Should().Equal(RecordAction.Cancel, RecordAction.Edit);
+    }
+
+    // 33.33 × 117.35 = 3911.2755, stored as 3911.28: re-deriving from the rounded amounts would say 117.3501.
+    [Fact]
+    public void An_exchange_shows_the_rate_the_operator_stated_not_one_derived_from_rounded_amounts()
+    {
+        var transfer = Legs("Cash EUR", Eur(33.33m), Eur(400m), "Cash RSD", Rsd(3911.28m), Rsd(15911.28m),
+            statedRate: new ExchangeRate(CurrencyCode.Eur, 117.35m, CurrencyCode.Rsd));
+
+        Echo.Compose(TransferRecord(transfer)).Text.Should().StartWith(
+            "Exchange — 33.33 EUR (Cash EUR) → 3911.28 RSD (Cash RSD) · 1 EUR = 117.3500 RSD\n");
+    }
+
+    [Fact]
+    public void An_exchange_with_a_fee_on_the_source_shows_it_on_that_side_and_takes_the_rate_from_the_principals()
+    {
+        var transfer = Legs("Cash EUR", Eur(102m), Eur(398m), "Cash RSD", Rsd(11700m), Rsd(23700m),
+            fee: Eur(2m), feeLeg: TransferLeg.From);
+
+        Echo.Compose(TransferRecord(transfer, lines: [FeeLine(Eur(2m))])).Text.Should().Be(
+            "Exchange — 102.00 EUR (Cash EUR, incl. fee 2.00) → 11700.00 RSD (Cash RSD) · 1 EUR = 117.0000 RSD\n"
+            + "Fee 2.00 EUR · Fees & Charges\n"
+            + "Cash EUR · balance 398.00 EUR\n"
+            + "Cash RSD · balance 23700.00 RSD");
+    }
+
+    [Fact]
+    public void An_exchange_with_a_fee_on_the_destination_shows_it_on_that_side_and_takes_the_rate_from_the_principals()
+    {
+        var transfer = Legs("Cash EUR", Eur(100m), Eur(400m), "Cash RSD", Rsd(11500m), Rsd(23500m),
+            fee: Rsd(200m), feeLeg: TransferLeg.To);
+
+        Echo.Compose(TransferRecord(transfer, lines: [FeeLine(Rsd(200m))])).Text.Should().Be(
+            "Exchange — 100.00 EUR (Cash EUR) → 11500.00 RSD (Cash RSD, after fee 200.00) · 1 EUR = 117.0000 RSD\n"
+            + "Fee 200.00 RSD · Fees & Charges\n"
+            + "Cash EUR · balance 400.00 EUR\n"
+            + "Cash RSD · balance 23500.00 RSD");
+    }
+
+    [Fact]
+    public void A_transfer_dated_to_another_day_says_which_day()
+    {
+        Echo.Compose(TransferRecord(Withdrawal, occurredOn: new DateOnly(2026, 9, 21))).Text.Should().StartWith(
+            "Transfer — 10000.00 RSD · Raiffeisen RSD → Cash RSD\nDate: 21.09.2026\nRaiffeisen RSD · balance");
+    }
+
+    [Fact]
+    public void A_cancelled_transfer_re_renders_both_balances_and_offers_only_restore()
+    {
+        var transfer = Legs("Raiffeisen RSD", Rsd(10000m), Rsd(174150m), "Cash RSD", Rsd(10000m), Rsd(2000m));
+
+        var echo = Echo.Compose(TransferRecord(transfer, TransactionStatus.Cancelled));
+
+        echo.Text.Should().Be(
+            "Cancelled transfer — 10000.00 RSD · Raiffeisen RSD → Cash RSD\n"
+            + "Raiffeisen RSD · balance 174150.00 RSD\n"
+            + "Cash RSD · balance 2000.00 RSD");
+        echo.Actions.Should().Equal(RecordAction.Restore);
+    }
+
+    [Fact]
+    public void A_cancelled_exchange_says_so_and_offers_only_restore()
+    {
+        var echo = Echo.Compose(TransferRecord(ExchangeOf100Eur, TransactionStatus.Cancelled));
+
+        echo.Text.Should().StartWith("Cancelled exchange — 100.00 EUR (Cash EUR) → 11700.00 RSD (Cash RSD) · 1 EUR = 117.0000 RSD\n");
+        echo.Actions.Should().Equal(RecordAction.Restore);
+    }
+
+    [Fact]
+    public void A_wallet_with_no_balance_yet_reads_zero_in_its_own_currency()
+    {
+        Echo.Compose(TransferRecord(Withdrawal with { ToBalances = [] })).Text.Should().EndWith("\nCash RSD · balance 0.00 RSD");
+    }
+
+    [Fact]
+    public void Transfer_amounts_and_the_rate_render_the_same_under_a_Serbian_machine_culture()
+    {
+        var saved = CultureInfo.CurrentCulture;
+        CultureInfo.CurrentCulture = new CultureInfo("sr-Latn-RS");
+        try
+        {
+            Echo.Compose(TransferRecord(ExchangeOf100Eur)).Text.Should().StartWith(
+                "Exchange — 100.00 EUR (Cash EUR) → 11700.00 RSD (Cash RSD) · 1 EUR = 117.0000 RSD\n");
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = saved;
+        }
+    }
+
+    const string Crossed = "is now";
+
+    [Fact]
+    public void An_exchange_that_takes_the_source_below_zero_asks_what_is_missing()
+    {
+        var transfer = Legs("Cash EUR", Eur(1100m), Eur(-1000m), "Cash RSD", Rsd(128700m), Rsd(140400m),
+            fromBalanceWithoutThis: 100m);
+
+        Echo.Compose(TransferRecord(transfer)).Text.Should().Be(
+            "Exchange — 1100.00 EUR (Cash EUR) → 128700.00 RSD (Cash RSD) · 1 EUR = 117.0000 RSD\n"
+            + "Cash EUR · balance -1000.00 EUR\n"
+            + "Cash RSD · balance 140400.00 RSD\n"
+            + "Cash EUR is now -1000.00 EUR — a missing exchange or income?");
+    }
+
+    [Fact]
+    public void A_source_at_exactly_zero_without_the_transfer_has_crossed()
+    {
+        var transfer = Legs("Raiffeisen RSD", Rsd(5000m), Rsd(-5000m), "Cash RSD", Rsd(5000m), Rsd(5000m),
+            fromBalanceWithoutThis: 0m);
+
+        Echo.Compose(TransferRecord(transfer)).Text.Should().EndWith(
+            "\nRaiffeisen RSD is now -5000.00 RSD — a missing exchange or income?");
+    }
+
+    [Fact]
+    public void A_source_that_was_already_negative_stays_quiet()
+    {
+        var transfer = Legs("Visa RSD", Rsd(5000m), Rsd(-25000m), "Cash RSD", Rsd(5000m), Rsd(5000m),
+            fromBalanceWithoutThis: -20000m);
+
+        Echo.Compose(TransferRecord(transfer)).Text.Should().NotContain(Crossed);
+    }
+
+    // Backdated before a checkpoint on the source: the checkpoint absorbs it, so the transfer moved nothing on
+    // that wallet, and its balance was below zero with or without it.
+    [Fact]
+    public void A_backdated_transfer_absorbed_by_a_later_checkpoint_stays_quiet()
+    {
+        var transfer = Legs("Cash EUR", Eur(100m), Eur(-50m), "Cash RSD", Rsd(11700m), Rsd(23700m),
+            fromBalanceWithoutThis: -50m);
+
+        Echo.Compose(TransferRecord(transfer)).Text.Should().NotContain(Crossed);
+    }
+
+    [Fact]
+    public void A_source_left_at_exactly_zero_has_not_crossed()
+    {
+        var transfer = Legs("Raiffeisen RSD", Rsd(5000m), Rsd(0m), "Cash RSD", Rsd(5000m), Rsd(5000m),
+            fromBalanceWithoutThis: 5000m);
+
+        Echo.Compose(TransferRecord(transfer)).Text.Should().NotContain(Crossed);
+    }
+
+    [Fact]
+    public void A_source_with_no_balance_without_this_transfer_stays_quiet()
+    {
+        var transfer = Legs("Cash EUR", Eur(1100m), Eur(-1000m), "Cash RSD", Rsd(128700m), Rsd(140400m));
+
+        Echo.Compose(TransferRecord(transfer)).Text.Should().NotContain(Crossed);
+    }
+
+    [Fact]
+    public void Only_the_balance_in_the_transfers_own_currency_counts()
+    {
+        // The RSD entry first on purpose: without the currency filter the first entry is what would be read.
+        var transfer = ExchangeOf100Eur with { FromBalances = [Rsd(-50m), Eur(20m)], FromBalanceWithoutThis = 120m };
+
+        Echo.Compose(TransferRecord(transfer)).Text.Should().NotContain(Crossed);
+    }
+
+    [Fact]
+    public void A_source_with_no_balance_in_the_transfers_currency_stays_quiet()
+    {
+        var transfer = ExchangeOf100Eur with { FromBalances = [Rsd(-50m)], FromBalanceWithoutThis = 120m };
+
+        Echo.Compose(TransferRecord(transfer)).Text.Should().NotContain(Crossed);
+    }
+
+    [Fact]
+    public void Cancel_and_restore_turn_the_crossing_line_off_and_on_again()
+    {
+        var transfer = Legs("Cash EUR", Eur(100m), Eur(-50m), "Cash RSD", Rsd(11700m), Rsd(23700m),
+            fromBalanceWithoutThis: 50m);
+
+        Echo.Compose(TransferRecord(transfer, TransactionStatus.Cancelled)).Text.Should().NotContain(Crossed);
+        Echo.Compose(TransferRecord(transfer, TransactionStatus.Completed)).Text
+            .Should().EndWith("\nCash EUR is now -50.00 EUR — a missing exchange or income?");
+    }
+
+    [Fact]
+    public void A_foreign_spending_charged_at_the_wallets_terms_shows_the_charge_its_rate_and_its_fee()
+    {
+        var echo = Echo.Compose(KaspiSpending([Taxi, UsdPurchaseFee(156m)], [UsdCharge()]));
+
+        echo.Text.Should().Be(
+            "Recorded — Kaspi KZT · balance 184244.00 KZT\n"
+            + "• taxi — 30.00 USD · Transport\n"
+            + "\n"
+            + "Total: 30.00 USD\n"
+            + "30.00 USD → charged 15600.00 KZT (1 USD = 520.0000 KZT, wallet rate) + fee 156.00 KZT");
+        echo.Actions.Should().Equal(RecordAction.Cancel, RecordAction.Edit);
+    }
+
+    [Fact]
+    public void A_stated_charge_says_stated_and_shows_the_rate_it_works_out_to()
+    {
+        var charge = UsdCharge(charged: 15400m, fee: 154m, rate: 513.333333333333m, source: ChargeSource.Stated);
+
+        Echo.Compose(KaspiSpending([Taxi, UsdPurchaseFee(154m)], [charge])).Text.Should().EndWith(
+            "\n30.00 USD → charged 15400.00 KZT (1 USD = 513.3333 KZT, stated) + fee 154.00 KZT");
+    }
+
+    [Fact]
+    public void A_charge_that_cost_no_fee_names_no_fee()
+    {
+        Echo.Compose(KaspiSpending([Taxi], [UsdCharge(fee: 0m)])).Text.Should().EndWith(
+            "\n30.00 USD → charged 15600.00 KZT (1 USD = 520.0000 KZT, wallet rate)");
+    }
+
+    [Fact]
+    public void Each_foreign_currency_gets_its_own_line_in_code_order()
+    {
+        var museum = new RecordedLine("museum", new Money(20m, CurrencyCode.Eur), "entertainment", "Entertainment", null);
+
+        Echo.Compose(KaspiSpending([Taxi, museum, UsdPurchaseFee(156m)], [UsdCharge()])).Text.Should().EndWith(
+            "\nTotal: 20.00 EUR, 30.00 USD\n"
+            + "20.00 EUR not converted — set a EUR rate for Kaspi KZT on /wallets, or correct this record to apply it\n"
+            + "30.00 USD → charged 15600.00 KZT (1 USD = 520.0000 KZT, wallet rate) + fee 156.00 KZT");
+    }
+
+    [Fact]
+    public void A_cancelled_foreign_spending_keeps_its_charge_line()
+    {
+        var echo = Echo.Compose(KaspiSpending([Taxi, UsdPurchaseFee(156m)], [UsdCharge()], TransactionStatus.Cancelled));
+
+        echo.Text.Should().StartWith("Cancelled — Kaspi KZT · balance 184244.00 KZT\n• taxi — 30.00 USD · Transport\n");
+        echo.Text.Should().EndWith("\n30.00 USD → charged 15600.00 KZT (1 USD = 520.0000 KZT, wallet rate) + fee 156.00 KZT");
+        echo.Actions.Should().Equal(RecordAction.Restore);
+    }
+
+    [Fact]
+    public void A_foreign_income_line_still_says_it_is_not_converted()
+    {
+        var salary = new RecordedLine("зарплата", new Money(2000m, CurrencyCode.Eur), "salary", "Salary", null);
+
+        Echo.Compose(Record(kind: TransactionKind.Income, lines: [salary])).Text
+            .Should().EndWith("\nNot in the wallet's currency — no conversion yet.");
+    }
+
+    // 1 RSD = 0.008 EUR is how the charge stores it; the echo turns it round to read "1 dearer = N cheaper".
+    [Fact]
+    public void A_charge_at_a_rate_below_one_reads_from_the_dearer_currency()
+    {
+        var dinner = new RecordedLine("dinner", Rsd(1250m), "food-drink", "Food & Drink", null);
+        var charge = new ChargeView(CurrencyCode.Rsd, 1250m, Eur(10m), Eur(0m), 0.008m, FeeTerms.None,
+            ChargeSource.WalletTerms);
+
+        var record = Record(lines: [dinner], walletCurrency: CurrencyCode.Eur, walletBalances: [Eur(390m)])
+            with { Charges = [charge] };
+
+        Echo.Compose(record).Text.Should().EndWith("\n1250.00 RSD → charged 10.00 EUR (1 EUR = 125.0000 RSD, wallet rate)");
+    }
+
+    [Theory]
+    [InlineData(RecordFailureReason.MissingReceivedAmount, "Exchange not recorded: how much did you get? Reply with the amount or the rate.")]
+    [InlineData(RecordFailureReason.SameWallet, "Transfer not recorded: both sides are the same wallet — which wallet did it go to?")]
+    [InlineData(RecordFailureReason.LegCurrencyMismatch,
+        "Transfer not recorded: a wallet holds another currency — create a wallet in that currency or name one.")]
+    [InlineData(RecordFailureReason.InvalidRate, "Exchange not recorded: couldn't use that rate. Reply with the amount you got.")]
+    [InlineData(RecordFailureReason.InvalidFee, "Transfer not recorded: couldn't place that fee. Reply with the amounts.")]
+    [InlineData(RecordFailureReason.InvalidAmount, "Transfer not recorded: an amount wasn't positive. Reply with the amounts.")]
+    [InlineData(RecordFailureReason.SlipIncomplete, "Slip read, but a figure is unreadable — reply with it.")]
+    public void A_failed_first_reading_says_why_it_was_not_recorded_and_offers_edit(RecordFailureReason reason, string text)
+    {
+        var echo = Echo.Compose(Record(TransactionStatus.Failed, lines: []) with { FailureReason = reason });
+
+        echo.Text.Should().Be(text);
+        echo.Actions.Should().Equal(RecordAction.Edit);
+    }
+
+    [Fact]
+    public void A_reply_to_a_failed_reading_that_fails_too_names_only_its_own_reason()
+    {
+        var record = Record(TransactionStatus.Failed, lines: []) with { FailureReason = RecordFailureReason.MissingReceivedAmount };
+
+        var echo = Echo.ComposeCorrectionFailure(record, RecordFailureReason.InvalidRate);
+
+        echo.Text.Should().Be("Correction not applied — Exchange not recorded: couldn't use that rate. Reply with the amount you got.");
+        echo.Actions.Should().Equal(RecordAction.Edit);
+    }
+
+    [Fact]
+    public void A_failed_correction_with_a_reason_names_it_above_the_unchanged_record()
+    {
+        var echo = Echo.ComposeCorrectionFailure(TransferRecord(ExchangeOf100Eur), RecordFailureReason.InvalidRate);
+
+        echo.Text.Should().Be(
+            "Correction not applied — Exchange not recorded: couldn't use that rate. Reply with the amount you got.\n\n"
+            + "Exchange — 100.00 EUR (Cash EUR) → 11700.00 RSD (Cash RSD) · 1 EUR = 117.0000 RSD\n"
+            + "Cash EUR · balance 400.00 EUR\n"
+            + "Cash RSD · balance 23700.00 RSD");
+        echo.Actions.Should().Equal(RecordAction.Cancel, RecordAction.Edit);
+    }
+
+    [Fact]
+    public void A_failed_correction_asking_for_the_received_amount_names_the_records_own_destination_currency()
+    {
+        Echo.ComposeCorrectionFailure(TransferRecord(ExchangeOf100Eur), RecordFailureReason.MissingReceivedAmount).Text
+            .Should().StartWith(
+                "Correction not applied — Exchange not recorded: how much RSD did you get? Reply with the amount or the rate.\n\n"
+                + "Exchange — 100.00 EUR (Cash EUR)");
+    }
+
+    [Fact]
+    public void A_cancelled_record_that_had_failed_keeps_its_reason_and_offers_only_restore()
+    {
+        var echo = Echo.Compose(Record(TransactionStatus.Cancelled, lines: []) with { FailureReason = RecordFailureReason.InvalidFee });
+
+        echo.Text.Should().Be("Cancelled — Transfer not recorded: couldn't place that fee. Reply with the amounts.");
+        echo.Actions.Should().Equal(RecordAction.Restore);
     }
 }
