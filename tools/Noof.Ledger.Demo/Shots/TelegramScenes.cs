@@ -168,6 +168,11 @@ internal static class TelegramScenes
                 Photo("13:40"),
                 Reply(echo.ComposeSlipNeedsConfirmation(SlipView(MockData.HeldSlipTransactionId)), "13:40"),
             ]),
+            new("slip-incomplete", "An exchange slip whose amount received could not be read",
+            [
+                Photo("13:55"),
+                Reply(echo.Compose(IncompleteSlip()), "13:55"),
+            ]),
             new("health", "/health",
             [
                 Operator("/health", "08:00"),
@@ -242,6 +247,19 @@ internal static class TelegramScenes
             CaptureKind = CaptureKind.Photo,
             Slip = new SlipFacts("Menjačnica Zlatnik", "PZ-2026-0917",
                 new ExtractedExchange(100.00m, "EUR", 11700.00m, "RSD", 117.0000m, null, null, "PZ-2026-0917")),
+        };
+
+    // No rate was read either, so the amount received can't be worked out from it.
+    static CategorizationSubject IncompleteSlip() =>
+        Expense(string.Empty, string.Empty, CurrencyCode.Rsd, 0m, []) with
+        {
+            Status = TransactionStatus.Failed,
+            CaptureKind = CaptureKind.Photo,
+            WalletCurrency = null,
+            WalletBalances = null,
+            FailureReason = RecordFailureReason.SlipIncomplete,
+            Slip = new SlipFacts("Menjačnica Zlatnik", "PZ-2026-0919",
+                new ExtractedExchange(100.00m, "EUR", null, "RSD", null, null, null, "PZ-2026-0919")),
         };
 
     // The same held slip the demo database holds, so the picture and its trace page agree.

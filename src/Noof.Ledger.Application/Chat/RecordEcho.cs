@@ -359,7 +359,7 @@ internal sealed class RecordEcho : IRecordEcho
         _ => problem.ToString(),
     };
 
-    // The contract's plain sentence when nothing names the missing figure (a SlipIncomplete record with no slip row).
+    // The plain sentence is for a SlipIncomplete record with no slip row, where nothing names the missing figure.
     static string SlipIncompleteText(SlipFacts? slip) =>
         SlipMissingClause(slip) is { } missing
             ? $"Slip read, but {missing} is unreadable — reply with it."
