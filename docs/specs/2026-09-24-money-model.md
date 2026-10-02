@@ -46,6 +46,10 @@ lines per currency; an income's are plus. Entries are rewritten in the same data
 rewrites the lines, and an integrity test asserts they agree. `LineItem` stays the categorised
 breakdown. Phase 7 transfers become two entries with no redesign.
 
+*Amended by Phase 7 — `docs/specs/2026-10-01-transfers-and-exchange-design.md` (2026-10-01): `Transfer = 3` and
+`EntryRole.Fee = 1` are declared; a transfer's legs live in a `transfers` row and a fee is a line
+item.*
+
 **M6 — A balance statement is a checkpoint, not an adjustment entry.** The operator's *"на райфе 45
 тысяч"* becomes a `BalanceCheck` transaction with one `balance_checks` row: wallet, currency, the
 stated amount, and — for the echo and the history — the balance the app computed just before it. **A
@@ -77,6 +81,10 @@ read straight into `decimal` (CLAUDE.md §4 *The model*). Prompt tuning waits fo
 "курсы зависят от банка — отложи".)* Its entry keeps the spending's currency, so the wallet's balance
 shows it as a separate currency line — visible, exact, and not invented. The echo adds *"not in the
 wallet's currency — no conversion yet"*. `docs/backlog/` records the conversion work.
+
+*Amended by Phase 7 — `docs/specs/2026-10-01-transfers-and-exchange-design.md` (2026-10-01): a spending is now
+charged to its wallet at the wallet's own terms for that currency, or at a stated charge (T-6, T-7);
+M10 still holds for income, and for a currency the wallet has no terms for.*
 
 **M11 — What the operator sees.**
 - Echo, expense: `Recorded — Raiffeisen RSD · balance 45 230.00 RSD`; income: `Income — Wise EUR ·

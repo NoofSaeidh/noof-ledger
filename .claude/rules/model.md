@@ -23,6 +23,11 @@ paths:
 - Forced tool use is unsupported on Claude Opus 5.5, Fable 5.1 and Mythos 5.1 — `docs/decisions/p3-2-forced-tool-use-model-restrictions.md`.
 - **Amounts are JSON numbers read straight into `decimal`** — from the argument's `JsonElement`,
   never via `double`.
+- **The model never does arithmetic on money** *(Phase 7, T-12)*. It copies amounts, rates and fees
+  as the operator said them — `record_transaction`'s `transfer` and `charged` — and C# converts,
+  adds a fee to a leg or takes it out, and prices a charge (`TransferRequest.TrySettle`,
+  `ChargeTerms` in Domain). A new money figure derived from what the model read is computed in C#,
+  never asked of the model.
 - **Never set temperature.** It is `[Obsolete]` in the SDK and therefore a compile error here.
   Determinism comes from the schema's enums.
 - **Nothing depends on an AI provider except its factory**: `IChatClientFactory` for the model and

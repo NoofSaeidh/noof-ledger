@@ -2,8 +2,9 @@
 
 > **Status:** spec approved (`docs/specs/2026-09-24-money-model.md`,
 > `docs/specs/2026-09-24-observability-design.md`,
-> `docs/specs/2026-09-25-receipts-design.md`); **Phases 0, 0b, 1A, 1B, 1C, 1D, 2, 3, 4, 5
-> and 6 complete** — solution, EF Core model and migrations, PostgreSQL money-storage gate, cookie
+> `docs/specs/2026-09-25-receipts-design.md`,
+> `docs/specs/2026-10-01-transfers-and-exchange-design.md`); **Phases 0, 0b, 1A, 1B, 1C, 1D, 2, 3,
+> 4, 5, 6 and 7 complete** — solution, EF Core model and migrations, PostgreSQL money-storage gate, cookie
 > authentication as the sole mode, the `user set-password` verb, the loopback interlock, a Blazor
 > Server shell, Telegram capture with a durable queue, natural-language capture, voice notes
 > transcribed by Groq's whisper-large-v3, the money model (every wallet's balance — opening balance,
@@ -31,13 +32,31 @@
 > the Receipts health check turns amber for 24 h). Every receipt line becomes its own categorised line
 > item, in the receipt's own order; the shop is a merchant row keyed by its tax id, so the same shop
 > next time costs no merchant tokens. Transactions carry a `Kind`
-> (`Expense`/`Income`/`BalanceCheck`); expense and income transactions own signed double-entry-lite
-> `entries`; a balance statement is a `balance_checks` checkpoint; a wallet's balance is computed by the
+> (`Expense`/`Income`/`BalanceCheck`/`Transfer`); expense, income and transfer transactions own signed
+> double-entry-lite `entries`; a balance statement is a `balance_checks` checkpoint; a wallet's balance is computed by the
 > `wallet_balances` SQL view and read back by `IBalanceReadModel`, never stored. The model's answer tool
 > is `record_transaction` (was `record_spending`) and now names a wallet and, for a balance statement,
-> the stated amount. `/wallets` manages wallets and each one's card/cash payment default; income and
-> balance statements are ordinary messages to the bot. The app also backs itself up daily —
-> `pg_dump -Fc` into `%LOCALAPPDATA%\NoofLedger\backups`, the newest 14 kept, every run logged to
+> the stated amount, or for a transfer both legs. `/wallets` manages wallets and each one's card/cash payment default; income and
+> balance statements are ordinary messages to the bot. And now money that moves between the operator's
+> own wallets: a withdrawal, a top-up, a transfer between banks or a currency exchange is one `Transfer`
+> with both legs in a `transfers` row, each leg in its wallet's own currency and holding what that wallet
+> actually moved; a fee is a `Fees & Charges` line item on the leg that paid it, the only part of a
+> transfer that counts as spending. The model copies the amounts, rate and fee as said and C# does the
+> arithmetic; an exchange told without the amount received or a rate is not recorded, and the bot asks
+> for it. A spending in a currency other than its wallet's is charged to the wallet at that wallet's own
+> terms for the currency — a rate and a percentage, fixed or minimum fee, set on `/wallets` — or at the
+> charge the operator states, and the charge is frozen with the record, so changing the terms never
+> reprices history. A photographed exchange-office slip is read by vision and recorded as an exchange
+> between the cash wallets of its two currencies, with the office as the venue; it is evidence the
+> operator corrects like a spoken amount (unlike a fiscal receipt), a duplicate slip is caught by its
+> number, a slip whose figures disagree waits for "Record anyway", and one with an unreadable amount
+> asks for it. Card and cash payment defaults are per currency. Home has two lenses: *This month*
+> shows spending and income (a new *Received* line) without transfer principals, and *Transfers this
+> month* lists the month's transfers and exchanges with the fees they cost; the *Recent* list switches
+> between *Spending & income*, *Transfers* and *All* and marks each row's kind. `/transactions` can hide
+> transfers (a checkbox, or `?view=spending` / `?view=transfers`) and its wallet filter matches either
+> leg; the trace page shows a transfer's legs, fee, rate and venue, and a foreign spending's charge.
+> The app also backs itself up daily — `pg_dump -Fc` into `%LOCALAPPDATA%\NoofLedger\backups`, the newest 14 kept, every run logged to
 > `backup_runs` — and `ops/restore-check.ps1` proves a dump restores to the same balances, checked so
 > far against a template clone; the one check against the live ledger itself is the operator's to run
 > (`ops/RUNBOOK.md`). The full `dotnet test --solution` suite passes, with the live-only tests
@@ -47,7 +66,7 @@
 > needs Chromium present. Live suites stay skipped unless `NOOF_LEDGER_LIVE_ANTHROPIC_KEY` /
 > `NOOF_LEDGER_LIVE_GROQ_KEY` + `NOOF_LEDGER_LIVE_VOICE_FILE` are set; `ops/publish.ps1` produces a
 > runnable host. **`run.ps1` in the repo root is the one entry point for launching and operating the
-> app** (`.\run.ps1 help`) — `dotnet run` and the published exe now behave the same. Cross-currency
-> conversion, transfers, exchange-office slips and editing receipt lines remain future phases.
+> app** (`.\run.ps1 help`) — `dotnet run` and the published exe now behave the same. Editing receipt
+> lines, and correcting the amounts of a vision-read fiscal receipt, remain future phases.
 > `.\run.ps1 demo` runs the app on a mock-data database with nothing to configure, and
 > `.\run.ps1 screenshots` keeps `docs/screenshots/` current.

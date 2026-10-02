@@ -385,8 +385,10 @@ default becomes per currency (T-13). Inline `MudAlert` feedback only (render-mod
   also settles M-6 (income and balance statements looking like spending).
 - **Balances** — unchanged; the view already counts transfers.
 
-**`/transactions`** — a URL preset without transfers; the wallet filter matches either leg (through
-entries, not `transactions.wallet_id`); the amounts column shows `−100.00 EUR → +11 700.00 RSD`.
+**`/transactions`** — a URL preset without transfers; the wallet filter matches either leg
+(`transactions.wallet_id` or a `transfers` leg on the wallet, A-16); the amounts column shows
+`−100.00 EUR → +11 700.00 RSD`. *(Corrected 2026-10-02 at the phase close: this line said "through
+entries, not `transactions.wallet_id`", which A-16 replaced.)*
 
 **Trace page** — the summary shows both legs, the fee and its leg, the rate, the venue and any charge
 with its source and snapshot; the revision history shows the transfer block and still reads snapshots
