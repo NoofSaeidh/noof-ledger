@@ -6,6 +6,7 @@ using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Application.Reporting;
 using Noof.Ledger.Domain;
+using Noof.Ledger.Persistence.Categorization;
 using Noof.Ledger.Persistence.Reporting;
 using Noof.Ledger.Persistence.Revisions;
 
@@ -120,28 +121,12 @@ internal sealed class EfTransactionTrace(LedgerDbContext db, IReceiptStore recei
         [
             .. charges
                 .OrderBy(charge => charge.Currency)
-                .Select(charge => ChargeViewOf(
-                    new ParsedCharge(
-                        charge.Currency, charge.ChargedAmount, charge.FeeAmount, charge.RateUsed, charge.FeePercent,
-                        charge.FeeFixed, charge.FeeMinimum, charge.Source),
-                    lineItems,
-                    walletCurrency)),
+                .Select(charge => ChargeViews.Of(charge, RolesAndAmounts(lineItems), walletCurrency)),
         ];
     }
 
-    // The one build for the charges stored today and those a revision snapshot kept, so the summary and the history
-    // cannot read a charge differently.
-    static ChargeView ChargeViewOf(ParsedCharge charge, IEnumerable<TraceLineItem> items, CurrencyCode walletCurrency) => new(
-        charge.Currency,
-        ForeignSum(items, charge.Currency),
-        new Money(charge.ChargedAmount, walletCurrency),
-        new Money(charge.FeeAmount, walletCurrency),
-        charge.RateUsed,
-        new FeeTerms(charge.FeePercent, charge.FeeFixed, charge.FeeMinimum),
-        charge.Source);
-
-    static decimal ForeignSum(IEnumerable<TraceLineItem> items, CurrencyCode currency) =>
-        items.Where(item => item.Role == EntryRole.Principal && item.Amount.Currency == currency).Sum(item => item.Amount.Amount);
+    static IEnumerable<(EntryRole Role, Money Amount)> RolesAndAmounts(IEnumerable<TraceLineItem> items) =>
+        items.Select(item => (item.Role, item.Amount));
 
     async Task<List<RevisionView>> HistoryAsync(Guid transactionId, CancellationToken cancellationToken)
     {
@@ -219,7 +204,7 @@ internal sealed class EfTransactionTrace(LedgerDbContext db, IReceiptStore recei
             : null;
 
         List<ChargeView> charges = snapshot.WalletId is { } recordWalletId && wallets.TryGetValue(recordWalletId, out var wallet)
-            ? [.. snapshot.Charges.Select(charge => ChargeViewOf(charge, items, wallet.Currency))]
+            ? [.. snapshot.Charges.Select(charge => ChargeViews.Of(charge, RolesAndAmounts(items), wallet.Currency))]
             : [];
 
         return new RevisionSnapshotView(
