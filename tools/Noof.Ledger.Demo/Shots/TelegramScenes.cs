@@ -157,6 +157,16 @@ internal static class TelegramScenes
                 Photo("09:20"),
                 Reply(echo.ComposeReceiptNeedsConfirmation(View(MockData.UnconfirmedReceiptTransactionId)), "09:20"),
             ]),
+            new("slip", "An exchange-office slip, recorded as an exchange between the two cash wallets",
+            [
+                Photo("13:15"),
+                Reply(echo.Compose(SlipExchange()), "13:15"),
+            ]),
+            new("slip-check", "An exchange slip whose figures don't match its printed rate",
+            [
+                Photo("13:40"),
+                Reply(echo.ComposeSlipNeedsConfirmation(HeldSlip()), "13:40"),
+            ]),
             new("health", "/health",
             [
                 Operator("/health", "08:00"),
@@ -222,4 +232,18 @@ internal static class TelegramScenes
         new(Guid.Empty, raw, MockData.TelegramChatId, 1, transfer.FromWalletName, TransactionStatus.Completed, Day, Day, lines ?? [],
             Kind: TransactionKind.Transfer, WalletCurrency: transfer.From.Currency, WalletBalances: transfer.FromBalances,
             WalletId: transfer.FromWalletId, Transfer: transfer);
+
+    static CategorizationSubject SlipExchange() =>
+        TransferRecord(string.Empty, Legs(
+            "Cash EUR", new Money(100.00m, CurrencyCode.Eur), 150.00m,
+            "Cash RSD", new Money(11700.00m, CurrencyCode.Rsd), 23700.00m) with { VenueName = "Menjačnica Zlatnik" }) with
+        {
+            CaptureKind = CaptureKind.Photo,
+            Slip = new SlipFacts("Menjačnica Zlatnik", "PZ-2026-0917",
+                new ExtractedExchange(100.00m, "EUR", 11700.00m, "RSD", 117.0000m, null, null, "PZ-2026-0917")),
+        };
+
+    static ExchangeSlipView HeldSlip() => new(
+        Guid.Empty, "123456789", "Menjačnica Zlatnik", MockData.At(18, 13, 40), "PZ-2026-0918",
+        new ExtractedExchange(100.00m, "EUR", 11650.00m, "RSD", 117.0000m, null, null, "PZ-2026-0918"));
 }
