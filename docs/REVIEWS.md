@@ -155,3 +155,12 @@ One line per review: confirmed findings by tag. Dated history, not status.
   boundary, the PR cut, health timeout cost [rejected]); 3 Codex only (`/bug` redelivery duplicates, a failing
   check blocking a report, unbounded snapshots); 4 Fable only (the boundary rule already existing, the CLI
   verb's wiring, dashboard Create duplicates [rejected], wallet currency immutability [rejected]).
+- **Phase 8a planning, implementation plan (`.superpowers/p8a-plan/`), 2026-10-02:** 2 by both (a double click
+  filing two reports or calling the model twice, the health check's 5 s budget unmeasured — to the operator); 5
+  Codex only (fiscal links in wallet and category names, Telegram ids in snapshotted log lines, a report about a
+  corrupt transfer unreadable through the trace reader, a Record anyway mid-run making a false Bug, the closing
+  worktree's paths); 5 Fable only (database test classes of Host/Demo run outside the suite lock, a revoked key
+  burning a report's attempts, the clipboard read-back in headless Chromium, a new bot reply without its scene, a
+  wrong contract sentence), plus 13 minor left as they are. Rejected: composite `--filter` unverified (Fable),
+  the boundary regex matching constructor parameters (Fable), a non-UTC `@idleSince` (Fable), the CLI host under
+  Development (Codex). Fable's first run hit the session limit and was re-run after the reset.

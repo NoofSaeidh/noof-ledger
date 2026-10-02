@@ -2,7 +2,9 @@
 
 **Status:** designed with the operator in conversation 2026-10-02 and approved ("начинай"); amended the
 same day after the spec reviews (Fable 5.1 and a Codex adversarial review, run in parallel) with the
-operator's answers to the decisions they raised (IR-10 – IR-12).
+operator's answers to the decisions they raised (IR-10 – IR-12); amended again at implementation planning
+(same day), with the plan reviews (Fable 5.1 and a Codex adversarial review, run in parallel) folded in —
+see *Planning amendments* below; where it and an earlier paragraph differ, the amendment wins.
 
 This is the first half of Phase 8 ("Integrity + explainer") in the phase table of
 `2026-09-22-natural-language-capture.md`, which the operator split in two: **8a** finds what is wrong
@@ -51,10 +53,42 @@ dashboard, a CLI verb, or a skill.
   *lines don't sum to the receipt's total* (the operator already accepted such a receipt through
   "Record anyway").
 
+## Planning amendments (2026-10-02)
+
+Taken while the implementation plan was written against the code, and from the plan reviews. The plan itself
+is scratch in the git-ignored `.superpowers/`; these are the decisions it changed. The paragraph an amendment
+changes is marked with its number.
+
+| # | Amendment | Why |
+|---|---|---|
+| P-1 | The PR cut is 12 PRs, replacing §4's provisional nine: 1 → 1a (every Application contract of the phase) + 1b (I-1, I-2); 4 → 4a (the Markdown) + 4b (the table and store); 6 → 6a (`/bug`, Close report) + 6b (the worker); 7 follows 5. A PR may exceed the ~500-line guide. | PR 1 was ~1 300 lines and PR 6 spanned two leaf assemblies; 7 shares the E2E class and the demo writer with 5. |
+| P-2 | One check per record: the checks run I-2 → I-1 → I-3 → I-4 and a record keeps only the earliest check's finding. I-1, I-3 and I-4 give at most one finding per record (I-1 lists every discrepancy as facts); I-2 one per record and condition. | The moved queries overlap — a moved entry is two `disagreeing` rows and a `misplaced` one; a charge on an income is both I-2 and I-1. A record shows its shape fault first, then any I-1 disagreement once that is fixed. |
+| P-3 | I-1's queries are reshaped, not re-ruled: rows per record, wallet, currency and role, a transfer's fee as a per-record sum of its `Fee` lines. The write-path test calls I-1 **and I-2** and expects no finding from either. | The shape clauses of `brokenTransfers` moved to I-2 and must stay in the oracle; a `LEFT JOIN` on fee lines multiplied rows. |
+| P-4 | A record's clock is its last activity — the latest of its `created_at`, its jobs' `updated_at` and its revisions' `created_at`. I-3's 10 minutes and I-4's 24 hours are measured from it; a clock ahead of now is never a finding and reads as age 0. | `transactions` has no `updated_at`; a Restore, a reply or a failed retry restarts the wait, so a record just touched is never flagged at once. |
+| P-5 | A record ever cancelled is never I-3. `Captured` with a `Cancel` revision, no `Pending`, `Claimed` or `Failed` job, not awaiting confirmation and idle over a day, it is I-4's fourth case: restored, but nothing will process it — Cancel or a correction reply answers it. | Restore queues no work, so the app's own cancels (a duplicate receipt, a non-money receipt kind) followed by the operator's Restore would turn the tile red for no fault of the code. |
+| P-6 | I-4's failed job: "later" is by `created_at`; the record has no `Pending` or `Claimed` job; the finding names the latest such job, its last error's first line cut to 500 characters. "The amount the record holds": its transfer's `From`, else its receipt's total above zero, else its `Principal` lines summed per currency, else none. | The spec left these open. |
+| P-7 | A fifth fact kind, `SinceFact`, holds the instant a wait started; C# formats the age as of now on the dashboard and as of the snapshot in a report. `DateFact` holds a date. | None of the four kinds carries an age that keeps its meaning in a stored snapshot. |
+| P-8 | The Integrity check reads `1 bug found` / `N bugs found`, `1 waiting on you` / `N waiting on you`, `No findings`; while the database is not ready it answers `Waiting for the database` (a Warning) without a query. Order: after Receipts. | As the Migrations check does: a health run never touches a database that is not ready. |
+| P-9 | `bug_reports.number` is `GENERATED ALWAYS AS IDENTITY`; `transaction_id` is a `RESTRICT` foreign key; check constraints tie the Telegram ids to the source, `closed_at` to the status and `Done` to an explanation. A redelivered `/bug` is looked up before inserting; the unique index is the race backstop. | A report is evidence, like a revision; a redelivery burns no number. |
+| P-10 | The record's summary is composed by Persistence and also holds the record's raw text and its revisions, URL-stripped — wallet and category names included. | The trace page's summary lacks the failure reason and is unstripped; the explainer is given the raw text and the revisions. |
+| P-11 | No lease on a report: the worker reads the oldest due one; one host runs one worker, and a second process explaining a report twice is accepted. Replaces §4's "the worker's claim". | The table has no claim columns; a crash mid-explain leaves the report `Pending`. |
+| P-12 | The reply's wording where the spec left it open: an unlinked report says `1 finding in the ledger` / `N findings in the ledger`; a snapshot whose findings could not be collected says `Integrity findings could not be collected`; the explanation is cut to 3 500 characters; a `Failed` explanation's reply has no button. | Telegram's 4 096-character limit would otherwise fail the send forever. |
+| P-13 | Every reply to a `/bug` — `Bug report #N saved.` and the explanation — is sent even when that message was deleted. A failed send is retried every tick, with a Warning once per report and Debug after. | A deleted `/bug` would otherwise block delivery forever; an unreachable chat must not write a Warning every 15 s. |
+| P-14 | Close report confirms itself: the owner's press is answered, closes the report and edits the reply to add `Bug report #N closed.` without the button. A stranger's press gets no answer at all. | Without feedback the operator cannot tell a press worked. |
+| P-15 | `/bug` has its own matcher: `/bug`, `/bug <text>`, `/bug@name`, `/bug@name <text>`, any case, the text over several lines. `/bugfix 500` and `/bugs` are captured as spending; a photo captioned `/bug` stays a receipt. | `/health`'s matcher is exact; photos are dispatched before text. |
+| P-16 | `setMyCommands` registers `health` and `bug` only when the token is new and an owner exists, as for `/health` today: a bot claimed later gets its menu at the next restart. | Unchanged behaviour; deferred to the backlog at the close. |
+| P-17 | The CLI verb is `bugs export [--all] [--output <directory>]`. Any arguments starting with `bugs` are the verb — a bad one prints its usage and exits 2, never starting the web host. With nothing to export it says so, writes no file and exits 0. Its failure lines use an ASCII ` - `. | `.\run.ps1 bugs export` passes its own output folder; an em dash prints as `?` in a Windows console's code page. |
+| P-18 | Explain → Create is not driven by E2E: the page's flow is a Web class tested from Host.Tests with a fake explainer and store. E2E covers the page with a seeded finding, Explain with no model key ("Couldn't explain this right now"), `/bugs` with Close/Reopen and the download, and the Integrity row. | The published E2E host cannot take a fake explainer, and no test-only configuration key may exist. |
+| P-19 | The demo seeds no Bug: one Waiting-on-you finding — a failed exchange waiting for its amount, dated by the real clock — and the records that could wait on the operator are touched at seeding, so the demo tile is amber (`Integrity — 1 waiting on you`) whatever the day. Replaces §4's "its violation seeded by raw SQL". | A permanently red tile in the main screenshot is wrong (the operator left the choice to the agent). The Bugs section is shown by tests. |
+| P-20 | The skill carries `disable-model-invocation: true`, so only the operator's `/bugs` starts it; `CLAUDE.md`'s `noof_ledger` rule names it as the explicit request to read the ledger through the verb. | The model could otherwise start the skill, and read the real ledger, on its own. |
+| P-21 | A refused account (401/402/403 — a revoked key, no credit) spends no attempt: the worker pauses explaining for five minutes, and the report stays `Pending`. | Plan review: every categorisation worker already does this; three 401s would otherwise end each report `Failed`, though the key may be fixed an hour later. |
+| P-22 | A report's log lines hold no Telegram id: a `…ChatId`, `…MessageId` or `…FileId` property, and its value wherever it appears in the message or exception, read `[telegram id]`. | Plan review: existing events log `to bot message {BotMessageId}` and `from chat {ChatId}`, and `SecretRedactor` leaves numbers alone. |
+| P-23 | A report reads its revisions straight from `transaction_revisions` — time, kind, and the instruction or the status change — not through the trace page's reader; no snapshot names are shown. Replaces §3's "their names resolved to today's". | Plan review: that reader throws on a transfer whose fee is in another currency than its leg — an I-2 fault, the very record a report is about — and would make that report and the whole export unreadable. |
+
 ## 1. Checks
 
 Each check is one SQL query; each row it returns is one finding. A defect is a finding of one check
-only.
+only (P-2).
 
 ### Bugs — any finding means our code wrote contradictory data (`Failing`)
 
@@ -68,7 +102,7 @@ an expense's charge fees differ from its `Fee` lines in the wallet's currency (t
 clauses of `brokenTransfers` and `mispricedCharges` belong to I-2. The queries move into production
 code; the write-path test then calls I-1 and expects no finding, keeping its guards that entries,
 transfers and charges exist — so its oracle stays the one production code uses, and stays independent
-of `LedgerPostings`, which writes the entries.
+of `LedgerPostings`, which writes the entries (P-3).
 
 **I-2 · A record's facts do not match its kind.** Any of:
 - a `Transfer` without a `transfers` row, or a `transfers` row on a record of another kind;
@@ -86,7 +120,7 @@ Facts: which condition, and the values that disagree; one finding per record and
 
 **I-3 · Stuck in the pipeline.** A record `Captured` for more than 10 minutes with no `Pending`,
 `Claimed` or `Failed` job, unless it is a receipt or slip awaiting confirmation. Facts: the status, the
-age, and the kinds of its jobs.
+age, and the kinds of its jobs (P-4, P-5).
 
 **Awaiting confirmation** is `IsAwaitingConfirmationAsync`, never a SQL copy: a `Vision` receipt (a
 fiscal QR receipt never waits) with no `CategorizeReceipt` job, or a `Vision` exchange slip with no
@@ -107,7 +141,7 @@ status; I-3 and I-4 add their own.
   `Failed` nor `Cancelled`, with no later `Succeeded` job on that record.
 
 Cancel clears every I-4 finding on its record. Facts: the reason, or the job kind and its last error's
-first line; the age; the date and the amount the record holds, when it holds one.
+first line; the age; the date and the amount the record holds, when it holds one (P-4, P-5, P-6).
 
 ### Shape
 
@@ -117,7 +151,7 @@ first line; the age; the date and the amount the record holds, when it holds one
   and `IntegrityGroup` (`Bug`, `WaitingOnYou`).
 - `IntegrityFinding` — `Check`, `Group`, optional `TransactionId`, `WalletId`, `JobId`, and `Facts`.
 - `IntegrityFact` — a named, typed fact: `MoneyFact(decimal, CurrencyCode)`, `DateFact`,
-  `TextFact`, `CountFact`. No `double`, no pre-formatted amount; C# formats at display.
+  `TextFact`, `CountFact` (P-7). No `double`, no pre-formatted amount; C# formats at display.
 - `IIntegrityChecks` — `FindAllAsync(ct)` and `FindForTransactionAsync(transactionId, ct)` (the same
   queries filtered to one record, for `/bug`).
 
@@ -129,7 +163,7 @@ runs them one at a time. "Now" comes from `TimeProvider`.
 `AddNoofPersistence`) runs every check: any Bug → `Failing`, "N bugs found"; only Waiting-on-you →
 `Warning`, "N waiting on you"; none → `Ok`. The Home tile, `/diagnostics` and the bot's `/health` get
 it unchanged, with the existing 30 s cache and 5 s timeout; a timeout or an exception is reported the
-way `SystemHealth` reports any check's.
+way `SystemHealth` reports any check's (P-8).
 
 **Boundary.** `HealthCheckBoundaryTests.No_health_check_reaches_a_model` already fails when an
 `ISystemHealthCheck` names `IChatClient` or the model stack; it is extended to the files implementing
@@ -146,7 +180,7 @@ this right now" (logged as a Warning, without the model's text).
 - each finding with its check's fixed English description (what it catches and what it usually
   means) and its facts, formatted by C#;
 - for `/bug`: the operator's text and the record's summary (kind, date, wallet or both legs, lines,
-  amounts, status, failure reason).
+  amounts, status, failure reason) (P-10).
 
 A `/bug` without a record sends at most the first 20 findings, in check order, and says how many there
 were in total.
@@ -191,22 +225,22 @@ The model is called only when the operator presses *Explain* or sends `/bug`.
 | `explanation text null`, `looks_like_bug boolean null` | |
 | `reply_message_id integer null` | the bot's reply carrying the explanation; null until delivered |
 
-`(telegram_chat_id, telegram_message_id)` is unique where set.
+`(telegram_chat_id, telegram_message_id)` is unique where set (P-9).
 
 Findings disappear once fixed and log rows by their level's retention (configurable; Debug defaults to
 one day, and database logging may be Off), hence the snapshots; a missing log line is not evidence that
 nothing happened. `log_lines` holds the linked record's rows, newest first, at most 200, each message
 and property cut to 2 000 characters, with the number omitted; an unlinked report holds the
-Warning-and-above rows of the hour before it was filed, under the same limits. Snapshots stay with the
+Warning-and-above rows of the hour before it was filed, under the same limits (P-22). Snapshots stay with the
 report, open or closed. Revisions are never deleted and are read live, their names resolved to
-today's. One migration in this phase, this table.
+today's (P-23). One migration in this phase, this table.
 
 ### `/bug` in Telegram
 
 - Owner only: recognised beside `/health`, before the owner gate's claim and before the reply branch (a
   reply would otherwise become a `Correct` job), and authorised by `TelegramOwnerGate.IsOwnerAsync`,
   never `IsAllowedAsync` — `/bug` never claims an unowned bot; anyone else gets silence. Never creates a
-  transaction; `/bug@<anything>` too; added to `setMyCommands` beside `/health`.
+  transaction; `/bug@<anything>` too; added to `setMyCommands` beside `/health` (P-15, P-16).
 - **As a reply** to a record's echo or Edit prompt (`FindByBotMessageAsync`) or to the operator's
   message that captured it (`FindByUserMessageAsync`), the report is linked to that record.
   **Otherwise** it has no record. The text after `/bug` is optional.
@@ -220,16 +254,16 @@ today's. One migration in this phase, this table.
   the record summary — each part best-effort: a part that fails is named in `collection_failures` and
   the report goes on without it, never with an empty findings list in its place. It explains the
   snapshot, not today's data, and stores the answer (`Done`). A failed model call counts an attempt and
-  waits `CategorizationWorkerOptions.ComputeBackoff`; three → `Failed`.
+  waits `CategorizationWorkerOptions.ComputeBackoff`; three → `Failed` (P-11, P-21).
 - **Delivery** is separate: a Telegram report that is `Done` or `Failed` with no `reply_message_id` is
   sent as a reply to the `/bug` message — the explanation and a line `2 findings on this record` /
   `No integrity findings`, or `Couldn't explain it — the report is saved.` When `looks_like_bug` is
   false it carries an inline **Close report** button. A failed send is retried on the next tick without
   calling the model and spends no attempt; a crash between sending and storing `reply_message_id` may
   send it twice, which is accepted. A report closed first is neither explained nor delivered. A reply
-  with inline buttons is a new `IChatNotifier` method; `SendAsync` and `AskAsync` cannot do it.
+  with inline buttons is a new `IChatNotifier` method; `SendAsync` and `AskAsync` cannot do it (P-12, P-13).
 - **Close report** is its own callback, `bug:close:<number>`, routed before `RecordActionButtons` and
-  authorised by `IsOwnerAsync`; a malformed or repeated press does nothing.
+  authorised by `IsOwnerAsync`; a malformed or repeated press does nothing (P-14).
 - The worker awaits `IDatabaseGate.WaitUntilReadyAsync` and catches every non-cancellation exception
   per tick (CLAUDE.md §4).
 - A report is its own queue rather than a `categorization_jobs` kind: that queue is keyed by a
@@ -257,7 +291,7 @@ today's. One migration in this phase, this table.
 
 - `IBugReportMarkdown` (Application, implemented there) renders a `BugReportDocument` the store loads —
   one report or several: header (number, date, source, status), the operator's text, the record's
-  summary as filed and its revision history (names as of today), the findings then and now, what could
+  summary as filed and its revision history (P-23), the findings then and now, what could
   not be collected, the explanation, the log lines. Each free-text field is fenced, so its own Markdown
   cannot leave its section; no Telegram chat, message or file id. The download, *Copy as Markdown* and
   the CLI verb all use it.
@@ -265,7 +299,7 @@ today's. One migration in this phase, this table.
   by default) and writes `artifacts/bug-reports/<yyyy-MM-dd-HHmm>.md` (git-ignored), printing the path.
   It registers what it needs (`AddNoofPersistence`, the renderer, `TimeProvider`). Read-only; works with
   the app stopped; waits for nothing — PostgreSQL down or a database not yet migrated ends it with one
-  line saying so and exit code 1. Closing a report stays the operator's, in the dashboard.
+  line saying so and exit code 1. Closing a report stays the operator's, in the dashboard (P-17).
 - **Skill `.claude/skills/bugs/SKILL.md`** — the operator types `/bugs`; Claude runs the verb and
   triages each report: reproduce with a synthetic failing test, then fix through the normal process
   (TDD, a PR), record it in `docs/backlog/`, or answer "this is data, not a bug". It states that:
@@ -274,22 +308,22 @@ today's. One migration in this phase, this table.
   reports to Claude Code's model (IR-12); nothing private from a report — amounts, merchants, dates,
   names, addresses, identifiers, raw text, log lines — enters a fixture, commit, PR, issue or backlog
   entry: the reproduction is rewritten synthetic, and the diff and PR text are read for leakage before
-  pushing; the export file stays under `artifacts/`.
+  pushing; the export file stays under `artifacts/` (P-20).
 
 ## 4. Delivery
 
 **Branch (IR-9).** `phase-8a` from `phase-7`; draft PR #52 `phase-8a → phase-7`, retargeted to
 `master` when Phase 7 merges, out of draft only once 8a is finalised. This spec and its amendments are
 committed straight to `phase-8a`; every PR below targets it, stacked on its prerequisite until that one
-merges (CLAUDE.md §5). The plan fixes the cut and records each PR's estimated size; provisionally:
+merges (CLAUDE.md §5). The plan fixes the cut and records each PR's estimated size (P-1); provisionally:
 
 | # | PR | Assemblies | After |
 |---|---|---|---|
 | 1 | Finding contracts, I-1 with the write-path oracle moved onto it, I-2 | Application · Persistence | — |
 | 2 | I-3, I-4, `IntegrityHealthCheck`, the boundary rule | Application · Persistence · Architecture | 1 |
 | 3 | `IFindingExplainer`, `ChatFindingExplainer` and `write_explanation` | Application · Ai | — |
-| 4 | `bug_reports`: migration, store with the worker's claim, attempt and delivery operations, snapshots, `IBugReportMarkdown` | Application · Persistence | 1 |
-| 5 | `/diagnostics/integrity` with Explain → Create; demo data, its violation seeded by raw SQL; screenshots | Web · Demo | 2, 3, 4 |
+| 4 | `bug_reports`: migration, store with the worker's claim (P-11), attempt and delivery operations, snapshots, `IBugReportMarkdown` | Application · Persistence | 1 |
+| 5 | `/diagnostics/integrity` with Explain → Create; demo data, its violation seeded by raw SQL (P-19); screenshots | Web · Demo | 2, 3, 4 |
 | 6 | `/bug`, the notifier's reply with buttons, `BugReportExplanationWorker`, *Close report*; bot scenes | Application · Telegram · Host · Demo | 2, 3, 4 |
 | 7 | `/bugs`, `/bugs/{number}`, Copy and Download; screenshots | Web · Demo | 4 |
 | 8 | `.\run.ps1 bugs export` and the `/bugs` skill | Host · ops | 4 |
@@ -324,7 +358,7 @@ live model.
   and repeated.
 - **Markdown** (Application, no database): a synthetic `BugReportDocument` against a literal expected
   text; fiscal URLs stripped, fields fenced, no Telegram ids.
-- **E2E (Playwright):** Explain and Create on a fake explainer; `/bugs` with Close/Reopen and the
+- **E2E (Playwright):** Explain and Create on a fake explainer (P-18); `/bugs` with Close/Reopen and the
   download; the Integrity row on `/diagnostics`.
 - **CLI verb:** writes the file under `artifacts/bug-reports/` from a template clone; PostgreSQL down and
   an unmigrated database → one line and exit code 1.
