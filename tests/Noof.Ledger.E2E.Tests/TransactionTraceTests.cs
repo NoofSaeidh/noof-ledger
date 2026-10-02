@@ -908,6 +908,69 @@ public sealed class TransactionTraceTests(CookieModeHostFixture fixture) : PageT
     }
 
     [Fact]
+    public async Task A_charge_at_the_wallets_rate_shows_its_fee_and_the_terms_it_was_priced_on()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var marker = Guid.NewGuid().ToString("N")[..8];
+        var transactionId = Guid.NewGuid();
+        var kaspiId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+
+        await using (var db = OpenDb())
+        {
+            db.Wallets.Add(new Wallet { Id = kaspiId, Name = $"Kaspi {marker}", Currency = CurrencyCode.Kzt, Aliases = [], CreatedAt = now });
+            db.Transactions.Add(new Transaction
+            {
+                Id = transactionId,
+                WalletId = kaspiId,
+                RawText = $"app store 30 usd {marker}",
+                CaptureKind = CaptureKind.Manual,
+                Kind = TransactionKind.Expense,
+                Status = TransactionStatus.Completed,
+                TimeZoneId = "Europe/Belgrade",
+                OccurredAt = now,
+                OccurredOn = ZonedClock.LocalDate(now, "Europe/Belgrade"),
+                TelegramChatId = null,
+                TelegramMessageId = null,
+                CreatedAt = now,
+            });
+            db.LineItems.Add(new LineItem
+            {
+                Id = Guid.NewGuid(),
+                TransactionId = transactionId,
+                Description = "App Store",
+                Amount = new Money(30.00m, CurrencyCode.Usd),
+                CategoryId = new Guid("00000000-0000-0000-0001-000000000011"),
+                CategorizedBy = CategorizationAuthority.Model,
+                MerchantId = null,
+                Ordinal = 1,
+            });
+            db.Charges.Add(new Charge
+            {
+                TransactionId = transactionId,
+                Currency = CurrencyCode.Usd,
+                ChargedAmount = 15600.00m,
+                FeeAmount = 156.00m,
+                RateUsed = 520m,
+                FeePercent = 1m,
+                FeeMinimum = 100.00m,
+                Source = ChargeSource.WalletTerms,
+            });
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync($"{fixture.BaseUrl}/transactions/{transactionId}/trace");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        await Expect(Page.Locator("#trace-charges")).ToContainTextAsync(
+            "30.00 USD → charged 15,600.00 KZT (1 USD = 520.0000 KZT, wallet rate) + fee 156.00 KZT · terms 1 %, minimum 100.00");
+    }
+
+    [Fact]
     public async Task A_damaged_snapshot_reads_as_unreadable_and_an_empty_one_as_a_dash()
     {
         if (fixture.DatabaseUnavailable)

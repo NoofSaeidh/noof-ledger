@@ -96,9 +96,14 @@ else
                 <MudLink Href="@($"/transactions/{row.Id}/trace")">@FormatOccurred(row)</MudLink>
             </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
             <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Wallet" Class="noof-col-nowrap noof-cell-meta" Context="row">
-                @(row.Transfer is { } transfer
-                    ? $"{transfer.FromWalletName} → {transfer.ToWalletName}"
-                    : string.IsNullOrEmpty(row.WalletName) ? "—" : row.WalletName)
+                @if (row.Transfer is { } transfer)
+                {
+                    <span class="noof-leg">@transfer.FromWalletName</span> <span class="noof-leg">→ @transfer.ToWalletName</span>
+                }
+                else
+                {
+                    @(string.IsNullOrEmpty(row.WalletName) ? "—" : row.WalletName)
+                }
             </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
             <Microsoft.AspNetCore.Components.QuickGrid.PropertyColumn TGridItem="TransactionListRow" TProp="TransactionKind" Property="@(row => row.Kind)" Title="Kind" Class="noof-col-nowrap noof-cell-meta noof-cell-meta-joined" />
             <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Status" Class="noof-col-nowrap noof-cell-meta noof-cell-meta-first" Context="row">
@@ -116,7 +121,15 @@ else
                 }
             </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
             <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Amounts" Class="noof-col-amounts noof-cell-trail" Context="row">
-                @(row.Transfer is { } transfer ? LedgerText.SignedTransfer(transfer) : FormatAmounts(row.Amounts))
+                @if (row.Transfer is { } transfer)
+                {
+                    var (from, to) = LedgerText.SignedTransferLegs(transfer);
+                    <span class="noof-leg">@from</span> <span class="noof-leg">@to</span>
+                }
+                else
+                {
+                    @FormatAmounts(row.Amounts)
+                }
             </Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn>
             <Microsoft.AspNetCore.Components.QuickGrid.TemplateColumn TGridItem="TransactionListRow" Title="Categories" Class="noof-cell-meta noof-cell-meta-joined" Context="row">
                 @string.Join(", ", row.Categories)
