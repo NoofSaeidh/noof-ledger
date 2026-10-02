@@ -280,7 +280,7 @@ public class RecordActionHandlerTests
         return new Harness(new RecordActionHandler(editor, store, notifier, Echo, receiptStore), receiptStore, notifier, editor);
     }
 
-    // Review focus 2: Restore of a held slip brings back its "Record anyway" prompt.
+    // Restore of a held slip brings back its "Record anyway" prompt.
     [Fact]
     public async Task Restore_of_a_held_slip_shows_its_confirmation_prompt_again()
     {
@@ -367,7 +367,7 @@ public class RecordActionHandlerTests
             Arg.Any<CancellationToken>());
     }
 
-    // Review focus 2: an incomplete slip only ever offers what a reply can do.
+    // An incomplete slip is never offered Record anyway: only a reply completes it.
     [Fact]
     public async Task Restore_of_an_incomplete_slip_is_never_offered_record_anyway()
     {
@@ -382,7 +382,7 @@ public class RecordActionHandlerTests
             Arg.Any<CancellationToken>());
     }
 
-    // Review focus 2: a slip a reply completed, then cancelled, then restored, offers Cancel and Edit - never Record anyway.
+    // A slip a reply completed, then cancelled, then restored, offers Cancel and Edit - never Record anyway.
     [Fact]
     public async Task Restore_of_a_slip_a_reply_completed_is_never_offered_record_anyway()
     {
