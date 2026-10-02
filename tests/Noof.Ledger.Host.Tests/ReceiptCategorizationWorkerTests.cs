@@ -573,10 +573,11 @@ public class ReceiptCategorizationWorkerTests
         var recordEditor = Substitute.For<IRecordEditor>();
         var categorizer = DefaultCategorizer();
         var jobQueue = QueueWith(Job());
+        var logger = new CapturingLogger<ReceiptCategorizationWorker>();
         var worker = CreateWorker(
             ScopeFactoryFor(jobQueue, KeyPresent(), store, receiptStore: receiptStore, categorizer: categorizer, notifier: notifier,
                 recordEditor: recordEditor),
-            Time());
+            Time(), logger);
 
         await worker.RunTickAsync(TestContext.Current.CancellationToken);
 
@@ -587,6 +588,11 @@ public class ReceiptCategorizationWorkerTests
         await store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, default, Arg.Any<CancellationToken>());
         await recordEditor.DidNotReceiveWithAnyArgs().CancelAsync(default, Arg.Any<CancellationToken>());
         await notifier.DidNotReceiveWithAnyArgs().EditAsync(default, default, default!, Arg.Any<CancellationToken>());
+
+        var stageFailed = logger.Entries.Should().ContainSingle(e => e.EventId.Id == TransactionStages.StageFailedEventId).Subject;
+        stageFailed.Stage.Should().Be(TransactionStages.StageFailed);
+        stageFailed.Properties["FailedStage"].Should().Be(TransactionStages.Categorized);
+        stageFailed.Exception.Should().NotBeNull();
     }
 
     [Fact]

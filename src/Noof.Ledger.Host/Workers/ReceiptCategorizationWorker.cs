@@ -148,8 +148,9 @@ internal sealed class ReceiptCategorizationWorker(
             }
 
             // An exchange slip is recorded by RecordExchange from its own evidence, never categorised from receipt
-            // lines (spec §3); a CategorizeReceipt job for one is a bug, so only the job fails - the record stays
-            // whatever RecordExchange or a correction made of it.
+            // lines (spec §3). Until extraction gives a vision-read slip its own branch, such a slip is still saved
+            // the fiscal way and enqueues this job; a slip has no lines whose sum is its money, so only the job
+            // fails - the record stays whatever RecordExchange or a correction made of it.
             if (!receipt.Kind.IsFiscalMoneyKind())
             {
                 const string notFiscal = "an exchange slip is recorded by RecordExchange, never categorised from receipt lines";
@@ -158,7 +159,7 @@ internal sealed class ReceiptCategorizationWorker(
                 return;
             }
 
-            var aliases =await merchantDirectory.AliasesAsync(cancellationToken);
+            var aliases = await merchantDirectory.AliasesAsync(cancellationToken);
             var aliasByFolded = aliases.ToDictionary(alias => alias.Folded, alias => alias);
 
             var merchantId = await KnownMerchantIdAsync(merchantDirectory, aliasByFolded, receipt, cancellationToken);
