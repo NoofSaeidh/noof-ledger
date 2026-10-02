@@ -32,6 +32,8 @@ internal static class AppScreens
         new("trace-receipt-vision", "A receipt read from the photo", $"/transactions/{MockData.VisionReceiptTransactionId}/trace", "#trace-receipt"),
         new("trace-receipt-check", "A receipt waiting for Record anyway",
             $"/transactions/{MockData.UnconfirmedReceiptTransactionId}/trace", "#trace-receipt-awaiting-confirmation"),
+        new("trace-slip-check", "An exchange slip waiting for Record anyway",
+            $"/transactions/{MockData.HeldSlipTransactionId}/trace", "#trace-receipt-awaiting-confirmation"),
         new("diagnostics", "Diagnostics", "/diagnostics", "#diagnostics-checks", Prepare: HideFreeDiskSpaceAsync),
         new("logs", "Logs", "/diagnostics/logs", "#logs-grid", Prepare: FilterLogsToTheMockWindowAsync),
         new("log-settings", "Log settings", "/diagnostics/logs/settings", "#retention-verbose"),

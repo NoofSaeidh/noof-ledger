@@ -281,7 +281,7 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
                 instructionDay: ZonedClock.LocalDate(transaction.OccurredAt, transaction.TimeZoneId),
                 createdAt: now.AddTicks(CaptionDelayTicks));
 
-    static string? NormalisedSlipNumber(string? slipNumber) =>
+    internal static string? NormalisedSlipNumber(string? slipNumber) =>
         string.IsNullOrWhiteSpace(slipNumber) ? null : slipNumber.Trim().ToUpperInvariant();
 
     public async Task<AppReceipts.ReceiptView?> GetByTransactionAsync(Guid transactionId, CancellationToken cancellationToken)
