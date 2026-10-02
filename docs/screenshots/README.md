@@ -13,6 +13,10 @@ Do not edit by hand; a change to what the app shows regenerates them.
 
 <img src="app/dashboard-desktop.png" width="640" alt="Dashboard, desktop"> <img src="app/dashboard-phone.png" width="200" alt="Dashboard, phone">
 
+### Dashboard: recent transfers
+
+<img src="app/dashboard-transfers-desktop.png" width="640" alt="Dashboard: recent transfers, desktop"> <img src="app/dashboard-transfers-phone.png" width="200" alt="Dashboard: recent transfers, phone">
+
 ### Wallets
 
 <img src="app/wallets-desktop.png" width="640" alt="Wallets, desktop"> <img src="app/wallets-phone.png" width="200" alt="Wallets, phone">
@@ -28,6 +32,14 @@ Do not edit by hand; a change to what the app shows regenerates them.
 ### A failed transaction's trace
 
 <img src="app/trace-failed-desktop.png" width="640" alt="A failed transaction's trace, desktop"> <img src="app/trace-failed-phone.png" width="200" alt="A failed transaction's trace, phone">
+
+### An exchange's trace
+
+<img src="app/trace-exchange-desktop.png" width="640" alt="An exchange's trace, desktop"> <img src="app/trace-exchange-phone.png" width="200" alt="An exchange's trace, phone">
+
+### A foreign-currency spending's trace
+
+<img src="app/trace-foreign-spending-desktop.png" width="640" alt="A foreign-currency spending's trace, desktop"> <img src="app/trace-foreign-spending-phone.png" width="200" alt="A foreign-currency spending's trace, phone">
 
 ### A receipt's trace
 
