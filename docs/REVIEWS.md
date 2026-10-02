@@ -137,3 +137,11 @@ One line per review: confirmed findings by tag. Dated history, not status.
   predicate landing after the slip jobs, PR 8 unreviewed and stale backlog, a screenshot run deleting another PR's
   pictures, tests that could not go red). Rejected: dropping a kept stated charge when the foreign sum changes
   (Fable; the operator keeps it), refusing a same-currency transfer whose sides differ (Fable; P2-1).
+- **Phase 8a planning, spec `2026-10-02-integrity-and-bug-reports-design.md`, 2026-10-02:** 14 by both (a
+  cancelled failed record tripping I-2, cancelled held receipts warning forever, failed jobs counted as bugs,
+  fiscal URLs in raw text reaching the prompt and the export, the awaiting-confirmation predicate copied into
+  SQL, I-1/I-2 overlap, the oracle's branches untested, explanation and delivery sharing one state, the `/bug`
+  Telegram seams, findings explained after filing, the log-retention claim, the export's privacy and trust
+  boundary, the PR cut, health timeout cost [rejected]); 3 Codex only (`/bug` redelivery duplicates, a failing
+  check blocking a report, unbounded snapshots); 4 Fable only (the boundary rule already existing, the CLI
+  verb's wiring, dashboard Create duplicates [rejected], wallet currency immutability [rejected]).
