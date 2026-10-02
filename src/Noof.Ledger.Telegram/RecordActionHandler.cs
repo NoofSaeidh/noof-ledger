@@ -75,6 +75,9 @@ internal sealed class RecordActionHandler(
         if (receipt is null)
             return recordEcho.Compose(record);
 
+        if (receipt.Kind == ReceiptKind.Exchange)
+            return await ComposeSlipRefreshAsync(action, record, cancellationToken);
+
         if (await receiptStore.IsAwaitingConfirmationAsync(record.TransactionId, cancellationToken))
         {
             if (action != RecordAction.Restore)
@@ -89,5 +92,26 @@ internal sealed class RecordActionHandler(
             return new EchoMessage(recordEcho.ComposeCategorisingReceipt(receipt.Lines.Count), []);
 
         return recordEcho.ComposeReceipt(record, receipt);
+    }
+
+    // An exchange slip is never a shop receipt (T-8). A held slip (IReceiptStore.IsAwaitingConfirmationAsync) keeps
+    // its own prompt through Cancel/Restore, as a held fiscal receipt does; Record anyway's refresh names the job now
+    // running; every other slip - recorded, incomplete, or completed by a reply - is the record as it stands, which
+    // never offers Record anyway. The held echo follows the record's status, not the button: the store can refuse
+    // Record anyway on a slip that is still Captured (a reply to it in flight), and that slip was never cancelled.
+    async Task<EchoMessage> ComposeSlipRefreshAsync(RecordAction action, CategorizationSubject record, CancellationToken cancellationToken)
+    {
+        if (await receiptStore.IsAwaitingConfirmationAsync(record.TransactionId, cancellationToken)
+            && await receiptStore.GetExchangeSlipAsync(record.TransactionId, cancellationToken) is { } held)
+        {
+            return record.Status == TransactionStatus.Cancelled
+                ? recordEcho.ComposeSlipCancelledUnconfirmed(held)
+                : recordEcho.ComposeSlipNeedsConfirmation(held);
+        }
+
+        if (action == RecordAction.RecordAnyway && record.Status == TransactionStatus.Captured)
+            return new EchoMessage(recordEcho.RecordingExchange, []);
+
+        return recordEcho.Compose(record);
     }
 }
