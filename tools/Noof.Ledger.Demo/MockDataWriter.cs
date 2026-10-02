@@ -1,12 +1,14 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Noof.Ledger.Application.Auth;
+using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence;
 using Noof.Ledger.Persistence.Backup;
+using Noof.Ledger.Persistence.Balances;
 using Noof.Ledger.Persistence.Diagnostics;
 using Noof.Ledger.Persistence.Revisions;
 
@@ -24,6 +26,11 @@ internal static class MockDataWriter
 
         for (var index = 0; index < MockData.Records.Count; index++)
             await WriteRecordAsync(db, MockData.Records[index], index + 1, wallets, categories, merchants, cancellationToken);
+
+        var messageId = MockData.Records.Count;
+        foreach (var transfer in MockData.Transfers)
+            await WriteTransferAsync(db, transfer, ++messageId, wallets, categories, cancellationToken);
+        await WriteForeignSpendingAsync(db, MockData.ForeignSpending, ++messageId, wallets, categories, cancellationToken);
 
         await WriteTraceAsync(db, cancellationToken);
         await WriteReceiptTracesAsync(db, cancellationToken);
@@ -171,6 +178,109 @@ internal static class MockDataWriter
         }
     }
 
+    // Only the facts are written here; LedgerPostings posts the legs, the fee and the transfers row, as the app does.
+    static async Task WriteTransferAsync(
+        LedgerDbContext db, MockTransfer transfer, int messageId, Dictionary<string, Guid> wallets,
+        Dictionary<string, Guid> categories, CancellationToken cancellationToken)
+    {
+        var from = new Money(transfer.FromAmount, CurrencyOf(transfer.From));
+        var to = new Money(transfer.ToAmount, CurrencyOf(transfer.To));
+        Money? fee = transfer.Fee is { } amount
+            ? new Money(amount, transfer.FeeLeg == TransferLeg.To ? to.Currency : from.Currency)
+            : null;
+
+        var transaction = NewCompletedRecord(
+            transfer.Id, wallets[transfer.From], TransactionKind.Transfer, transfer.RawText, transfer.Day, messageId);
+        db.Transactions.Add(transaction);
+        if (fee is { } taken)
+            db.LineItems.Add(NewFeeLine(MockData.Id(2000 + messageId * 10), transaction.Id, "Fee", taken, categories, ordinal: 1));
+        await db.SaveChangesAsync(cancellationToken);
+
+        await LedgerPostings.RewriteAsync(
+            db, transaction, stated: null,
+            new TransferFacts(wallets[transfer.From], from, wallets[transfer.To], to, fee, transfer.FeeLeg, StatedRate: null),
+            cancellationToken);
+        await RevisionLog.AppendAsync(
+            db, transaction, RevisionKind.Initial, null, TransactionStatus.Captured, transaction.OccurredAt.AddSeconds(2), cancellationToken);
+    }
+
+    // The line stays in its own currency for the statistics; LedgerPostings moves the wallet by the charge and its fee.
+    static async Task WriteForeignSpendingAsync(
+        LedgerDbContext db, MockForeignSpending spending, int messageId, Dictionary<string, Guid> wallets,
+        Dictionary<string, Guid> categories, CancellationToken cancellationToken)
+    {
+        var transaction = NewCompletedRecord(
+            spending.Id, wallets[spending.Wallet], TransactionKind.Expense, spending.RawText, spending.Day, messageId);
+        db.Transactions.Add(transaction);
+        db.LineItems.Add(new LineItem
+        {
+            Id = MockData.Id(2000 + messageId * 10),
+            TransactionId = transaction.Id,
+            Description = spending.Line.Description,
+            Amount = new Money(spending.Line.Amount, spending.LineCurrency),
+            CategoryId = categories[spending.Line.CategorySlug],
+            CategorizedBy = CategorizationAuthority.Model,
+            MerchantId = null,
+            Ordinal = 1,
+        });
+        db.LineItems.Add(NewFeeLine(
+            MockData.Id(2000 + messageId * 10 + 1), transaction.Id, $"Fee · {spending.LineCurrency.Value} purchase",
+            new Money(spending.Fee, CurrencyOf(spending.Wallet)), categories, ordinal: 2));
+        db.Charges.Add(new Charge
+        {
+            TransactionId = transaction.Id,
+            Currency = spending.LineCurrency,
+            ChargedAmount = spending.Charged,
+            FeeAmount = spending.Fee,
+            RateUsed = spending.Rate,
+            FeePercent = spending.FeePercent,
+            Source = ChargeSource.WalletTerms,
+        });
+        await db.SaveChangesAsync(cancellationToken);
+
+        await LedgerPostings.RewriteAsync(db, transaction, stated: null, transfer: null, cancellationToken);
+        await RevisionLog.AppendAsync(
+            db, transaction, RevisionKind.Initial, null, TransactionStatus.Captured, transaction.OccurredAt.AddSeconds(2), cancellationToken);
+    }
+
+    static Transaction NewCompletedRecord(Guid id, Guid walletId, TransactionKind kind, string rawText, DateOnly day, int messageId)
+    {
+        var occurredAt = ZonedClock.StartOfDay(day, MockData.TimeZoneId).AddHours(12).AddMinutes(messageId);
+        return new Transaction
+        {
+            Id = id,
+            WalletId = walletId,
+            Kind = kind,
+            RawText = rawText,
+            CaptureKind = CaptureKind.Text,
+            Status = TransactionStatus.Completed,
+            TimeZoneId = MockData.TimeZoneId,
+            OccurredAt = occurredAt,
+            OccurredOn = day,
+            TelegramChatId = MockData.TelegramChatId,
+            TelegramMessageId = messageId,
+            BotMessageId = 10_000 + messageId,
+            CreatedAt = occurredAt,
+        };
+    }
+
+    // As the app writes one: by C# (Rule), in Fees & Charges, after every principal line.
+    static LineItem NewFeeLine(
+        Guid id, Guid transactionId, string description, Money amount, Dictionary<string, Guid> categories, int ordinal) => new()
+    {
+        Id = id,
+        TransactionId = transactionId,
+        Description = description,
+        Amount = amount,
+        CategoryId = categories["fees-charges"],
+        CategorizedBy = CategorizationAuthority.Rule,
+        MerchantId = null,
+        Ordinal = ordinal,
+        Role = EntryRole.Fee,
+    };
+
+    static CurrencyCode CurrencyOf(string wallet) => MockData.Wallets.Single(candidate => candidate.Name == wallet).Currency;
+
     static List<Guid> AddReceipt(LedgerDbContext db, Transaction transaction, MockReceipt receipt, int messageId)
     {
         var receiptId = MockData.Id(4000 + messageId);
@@ -229,19 +339,25 @@ internal static class MockDataWriter
 
     static async Task WriteTraceAsync(LedgerDbContext db, CancellationToken cancellationToken)
     {
-        var traced = await db.Transactions.SingleAsync(transaction => transaction.Id == MockData.TracedTransactionId, cancellationToken);
         var failed = await db.Transactions.SingleAsync(transaction => transaction.Id == MockData.FailedTransactionId, cancellationToken);
+        Guid[] completed = [MockData.TracedTransactionId, MockData.ExchangeTransactionId, MockData.ForeignSpendingTransactionId];
+        var recorded = await db.Transactions.Where(transaction => completed.Contains(transaction.Id)).ToListAsync(cancellationToken);
 
+        db.AppLogs.AddRange(recorded.SelectMany(TextCaptureStages));
         db.AppLogs.AddRange(
-            Stage(traced.Id, traced.OccurredAt, "Noof.Ledger.Telegram.TelegramUpdateRouter", TransactionStages.Received, TransactionStages.ReceivedEventId),
-            Stage(traced.Id, traced.OccurredAt.AddMilliseconds(1450), "Noof.Ledger.Host.Workers.CategorizationWorker", TransactionStages.Categorized, TransactionStages.CategorizedEventId),
-            Stage(traced.Id, traced.OccurredAt.AddMilliseconds(1520), "Noof.Ledger.Host.Workers.CategorizationWorker", TransactionStages.Persisted, TransactionStages.PersistedEventId),
-            Stage(traced.Id, traced.OccurredAt.AddMilliseconds(1690), "Noof.Ledger.Telegram.TelegramChatNotifier", TransactionStages.Replied, TransactionStages.RepliedEventId),
             Stage(failed.Id, failed.OccurredAt, "Noof.Ledger.Telegram.TelegramUpdateRouter", TransactionStages.Received, TransactionStages.ReceivedEventId),
             StageFailed(failed.Id, failed.OccurredAt.AddMilliseconds(2300), TransactionStages.Categorized));
 
         await db.SaveChangesAsync(cancellationToken);
     }
+
+    static IEnumerable<AppLogEntry> TextCaptureStages(Transaction transaction) =>
+    [
+        Stage(transaction.Id, transaction.OccurredAt, "Noof.Ledger.Telegram.TelegramUpdateRouter", TransactionStages.Received, TransactionStages.ReceivedEventId),
+        Stage(transaction.Id, transaction.OccurredAt.AddMilliseconds(1450), "Noof.Ledger.Host.Workers.CategorizationWorker", TransactionStages.Categorized, TransactionStages.CategorizedEventId),
+        Stage(transaction.Id, transaction.OccurredAt.AddMilliseconds(1520), "Noof.Ledger.Host.Workers.CategorizationWorker", TransactionStages.Persisted, TransactionStages.PersistedEventId),
+        Stage(transaction.Id, transaction.OccurredAt.AddMilliseconds(1690), "Noof.Ledger.Telegram.TelegramChatNotifier", TransactionStages.Replied, TransactionStages.RepliedEventId),
+    ];
 
     static async Task WriteReceiptTracesAsync(LedgerDbContext db, CancellationToken cancellationToken)
     {
