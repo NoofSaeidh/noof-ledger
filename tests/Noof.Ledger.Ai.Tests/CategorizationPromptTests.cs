@@ -47,14 +47,14 @@ public class CategorizationPromptTests
     }
 
     [Fact]
-    public void System_prompt_has_between_three_and_ten_examples()
+    public void System_prompt_has_between_three_and_eleven_examples()
     {
-        // Widened from [3,7] (Phase 7): a withdrawal with a fee, an exchange at a stated rate and a stated charge
-        // bring the count to 10.
+        // Widened from [3,7] (Phase 7): a withdrawal with a fee, an exchange at a stated rate, a fee on the
+        // receiving side and a stated charge bring the count to 11.
         var opening = Regex.Matches(CategorizationPrompt.System, "<example>").Count;
         var closing = Regex.Matches(CategorizationPrompt.System, "</example>").Count;
 
-        opening.Should().BeInRange(3, 10);
+        opening.Should().BeInRange(3, 11);
         closing.Should().Be(opening);
     }
 
@@ -83,6 +83,35 @@ public class CategorizationPromptTests
     }
 
     [Fact]
+    public void System_prompt_reads_an_amount_said_as_what_arrived_as_already_net_of_a_fee_on_leg_to()
+    {
+        // I-1 (Phase 7 closing review): "получил 11700, комиссия 100 динар" answered included false is settled as
+        // 11700 before the fee and stored as 11600, while the purse holds 11700.
+        CategorizationPrompt.System.Should().Contain("or when the fee is on leg \"to\" and");
+        CategorizationPrompt.System.Should().Contain("to_amount is said as what arrived; otherwise false.");
+        CategorizationPrompt.System.Should().Contain("\"получил\", \"пришло\", \"на руки\" — is what was left after a fee");
+        CategorizationPrompt.System.Should().Contain("unless the person says the fee was taken out of it afterwards");
+    }
+
+    [Fact]
+    public void System_prompt_has_an_example_of_a_fee_on_leg_to_beside_what_arrived()
+    {
+        CategorizationPrompt.System.Should().Contain("Message: \"поменял 100 евро, получил 11700 динар, комиссия 100 динар\"");
+        CategorizationPrompt.System.Should().Contain("leg \"to\", included true, both wallet ids null");
+        CategorizationPrompt.System.Should().Contain("so 11700 already has the fee out of it");
+    }
+
+    [Fact]
+    public void System_prompt_answers_a_shown_fee_by_its_framing_and_keeps_it_for_a_new_amount()
+    {
+        // A to-side fee is shown as what arrived with the fee "already taken out of the figure" (spec A-21): answered
+        // included false, as the from side is, it would take the fee off a second time.
+        CategorizationPrompt.System.Should().Contain("and a fee \"already taken out of the figure\" with");
+        CategorizationPrompt.System.Should().Contain("A new amount the correction states for a side replaces that figure and keeps");
+        CategorizationPrompt.System.Should().Contain("its fee's included as shown, unless the correction says how the fee relates to it.");
+    }
+
+    [Fact]
     public void System_prompt_answers_charged_only_when_the_charged_amount_is_said()
     {
         CategorizationPrompt.System.Should().Contain("Answer charged only when the person says what was actually taken from the wallet");
@@ -99,7 +128,7 @@ public class CategorizationPromptTests
     [Fact]
     public void System_prompt_explains_how_a_transfers_current_sides_are_answered_back()
     {
-        // Amendment 24: a fee shown beside its side's principal is answered not included; a side the ledger worked
+        // A-21: a fee shown beside its side's principal is answered not included; a side the ledger worked
         // out is answered null, so a date-only correction re-derives it instead of pinning a rounded figure.
         CategorizationPrompt.System.Should().Contain("is answered with included false");
         CategorizationPrompt.System.Should().Contain("A side \"worked out by the ledger\" is answered");
@@ -330,8 +359,36 @@ public class CategorizationPromptTests
 
         turn.Should().Contain("- from Cash EUR: 100 EUR");
         turn.Should().Contain(
-            "- to Cash RSD: 11712.35 RSD, worked out by the ledger, plus a fee of 150 RSD on this side (not included in the figure)");
+            "- to Cash RSD: 11562.35 RSD, worked out by the ledger, after a fee of 150 RSD on this side (already taken out of the figure)");
         turn.Should().Contain("- rate as stated: 1 EUR = 117.1235 RSD");
+        turn.Should().NotContain("11712.35", "the side is shown as what arrived, the fee already out of it");
+    }
+
+    // I-1's capture "получил 11700 динар, комиссия 100 динар" stored as 100 EUR -> 11700 RSD with the 100 fee on the
+    // destination. Shown as what arrived and answered back that way, it settles to the 11700 the purse holds; the
+    // principal 11800 shown as said would be answered back as arrived and stored as 11800.
+    [Fact]
+    public void A_received_side_with_its_fee_is_shown_as_what_arrived_and_answered_back_settles_unchanged()
+    {
+        var received = Exchange with { To = new Money(11700m, CurrencyCode.Rsd), Fee = new Money(100m, CurrencyCode.Rsd), StatedRate = null };
+
+        var turn = TurnFor(new CorrectionRequest(Recorded, [], "это было позавчера", TransactionKind.Transfer, received));
+
+        turn.Should().Contain("- to Cash RSD: 11700 RSD, after a fee of 100 RSD on this side (already taken out of the figure)");
+        turn.Should().NotContain("11800");
+        turn.Should().NotContain("worked out by the ledger");
+
+        IReadOnlyList<WalletOption> wallets =
+        [
+            new(received.FromWalletId, received.FromWalletName, CurrencyCode.Eur, [], true),
+            new(received.ToWalletId, received.ToWalletName, CurrencyCode.Rsd, [], true),
+        ];
+        var answeredAsShown = new CategorizationProposal([], Kind: ProposedKind.Transfer, Transfer: new ProposedTransfer(
+            received.FromWalletId, 100m, "EUR", received.ToWalletId, 11700m, "RSD", null, new ProposedFee(100m, "RSD", ProposedLeg.To, true)));
+
+        new ProposalMapper().TryMap(answeredAsShown, [], [], wallets, "RSD", out var mapped, out var failure, out _).Should().BeTrue(failure);
+        mapped.Transfer!.To.Should().Be(received.To);
+        mapped.Transfer.From.Should().Be(received.From);
     }
 
     [Fact]
@@ -416,6 +473,6 @@ public class CategorizationPromptTests
         using var culture = new CultureScope("ru-RU");
 
         TurnFor(new CorrectionRequest(Recorded, [], "нет", TransactionKind.Transfer, Exchange))
-            .Should().Contain("- to Cash RSD: 11712.35 RSD, worked out by the ledger");
+            .Should().Contain("- to Cash RSD: 11562.35 RSD, worked out by the ledger");
     }
 }

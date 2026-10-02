@@ -7,10 +7,6 @@ since: 2026-09-26
 Recorded 2026-09-26 closing Phase 6. Named explicitly out of scope by the spec, or found and parked
 during implementation and its closing review and two re-reviews (Fable 5.1).
 
-**Exchange-office slips (Phase 7, R-1).** A currency exchange receipt is a different shape entirely — no
-line items, no category per line, a rate instead — and belongs with whichever phase finally builds
-cross-currency conversion (the deferred item above), not with the fiscal-receipt pipeline.
-
 **A product → category dictionary as a cache in front of the model (R-Q7-adjacent).** Named out of
 scope by the design as "possible later cache, like merchant aliases" — the same shape as
 `IMerchantDirectory`'s write-once alias table, but keyed on a receipt line's product name rather than a

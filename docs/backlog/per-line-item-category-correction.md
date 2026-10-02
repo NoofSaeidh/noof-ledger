@@ -6,8 +6,9 @@ area: web
 **Wanted.** "No, that one was actually Transport" on a single line item.
 
 **Why it is not scheduled.** The only recategorisation UI the spec names is `/recategorize`, which is
-Phase 7 and is a bulk, merchant-rule-driven operation — not a one-row fix. That leaves every phase
-between 1 and 7 with no way to correct a single miscategorised item.
+for a later governance phase (the original design's Phase 7; the delivered Phase 7 became currency
+exchange) and is a bulk, merchant-rule-driven operation — not a one-row fix. That leaves every phase
+until then with no way to correct a single miscategorised item.
 
 **Cost already paid.** `CategorizationAuthority.User = 4` ships in Phase 1's enum and its integer value
 is pinned by a test, so the precedence guard already knows a human outranks the model. The retrofit is

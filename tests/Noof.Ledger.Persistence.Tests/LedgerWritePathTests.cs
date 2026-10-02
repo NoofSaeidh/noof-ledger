@@ -774,7 +774,7 @@ public class LedgerWritePathTests(PostgresFixture fixture)
 
         db.ChangeTracker.Clear();
         (await db.Transactions.AsNoTracking().SingleAsync(t => t.Id == held, Ct)).Status.Should().Be(TransactionStatus.Completed,
-            "it was applied after the cancel, so the Captured it had before the cancel no longer describes it (amendment 25)");
+            "it was applied after the cancel, so the Captured it had before the cancel no longer describes it (A-22)");
         (await BalanceAsync(db, cashEur, CurrencyCode.Eur)).Should().Be(-100m);
         (await BalanceAsync(db, cashRsd, CurrencyCode.Rsd)).Should().Be(11700m);
         (await db.Transactions.AsNoTracking().SingleAsync(t => t.Id == untouched, Ct)).Status.Should().Be(TransactionStatus.Captured,

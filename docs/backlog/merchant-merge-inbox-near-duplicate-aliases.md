@@ -9,8 +9,9 @@ area: web
 **Why it is not in Phase 1B.** The alias table this needs - write-once, `Fold()`-keyed, the sole
 authority on merchant identity - ships this phase (`IMerchantDirectory`). The merge inbox is a
 read/write UI over rows that table already produces correctly; nothing about it changes the
-schema. It is explicitly Phase 7 (Governance) work in the spec's phase table, alongside the
-recategorization batch UI it shares page furniture with.
+schema. It is work for a later governance phase (Phase 7 in the original spec's phase table; the
+delivered Phase 7 became currency exchange), alongside the recategorization batch UI it shares page
+furniture with.
 
 **Until then.** A wrong canonicalisation on first sighting is permanent under write-once (a
 named, accepted trade-off - see spec §13 risk 4), with no UI yet to correct it short of a manual

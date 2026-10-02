@@ -23,7 +23,7 @@ internal static class ExchangeSlipMapper
             || ExtractedExchange.SupportedCurrency(slip.ReceivedCurrency) is not { } receivedCurrency)
             return false;
 
-        if (!TryReadFee(slip, givenCurrency, receivedCurrency, out var fee))
+        if (!TryReadFee(slip, out var fee))
         {
             failure = RecordFailureReason.InvalidFee;
             return false;
@@ -47,17 +47,21 @@ internal static class ExchangeSlipMapper
         (wallets.FirstOrDefault(wallet => wallet.Currency == currency && wallet.DefaultForPayment == WalletPaymentDefault.Cash)
          ?? wallets.FirstOrDefault(wallet => wallet.Currency == currency && wallet.IsDefaultForCurrency))?.Id;
 
-    static bool TryReadFee(ExtractedExchange slip, CurrencyCode given, CurrencyCode received, out TransferFeeRequest? fee)
+    // The leg a printed commission was taken on: the given side when it is in that currency, else the received one;
+    // null when it is in neither, or in a currency the ledger lacks. SlipRequestText shows it on the same side.
+    public static TransferLeg? CommissionLegOf(ExtractedExchange slip) =>
+        slip.CommissionCurrencyOrDinars() is not { } currency ? null
+        : currency == ExtractedExchange.SupportedCurrency(slip.GivenCurrency) ? TransferLeg.From
+        : currency == ExtractedExchange.SupportedCurrency(slip.ReceivedCurrency) ? TransferLeg.To
+        : null;
+
+    static bool TryReadFee(ExtractedExchange slip, out TransferFeeRequest? fee)
     {
         fee = null;
         if (slip.CommissionAmount is not { } commission || commission == 0m)
             return true;
 
-        if (commission < 0m || slip.CommissionCurrencyOrDinars() is not { } currency)
-            return false;
-
-        TransferLeg? leg = currency == given ? TransferLeg.From : currency == received ? TransferLeg.To : null;
-        if (leg is not { } feeLeg)
+        if (commission < 0m || slip.CommissionCurrencyOrDinars() is not { } currency || CommissionLegOf(slip) is not { } feeLeg)
             return false;
 
         fee = new TransferFeeRequest(new Money(commission, currency), feeLeg, Included: true);

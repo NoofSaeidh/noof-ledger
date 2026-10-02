@@ -90,7 +90,7 @@ public class WalletsPageSourceTests
     public void Every_numeric_field_parses_against_invariant_culture()
     {
         // A rate typed as 117.35 on the operator's ru-RU or sr-Latn-RS Windows would otherwise be refused or read as
-        // 11735 (review focus 4) - each field is checked on its own, so a new one cannot hide behind the count above.
+        // 11735 - each field is checked on its own, so a new one cannot hide behind the count above.
         var fields = NumericFields();
 
         fields.Should().HaveCount(9,
@@ -102,7 +102,7 @@ public class WalletsPageSourceTests
     public void Every_numeric_field_reads_a_decimal_comma_and_reports_what_it_cannot_read()
     {
         // MudBlazor's default converter reads "117,35" as 11735 under the invariant culture and an unreadable value as
-        // null (amendment 27); each field carries its own converter instance, because the instance remembers that its
+        // null (A-24); each field carries its own converter instance, because the instance remembers that its
         // field failed - shared, one field's good value would clear another's refusal.
         var fields = NumericFields();
         var converters = fields
