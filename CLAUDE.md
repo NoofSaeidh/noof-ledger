@@ -236,8 +236,11 @@ the code that builds the echo text.
   review (Codex, Fable, the phase's closing review), small bugs, follow-ups, plan and doc
   corrections, reference sweeps: anything that adds no behaviour and changes no design. Run the
   tests of the classes a fix touches before pushing; CI on the aggregate PR stays green. A direct
-  fix gets no Codex review of its own — the phase's closing review covers it. New behaviour or a
-  design change is a PR. **`master` takes nothing directly** — only a merged PR.
+  fix gets no Codex review of its own — the phase's closing review covers it. Fixes made *after*
+  the closing review are not covered by it: before the aggregate PR leaves draft, one opus review
+  (effort medium) reads their combined diff since the reviewed commit, and the "Ready to merge"
+  comment names that commit. New behaviour or a design change is a PR. **`master` takes nothing
+  directly** — only a merged PR.
 - Independent PRs branch from the aggregate branch, or from `master` when there is none; a PR
   needing another's changes is stacked on it (base = that branch) until that one merges, never
   merged into it.
