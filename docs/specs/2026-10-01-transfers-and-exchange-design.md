@@ -78,13 +78,17 @@ Taken while the implementation plan was written against the code. The plan itsel
 | A-19 | A kept `Stated` charge stays when the foreign sum it priced changes; its rate is derived from the new sum and still marked `stated`. | Operator's call at the plan review. |
 | A-20 | A fee said in exactly one side's currency is on that side, whatever leg the model named. | A menjačnica takes its commission in dinars on a EUR → RSD exchange; the default `from` leg would reject it as `InvalidFee`. |
 | A-21 | A transfer's correction input states each side as the operator would say it — the principal, plus the fee on that side as not included — and a side the ledger worked out as such, answered `null` unless the correction states it. A valid stated rate is kept even when both amounts are given. | Otherwise a date-only correction charges the fee twice and a rate-only correction is silently lost. |
-| A-22 | Failure writes never overwrite a record that moved on: a failed first reading is marked `Failed` only while still `Captured`; Restore of a record a correction applied while it was cancelled restores `Completed`; `RecordExchange` leaves an already-applied record alone, so a reply queued during extraction wins. | Each was a race or ordering in which a booked record would leave the balances. |
+| A-22 | *(Extended by A-31.)* Failure writes never overwrite a record that moved on: a failed first reading is marked `Failed` only while still `Captured`; Restore of a record a correction applied while it was cancelled restores `Completed`; `RecordExchange` leaves an already-applied record alone, so a reply queued during extraction wins. | Each was a race or ordering in which a booked record would leave the balances. |
 | A-23 | A slip's printed issue date is the record's date until a correction says otherwise. | A slip photographed the next day, completed by a reply, would otherwise land on the capture day. |
 | A-24 | Charges are never computed for a fiscal receipt's record (T-1); `DIN`/`ДИН` on a slip read as RSD; slip vision reports figures exactly as printed and never works one out; `/wallets` numeric fields take a comma as the decimal separator and refuse what they cannot parse. | The receipt echo cannot render a charge; Serbian slips print DIN; P6-2; MudBlazor's default converter reads `117,35` as 11735. |
 | A-25 | The crossing-zero line compares the source's balance with and without this transfer under the checkpoint rule. | A backdated transfer absorbed by a later checkpoint did not cause today's negative balance. |
 | A-26 | `RecordFailureReason` has `None = 0`, and a failure reason is never nullable: `transactions.failure_reason` is `not null default 0`, a record that is not `Failed` holds `None`, one `MarkFailedAsync(id, reason)` takes `None` for a failure with no named reason, and the echo's reason parameter defaults to `None`. | Operator's review of PR #32. |
 | A-27 | Replaces A-18 for capture: a transfer's **source** leg the model leaves without a wallet goes to the **card** default of its currency, its **destination** leg to the **cash** default of its currency, each else the currency's default. A slip keeps cash on both legs (A-8, §3). | "снял 10000" with no wallet named would otherwise put both legs on the cash wallet and fail as `SameWallet`; a withdrawal takes from the card and lands in cash. Operator, 2026-10-01. |
 | A-28 | The no-terms echo reads `{sum} {CUR} not converted — set a {CUR} rate for {Wallet} on /wallets, or correct this record to apply it` (`30.00 USD not converted — set a USD rate for Kaspi KZT on /wallets, or correct this record to apply it`), not §4's `not in the wallet's currency — set a USD rate for Kaspi KZT on /wallets`. | It leads with the amount, and the correction route keeps the hint true for a record saved before the rate existed, since rates are never applied retroactively (§1, "No backfill"). Operator, 2026-10-02. |
+| A-29 | A slip is held for its amounts only when the dinar side differs from `foreign × rate`, after allowing for a printed commission, by **one dinar or more** beyond the error a rate printed to four decimals can carry (`foreign × 0.00005`): held when `\|unexplained\| ≥ 1 + foreign × 0.00005`. Replaces §3 Recording 3's "one para". The recorded amounts stay exactly as printed. | Offices pay out whole dinars (11 712 for 11 712.34), so a one-para band held nearly every real slip (closing review). The rate error is independent of that rounding and grows with the amount, so it stays on top. Operator, 2026-10-02. |
+| A-30 | A slip whose currency was read but is not one the ledger holds is not called unreadable: `SlipIncomplete`'s echo reads `Slip read, but CHF isn't a currency this ledger holds — nothing recorded. If it was misread, reply with the right currency.` (`CHF and GBP aren't currencies this ledger holds` for two), ahead of any figure that is missing as well. | The code was read, not missed, and no reply can make the ledger hold it — only a misread can be corrected (closing review). |
+| A-31 | Extends A-22: an incomplete slip saved while its photo was cancelled keeps `SlipIncomplete` and is restored `Failed`, so Restore asks for the missing figure. | Otherwise a slip cancelled during extraction and then restored was stranded, with nothing asking for what was missing (closing review). |
+| A-32 | An amount said as what arrived ("получил", "пришло", "на руки") on the fee's side already includes the fee, so `included` is true unless the person says the fee was taken on top. Extends §2's *Prompt additions*, where `included` was true only when the operator said the amount includes it. | "получил 11700, комиссия 100 динар" stored the received leg as 11 600, though 11 700 is what arrived (closing review). |
 
 ## 1. Data
 
@@ -215,7 +219,8 @@ straight into `decimal`):
 - amounts are copied as said — a rate goes into `rate`, a fee into `fee`, and the model never
   multiplies, adds or subtracts;
 - `leg` is `from` unless the operator says the receiving side kept the fee; `included` only when the
-  operator says the amount includes it;
+  operator says the amount includes it *(extended by A-32: an amount said as what arrived includes the
+  fee on its side)*;
 - `charged` only when the charged amount is said.
 
 Tuning waits for Phase 11.
@@ -327,7 +332,8 @@ currency, as a Serbian slip prints it), `commission_amount`, `commission_currenc
    it was taken on — and applies a transfer outcome through `ApplyAsync`, like any other job.
 3. **Held** (saved, not recorded, "Record anyway" offered): the dinar side differs from
    `foreign × rate` by more than one para plus the error a rate printed to four decimals can carry
-   (`foreign × 0.00005`), after allowing for a printed commission; the PIB is unread or not exactly
+   (`foreign × 0.00005`), after allowing for a printed commission *(the one para superseded by A-29:
+   one dinar)*; the PIB is unread or not exactly
    nine digits; the slip number is unread (a duplicate could not be detected).
 4. **Incomplete** (an amount or currency unread and not computable from the rate): `Failed` with
    `SlipIncomplete`, and the bot asks for the missing figure. "Record anyway" is never offered for it —
@@ -362,7 +368,7 @@ reworded to say "fiscal receipt" explicitly, rather than gaining an exemption.
 | Slip | as an exchange, plus `Menjačnica <name> · from a slip photo` and the vision warning line receipts carry |
 | Foreign spending | as today, plus `30.00 USD → charged 15 600.00 KZT (1 USD = 520.0000 KZT, wallet rate) + fee 156.00 KZT`; `stated` instead of `wallet rate` for a stated charge |
 | No terms | `not in the wallet's currency — set a USD rate for Kaspi KZT on /wallets` *(superseded by A-28)* |
-| Failures | one line per reason: `Exchange not recorded: how much RSD did you get? Reply with the amount or the rate.` (`MissingReceivedAmount`); `… both sides are Cash RSD — which wallet did it go to?` (`SameWallet`); `… Cash RSD holds RSD, not EUR — create a EUR wallet or name one` (`LegCurrencyMismatch`); `… couldn't use that rate` (`InvalidRate`); `… couldn't place that fee` (`InvalidFee`); `Slip read, but the received amount is unreadable — reply with it` (`SlipIncomplete`) |
+| Failures | one line per reason: `Exchange not recorded: how much RSD did you get? Reply with the amount or the rate.` (`MissingReceivedAmount`); `… both sides are Cash RSD — which wallet did it go to?` (`SameWallet`); `… Cash RSD holds RSD, not EUR — create a EUR wallet or name one` (`LegCurrencyMismatch`); `… couldn't use that rate` (`InvalidRate`); `… couldn't place that fee` (`InvalidFee`); `Slip read, but the received amount is unreadable — reply with it` (`SlipIncomplete`; a currency the ledger does not hold is worded by A-30) |
 | Source crosses zero | an extra line when this transfer takes the source from ≥ 0 to < 0: `Cash EUR is now −1 000.00 EUR — a missing exchange or income?` — never for a wallet that was already negative, so a credit wallet stays quiet |
 
 A rate is shown as "1 dearer = N cheaper" (N ≥ 1), four decimals; C# picks the direction; a stated
