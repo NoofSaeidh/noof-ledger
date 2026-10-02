@@ -195,6 +195,37 @@ public sealed class DashboardLensesTests(CookieModeHostFixture fixture) : PageTe
         await Expect(Page.Locator($"#txn-{expenseId}")).ToBeVisibleAsync();
     }
 
+    [Fact]
+    public async Task Income_and_a_balance_statement_are_marked_by_kind_and_never_read_as_spending()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var marker = Guid.NewGuid().ToString("N")[..8];
+        var wallet = await SeedWalletAsync($"Raiffeisen {marker}", CurrencyCode.Rsd);
+        var now = DateTimeOffset.UtcNow;
+        var statementId = Guid.NewGuid();
+        Guid salaryId;
+
+        await using (var db = OpenDb())
+        {
+            salaryId = AddRecord(db, wallet, TransactionKind.Income, $"salary {marker}", now.AddMinutes(-1),
+                new Money(150000.00m, CurrencyCode.Rsd), SalaryId);
+            db.Transactions.Add(NewTransaction(statementId, wallet, TransactionKind.BalanceCheck, $"raif has 172000 {marker}", now));
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        await Expect(Page.Locator($"#txn-{statementId}")).ToContainTextAsync("Balance statement");
+        await Expect(Page.Locator($"#txn-{statementId}")).ToContainTextAsync("A balance statement - it sets what the wallet holds");
+        await Expect(Page.Locator($"#txn-{statementId}")).Not.ToContainTextAsync("Read - nothing here looked like spending");
+        await Expect(Page.Locator($"#txn-{salaryId}")).ToContainTextAsync("Income");
+    }
+
     async Task<Guid> SeedWalletAsync(string name, CurrencyCode currency)
     {
         var walletId = Guid.NewGuid();

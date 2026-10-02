@@ -253,7 +253,8 @@ else
                         <MudText Typo="Typo.caption">@FormatOccurred(transaction)</MudText>
                     </MudLink>
                     <MudSpacer />
-                    @* Only a record that has been read has a known kind; until then it is stored as the default. *@
+                    @* A captured record holds the default kind, and a failed reading recorded nothing, so only a
+                       completed record's kind says what it is. *@
                     @if (transaction.Status == TransactionStatus.Completed)
                     {
                         <MudChip T="string" Size="Size.Small" Variant="Variant.Text">@DescribeKind(transaction.Kind)</MudChip>
