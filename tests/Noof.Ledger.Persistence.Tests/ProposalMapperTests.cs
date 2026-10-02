@@ -593,8 +593,8 @@ public class ProposalMapperTests
 
     // The exchange 2a renders and reads back (An_exchange_answered_back_unchanged_reads_into_the_proposal_the_rendering_implies):
     // stored 100 EUR → 11562.35 RSD, 150 RSD fee on the destination, stated rate 117.1235. "это было позавчера" answered
-    // back unchanged moves the day and keeps every figure and the rate - also when the model repeats the worked-out
-    // 11712.35 instead of leaving it null.
+    // back unchanged moves the day and keeps every figure and the rate - also when the model repeats the shown 11562.35,
+    // the fee already taken out of it, instead of leaving it null.
     [Fact]
     public void A_date_only_correction_answered_back_unchanged_keeps_the_legs_fee_and_stated_rate()
     {
@@ -603,9 +603,9 @@ public class ProposalMapperTests
             new ExchangeRate(CurrencyCode.Eur, 117.1235m, CurrencyCode.Rsd));
         var said = new ProposedTransfer(
             WiseEur.Id, 100m, "EUR", MainRsd.Id, null, "RSD",
-            new ProposedRate("EUR", 117.1235m, "RSD"), new ProposedFee(150m, "RSD", ProposedLeg.To, false));
+            new ProposedRate("EUR", 117.1235m, "RSD"), new ProposedFee(150m, "RSD", ProposedLeg.To, true));
         var unchanged = new CategorizationProposal([], OccurredOn: "2026-09-20", Kind: ProposedKind.Transfer, Transfer: said);
-        var repeated = unchanged with { Transfer = said with { ToAmount = 11712.35m } };
+        var repeated = unchanged with { Transfer = said with { ToAmount = 11562.35m } };
 
         MapTransfer(unchanged, out var mapped, out _, out _).Should().BeTrue();
         MapTransfer(repeated, out var mappedRepeated, out _, out _).Should().BeTrue();

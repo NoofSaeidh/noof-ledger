@@ -49,7 +49,8 @@ public interface IReceiptStore
     // An exchange-office slip (spec §3): the receipts row (Kind = Exchange, the slip number trimmed and
     // upper-cased) and its receipt_exchanges evidence, plus what the disposition asks for, in ONE commit -
     // Record queues RecordExchange and then the caption's Correct job, Hold queues nothing (the caption waits
-    // for "Record anyway"), Incomplete fails the record with SlipIncomplete and queues the caption at once. A
+    // for "Record anyway"), Incomplete fails the record with SlipIncomplete and queues the caption at once - a record
+    // already Cancelled stays Cancelled but keeps SlipIncomplete, so Restore brings it back Failed. A
     // (seller_tax_id, slip_number) another transaction already recorded writes nothing and names it, as
     // SaveExtractedAsync does for a fiscal receipt; a replay of this transaction's own save returns its id.
     Task<ReceiptSaveResult> SaveExchangeSlipAsync(

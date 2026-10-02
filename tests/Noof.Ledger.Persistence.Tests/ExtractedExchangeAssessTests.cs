@@ -36,18 +36,42 @@ public class ExtractedExchangeAssessTests
             .Disposition.Should().Be(SlipDisposition.Record);
     }
 
-    // 1000 EUR at 117.1235 is 117123.50 RSD; the tolerance is 0.01 + 1000 × 0.00005 = 0.06.
+    // An office pays out whole dinars: 100 EUR at 117.1234 is 11712.34 RSD, and the slip says 11712. A difference
+    // under one dinar is rounding (operator, 2026-10-02); the tolerance is 1 + 100 × 0.00005 = 1.005.
+    public static TheoryData<decimal, SlipDisposition> HundredEurosPaidOutInWholeDinars => new()
+    {
+        { 11712.00m, SlipDisposition.Record },
+        { 11713.00m, SlipDisposition.Record },
+        { 11712.99m, SlipDisposition.Record },
+        { 11711.34m, SlipDisposition.Record },
+        { 11711.33m, SlipDisposition.Hold },
+        { 11713.35m, SlipDisposition.Hold },
+        { 11700.00m, SlipDisposition.Hold },
+    };
+
+    [Theory]
+    [MemberData(nameof(HundredEurosPaidOutInWholeDinars))]
+    public void A_dinar_side_rounded_to_whole_dinars_is_recorded_and_one_dinar_off_is_held(decimal dinars, SlipDisposition expected)
+    {
+        var assessment = Assess(Slip(given: 100.00m, received: dinars, rate: 117.1234m));
+
+        assessment.Disposition.Should().Be(expected);
+        assessment.Problems.Contains(SlipProblem.AmountsDisagree).Should().Be(expected == SlipDisposition.Hold);
+    }
+
+    // 1000 EUR at 117.1235 is 117123.50 RSD; the tolerance is 1 + 1000 × 0.00005 = 1.05.
     public static TheoryData<decimal, SlipDisposition> ThousandEurosAtAFourDecimalRate => new()
     {
-        { 117123.44m, SlipDisposition.Record },
-        { 117123.56m, SlipDisposition.Record },
-        { 117123.43m, SlipDisposition.Hold },
-        { 117123.57m, SlipDisposition.Hold },
+        { 117122.46m, SlipDisposition.Record },
+        { 117124.54m, SlipDisposition.Record },
+        { 117122.45m, SlipDisposition.Hold },
+        { 117124.55m, SlipDisposition.Hold },
     };
 
     [Theory]
     [MemberData(nameof(ThousandEurosAtAFourDecimalRate))]
-    public void The_dinar_side_may_differ_by_one_para_plus_what_four_printed_decimals_can_carry(decimal dinars, SlipDisposition expected)
+    public void The_dinar_side_may_differ_by_under_one_dinar_plus_what_four_printed_decimals_can_carry(
+        decimal dinars, SlipDisposition expected)
     {
         var assessment = Assess(Slip(given: 1000.00m, received: dinars, rate: 117.1235m));
 
@@ -55,16 +79,18 @@ public class ExtractedExchangeAssessTests
         assessment.Problems.Contains(SlipProblem.AmountsDisagree).Should().Be(expected == SlipDisposition.Hold);
     }
 
-    // 10 EUR at 117 is 1170.00 RSD; the tolerance is 0.01 + 10 × 0.00005 = 0.0105.
+    // 10 EUR at 117 is 1170.00 RSD; the tolerance is 1 + 10 × 0.00005 = 1.0005.
     public static TheoryData<decimal, SlipDisposition> TenEurosAtAWholeRate => new()
     {
-        { 1170.01m, SlipDisposition.Record },
-        { 1170.02m, SlipDisposition.Hold },
+        { 1170.99m, SlipDisposition.Record },
+        { 1169.01m, SlipDisposition.Record },
+        { 1171.01m, SlipDisposition.Hold },
+        { 1168.99m, SlipDisposition.Hold },
     };
 
     [Theory]
     [MemberData(nameof(TenEurosAtAWholeRate))]
-    public void A_small_exchange_is_held_beyond_one_para(decimal dinars, SlipDisposition expected) =>
+    public void A_small_exchange_is_held_from_one_dinar_off(decimal dinars, SlipDisposition expected) =>
         Assess(Slip(given: 10.00m, received: dinars, rate: 117.0000m)).Disposition.Should().Be(expected);
 
     [Fact]

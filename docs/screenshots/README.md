@@ -151,6 +151,10 @@ Do not edit by hand; a change to what the app shows regenerates them.
 
 <img src="telegram/slip-incomplete.png" width="300" alt="An exchange slip whose amount received could not be read">
 
+### An exchange slip in a currency the ledger doesn't hold
+
+<img src="telegram/slip-unsupported-currency.png" width="300" alt="An exchange slip in a currency the ledger doesn't hold">
+
 ### /health
 
 <img src="telegram/health.png" width="300" alt="/health">

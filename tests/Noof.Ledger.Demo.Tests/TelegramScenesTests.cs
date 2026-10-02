@@ -13,7 +13,8 @@ public sealed class TelegramScenesTests
         Scenes.Select(scene => scene.Name).Should().Equal(
             "expense", "multi-line", "income", "balance", "cancel-restore", "correction", "failure",
             "transfer", "transfer-fee", "exchange", "foreign-spending", "no-terms", "exchange-question",
-            "receipt-qr", "receipt-vision", "receipt-check", "slip", "slip-check", "slip-incomplete", "health");
+            "receipt-qr", "receipt-vision", "receipt-check", "slip", "slip-check", "slip-incomplete", "slip-unsupported-currency",
+            "health");
     }
 
     [Theory]
@@ -33,6 +34,7 @@ public sealed class TelegramScenesTests
     [InlineData("slip", "Exchange — 100.00 EUR (Cash EUR) → 11700.00 RSD (Cash RSD)", new[] { "Cancel", "Edit" })]
     [InlineData("slip-check", "This exchange slip doesn't look right — Menjačnica Zlatnik", new[] { "Record anyway", "Cancel" })]
     [InlineData("slip-incomplete", "Slip read, but", new[] { "Edit" })]
+    [InlineData("slip-unsupported-currency", "Slip read, but CHF", new[] { "Edit" })]
     public void The_bot_bubble_carries_the_apps_own_text_and_buttons(string scene, string start, string[] buttons)
     {
         var reply = Scenes.Single(candidate => candidate.Name == scene).Bubbles.Last(bubble => bubble.Side == ChatSide.Bot);
@@ -89,6 +91,16 @@ public sealed class TelegramScenesTests
 
         bubbles[0].Photo.Should().BeTrue();
         bubbles[^1].Text.Should().Be("Slip read, but the amount received is unreadable — reply with it.");
+    }
+
+    [Fact]
+    public void A_slip_in_a_currency_the_ledger_lacks_names_the_currency_instead_of_asking_for_it()
+    {
+        var bubbles = Scenes.Single(scene => scene.Name == "slip-unsupported-currency").Bubbles;
+
+        bubbles[0].Photo.Should().BeTrue();
+        bubbles[^1].Text.Should().Be(
+            "Slip read, but CHF isn't a currency this ledger holds — nothing recorded. If it was misread, reply with the right currency.");
     }
 
     [Fact]

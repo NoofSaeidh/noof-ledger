@@ -1,7 +1,9 @@
 using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
+using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Domain;
+using Noof.Ledger.Persistence.Categorization;
 using Noof.Ledger.Persistence.Editing;
 using Noof.Ledger.Persistence.Jobs;
 using Noof.Ledger.Persistence.Receipts;
@@ -856,7 +858,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
             transaction.Id, NewSlipReceipt() with { IssuedAt = new DateTimeOffset(2026, 9, 25, 20, 15, 0, TimeSpan.FromHours(2)) },
             NewSlip(received: 11650.00m), "photo-file-1", AppReceipts.SlipDisposition.Hold, TestContext.Current.CancellationToken);
 
-        var subject = await new Noof.Ledger.Persistence.Categorization.EfCategorizationStore(db, new FakeTimeProvider(Now))
+        var subject = await new EfCategorizationStore(db, new FakeTimeProvider(Now))
             .GetSubjectAsync(transaction.Id, TestContext.Current.CancellationToken);
 
         subject!.OccurredOn.Should().Be(new DateOnly(2026, 9, 25));
@@ -1116,10 +1118,11 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
         (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken)).Should().BeFalse();
     }
 
-    // A photo cancelled before its incomplete slip is saved keeps no failure reason (the Incomplete
-    // update only touches a Captured record), so only the slip's own evidence can say it is incomplete.
+    // A photo cancelled while it was being read stays Cancelled when its incomplete slip is saved, but keeps the
+    // outcome: Restore brings it back Failed with SlipIncomplete, so the echo asks for the missing figure. Restored
+    // Captured instead, it had no job and no buttons - "Reading the receipt…" forever.
     [Fact]
-    public async Task An_incomplete_slip_saved_after_a_Cancel_is_never_recorded_anyway_after_Restore()
+    public async Task An_incomplete_slip_saved_after_a_Cancel_is_restored_incomplete_and_never_recorded_anyway()
     {
         await using var db = await fixture.CreateMigratedContextAsync();
         var transaction = await SeedSlipTransactionAsync(db);
@@ -1129,17 +1132,63 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
         await store.SaveExchangeSlipAsync(
             transaction.Id, NewSlipReceipt(), NewSlip(received: null) with { Rate = null }, "photo-file-1",
             AppReceipts.SlipDisposition.Incomplete, TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var whileCancelled = await db.Transactions.AsNoTracking().SingleAsync(t => t.Id == transaction.Id, TestContext.Current.CancellationToken);
+        whileCancelled.Status.Should().Be(TransactionStatus.Cancelled, "the operator's Cancel stands");
+        whileCancelled.FailureReason.Should().Be(RecordFailureReason.SlipIncomplete);
+
         await editor.RestoreAsync(transaction.Id, TestContext.Current.CancellationToken);
         db.ChangeTracker.Clear();
 
         var queued = await store.EnqueueCategorizationAsync(transaction.Id, 999, TestContext.Current.CancellationToken);
 
         var stored = await db.Transactions.AsNoTracking().SingleAsync(t => t.Id == transaction.Id, TestContext.Current.CancellationToken);
-        stored.Status.Should().Be(TransactionStatus.Captured);
-        stored.FailureReason.Should().Be(RecordFailureReason.None);
+        stored.Status.Should().Be(TransactionStatus.Failed, "nothing applied it while cancelled, so it is still incomplete");
+        stored.FailureReason.Should().Be(RecordFailureReason.SlipIncomplete);
         queued.Should().BeFalse("the slip is missing its received amount; only a reply can complete it");
         (await JobsOfAsync(db, transaction.Id)).Should().BeEmpty();
         (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken)).Should().BeFalse();
+    }
+
+    // Amendment 22 still wins: a reply that completed the incomplete slip while it was cancelled restores Completed.
+    [Fact]
+    public async Task An_incomplete_slip_saved_after_a_Cancel_and_completed_by_a_reply_while_cancelled_restores_Completed()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var transaction = await SeedSlipTransactionAsync(db);
+        var clock = new FakeTimeProvider(Now);
+        var editor = new EfRecordEditor(db, clock);
+        var cashEur = await AddWalletAsync(db, "Cash EUR", CurrencyCode.Eur);
+        var cashRsd = await AddWalletAsync(db, "Cash RSD", CurrencyCode.Rsd);
+        await editor.CancelAsync(transaction.Id, TestContext.Current.CancellationToken);
+        await new EfReceiptStore(db, clock).SaveExchangeSlipAsync(
+            transaction.Id, NewSlipReceipt(), NewSlip(received: null) with { Rate = null }, "photo-file-1",
+            AppReceipts.SlipDisposition.Incomplete, TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+        await new EfCategorizationStore(db, clock).ApplyAsync(transaction.Id, new CategorizationOutcome(
+            [], new DateOnly(2026, 9, 26), Kind: JobKind.Correct, Instruction: "получил 11700",
+            TransactionKind: TransactionKind.Transfer,
+            Transfer: new TransferFacts(
+                cashEur, new Money(100.00m, CurrencyCode.Eur), cashRsd, new Money(11700.00m, CurrencyCode.Rsd), null, null, null)),
+            TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        await editor.RestoreAsync(transaction.Id, TestContext.Current.CancellationToken);
+
+        db.ChangeTracker.Clear();
+        var stored = await db.Transactions.AsNoTracking().SingleAsync(t => t.Id == transaction.Id, TestContext.Current.CancellationToken);
+        stored.Status.Should().Be(TransactionStatus.Completed);
+        stored.FailureReason.Should().Be(RecordFailureReason.None);
+    }
+
+    static async Task<Guid> AddWalletAsync(LedgerDbContext db, string name, CurrencyCode currency)
+    {
+        var wallet = new Wallet { Id = Guid.NewGuid(), Name = name, Currency = currency, CreatedAt = Now };
+        db.Wallets.Add(wallet);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+        return wallet.Id;
     }
 
     [Fact]
