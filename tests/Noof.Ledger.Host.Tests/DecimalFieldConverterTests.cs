@@ -6,7 +6,7 @@ using Noof.Ledger.Web.Components;
 namespace Noof.Ledger.Host.Tests;
 
 // The operator types a decimal comma; MudBlazor's own converter reads "117,35" as 11735 under the invariant culture
-// and turns what it cannot read into "no value" (amendment 27).
+// and turns what it cannot read into "no value" (A-24).
 public class DecimalFieldConverterTests
 {
     const string Refusal = "Not a number: use one decimal separator (a point or a comma) and no thousands separator.";

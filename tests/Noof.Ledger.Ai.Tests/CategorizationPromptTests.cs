@@ -128,7 +128,7 @@ public class CategorizationPromptTests
     [Fact]
     public void System_prompt_explains_how_a_transfers_current_sides_are_answered_back()
     {
-        // Amendment 24: a fee shown beside its side's principal is answered not included; a side the ledger worked
+        // A-21: a fee shown beside its side's principal is answered not included; a side the ledger worked
         // out is answered null, so a date-only correction re-derives it instead of pinning a rounded figure.
         CategorizationPrompt.System.Should().Contain("is answered with included false");
         CategorizationPrompt.System.Should().Contain("A side \"worked out by the ledger\" is answered");

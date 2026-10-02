@@ -280,11 +280,10 @@ internal static class CategorizationPrompt
         _ => ProposedKind.Expense,
     };
 
-    // Each side as the person would have said it (amendments 21, 24): the source as handed over less its fee, the fee
-    // beside it "not included in the figure"; the destination as what arrived - the stored amount - its fee "already
-    // taken out of the figure", as a person says "получил" (I-1). Answered back that way - included false on the source,
-    // true on the destination, a worked-out side null - it settles to exactly the stored amounts. A stated rate keeps
-    // its stated direction.
+    // Each side as the person would have said it (A-33): the source as handed over less its fee, the fee beside it
+    // "not included in the figure"; the destination as what arrived - the stored amount - its fee "already taken out
+    // of the figure". Answered back that way - included false on the source, true on the destination, a worked-out side
+    // null - it settles to exactly the stored amounts. A stated rate keeps its stated direction.
     static IEnumerable<string> RenderTransfer(TransferView transfer)
     {
         var source = transfer is { Fee: { } sourceFee, FeeLeg: TransferLeg.From } ? transfer.From - sourceFee : transfer.From;

@@ -675,7 +675,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
             .Status.Should().Be(TransactionStatus.Captured, "a clean slip is recorded by RecordExchange, not by saving it");
     }
 
-    // Review focus 3: a slip photo with the caption "получил 11650" - RecordExchange runs first, then the
+    // A-10: a slip photo with the caption "получил 11650" - RecordExchange runs first, then the
     // caption's correction replaces the received amount; never both at once, never the other way round.
     [Fact]
     public async Task The_caption_job_of_a_clean_slip_is_claimable_only_after_its_record_exchange_job()
@@ -811,7 +811,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
         secondResult.DuplicateOfTransactionId.Should().BeNull();
     }
 
-    // Amendment 26: a slip changed money the evening before its photo was sent; the record is dated by the slip.
+    // A-23: a slip changed money the evening before its photo was sent; the record is dated by the slip.
     [Theory]
     [InlineData(AppReceipts.SlipDisposition.Record)]
     [InlineData(AppReceipts.SlipDisposition.Hold)]
@@ -845,7 +845,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
             .OccurredOn.Should().Be(new DateOnly(2026, 9, 26));
     }
 
-    // Amendment 26 and spec §3: a held slip a reply completes keeps the slip's day - the correction that names no day
+    // A-23 and spec §3: a held slip a reply completes keeps the slip's day - the correction that names no day
     // keeps the record's (CategorizationWorker.DefaultDay), and the record's day is now the slip's. PR 7c's worker test
     // covers the worker half; this pins that the day a reply finds is the slip's, through the subject it reads.
     [Fact]
@@ -1070,7 +1070,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
         (await store.IsAwaitingConfirmationAsync(transaction.Id, TestContext.Current.CancellationToken)).Should().BeTrue();
     }
 
-    // Review focus 2: Cancel, then Restore, must bring back the "Record anyway" prompt for a held slip.
+    // A-7: Cancel, then Restore, must bring back the "Record anyway" prompt for a held slip.
     [Fact]
     public async Task A_cancelled_held_slip_is_still_awaiting_confirmation()
     {
@@ -1083,7 +1083,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
             .Should().BeTrue("a Cancel is not an apply: Restore must return to the slip's confirmation prompt");
     }
 
-    // Review focus 2: a slip a reply completed (amendment 9) and then cancelled offers Restore only.
+    // A-7: a slip a reply completed (A-8) and then cancelled offers Restore only.
     [Fact]
     public async Task A_slip_a_reply_completed_is_never_awaiting_even_when_cancelled()
     {
@@ -1104,7 +1104,7 @@ public class EfReceiptStoreTests(PostgresFixture fixture)
             .Should().BeFalse("a reply already recorded it; Restore must never offer Record anyway again");
     }
 
-    // Review focus 2: an incomplete slip is Failed with SlipIncomplete - only a reply completes it.
+    // A-7: an incomplete slip is Failed with SlipIncomplete - only a reply completes it.
     [Fact]
     public async Task An_incomplete_slip_is_never_awaiting()
     {

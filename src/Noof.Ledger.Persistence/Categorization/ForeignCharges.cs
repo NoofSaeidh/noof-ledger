@@ -34,7 +34,7 @@ internal static class ForeignCharges
             [new NpgsqlParameter("transactionId", transaction.Id)],
             cancellationToken);
 
-        // T-1, amendment 27: a fiscal receipt is never a foreign-currency spending, so its lines stay as they are.
+        // T-1, A-24: a fiscal receipt is never a foreign-currency spending, so its lines stay as they are.
         if (job == JobKind.CategorizeReceipt
             || transaction.Kind != TransactionKind.Expense
             || transaction.WalletId is not { } walletId)
@@ -62,7 +62,7 @@ internal static class ForeignCharges
                 terms => new ChargeTerms(terms.Rate, new FeeTerms(terms.FeePercent, terms.FeeFixed, terms.FeeMinimum)));
 
         // A said charge cannot be split across currencies, and one in a currency other than the wallet's prices
-        // nothing here (amendment 14).
+        // nothing here (A-13).
         var honoured = said is not null && foreignSums.Count == 1 && said.Charged.Currency == walletCurrency ? said : null;
 
         List<Charge> charges = [.. foreignSums
@@ -107,7 +107,7 @@ internal static class ForeignCharges
                 return ChargeOf(transactionId, currency, stated, feeTerms, ChargeSource.Stated);
         }
 
-        // Amendment 22: a kept Stated charge stays when the foreign sum changes; only its rate is derived again. Its
+        // A-19: a kept Stated charge stays when the foreign sum changes; only its rate is derived again. Its
         // stored fee goes back in as said: a fee solved out of an included figure can differ from FeeOn(Charged) by
         // a cent, and a said fee need not be FeeOn(Charged) at all, so recomputing it would move a figure stated.
         if (!chargeWasSaid && kept is { Source: ChargeSource.Stated } && SnapshotOf(kept) is var snapshot

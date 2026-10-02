@@ -3,7 +3,7 @@ using Noof.Ledger.Domain;
 namespace Noof.Ledger.Application.Receipts;
 
 // Null when the receipt saved cleanly, or was already saved for this same transaction by an earlier,
-// replayed attempt (ReceiptId is then the existing row's id either way, C-1). A duplicate
+// replayed attempt (ReceiptId is then the existing row's id either way). A duplicate
 // seller+fiscal-number pair (or, for an exchange slip, seller+slip-number) recorded for ANOTHER
 // transaction writes nothing and names that transaction instead - ReceiptId is null and
 // DuplicateOfTransactionId never equals the transaction being saved.
@@ -52,7 +52,7 @@ public interface IReceiptStore
     // for "Record anyway"), Incomplete fails the record with SlipIncomplete and queues the caption at once - a record
     // already Cancelled stays Cancelled but keeps SlipIncomplete, so Restore brings it back Failed. A
     // (seller_tax_id, slip_number) another transaction already recorded writes nothing and names it, as
-    // SaveExtractedAsync does for a fiscal receipt; a replay of this transaction's own save returns its id (C-1).
+    // SaveExtractedAsync does for a fiscal receipt; a replay of this transaction's own save returns its id.
     Task<ReceiptSaveResult> SaveExchangeSlipAsync(
         Guid transactionId, ExtractedReceipt receipt, ExtractedExchange exchange, string? telegramFileId,
         SlipDisposition disposition, CancellationToken cancellationToken);
@@ -81,12 +81,12 @@ public interface IReceiptStore
     // A caller that gets false just re-renders the record's current state.
     Task<bool> EnqueueCategorizationAsync(Guid transactionId, int sourceMessageId, CancellationToken cancellationToken);
 
-    // A fiscal vision receipt that has never had a CategorizeReceipt job, or (amendment 8) a vision exchange
+    // A fiscal vision receipt that has never had a CategorizeReceipt job, or (A-7) a vision exchange
     // slip that was never recorded - no RecordExchange job, no Initial/Correction/Edit revision - and is not
     // failed. Independent of the transaction's own current status, so it reads the same right after Cancel as
     // before either button is pressed: RecordActionHandler keeps showing the confirmation prompt through
     // Cancel/Restore, EfTransactionTrace shows the same value on the trace page, and ExtractReceiptWorker's
-    // C-1 replay uses it in place of recomputing why the receipt was held
+    // lease-expiry replay uses it in place of recomputing why the receipt was held
     // (docs/decisions/p6-2-vision-fallback-stopped-inventing-receipts.md).
     Task<bool> IsAwaitingConfirmationAsync(Guid transactionId, CancellationToken cancellationToken);
 }
