@@ -19,6 +19,7 @@ DatabaseState
 DumpResult
 EchoMessage
 EchoTarget
+ExchangeSlipView
 ExtractedExchange
 ExtractedReceipt
 ExtractedReceiptLine
@@ -133,7 +134,11 @@ SecretKeys
 SecretResult
 SecretState
 SecretStatus
+SlipAssessment
+SlipDisposition
 SlipFacts
+SlipMissing
+SlipProblem
 SlowOperationOptions
 StatedCharge
 SystemHealthReport

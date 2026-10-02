@@ -3,6 +3,7 @@ using Npgsql;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Balances;
+using Noof.Ledger.Persistence.Receipts;
 using Noof.Ledger.Persistence.Revisions;
 
 namespace Noof.Ledger.Persistence.Categorization;
@@ -80,6 +81,8 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
 
         var charges = await ChargesOfAsync(transactionId, header.WalletCurrency, lines, cancellationToken);
 
+        var slip = await SlipFactsAsync(transactionId, transfer?.VenueName, cancellationToken);
+
         // A voice capture has no text until its transcript arrives, and none at all when nothing was heard;
         // the pipeline and the echo read that as empty, which is what it is. Only a Manual record has no chat,
         // and nothing categorises or echoes one, so 0 stands in for it.
@@ -87,7 +90,7 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
             header.Id, header.RawText ?? string.Empty, header.TelegramChatId ?? 0, header.BotMessageId, header.WalletName,
             header.Status, ZonedClock.LocalDate(header.OccurredAt, header.TimeZoneId), header.OccurredOn, lines,
             header.CaptureKind, header.Kind, header.WalletCurrency, balances, statement, WalletId: header.WalletId,
-            Transfer: transfer, FailureReason: header.FailureReason, Charges: charges);
+            Transfer: transfer, FailureReason: header.FailureReason, Charges: charges, Slip: slip);
     }
 
     async Task<TransferView?> TransferViewAsync(
@@ -155,6 +158,14 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
                 new FeeTerms(charge.FeePercent, charge.FeeFixed, charge.FeeMinimum),
                 charge.Source))];
     }
+
+    // A slip's evidence and the office it names (spec §3-§4): the echo's slip rows and a slip correction's request
+    // text read them. The venue merchant (1b's TransferView.VenueName) is the office once a transfer names it; before
+    // that, the name the slip printed.
+    async Task<SlipFacts?> SlipFactsAsync(Guid transactionId, string? venueName, CancellationToken cancellationToken) =>
+        await new EfReceiptStore(db, timeProvider).GetExchangeSlipAsync(transactionId, cancellationToken) is { } slip
+            ? new SlipFacts(venueName ?? slip.SellerName, slip.SlipNumber, slip.Evidence)
+            : null;
 
     public async Task ApplyAsync(Guid transactionId, CategorizationOutcome outcome, CancellationToken cancellationToken)
     {
