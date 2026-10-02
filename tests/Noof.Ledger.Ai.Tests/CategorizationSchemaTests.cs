@@ -100,7 +100,7 @@ public class CategorizationSchemaTests
                             "amount": { "type": "number", "description": "The fee, as the person said it." },
                             "currency": { "type": "string", "enum": ["EUR", "RSD", "USD", "RUB", "KZT"], "description": "The fee's currency." },
                             "leg": { "type": "string", "enum": ["from", "to"], "description": "\"from\" unless the person says the receiving side kept the fee - then \"to\"; a fee in only one side's currency is always on that side." },
-                            "included": { "type": "boolean", "description": "True only when the person says the amount they gave for that side already includes the fee." }
+                            "included": { "type": "boolean", "description": "True only when the person says the amount they gave for that side already includes the fee, or when the fee is on \"to\" and to_amount is what they say arrived, unless they say the fee was taken out of it afterwards." }
                           }
                         },
                         { "type": "null" }

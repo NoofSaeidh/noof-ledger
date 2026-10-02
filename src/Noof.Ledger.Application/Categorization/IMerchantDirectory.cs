@@ -20,7 +20,7 @@ public interface IMerchantDirectory
     Task LinkTaxIdAsync(Guid merchantId, string taxId, CancellationToken cancellationToken);
 
     // The office a slip names, keyed by its PIB as a shop is (spec §3). One PIB is one legal entity
-    // (amendment 10): a PIB a shop receipt already linked resolves to that merchant, whatever its kind; an
+    // (A-9): a PIB a shop receipt already linked resolves to that merchant, whatever its kind; an
     // unknown one creates an ExchangeVenue carrying it.
     Task<Guid> VenueForTaxIdAsync(string taxId, string displayName, CancellationToken cancellationToken);
 }

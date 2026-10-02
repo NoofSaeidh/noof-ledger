@@ -197,7 +197,9 @@ internal static class CategorizationSchema
                 ["enum"] = new JsonArray(ProposedLeg.From, ProposedLeg.To),
                 ["description"] = "\"from\" unless the person says the receiving side kept the fee - then \"to\"; a fee in only one side's currency is always on that side.",
             }),
-            ("included", Boolean("True only when the person says the amount they gave for that side already includes the fee.")))));
+            ("included", Boolean(
+                "True only when the person says the amount they gave for that side already includes the fee, "
+                + "or when the fee is on \"to\" and to_amount is what they say arrived, unless they say the fee was taken out of it afterwards.")))));
 
     static JsonObject Charged() => NullableObject.Of(
         ChargedDescription,

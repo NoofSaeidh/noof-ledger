@@ -147,16 +147,7 @@ internal sealed class EfCategorizationStore(LedgerDbContext db, TimeProvider tim
 
         return [.. charges
             .OrderBy(charge => charge.Currency.Value, StringComparer.Ordinal)
-            .Select(charge => new ChargeView(
-                charge.Currency,
-                lines
-                    .Where(line => line.Role == EntryRole.Principal && line.Amount.Currency == charge.Currency)
-                    .Sum(line => line.Amount.Amount),
-                new Money(charge.ChargedAmount, chargedIn),
-                new Money(charge.FeeAmount, chargedIn),
-                charge.RateUsed,
-                new FeeTerms(charge.FeePercent, charge.FeeFixed, charge.FeeMinimum),
-                charge.Source))];
+            .Select(charge => ChargeViews.Of(charge, lines.Select(line => (line.Role, line.Amount)), chargedIn))];
     }
 
     // A slip's evidence and the office it names (spec §3-§4): the echo's slip rows and a slip correction's request

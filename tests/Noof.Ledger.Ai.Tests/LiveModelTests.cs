@@ -30,7 +30,7 @@ public sealed class LiveModelTests
 
     static readonly WalletOption Raiffeisen = new(
         Guid.Parse("10000000-0000-0000-0000-000000000001"), "Raiffeisen RSD", CurrencyCode.Rsd, ["райф"], true);
-    // The RSD cash default while Raiffeisen is the RSD default (amendment 21): an unnamed cash side lands here.
+    // The RSD cash default while Raiffeisen is the RSD default (A-27): an unnamed cash side lands here.
     static readonly WalletOption CashRsd = new(
         Guid.Parse("10000000-0000-0000-0000-000000000002"), "Cash RSD", CurrencyCode.Rsd, ["налик", "наличка"], false,
         DefaultForPayment: WalletPaymentDefault.Cash);
@@ -61,6 +61,18 @@ public sealed class LiveModelTests
             new CategoryOption("fees-charges", "Fees & Charges", "Комиссии и сборы", null),
             new CategoryOption("books", "Books", "Книги", null),
         ]) with { Wallets = [Raiffeisen, CashRsd, Wise, Revolut, Kaspi] };
+
+    // What the destination wallet actually stores once the ledger settles the model's answer (spec §2, rules 2-3).
+    static Money StoredTo(CategorizationProposal proposal)
+    {
+        var mapped = new ProposalMapper().TryMap(
+            proposal, OfferedSlugs, offeredMerchantIds: [], wallets: [Raiffeisen, CashRsd, Wise, Revolut, Kaspi], defaultCurrency: "RSD",
+            out var result, out var failure, out _);
+
+        mapped.Should().BeTrue(failure);
+        result.Transfer.Should().NotBeNull();
+        return result.Transfer!.To;
+    }
 
     [Fact]
     public async Task A_single_coffee_purchase_produces_one_line_item_with_the_amount_and_currency()
@@ -318,6 +330,33 @@ public sealed class LiveModelTests
         fee.Leg.Should().Be(ProposedLeg.To);
         fee.Amount.Should().Be(1m);
         fee.Currency.Should().Be("EUR");
+    }
+
+    [Fact]
+    public async Task A_received_amount_beside_a_fee_on_the_receiving_side_is_stored_as_what_arrived()
+    {
+        if (!LiveModelGate.TryGetApiKey(out var apiKey))
+            Assert.Skip(LiveModelGate.SkipMessage);
+
+        // I-1 (Phase 7 closing review): "получил" is what the purse holds after the office's dinar fee, never 11600.
+        var proposal = await CreateCategorizer(apiKey).ProposeAsync(
+            WithWallets("поменял 100 евро, получил 11700 динар, комиссия 100 динар"), TestContext.Current.CancellationToken);
+
+        StoredTo(proposal).Should().Be(new Money(11700m, CurrencyCode.Rsd));
+    }
+
+    [Fact]
+    public async Task An_amount_said_only_as_what_arrived_beside_a_fee_is_stored_as_what_arrived()
+    {
+        if (!LiveModelGate.TryGetApiKey(out var apiKey))
+            Assert.Skip(LiveModelGate.SkipMessage);
+
+        // The source is named because an unnamed EUR source would fall to Wise, the EUR default, and put both legs on
+        // one wallet. Whichever leg the model gives the fee, Wise must end up with the 9950 that arrived, not 9900.
+        var proposal = await CreateCategorizer(apiKey).ProposeAsync(
+            WithWallets("перевёл с ревута на вайз, пришло 9950, комиссия 50"), TestContext.Current.CancellationToken);
+
+        StoredTo(proposal).Should().Be(new Money(9950m, CurrencyCode.Eur));
     }
 
     [Fact]

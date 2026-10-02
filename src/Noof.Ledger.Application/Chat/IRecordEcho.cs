@@ -82,7 +82,7 @@ public interface IRecordEcho
     EchoMessage ComposeReceiptNeedsConfirmation(ExtractedReceipt receipt, bool taxIdMalformed = false, bool kindUnclear = false);
 
     // The same prompt rebuilt from what was actually stored - RecordActionHandler's Cancel/Restore and
-    // ExtractReceiptWorker's own C-1 replay of a still-unconfirmed job both need to turn a stored
+    // ExtractReceiptWorker's own lease-expiry replay of a still-unconfirmed job both need to turn a stored
     // ReceiptView back into this prompt without ever having an ExtractedReceipt to hand. A malformed
     // printed tax id, or an unclear kind, is never recoverable here (the stored Receipt.Kind is already
     // a concrete value, and ChatReceiptVision only ever stores a well-formed tax id), so a replay or a

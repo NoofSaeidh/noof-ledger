@@ -11,8 +11,9 @@ public sealed record ExtractedExchange(
     decimal? GivenAmount, string? GivenCurrency, decimal? ReceivedAmount, string? ReceivedCurrency,
     decimal? Rate, decimal? CommissionAmount, string? CommissionCurrency, string? SlipNumber)
 {
-    // One para, plus what a rate printed to four decimals can be off by on the foreign amount (spec §3).
-    const decimal OnePara = 0.01m;
+    // An office pays out whole dinars, so a difference under one dinar is rounding (operator, 2026-10-02; spec A-29).
+    // The printed-rate error is independent of it and grows with the amount, so it is allowed for on top.
+    const decimal OneDinar = 1m;
     const decimal PrintedRateError = 0.00005m;
 
     static readonly Regex NineDigitPib = new(@"^\d{9}$", RegexOptions.Compiled);
@@ -87,7 +88,7 @@ public sealed record ExtractedExchange(
         var receivedInDinars = givenIsForeign ? received : received * rate;
         var unexplained = givenInDinars - receivedInDinars - CommissionInDinars(printed.Base, rate);
 
-        return Math.Abs(unexplained) > OnePara + foreignAmount * PrintedRateError;
+        return Math.Abs(unexplained) >= OneDinar + foreignAmount * PrintedRateError;
     }
 
     // A commission in a third currency (neither side's) cannot be allowed for, so it counts as nothing and the

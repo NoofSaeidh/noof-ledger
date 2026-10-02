@@ -94,8 +94,8 @@ public sealed record ProposedCharge(decimal Amount, string Currency, decimal? Fe
 
 // Kind defaults to Expense so every existing positional construction of this record (a plain
 // spending answer) keeps meaning exactly what it always meant. WalletId/BalanceAmount/BalanceCurrency
-// travel flat, mirroring record_transaction's own wire shape (the "expensive to reverse" note in
-// plan-00-header.md) rather than as a nested object the strict schema cannot express as cleanly.
+// travel flat, mirroring record_transaction's own wire shape, rather than as a nested object the
+// strict schema cannot express as cleanly.
 public sealed record CategorizationProposal(
     IReadOnlyList<ProposedLineItem> Items,
     string? OccurredOn = null,
