@@ -84,6 +84,7 @@ Taken while the implementation plan was written against the code. The plan itsel
 | A-25 | The crossing-zero line compares the source's balance with and without this transfer under the checkpoint rule. | A backdated transfer absorbed by a later checkpoint did not cause today's negative balance. |
 | A-26 | `RecordFailureReason` has `None = 0`, and a failure reason is never nullable: `transactions.failure_reason` is `not null default 0`, a record that is not `Failed` holds `None`, one `MarkFailedAsync(id, reason)` takes `None` for a failure with no named reason, and the echo's reason parameter defaults to `None`. | Operator's review of PR #32. |
 | A-27 | Replaces A-18 for capture: a transfer's **source** leg the model leaves without a wallet goes to the **card** default of its currency, its **destination** leg to the **cash** default of its currency, each else the currency's default. A slip keeps cash on both legs (A-8, §3). | "снял 10000" with no wallet named would otherwise put both legs on the cash wallet and fail as `SameWallet`; a withdrawal takes from the card and lands in cash. Operator, 2026-10-01. |
+| A-28 | The no-terms echo reads `{sum} {CUR} not converted — set a {CUR} rate for {Wallet} on /wallets, or correct this record to apply it` (`30.00 USD not converted — set a USD rate for Kaspi KZT on /wallets, or correct this record to apply it`), not §4's `not in the wallet's currency — set a USD rate for Kaspi KZT on /wallets`. | It leads with the amount, and the correction route keeps the hint true for a record saved before the rate existed, since rates are never applied retroactively (§1, "No backfill"). Operator, 2026-10-02. |
 
 ## 1. Data
 
@@ -360,7 +361,7 @@ reworded to say "fiscal receipt" explicitly, rather than gaining an exemption.
 | Exchange | `Exchange — 100.00 EUR (Cash EUR) → 11 700.00 RSD (Cash RSD) · 1 EUR = 117.0000 RSD`, both balances; a fee shows on its leg as above, and as `Fee 2.00 EUR · Fees & Charges` |
 | Slip | as an exchange, plus `Menjačnica <name> · from a slip photo` and the vision warning line receipts carry |
 | Foreign spending | as today, plus `30.00 USD → charged 15 600.00 KZT (1 USD = 520.0000 KZT, wallet rate) + fee 156.00 KZT`; `stated` instead of `wallet rate` for a stated charge |
-| No terms | `not in the wallet's currency — set a USD rate for Kaspi KZT on /wallets` |
+| No terms | `not in the wallet's currency — set a USD rate for Kaspi KZT on /wallets` *(superseded by A-28)* |
 | Failures | one line per reason: `Exchange not recorded: how much RSD did you get? Reply with the amount or the rate.` (`MissingReceivedAmount`); `… both sides are Cash RSD — which wallet did it go to?` (`SameWallet`); `… Cash RSD holds RSD, not EUR — create a EUR wallet or name one` (`LegCurrencyMismatch`); `… couldn't use that rate` (`InvalidRate`); `… couldn't place that fee` (`InvalidFee`); `Slip read, but the received amount is unreadable — reply with it` (`SlipIncomplete`) |
 | Source crosses zero | an extra line when this transfer takes the source from ≥ 0 to < 0: `Cash EUR is now −1 000.00 EUR — a missing exchange or income?` — never for a wallet that was already negative, so a credit wallet stays quiet |
 
