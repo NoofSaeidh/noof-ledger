@@ -178,8 +178,11 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
         }
 
         // A held slip's caption waits for "Record anyway" (EnqueueCategorizationAsync); an incomplete one's goes
-        // at once, since it may carry the missing figure.
-        if (disposition != AppReceipts.SlipDisposition.Hold && CaptionJob(transactionId, transaction, now) is { } caption)
+        // at once, since it may carry the missing figure. A-22: a reply sent while the photo was being read is the
+        // operator's later word, and the caption queued behind it would re-apply the older figures over it.
+        if (disposition != AppReceipts.SlipDisposition.Hold
+            && CaptionJob(transactionId, transaction, now) is { } caption
+            && !await HasReplyInFlightAsync(transactionId, cancellationToken))
             db.CategorizationJobs.Add(caption);
 
         try
@@ -346,6 +349,11 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
         var now = timeProvider.GetUtcNow();
         if (await IsExchangeSlipAsync(transactionId, cancellationToken))
         {
+            // A-8: a reply records a held slip. Queued behind a reply still in flight, the caption would re-apply its
+            // own figures over the operator's.
+            if (await HasReplyInFlightAsync(transactionId, cancellationToken))
+                return false;
+
             // A held slip is recorded by RecordExchange, its caption right after it (spec §3, Recording 1).
             db.CategorizationJobs.Add(PendingJob(transactionId, JobKind.RecordExchange, now, sourceMessageId));
             if (CaptionJob(transactionId, transaction, now) is { } caption)
@@ -402,6 +410,14 @@ internal sealed class EfReceiptStore(LedgerDbContext db, TimeProvider timeProvid
 
     Task<bool> HasJobAsync(Guid transactionId, JobKind kind, CancellationToken cancellationToken) =>
         db.CategorizationJobs.AsNoTracking().AnyAsync(job => job.TransactionId == transactionId && job.Kind == kind, cancellationToken);
+
+    // Until Record anyway, only a reply's job on a slip carries a source message; a caption's never does.
+    Task<bool> HasReplyInFlightAsync(Guid transactionId, CancellationToken cancellationToken) =>
+        db.CategorizationJobs.AsNoTracking().AnyAsync(
+            job => job.TransactionId == transactionId
+                && job.SourceMessageId != null
+                && (job.Status == JobStatus.Pending || job.Status == JobStatus.Claimed),
+            cancellationToken);
 
     Task<bool> IsExchangeSlipAsync(Guid transactionId, CancellationToken cancellationToken) =>
         db.Receipts.AsNoTracking().AnyAsync(r => r.TransactionId == transactionId && r.Kind == ReceiptKind.Exchange, cancellationToken);

@@ -34,15 +34,24 @@ internal sealed class EfTranscriptionStore(LedgerDbContext db, TimeProvider time
         return true;
     }
 
+    // Stamped under the transaction's row lock, as EfRecordEditor queues a typed reply: a slip save and Record anyway
+    // check for a reply under that lock.
     public async Task<bool> CompleteCorrectionAsync(
         Guid transactionId, string transcript, int sourceMessageId, DateOnly? instructionDay, CancellationToken cancellationToken)
     {
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.Database.SqlQueryRaw<Guid>(
+                "SELECT id FROM transactions WHERE id = @transactionId FOR UPDATE",
+                new NpgsqlParameter("transactionId", transactionId))
+            .ToListAsync(cancellationToken);
+
         var job = NewJob(transactionId, JobKind.Correct, transcript, sourceMessageId, instructionDay);
         db.CategorizationJobs.Add(job);
 
         try
         {
             await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
             return true;
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException
