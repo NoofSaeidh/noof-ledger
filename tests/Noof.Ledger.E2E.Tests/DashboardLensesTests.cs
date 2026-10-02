@@ -109,6 +109,10 @@ public sealed class DashboardLensesTests(CookieModeHostFixture fixture) : PageTe
         {
             AddTransfer(db, withdrawalId, raiffeisen, new Money(10150.00m, CurrencyCode.Rsd), cash, new Money(10000.00m, CurrencyCode.Rsd),
                 $"withdrawal {marker}", DateTimeOffset.UtcNow, fee: new Money(150.00m, CurrencyCode.Rsd));
+            // A second RSD fee of its own, so the per-currency sum is proved here, not only when another test of
+            // this class already left a fee in the shared clone.
+            AddTransfer(db, Guid.NewGuid(), raiffeisen, new Money(5050.00m, CurrencyCode.Rsd), cash, new Money(5000.00m, CurrencyCode.Rsd),
+                $"withdrawal 2 {marker}", DateTimeOffset.UtcNow, fee: new Money(50.00m, CurrencyCode.Rsd));
             await db.SaveChangesAsync(cancellationToken);
         }
 
@@ -119,7 +123,7 @@ public sealed class DashboardLensesTests(CookieModeHostFixture fixture) : PageTe
         await Expect(Page.Locator($"#month-transfer-{withdrawalId}")).ToContainTextAsync(
             $"Raiffeisen {marker} → Cash RSD {marker} · 10,150.00 RSD → 10,000.00 RSD");
         await Expect(Page.Locator($"#month-transfer-{withdrawalId}")).ToContainTextAsync($"Fee 150.00 RSD from Raiffeisen {marker}");
-        (await TransferFeesAsync(CurrencyCode.Rsd)).Should().Be(rsdFeesBefore + 150.00m,
+        (await TransferFeesAsync(CurrencyCode.Rsd)).Should().Be(rsdFeesBefore + 200.00m,
             "the section's fee line sums every transfer's fee per currency");
     }
 
