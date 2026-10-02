@@ -1160,4 +1160,218 @@ public class ExtractReceiptWorkerTests
 
         logger.Entries.Should().BeEmpty();
     }
+
+    static readonly ExtractedExchange CleanSlip = new(100.00m, "EUR", 11700.00m, "RSD", 117.0000m, null, null, "PZ-2026-0917");
+
+    static ExtractedReceipt SlipRead(string? sellerTaxId = "123456789") => new(
+        ReceiptSource.Vision, null, sellerTaxId, "Menjačnica Zlatnik", null, null, null,
+        DateTimeOffset.Parse("2026-09-25T09:00:00+02:00"), 11700.00m, CurrencyCode.Rsd, ReceiptKind.Exchange, null, null, []);
+
+    static ExchangeSlipView SlipView(ExtractedExchange slip, string? sellerTaxId = "123456789") => new(
+        Guid.Parse("00000000-0000-0000-0007-000000000010"), sellerTaxId, "Menjačnica Zlatnik",
+        DateTimeOffset.Parse("2026-09-25T07:00:00Z"), "PZ-2026-0917", slip);
+
+    static ReceiptView SlipReceiptView() => new(
+        Guid.Parse("00000000-0000-0000-0007-000000000010"), ReceiptSource.Vision, "123456789", "Menjačnica Zlatnik", null, null,
+        null, DateTimeOffset.Parse("2026-09-25T07:00:00Z"), 11700.00m, CurrencyCode.Rsd, ReceiptKind.Exchange, null, null, null, []);
+
+    static Harness SlipSetup(ExtractedExchange slip, string? sellerTaxId = "123456789", bool taxIdMalformed = false)
+    {
+        var harness = Setup(ExtractJob());
+        harness.Vision.ReadAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<string>(), Arg.Any<decimal?>(), Arg.Any<CancellationToken>())
+            .Returns(new ReceiptVisionResult(SlipRead(sellerTaxId), null, taxIdMalformed, KindUnclear: false, Exchange: slip));
+        harness.ReceiptStore.SaveExchangeSlipAsync(
+                Arg.Any<Guid>(), Arg.Any<ExtractedReceipt>(), Arg.Any<ExtractedExchange>(), Arg.Any<string?>(),
+                Arg.Any<SlipDisposition>(), Arg.Any<CancellationToken>())
+            .Returns(new ReceiptSaveResult(Guid.NewGuid(), null));
+        harness.ReceiptStore.GetExchangeSlipAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(SlipView(slip, sellerTaxId));
+        return harness;
+    }
+
+    [Fact]
+    public async Task A_clean_slip_is_saved_for_RecordExchange_and_acknowledged_never_held_on_lines_it_does_not_have()
+    {
+        var harness = SlipSetup(CleanSlip);
+        var logger = new CapturingLogger<ExtractReceiptWorker>();
+
+        (await CreateWorker(harness.ScopeFactory(), logger: logger).RunTickAsync(TestContext.Current.CancellationToken))
+            .Should().Be(CategorizationTickResult.Processed);
+
+        await harness.ReceiptStore.Received(1).SaveExchangeSlipAsync(
+            TransactionId, Arg.Is<ExtractedReceipt>(r => r.Kind == ReceiptKind.Exchange), CleanSlip, "photo-1",
+            SlipDisposition.Record, Arg.Any<CancellationToken>());
+        await harness.ReceiptStore.DidNotReceiveWithAnyArgs().SaveExtractedAsync(default, default!, default, default, Arg.Any<CancellationToken>());
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text == Echo.RecordingExchange && m.Actions.Count == 0), Arg.Any<CancellationToken>());
+        await harness.Queue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
+        logger.Entries.Should().Contain(entry => entry.EventId.Id == 5021);
+        logger.Entries.Should().Contain(entry => entry.EventId.Id == TransactionStages.ExtractedEventId);
+    }
+
+    [Fact]
+    public async Task A_slip_whose_figures_disagree_is_held_with_the_slip_confirmation_prompt()
+    {
+        var slip = CleanSlip with { ReceivedAmount = 11650.00m };
+        var harness = SlipSetup(slip);
+
+        await TickAsync(harness);
+
+        await harness.ReceiptStore.Received(1).SaveExchangeSlipAsync(
+            TransactionId, Arg.Any<ExtractedReceipt>(), slip, "photo-1", SlipDisposition.Hold, Arg.Any<CancellationToken>());
+        var prompt = Echo.ComposeSlipNeedsConfirmation(SlipView(slip));
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text == prompt.Text && m.Actions.SequenceEqual(new[] { RecordAction.RecordAnyway, RecordAction.Cancel })),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_slip_with_a_malformed_PIB_is_held_naming_the_PIB()
+    {
+        var harness = SlipSetup(CleanSlip, sellerTaxId: null, taxIdMalformed: true);
+
+        await TickAsync(harness);
+
+        await harness.ReceiptStore.Received(1).SaveExchangeSlipAsync(
+            TransactionId, Arg.Any<ExtractedReceipt>(), CleanSlip, "photo-1", SlipDisposition.Hold, Arg.Any<CancellationToken>());
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text.Contains("⚠️ The office's PIB is unreadable or not 9 digits", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task An_incomplete_slip_is_saved_as_incomplete_and_the_echo_asks_for_the_missing_figure()
+    {
+        var slip = CleanSlip with { ReceivedAmount = null, Rate = null };
+        var harness = SlipSetup(slip);
+        var failed = WaitingReceipt() with
+        {
+            Status = TransactionStatus.Failed,
+            FailureReason = RecordFailureReason.SlipIncomplete,
+            Slip = new SlipFacts("Menjačnica Zlatnik", "PZ-2026-0917", slip),
+        };
+        harness.Store.GetSubjectAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(WaitingReceipt(), failed);
+
+        await TickAsync(harness);
+
+        await harness.ReceiptStore.Received(1).SaveExchangeSlipAsync(
+            TransactionId, Arg.Any<ExtractedReceipt>(), slip, "photo-1", SlipDisposition.Incomplete, Arg.Any<CancellationToken>());
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text == "Slip read, but the amount received is unreadable — reply with it."
+                && !m.Actions.Contains(RecordAction.RecordAnyway)),
+            Arg.Any<CancellationToken>());
+        await harness.Queue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
+        await harness.Store.DidNotReceiveWithAnyArgs().MarkFailedAsync(default, default, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_duplicate_slip_cancels_the_new_transaction_and_says_the_slip_was_sent_before()
+    {
+        var harness = SlipSetup(CleanSlip);
+        var duplicateId = Guid.Parse("00000000-0000-0000-0007-000000000020");
+        harness.ReceiptStore.SaveExchangeSlipAsync(
+                Arg.Any<Guid>(), Arg.Any<ExtractedReceipt>(), Arg.Any<ExtractedExchange>(), Arg.Any<string?>(),
+                Arg.Any<SlipDisposition>(), Arg.Any<CancellationToken>())
+            .Returns(new ReceiptSaveResult(null, duplicateId));
+        harness.ReceiptStore.GetExchangeSlipAsync(duplicateId, Arg.Any<CancellationToken>())
+            .Returns(SlipView(CleanSlip) with { IssuedAt = DateTimeOffset.Parse("2026-09-24T22:30:00Z") });
+        harness.Store.GetSubjectAsync(duplicateId, Arg.Any<CancellationToken>())
+            .Returns(WaitingReceipt() with { TransactionId = duplicateId, Status = TransactionStatus.Completed });
+        var logger = new CapturingLogger<ExtractReceiptWorker>();
+
+        await CreateWorker(harness.ScopeFactory(), logger: logger).RunTickAsync(TestContext.Current.CancellationToken);
+
+        await harness.RecordEditor.Received(1).CancelAsync(TransactionId, Arg.Any<CancellationToken>());
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text == "Already recorded — this exchange slip was sent before (25.09.2026, 100.00 EUR → 11700.00 RSD)."),
+            Arg.Any<CancellationToken>());
+        await harness.Queue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
+        logger.Entries.Should().Contain(entry => entry.EventId.Id == 5022);
+    }
+
+    [Fact]
+    public async Task A_replay_of_a_saved_clean_slip_says_recording_the_exchange_never_categorising_zero_lines()
+    {
+        var harness = Setup(ExtractJob(), record: WaitingReceipt());
+        harness.ReceiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(SlipReceiptView());
+        harness.ReceiptStore.IsAwaitingConfirmationAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(false);
+
+        await TickAsync(harness);
+
+        await harness.Vision.DidNotReceiveWithAnyArgs().ReadAsync(default, default!, default, Arg.Any<CancellationToken>());
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text == Echo.RecordingExchange), Arg.Any<CancellationToken>());
+        await harness.Notifier.DidNotReceive().EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text.StartsWith("Categorising", StringComparison.Ordinal)), Arg.Any<CancellationToken>());
+        await harness.Queue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_replay_of_a_held_slip_shows_the_slip_prompt_again()
+    {
+        var slip = CleanSlip with { ReceivedAmount = 11650.00m };
+        var harness = Setup(ExtractJob(), record: WaitingReceipt());
+        harness.ReceiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(SlipReceiptView());
+        harness.ReceiptStore.IsAwaitingConfirmationAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(true);
+        harness.ReceiptStore.GetExchangeSlipAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(SlipView(slip));
+
+        await TickAsync(harness);
+
+        var prompt = Echo.ComposeSlipNeedsConfirmation(SlipView(slip));
+        await harness.Notifier.Received(1).EditAsync(111L, 42, Arg.Is<EchoMessage>(m => m.Text == prompt.Text), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_replay_of_a_held_slip_the_operator_cancelled_leaves_the_echo_alone()
+    {
+        var slip = CleanSlip with { ReceivedAmount = 11650.00m };
+        var harness = Setup(ExtractJob(), record: WaitingReceipt() with { Status = TransactionStatus.Cancelled });
+        harness.ReceiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(SlipReceiptView());
+        harness.ReceiptStore.IsAwaitingConfirmationAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(true);
+        harness.ReceiptStore.GetExchangeSlipAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(SlipView(slip));
+
+        await TickAsync(harness);
+
+        await harness.Notifier.DidNotReceiveWithAnyArgs().EditAsync(default, default, default!, Arg.Any<CancellationToken>());
+        await harness.Queue.Received(1).SucceedAsync(JobId, WorkerId, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_replay_of_an_incomplete_slip_is_never_offered_record_anyway()
+    {
+        var failed = WaitingReceipt() with
+        {
+            Status = TransactionStatus.Failed,
+            FailureReason = RecordFailureReason.SlipIncomplete,
+            Slip = new SlipFacts("Menjačnica Zlatnik", "PZ-2026-0917", CleanSlip with { ReceivedAmount = null, Rate = null }),
+        };
+        var harness = Setup(ExtractJob(), record: failed);
+        harness.ReceiptStore.GetByTransactionAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(SlipReceiptView());
+        harness.ReceiptStore.IsAwaitingConfirmationAsync(TransactionId, Arg.Any<CancellationToken>()).Returns(false);
+
+        await TickAsync(harness);
+
+        var expected = Echo.Compose(failed);
+        await harness.Notifier.Received(1).EditAsync(111L, 42,
+            Arg.Is<EchoMessage>(m => m.Text == expected.Text && !m.Actions.Contains(RecordAction.RecordAnyway)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_photo_whose_fiscal_QR_decoded_stays_a_fiscal_receipt_even_if_vision_calls_it_a_slip()
+    {
+        // Vision already refuses a slip once it is given a QR total; this pins the worker's own ordering behind that.
+        var harness = SlipSetup(CleanSlip);
+        harness.QrReader.Read(Arg.Any<Stream>()).Returns("https://suf.purs.gov.rs/v/?vl=abc");
+        harness.Decoder.Decode(Arg.Any<string>()).Returns(new FiscalQrDecodeResult(Payload(), null));
+        harness.FetchClient.FetchAsync(Arg.Any<FiscalQrPayload>(), Arg.Any<CancellationToken>())
+            .Returns(new FiscalFetchResult(null, new FiscalFetchFailure("timeout", null)));
+
+        await TickAsync(harness);
+
+        await harness.ReceiptStore.Received(1).SaveExtractedAsync(
+            TransactionId, Arg.Is<ExtractedReceipt>(r => r.Kind == ReceiptKind.Sale), Arg.Any<string?>(), Arg.Any<bool>(),
+            Arg.Any<CancellationToken>());
+        await harness.ReceiptStore.DidNotReceiveWithAnyArgs().SaveExchangeSlipAsync(
+            default, default!, default!, default, default, Arg.Any<CancellationToken>());
+    }
 }

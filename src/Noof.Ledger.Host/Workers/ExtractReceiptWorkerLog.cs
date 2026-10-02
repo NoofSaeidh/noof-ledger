@@ -1,4 +1,5 @@
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Host.Workers.ExtractReceiptLogging;
@@ -85,4 +86,12 @@ internal static partial class ExtractReceiptWorkerLog
         Message = "Vision fiscal number {ModelFiscalNumber} discarded in favour of the verified QR fiscal number {QrFiscalNumber}")]
     public static partial void LogModelFiscalNumberDiscardedForQrFiscalNumber(
         this ILogger logger, string? modelFiscalNumber, string qrFiscalNumber);
+
+    [LoggerMessage(EventId = 5021, Level = LogLevel.Information,
+        Message = "Exchange slip saved for transaction {TransactionId}: {Disposition}, problems [{Problems}], missing [{Missing}]")]
+    public static partial void LogSlipExtracted(
+        this ILogger logger, Guid transactionId, SlipDisposition disposition, string problems, string missing);
+
+    [LoggerMessage(EventId = 5022, Level = LogLevel.Information, Message = "Exchange slip duplicate of transaction {DuplicateTransactionId}")]
+    public static partial void LogSlipDuplicate(this ILogger logger, Guid duplicateTransactionId);
 }

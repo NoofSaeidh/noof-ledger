@@ -99,7 +99,8 @@ internal sealed class ExtractReceiptWorker(
             // C-1: a lease-expiry replay of a job whose earlier run already committed the receipt (the
             // window between that commit and SucceedQuietlyAsync below, e.g. PostgreSQL going away in
             // between). The CategorizeReceipt job was inserted in the SAME SaveChangesAsync as the
-            // receipt row (EfReceiptStore.SaveExtractedAsync), so its existence needs no separate check
+            // receipt row (EfReceiptStore.SaveExtractedAsync; for an exchange slip, RecordExchange in
+            // SaveExchangeSlipAsync's one commit), so its existence needs no separate check
             // here - it is guaranteed by that one atomic commit. Re-extracting would re-download the
             // photo, call the Tax Administration or vision again, and hit a unique-index violation on
             // SaveExtractedAsync for no reason.
@@ -107,7 +108,14 @@ internal sealed class ExtractReceiptWorker(
             if (existingReceipt is not null)
             {
                 logger.LogReceiptAlreadyExtracted(job.TransactionId);
-                if (record.Status == TransactionStatus.Captured)
+                if (existingReceipt.Kind == ReceiptKind.Exchange)
+                {
+                    // A Cancelled slip's echo is whatever the operator's own Cancel rendered; re-sending the
+                    // prompt would offer buttons that no longer do anything.
+                    if (record.Status != TransactionStatus.Cancelled)
+                        await EditQuietlyAsync(notifier, record, await SlipReplayEchoAsync(receiptStore, job, record, cancellationToken), cancellationToken);
+                }
+                else if (record.Status == TransactionStatus.Captured)
                 {
                     // A replay landing here (C-1) after a save that skipped enqueueing CategorizeReceipt
                     // (2026-09-27) must not claim "Categorising…" when nothing is actually running. Job
@@ -153,6 +161,7 @@ internal sealed class ExtractReceiptWorker(
             var fetchFailed = false;
             var taxIdMalformed = false;
             var kindUnclear = false;
+            ExtractedExchange? exchange = null;
             // Set only on the QR-decoded-but-fetch-failed vision fallback below - the one path where a
             // model can disagree with facts the Tax Administration's own QR already carries offline.
             FiscalQrPayload? verifiedQrFacts = null;
@@ -177,6 +186,7 @@ internal sealed class ExtractReceiptWorker(
                         extracted = visionResult.Receipt;
                         taxIdMalformed = visionResult.TaxIdMalformed;
                         kindUnclear = visionResult.KindUnclear;
+                        exchange = visionResult.Exchange;
                     }
                     else
                     {
@@ -228,6 +238,7 @@ internal sealed class ExtractReceiptWorker(
                             extracted = visionResult.Receipt;
                             taxIdMalformed = visionResult.TaxIdMalformed;
                             kindUnclear = visionResult.KindUnclear;
+                            exchange = visionResult.Exchange;
                         }
                         else
                         {
@@ -250,6 +261,7 @@ internal sealed class ExtractReceiptWorker(
                 extracted = visionResult.Receipt;
                 taxIdMalformed = visionResult.TaxIdMalformed;
                 kindUnclear = visionResult.KindUnclear;
+                exchange = visionResult.Exchange;
             }
             else
             {
@@ -315,6 +327,16 @@ internal sealed class ExtractReceiptWorker(
                     logger.LogModelFiscalNumberDiscardedForQrFiscalNumber(extracted.FiscalNumber, qrFacts.FiscalNumber);
                     extracted = extracted with { FiscalNumber = qrFacts.FiscalNumber };
                 }
+            }
+
+            // A slip is not a fiscal receipt (T-8): it is saved as evidence and recorded by RecordExchange, never held
+            // on the line-sum check below, which a slip with no lines would always fail. After the QR override, so a
+            // photo whose fiscal QR decoded stays the fiscal receipt the QR names.
+            if (extracted.Kind == ReceiptKind.Exchange && exchange is { } slip)
+            {
+                await SaveSlipAsync(jobQueue, store, receiptStore, recordEditor, notifier, job, record, extracted, slip,
+                    taxIdMalformed, telegramFileId, fetchFailed, cancellationToken);
+                return;
             }
 
             var mismatch = HasMismatch(extracted);
@@ -412,7 +434,7 @@ internal sealed class ExtractReceiptWorker(
     // through to SaveExtractedAsync. This is a distinct outcome from a ModelCallException: it is the
     // model succeeding at its one job, which is saying it could not read this photo, not a transient or
     // terminal failure of the call itself.
-    async Task<(ExtractedReceipt Receipt, bool TaxIdMalformed, bool KindUnclear)?> ReadWithVisionAsync(
+    async Task<(ExtractedReceipt Receipt, bool TaxIdMalformed, bool KindUnclear, ExtractedExchange? Exchange)?> ReadWithVisionAsync(
         IServiceScope scope, IJobQueue jobQueue, ICategorizationStore store, IChatNotifier notifier,
         CategorizationJob job, CategorizationSubject record, ReceiptPhoto photo, decimal? qrTotal,
         CancellationToken cancellationToken)
@@ -429,7 +451,68 @@ internal sealed class ExtractReceiptWorker(
             return null;
         }
 
-        return (result.Receipt!, result.SellerTaxIdMalformed, result.KindUnclear);
+        return (result.Receipt!, result.SellerTaxIdMalformed, result.KindUnclear, result.Exchange);
+    }
+
+    // The echo is read back from the database (D4): the stored slip for a held prompt, the failed record for an
+    // incomplete one.
+    async Task SaveSlipAsync(
+        IJobQueue jobQueue, ICategorizationStore store, IReceiptStore receiptStore, IRecordEditor recordEditor, IChatNotifier notifier,
+        CategorizationJob job, CategorizationSubject record, ExtractedReceipt extracted, ExtractedExchange slip, bool taxIdMalformed,
+        string? telegramFileId, bool fetchFailed, CancellationToken cancellationToken)
+    {
+        var assessment = slip.Assess(extracted.SellerTaxId, taxIdMalformed);
+        var saveResult = await receiptStore.SaveExchangeSlipAsync(
+            job.TransactionId, extracted, slip, telegramFileId, assessment.Disposition, cancellationToken);
+
+        if (saveResult.DuplicateOfTransactionId is { } duplicateId)
+        {
+            await recordEditor.CancelAsync(job.TransactionId, cancellationToken);
+            logger.LogSlipDuplicate(duplicateId);
+            var duplicate = await receiptStore.GetExchangeSlipAsync(duplicateId, cancellationToken);
+            var duplicateDate = duplicate?.IssuedAt is { } issuedAt
+                ? DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(issuedAt, captureTimeZone).DateTime)
+                : (DateOnly?)null;
+            var duplicateSubject = await store.GetSubjectAsync(duplicateId, cancellationToken);
+            var duplicateEcho = recordEcho.ComposeSlipDuplicate(
+                duplicateDate, duplicate?.Evidence ?? slip, duplicateSubject?.Status == TransactionStatus.Cancelled);
+            await EditQuietlyAsync(notifier, record, duplicateEcho, cancellationToken);
+            await SucceedQuietlyAsync(jobQueue, job, cancellationToken);
+            return;
+        }
+
+        logger.LogExtracted(TransactionStages.Extracted, extracted.Source, 0, extracted.Total, extracted.QrTotal, mismatch: false, fetchFailed);
+        logger.LogSlipExtracted(job.TransactionId, assessment.Disposition,
+            string.Join(", ", assessment.Problems), string.Join(", ", assessment.Missing));
+
+        var echo = assessment.Disposition switch
+        {
+            SlipDisposition.Record => new EchoMessage(recordEcho.RecordingExchange, []),
+            SlipDisposition.Hold => await SlipPromptAsync(receiptStore, job, record, cancellationToken),
+            _ => recordEcho.Compose(await store.GetSubjectAsync(job.TransactionId, cancellationToken) ?? record),
+        };
+        await EditQuietlyAsync(notifier, record, echo, cancellationToken);
+        await SucceedQuietlyAsync(jobQueue, job, cancellationToken);
+    }
+
+    // Built from the stored slip, as a replay and a Restore build it, so all three print the same prompt.
+    async Task<EchoMessage> SlipPromptAsync(
+        IReceiptStore receiptStore, CategorizationJob job, CategorizationSubject record, CancellationToken cancellationToken) =>
+        await receiptStore.GetExchangeSlipAsync(job.TransactionId, cancellationToken) is { } held
+            ? recordEcho.ComposeSlipNeedsConfirmation(held)
+            : recordEcho.Compose(record);
+
+    // A replay of a slip never says "Categorising 0 lines…": still held → the prompt again; Captured → being
+    // recorded; anything else (an incomplete slip is Failed) → the record as it now stands.
+    async Task<EchoMessage> SlipReplayEchoAsync(
+        IReceiptStore receiptStore, CategorizationJob job, CategorizationSubject record, CancellationToken cancellationToken)
+    {
+        if (await receiptStore.IsAwaitingConfirmationAsync(job.TransactionId, cancellationToken))
+            return await SlipPromptAsync(receiptStore, job, record, cancellationToken);
+
+        return record.Status == TransactionStatus.Captured
+            ? new EchoMessage(recordEcho.RecordingExchange, [])
+            : recordEcho.Compose(record);
     }
 
     async Task FailWithEchoAsync(
