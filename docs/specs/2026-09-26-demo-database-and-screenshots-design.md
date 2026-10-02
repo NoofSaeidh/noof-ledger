@@ -1,7 +1,6 @@
 # Demo database and screenshots (design)
 
-**Status:** approved in conversation 2026-09-26; this written spec awaits the operator's review before
-an implementation plan is written. Branch `demo-environment`, cut from `master` (67225ea). Replaces a
+**Status:** approved in conversation 2026-09-26; implemented in PR #4, merged 2026-09-28. Branch `demo-environment`, cut from `master` (67225ea). Replaces a
 larger first draft (a live fake Telegram chat, a rule-based fake model, a demo tool running the app
 in-process), which the operator cut back to what is below.
 

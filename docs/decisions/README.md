@@ -31,6 +31,26 @@ related: [<ids/slugs the text explicitly refers to>]
 one, which is in turn marked `status: superseded` and points `superseded_by` at the new file — never
 rewrite a decision's own file to say something different than what was actually decided at the time.
 
+Why: the file is the record of what was decided and why, with what was known then. Agents read the
+file, not its `git log`, so a rewritten file loses the reasoning behind the first choice — and with it
+the answer to "we tried that, here is why we stopped", which is what keeps a settled question from
+being re-litigated. CLAUDE.md, code comments and PRs also cite these files by name; a rewrite would
+silently change what an old citation means.
+
+Where the boundary sits:
+
+- **Edited in place** — anything that leaves the decision itself as it was: typos, wording, broken
+  links, a clarification of what was already meant, `related` entries. So is an `open` or `deferred`
+  question receiving its answer: nothing had been decided yet, so nothing is rewritten.
+- **A new file** — anything that changes the decision: reversing it, choosing another option,
+  widening or narrowing what it covers.
+- **The superseded file** keeps its text. Beyond the front matter it gets one line at the top of its
+  body — ``Superseded <date> — see `<slug>.md`: <the reason in a sentence>``.
+- **One item in a file that holds several** (a table of `O-*` decisions, a numbered list) is
+  superseded the same way, by a new file; the old item keeps its text behind a leading
+  `*(Superseded <date> by <ref>.)*`. The file's own `status` changes only once every item in it is
+  superseded.
+
 ## Preserved from `docs/OPEN-QUESTIONS.md`
 
 The original file's own preamble, and a few section headings that only grouped several items without
