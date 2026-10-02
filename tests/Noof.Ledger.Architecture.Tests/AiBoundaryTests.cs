@@ -92,6 +92,11 @@ public class AiBoundaryTests
         // come from receipt_lines, never a model answer, so its Money is built from the opposite kind
         // of source ProposalMapper guards - deliberately a second door, not an exception to the first.
         var receiptWorker = Path.Combine(root, "src", "Noof.Ledger.Host", "Workers", "ReceiptCategorizationWorker.cs");
+
+        // A third door of the same kind (transfers spec §3, Recording 2): an exchange slip's transfer is built
+        // from its stored receipt_exchanges row with no model call, its two sites being the amount given and
+        // the printed commission.
+        var slipMapper = Path.Combine(root, "src", "Noof.Ledger.Host", "Workers", "ExchangeSlipMapper.cs");
         string[] scannedRoots =
         [
             Path.Combine(root, "src", "Noof.Ledger.Ai"),
@@ -103,6 +108,7 @@ public class AiBoundaryTests
             .SelectMany(dir => Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories))
             .Where(file => !string.Equals(file, mapper, StringComparison.OrdinalIgnoreCase))
             .Where(file => !string.Equals(file, receiptWorker, StringComparison.OrdinalIgnoreCase))
+            .Where(file => !string.Equals(file, slipMapper, StringComparison.OrdinalIgnoreCase))
             .Where(file => File.ReadAllText(file).Contains("new Money(", StringComparison.Ordinal))
             .Select(file => Path.GetRelativePath(root, file))
             .ToArray();
@@ -112,6 +118,8 @@ public class AiBoundaryTests
         // silently. Counting the site pins it at exactly one - the same one the comment above names.
         CountOccurrences(File.ReadAllText(receiptWorker), "new Money(").Should().Be(
             1, "the receipt worker's exemption covers its one permitted construction site, not the whole file");
+        CountOccurrences(File.ReadAllText(slipMapper), "new Money(").Should().Be(
+            2, "the slip mapper's exemption covers the amount given and the commission, not the whole file");
 
         // One door, not a check: the model's reading of an amount becomes a Money in exactly one place,
         // so a wrong figure has exactly one place to be traced to. The verbatim check that used to live
