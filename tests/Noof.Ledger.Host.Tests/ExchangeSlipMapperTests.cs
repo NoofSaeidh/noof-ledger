@@ -106,6 +106,16 @@ public class ExchangeSlipMapperTests
         failure.Should().Be(RecordFailureReason.InvalidFee);
     }
 
+    [Fact]
+    public void A_negative_commission_is_refused_not_dropped_even_with_the_received_amount_unread()
+    {
+        ExchangeSlipMapper.TryRead(Slip(received: null, commission: -150.00m, commissionCurrency: "RSD"), out var request, out var failure)
+            .Should().BeFalse();
+
+        request.Should().BeNull();
+        failure.Should().Be(RecordFailureReason.InvalidFee);
+    }
+
     public static TheoryData<ExtractedExchange> SlipsMissingWhatTheTransferNeeds => new()
     {
         Slip(given: null),
