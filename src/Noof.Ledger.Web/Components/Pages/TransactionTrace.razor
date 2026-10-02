@@ -68,9 +68,9 @@ else
                         <td>Transfer</td>
                         <td>@LedgerText.TransferLegs(transfer.Line)</td>
                     </tr>
-                    @if (LedgerText.TransferFee(transfer.Line) is { } fee)
+                    @if (LedgerText.TransferFeeTaken(transfer.Line) is { } fee)
                     {
-                        <tr>
+                        <tr id="trace-transfer-fee">
                             <td>Fee</td>
                             <td>@fee</td>
                         </tr>

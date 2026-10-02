@@ -23,9 +23,12 @@ internal static class LedgerText
     // read as a fee that was taken.
     public static bool IsFee(Money? fee) => fee is { Amount: > 0m };
 
-    public static string? TransferFee(TransferLine line) =>
+    public static string? TransferFee(TransferLine line) => TransferFeeTaken(line) is { } taken ? $"Fee {taken}" : null;
+
+    // For a row already labelled Fee.
+    public static string? TransferFeeTaken(TransferLine line) =>
         line.Fee is { } fee && IsFee(fee)
-            ? $"Fee {Amount(fee)} from {(line.FeeLeg == TransferLeg.To ? line.ToWalletName : line.FromWalletName)}"
+            ? $"{Amount(fee)} from {(line.FeeLeg == TransferLeg.To ? line.ToWalletName : line.FromWalletName)}"
             : null;
 
     public static string Charge(ChargeView charge)

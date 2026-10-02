@@ -830,7 +830,7 @@ public sealed class TransactionTraceTests(CookieModeHostFixture fixture) : PageT
 
         var summary = Page.Locator("#trace-summary");
         await Expect(Page.Locator("#trace-transfer")).ToContainTextAsync($"Wise {marker} → Cash RSD {marker} · 101.00 EUR → 11,700.00 RSD");
-        await Expect(summary).ToContainTextAsync($"Fee 1.00 EUR from Wise {marker}");
+        await Expect(Page.Locator("#trace-transfer-fee")).ToHaveTextAsync($"Fee 1.00 EUR from Wise {marker}");
         await Expect(summary).ToContainTextAsync("1 EUR = 117.0000 RSD · from the amounts");
         await Expect(summary).ToContainTextAsync($"Menjačnica {marker}");
         await Expect(summary).ToContainTextAsync("1.00 EUR (Fees & Charges) · fee");
@@ -853,7 +853,7 @@ public sealed class TransactionTraceTests(CookieModeHostFixture fixture) : PageT
         await using (var db = OpenDb())
         {
             db.Wallets.Add(new Wallet { Id = kaspiId, Name = $"Kaspi {marker}", Currency = CurrencyCode.Kzt, Aliases = [], CreatedAt = now });
-            db.Transactions.Add(new Transaction
+            var record = new Transaction
             {
                 Id = transactionId,
                 WalletId = kaspiId,
@@ -867,7 +867,8 @@ public sealed class TransactionTraceTests(CookieModeHostFixture fixture) : PageT
                 TelegramChatId = null,
                 TelegramMessageId = null,
                 CreatedAt = now,
-            });
+            };
+            db.Transactions.Add(record);
             db.LineItems.Add(new LineItem
             {
                 Id = Guid.NewGuid(),
@@ -890,6 +891,7 @@ public sealed class TransactionTraceTests(CookieModeHostFixture fixture) : PageT
                 Source = ChargeSource.Stated,
             });
             await db.SaveChangesAsync(cancellationToken);
+            await RevisionLog.AppendAsync(db, record, RevisionKind.Initial, null, TransactionStatus.Captured, now, cancellationToken);
         }
 
         await SignInAsync();
@@ -899,6 +901,10 @@ public sealed class TransactionTraceTests(CookieModeHostFixture fixture) : PageT
         var charges = Page.Locator("#trace-charges");
         await Expect(charges).ToContainTextAsync("30.00 USD → charged 15,400.00 KZT (1 USD = 513.3333 KZT, stated)");
         await Expect(charges).Not.ToContainTextAsync("+ fee");
+        var history = Page.Locator("#trace-history");
+        await Expect(history).ToContainTextAsync(
+            "Expense · App Store 30.00 USD; 30.00 USD → charged 15,400.00 KZT (1 USD = 513.3333 KZT, stated)");
+        await Expect(history).Not.ToContainTextAsync("+ fee");
     }
 
     [Fact]
