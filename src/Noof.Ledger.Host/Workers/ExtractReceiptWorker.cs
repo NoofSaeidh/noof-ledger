@@ -109,12 +109,7 @@ internal sealed class ExtractReceiptWorker(
             {
                 logger.LogReceiptAlreadyExtracted(job.TransactionId);
                 if (existingReceipt.Kind == ReceiptKind.Exchange)
-                {
-                    // A Cancelled slip's echo is whatever the operator's own Cancel rendered; re-sending the
-                    // prompt would offer buttons that no longer do anything.
-                    if (record.Status != TransactionStatus.Cancelled)
-                        await EditQuietlyAsync(notifier, record, await SlipReplayEchoAsync(receiptStore, job, record, cancellationToken), cancellationToken);
-                }
+                    await EchoSavedSlipAsync(receiptStore, notifier, job, record, cancellationToken);
                 else if (record.Status == TransactionStatus.Captured)
                 {
                     // A replay landing here (C-1) after a save that skipped enqueueing CategorizeReceipt
@@ -454,8 +449,6 @@ internal sealed class ExtractReceiptWorker(
         return (result.Receipt!, result.SellerTaxIdMalformed, result.KindUnclear, result.Exchange);
     }
 
-    // The echo is read back from the database (D4): the stored slip for a held prompt, the failed record for an
-    // incomplete one.
     async Task SaveSlipAsync(
         IJobQueue jobQueue, ICategorizationStore store, IReceiptStore receiptStore, IRecordEditor recordEditor, IChatNotifier notifier,
         CategorizationJob job, CategorizationSubject record, ExtractedReceipt extracted, ExtractedExchange slip, bool taxIdMalformed,
@@ -485,34 +478,40 @@ internal sealed class ExtractReceiptWorker(
         logger.LogSlipExtracted(job.TransactionId, assessment.Disposition,
             string.Join(", ", assessment.Problems), string.Join(", ", assessment.Missing));
 
-        var echo = assessment.Disposition switch
-        {
-            SlipDisposition.Record => new EchoMessage(recordEcho.RecordingExchange, []),
-            SlipDisposition.Hold => await SlipPromptAsync(receiptStore, job, record, cancellationToken),
-            _ => recordEcho.Compose(await store.GetSubjectAsync(job.TransactionId, cancellationToken) ?? record),
-        };
-        await EditQuietlyAsync(notifier, record, echo, cancellationToken);
+        var saved = await store.GetSubjectAsync(job.TransactionId, cancellationToken) ?? record;
+        await EchoSavedSlipAsync(receiptStore, notifier, job, saved, cancellationToken);
         await SucceedQuietlyAsync(jobQueue, job, cancellationToken);
     }
 
-    // Built from the stored slip, as a replay and a Restore build it, so all three print the same prompt.
-    async Task<EchoMessage> SlipPromptAsync(
-        IReceiptStore receiptStore, CategorizationJob job, CategorizationSubject record, CancellationToken cancellationToken) =>
-        await receiptStore.GetExchangeSlipAsync(job.TransactionId, cancellationToken) is { } held
-            ? recordEcho.ComposeSlipNeedsConfirmation(held)
-            : recordEcho.Compose(record);
+    // From what the database holds, never from this attempt's own reading: a concurrent attempt may have saved the
+    // slip first with another disposition. A Cancelled slip's echo is whatever the operator's own Cancel rendered;
+    // re-sending the prompt would offer buttons that no longer do anything.
+    async Task EchoSavedSlipAsync(
+        IReceiptStore receiptStore, IChatNotifier notifier, CategorizationJob job, CategorizationSubject saved,
+        CancellationToken cancellationToken)
+    {
+        if (saved.Status == TransactionStatus.Cancelled)
+            return;
 
-    // A replay of a slip never says "Categorising 0 lines…": still held → the prompt again; Captured → being
-    // recorded; anything else (an incomplete slip is Failed) → the record as it now stands.
-    async Task<EchoMessage> SlipReplayEchoAsync(
-        IReceiptStore receiptStore, CategorizationJob job, CategorizationSubject record, CancellationToken cancellationToken)
+        await EditQuietlyAsync(notifier, saved, await SavedSlipEchoAsync(receiptStore, job, saved, cancellationToken), cancellationToken);
+    }
+
+    // Never "Categorising 0 lines…": still held → the prompt; Captured → being recorded; anything else (an
+    // incomplete slip is Failed) → the record as it now stands.
+    async Task<EchoMessage> SavedSlipEchoAsync(
+        IReceiptStore receiptStore, CategorizationJob job, CategorizationSubject saved, CancellationToken cancellationToken)
     {
         if (await receiptStore.IsAwaitingConfirmationAsync(job.TransactionId, cancellationToken))
-            return await SlipPromptAsync(receiptStore, job, record, cancellationToken);
+        {
+            // Built from the stored slip, as a Restore builds it, so both print the same prompt.
+            return await receiptStore.GetExchangeSlipAsync(job.TransactionId, cancellationToken) is { } held
+                ? recordEcho.ComposeSlipNeedsConfirmation(held)
+                : recordEcho.Compose(saved);
+        }
 
-        return record.Status == TransactionStatus.Captured
+        return saved.Status == TransactionStatus.Captured
             ? new EchoMessage(recordEcho.RecordingExchange, [])
-            : recordEcho.Compose(record);
+            : recordEcho.Compose(saved);
     }
 
     async Task FailWithEchoAsync(
