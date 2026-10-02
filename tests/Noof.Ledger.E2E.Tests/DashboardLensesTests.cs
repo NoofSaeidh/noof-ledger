@@ -127,6 +127,74 @@ public sealed class DashboardLensesTests(CookieModeHostFixture fixture) : PageTe
             "the section's fee line sums every transfer's fee per currency");
     }
 
+    [Fact]
+    public async Task The_recent_view_links_show_spending_and_income_transfers_or_everything()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var marker = Guid.NewGuid().ToString("N")[..8];
+        var wise = await SeedWalletAsync($"Wise {marker}", CurrencyCode.Eur);
+        var cash = await SeedWalletAsync($"Cash EUR {marker}", CurrencyCode.Eur);
+        var now = DateTimeOffset.UtcNow;
+        var withdrawalId = Guid.NewGuid();
+        var failedTransferId = Guid.NewGuid();
+        Guid expenseId;
+
+        await using (var db = OpenDb())
+        {
+            expenseId = AddRecord(db, wise, TransactionKind.Expense, $"lunch {marker}", now.AddMinutes(-1),
+                new Money(12.00m, CurrencyCode.Eur), GroceriesId);
+            db.LineItems.Add(new LineItem
+            {
+                Id = Guid.NewGuid(),
+                TransactionId = expenseId,
+                Description = "Bank charge",
+                Amount = new Money(0.50m, CurrencyCode.Eur),
+                CategoryId = FeesAndChargesId,
+                CategorizedBy = CategorizationAuthority.Rule,
+                MerchantId = null,
+                Ordinal = 2,
+                Role = EntryRole.Fee,
+            });
+            AddTransfer(db, withdrawalId, wise, new Money(200.00m, CurrencyCode.Eur), cash, new Money(200.00m, CurrencyCode.Eur),
+                $"withdrawal {marker}", now);
+            // A transfer whose first reading failed has its kind but no transfers row, so the row has no legs to show.
+            var failedTransfer = NewTransaction(failedTransferId, wise, TransactionKind.Transfer, $"moved some {marker}", now.AddMinutes(-2));
+            failedTransfer.Status = TransactionStatus.Failed;
+            failedTransfer.FailureReason = RecordFailureReason.MissingReceivedAmount;
+            db.Transactions.Add(failedTransfer);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        await Expect(Page.Locator($"#txn-{expenseId}")).ToContainTextAsync("Spending");
+        await Expect(Page.Locator($"#txn-{expenseId}")).ToContainTextAsync("Bank charge · fee",
+            new() { Timeout = 10_000 });
+        await Expect(Page.Locator($"#txn-{withdrawalId}")).ToHaveCountAsync(0);
+        await Expect(Page.Locator($"#txn-{failedTransferId}")).ToHaveCountAsync(0);
+        await Expect(Page.Locator("#recent-view-spending")).ToHaveAttributeAsync("aria-current", "page");
+
+        await Page.ClickAsync("#recent-view-transfers");
+        await Expect(Page).ToHaveURLAsync(new Regex(@"/\?view=transfers$"));
+        await Expect(Page.Locator($"#txn-{withdrawalId}")).ToContainTextAsync(
+            $"Wise {marker} → Cash EUR {marker} · 200.00 EUR → 200.00 EUR");
+        await Expect(Page.Locator($"#txn-{withdrawalId}")).ToContainTextAsync("Transfer");
+        await Expect(Page.Locator($"#txn-{failedTransferId}")).ToContainTextAsync("Categorisation failed. Nothing was recorded");
+        await Expect(Page.Locator($"#txn-{failedTransferId}")).Not.ToContainTextAsync("→");
+        await Expect(Page.Locator($"#txn-{expenseId}")).ToHaveCountAsync(0);
+        await Expect(Page.Locator("#recent-view-transfers")).ToHaveAttributeAsync("aria-current", "page");
+
+        await Page.GotoAsync(fixture.BaseUrl + "/?view=all");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        await Expect(Page.Locator($"#txn-{withdrawalId}")).ToBeVisibleAsync();
+        await Expect(Page.Locator($"#txn-{expenseId}")).ToBeVisibleAsync();
+    }
+
     async Task<Guid> SeedWalletAsync(string name, CurrencyCode currency)
     {
         var walletId = Guid.NewGuid();
