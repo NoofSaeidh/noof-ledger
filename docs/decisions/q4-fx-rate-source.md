@@ -9,6 +9,12 @@ phase: Phase 7 (was 5)
 
 **Decide by:** Phase 7 (was 5).
 
+**2026-10-02, Phase 7 closed without an external rate source.** The operator scoped the rate archive
+and the spread insight out of Phase 7 (T-1, `docs/decisions/p7-1-transfers-and-exchange-decisions.md`):
+a foreign-currency spending is converted at each wallet's own terms set on `/wallets` (T-6), and a
+transfer's rate is the one the operator said or the one its two amounts imply. No mid-rate is fetched or
+stored, so this question stays deferred, with no phase named for it.
+
 ## Why the default is safe to defer
 
 The two providers disagree on RSD by **0.09%** while the spread being measured is 0.5–0.6%, so
