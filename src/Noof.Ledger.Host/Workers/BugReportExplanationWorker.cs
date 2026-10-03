@@ -1,4 +1,5 @@
 using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Diagnostics.BugReports;
 using Noof.Ledger.Application.Diagnostics.Integrity;
@@ -18,6 +19,10 @@ internal sealed class BugReportExplanationWorker(
     public const int MaxAttempts = 3;
 
     public static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(15);
+
+    // Per process, on purpose: a chat that blocks the bot would otherwise write a Warning every tick; after a restart
+    // it warns once more.
+    readonly HashSet<Guid> undeliverable = [];
 
     // CategorizationWorker's rule (spec P-21): a refused account fails every report alike, so it spends no attempt and
     // explaining pauses instead; a key fixed later still gets the report explained.
@@ -44,8 +49,9 @@ internal sealed class BugReportExplanationWorker(
             var store = scope.ServiceProvider.GetRequiredService<IBugReportStore>();
 
             var explained = await ExplainNextAsync(scope.ServiceProvider, store, now, cancellationToken);
+            var delivered = await DeliverAsync(scope.ServiceProvider.GetRequiredService<IChatNotifier>(), store, cancellationToken);
 
-            return explained ? BugReportTickResult.Processed : BugReportTickResult.Idle;
+            return explained || delivered ? BugReportTickResult.Processed : BugReportTickResult.Idle;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -113,6 +119,46 @@ internal sealed class BugReportExplanationWorker(
         else
             logger.ExplanationAttemptFailed(report.Number, attempt, MaxAttempts, FailureType(failure));
     }
+
+    // A failed send spends no attempt and never calls the model again: the answer is stored, only the reply is owed.
+    // Storing a sent reply's id stays outside the send's catch, so a database fault there is the tick's 1901, not 1905.
+    async Task<bool> DeliverAsync(IChatNotifier chatNotifier, IBugReportStore store, CancellationToken cancellationToken)
+    {
+        var delivered = false;
+        foreach (var delivery in await store.PendingDeliveriesAsync(cancellationToken))
+        {
+            if (await TrySendReplyAsync(chatNotifier, delivery, cancellationToken) is not { } replyId)
+                continue;
+
+            await store.MarkDeliveredAsync(delivery.Id, replyId, cancellationToken);
+            undeliverable.Remove(delivery.Id);
+            logger.ReplyDelivered(delivery.Number);
+            delivered = true;
+        }
+
+        return delivered;
+    }
+
+    async Task<int?> TrySendReplyAsync(IChatNotifier chatNotifier, BugReportDelivery delivery, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await chatNotifier.ReplyToBugReportAsync(
+                delivery.ChatId, delivery.MessageId, BugReportReplies.Compose(delivery), CloseButtonNumber(delivery), cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            if (undeliverable.Add(delivery.Id))
+                logger.ReplyFailed(delivery.Number, FailureType(ex));
+            else
+                logger.ReplyStillFailing(delivery.Number, FailureType(ex));
+            return null;
+        }
+    }
+
+    // Only an answer that blames the data, not the app, offers to close the report from the chat.
+    static int? CloseButtonNumber(BugReportDelivery delivery) =>
+        delivery is { State: BugExplanationState.Done, LooksLikeBug: false } ? delivery.Number : null;
 
     static string FailureType(Exception failure) =>
         failure is ModelCallException model ? model.Kind.ToString() : failure.GetType().Name;

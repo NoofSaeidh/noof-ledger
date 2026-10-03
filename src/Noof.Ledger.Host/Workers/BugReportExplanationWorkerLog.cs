@@ -20,6 +20,17 @@ internal static partial class BugReportExplanationWorkerLog
         Message = "Bug report #{Number}: no explanation after {MaxAttempts} attempts")]
     public static partial void ExplanationGaveUp(this ILogger logger, int number, int maxAttempts);
 
+    [LoggerMessage(EventId = 1905, Level = LogLevel.Warning,
+        Message = "Bug report #{Number}: the reply could not be sent ({FailureType}); retrying every tick")]
+    public static partial void ReplyFailed(this ILogger logger, int number, string failureType);
+
+    [LoggerMessage(EventId = 1906, Level = LogLevel.Debug,
+        Message = "Bug report #{Number}: the reply still could not be sent ({FailureType})")]
+    public static partial void ReplyStillFailing(this ILogger logger, int number, string failureType);
+
+    [LoggerMessage(EventId = 1907, Level = LogLevel.Information, Message = "Bug report #{Number}: reply delivered")]
+    public static partial void ReplyDelivered(this ILogger logger, int number);
+
     [LoggerMessage(EventId = 1908, Level = LogLevel.Warning, Message = "Bug report #{Number}: snapshot taken with parts missing")]
     public static partial void SnapshotIncomplete(this ILogger logger, int number);
 

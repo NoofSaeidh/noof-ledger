@@ -396,4 +396,130 @@ public class BugReportExplanationWorkerTests
 
         NextDueCalls(harness).Should().BeGreaterThanOrEqualTo(2, "the clock never moved, so only a processed tick's zero delay explains a second call");
     }
+
+    static BugReportDelivery Delivery(int number, BugExplanationState state, bool? looksLikeBug) =>
+        new(ReportId(number), number, 111L, 50 + number, state,
+            state == BugExplanationState.Done ? "Reply to the echo with the amount." : null,
+            looksLikeBug, Linked: true, FindingsCount: 1);
+
+    [Fact]
+    public async Task Explained_and_failed_reports_are_delivered_as_replies_to_their_bug_messages()
+    {
+        var harness = new Harness();
+        IReadOnlyList<BugReportDelivery> pending =
+        [
+            Delivery(5, BugExplanationState.Done, looksLikeBug: false),
+            Delivery(6, BugExplanationState.Done, looksLikeBug: true),
+            Delivery(8, BugExplanationState.Failed, looksLikeBug: null),
+        ];
+        harness.Store.PendingDeliveriesAsync(Arg.Any<CancellationToken>()).Returns(pending);
+        harness.ChatNotifier.ReplyToBugReportAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
+            .Returns(900, 901, 902);
+
+        var result = await harness.Worker().RunTickAsync(Ct);
+
+        result.Should().Be(BugReportTickResult.Processed);
+        const string Explained = "Reply to the echo with the amount.\n\n1 finding on this record";
+        await harness.ChatNotifier.Received(1).ReplyToBugReportAsync(111L, 55, Explained, 5, Arg.Any<CancellationToken>());
+        await harness.ChatNotifier.Received(1).ReplyToBugReportAsync(111L, 56, Explained, null, Arg.Any<CancellationToken>());
+        await harness.ChatNotifier.Received(1).ReplyToBugReportAsync(
+            111L, 58, "Couldn't explain it — the report is saved.", null, Arg.Any<CancellationToken>());
+        await harness.Store.Received(1).MarkDeliveredAsync(ReportId(5), 900, Arg.Any<CancellationToken>());
+        await harness.Store.Received(1).MarkDeliveredAsync(ReportId(6), 901, Arg.Any<CancellationToken>());
+        await harness.Store.Received(1).MarkDeliveredAsync(ReportId(8), 902, Arg.Any<CancellationToken>());
+        harness.Logger.Entries.Where(entry => entry.EventId.Id == 1907).Select(entry => entry.Properties["Number"])
+            .Should().Equal(5, 6, 8);
+        await harness.Explainer.DidNotReceiveWithAnyArgs().ExplainAsync(default!, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Replies_go_out_even_while_the_model_is_unconfigured()
+    {
+        var harness = new Harness();
+        harness.ModelProvider.IsConfiguredAsync(Arg.Any<CancellationToken>()).Returns(false);
+        IReadOnlyList<BugReportDelivery> pending = [Delivery(8, BugExplanationState.Failed, looksLikeBug: null)];
+        harness.Store.PendingDeliveriesAsync(Arg.Any<CancellationToken>()).Returns(pending);
+        harness.ChatNotifier.ReplyToBugReportAsync(111L, 58, Arg.Any<string>(), null, Arg.Any<CancellationToken>()).Returns(902);
+
+        var result = await harness.Worker().RunTickAsync(Ct);
+
+        result.Should().Be(BugReportTickResult.Processed);
+        await harness.Store.Received(1).MarkDeliveredAsync(ReportId(8), 902, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_reply_that_can_never_be_sent_spends_no_attempt_never_reruns_the_model_and_warns_once()
+    {
+        var harness = new Harness();
+        var stuck = Delivery(5, BugExplanationState.Done, looksLikeBug: false);
+        IReadOnlyList<BugReportDelivery> firstTick = [stuck, Delivery(6, BugExplanationState.Done, looksLikeBug: true)];
+        IReadOnlyList<BugReportDelivery> secondTick = [stuck, Delivery(9, BugExplanationState.Done, looksLikeBug: false)];
+        IReadOnlyList<BugReportDelivery> thirdTick = [stuck];
+        harness.Store.NextDueAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(Due(number: 9, snapshot: Snapshot()), (BugReportToExplain?)null);
+        harness.Store.PendingDeliveriesAsync(Arg.Any<CancellationToken>()).Returns(firstTick, secondTick, thirdTick);
+        harness.ChatNotifier.ReplyToBugReportAsync(111L, Arg.Is<int>(id => id != 55), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
+            .Returns(900);
+        harness.ChatNotifier.ReplyToBugReportAsync(111L, 55, Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("The Telegram client is not ready yet: no bot token has been saved."));
+        var worker = harness.Worker();
+
+        var results = new List<BugReportTickResult>();
+        for (var tick = 0; tick < 3; tick++)
+            results.Add(await worker.RunTickAsync(Ct));
+
+        results.Should().Equal(BugReportTickResult.Processed, BugReportTickResult.Processed, BugReportTickResult.Idle);
+        await harness.Explainer.Received(1).ExplainAsync(Request, Arg.Any<CancellationToken>());
+        await harness.Store.DidNotReceiveWithAnyArgs().RecordFailedAttemptAsync(default, default, default, Arg.Any<CancellationToken>());
+        await harness.ChatNotifier.Received(3).ReplyToBugReportAsync(111L, 55, Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>());
+        await harness.Store.Received(1).MarkDeliveredAsync(ReportId(6), 900, Arg.Any<CancellationToken>());
+        await harness.Store.Received(1).MarkDeliveredAsync(ReportId(9), 900, Arg.Any<CancellationToken>());
+        await harness.Store.DidNotReceive().MarkDeliveredAsync(ReportId(5), Arg.Any<int>(), Arg.Any<CancellationToken>());
+
+        var warned = harness.Logger.Entries.Should().ContainSingle(entry => entry.EventId.Id == 1905).Subject;
+        warned.Level.Should().Be(LogLevel.Warning);
+        warned.Properties["Number"].Should().Be(5);
+        warned.Properties["FailureType"].Should().Be("InvalidOperationException");
+        warned.Exception.Should().BeNull();
+        harness.Logger.Entries.Where(entry => entry.EventId.Id == 1906)
+            .Should().HaveCount(2).And.OnlyContain(entry => entry.Level == LogLevel.Debug && (int)entry.Properties["Number"] == 5);
+    }
+
+    [Fact]
+    public async Task A_database_fault_listing_the_replies_owed_is_a_failed_tick_not_an_attempt()
+    {
+        var harness = new Harness();
+        harness.Store.NextDueAsync(Now, Arg.Any<CancellationToken>()).Returns(Due(snapshot: Snapshot()));
+        harness.Store.PendingDeliveriesAsync(Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("database unreachable"));
+
+        var result = await harness.Worker().RunTickAsync(Ct);
+
+        result.Should().Be(BugReportTickResult.Failed);
+        harness.Logger.Entries.Should().ContainSingle(entry => entry.EventId.Id == 1901)
+            .Which.Exception.Should().BeOfType<InvalidOperationException>();
+        await harness.Store.DidNotReceiveWithAnyArgs().RecordFailedAttemptAsync(default, default, default, Arg.Any<CancellationToken>());
+    }
+
+    // A send that succeeded is not an undeliverable reply: storing its id failing is the database's fault, so it is the
+    // tick's 1901, and the next tick sends again (a duplicate the spec accepts).
+    [Fact]
+    public async Task A_database_fault_storing_a_sent_reply_is_a_failed_tick_not_an_unsent_reply()
+    {
+        var harness = new Harness();
+        IReadOnlyList<BugReportDelivery> pending = [Delivery(5, BugExplanationState.Done, looksLikeBug: false)];
+        harness.Store.PendingDeliveriesAsync(Arg.Any<CancellationToken>()).Returns(pending);
+        harness.ChatNotifier.ReplyToBugReportAsync(111L, 55, Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
+            .Returns(900);
+        harness.Store.MarkDeliveredAsync(ReportId(5), 900, Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("database unreachable"));
+
+        var result = await harness.Worker().RunTickAsync(Ct);
+
+        result.Should().Be(BugReportTickResult.Failed);
+        harness.Logger.Entries.Should().ContainSingle(entry => entry.EventId.Id == 1901)
+            .Which.Exception.Should().BeOfType<InvalidOperationException>();
+        harness.Logger.Entries.Should().NotContain(entry => entry.EventId.Id >= 1905 && entry.EventId.Id <= 1907);
+        await harness.Store.DidNotReceiveWithAnyArgs().RecordFailedAttemptAsync(default, default, default, Arg.Any<CancellationToken>());
+    }
 }
