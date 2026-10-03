@@ -1,12 +1,16 @@
 using System.Net;
 using System.Text.Json;
 using AwesomeAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Noof.Ledger.Ai.Anthropic;
+using Noof.Ledger.Application;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Diagnostics.Integrity;
+using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Application.Secrets;
+using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Ai.Tests.Anthropic;
 
@@ -14,6 +18,8 @@ namespace Noof.Ledger.Ai.Tests.Anthropic;
 // the same pattern ChatReceiptCategorizerOverAnthropicTests uses.
 public class ChatFindingExplainerOverAnthropicTests
 {
+    const string VerificationUrlPrefix = "https://suf.purs.gov.rs/v/?vl=";
+
     static readonly IOperationTimer Timer = new OperationTimer(TimeProvider.System, new SlowOperationOptions());
 
     static CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -25,7 +31,10 @@ public class ChatFindingExplainerOverAnthropicTests
             new StubSecretStore(SecretState.Present, "sk-ant-test-key-do-not-log-me"), new HttpClient(handler),
             new AnthropicOptions { Model = "claude-haiku-4-5-20251001", MaxTokens = 2048, Timeout = TimeSpan.FromSeconds(90) },
             Timer, NullLogger<AnthropicChatClientFactory>.Instance);
-        var explainer = new ChatFindingExplainer(clientFactory, Timer, logger ?? NullLogger<ChatFindingExplainer>.Instance);
+        var explainer = new ChatFindingExplainer(
+            clientFactory,
+            new FiscalVerificationUrl(new FiscalVerificationUrlOptions { VerificationUrlPrefix = VerificationUrlPrefix }),
+            Timer, logger ?? NullLogger<ChatFindingExplainer>.Instance);
         return (explainer, handler);
     }
 
@@ -117,5 +126,48 @@ public class ChatFindingExplainerOverAnthropicTests
 
         explanation.LooksLikeBug.Should().BeTrue();
         explanation.Text.Should().Be("The entries disagree with the lines. This is a bug - file it.");
+    }
+
+    [Fact]
+    public async Task No_fiscal_link_in_any_field_of_a_composed_report_reaches_the_wire()
+    {
+        using var services = new ServiceCollection()
+            .AddNoofApplication(
+                new SlowOperationOptions(), new FiscalVerificationUrlOptions { VerificationUrlPrefix = VerificationUrlPrefix })
+            .BuildServiceProvider();
+        var asOf = new DateTimeOffset(2026, 10, 2, 12, 0, 0, TimeSpan.Zero);
+        IntegrityFinding waiting = new(
+            IntegrityCheck.NotApplied, IntegrityGroup.WaitingOnYou,
+            Guid.Parse("7a1c0000-0000-4000-8000-000000000900"), null, Guid.Parse("7a1c0000-0000-4000-8000-000000000901"),
+            [
+                new TextFact("Waiting for", "A correction that never applied"),
+                new TextFact("Job", "Correct"),
+                new TextFact("Last error", $"could not read {VerificationUrlPrefix}LastErrorVl"),
+                new SinceFact("Idle for", asOf.AddDays(-2)),
+                new DateFact("Date", new DateOnly(2026, 9, 30)),
+                new MoneyFact("Amount", 250.00m, CurrencyCode.Rsd),
+            ]);
+        var request = services.GetRequiredService<IFindingText>().ForReport(
+            $"the amount is wrong {VerificationUrlPrefix}OperatorTextVl",
+            "Record: Expense · Completed · captured from Text\n"
+            + $"Text: coffee {VerificationUrlPrefix}RawTextVl 250\n"
+            + $"Revisions:\n- 2026-09-30 10:05 UTC · Correction · it was {VerificationUrlPrefix}RevisionVl not 200",
+            [waiting],
+            asOf);
+        request.OperatorText.Should().Contain("OperatorTextVl", "the guard below must start from a request that carries the links");
+        request.RecordSummary.Should().Contain("RawTextVl").And.Contain("RevisionVl");
+        request.Findings.Should().Contain("LastErrorVl");
+
+        var (explainer, handler) = Build();
+        handler.Enqueue(HttpStatusCode.OK, AnthropicResponses.WriteExplanationJsonAnswer);
+
+        await explainer.ExplainAsync(request, Ct);
+
+        var body = handler.Requests.Single().Body;
+        body.Should().NotContain("suf.purs.gov.rs");
+        foreach (var payload in new[] { "OperatorTextVl", "RawTextVl", "RevisionVl", "LastErrorVl" })
+            body.Should().NotContain(payload);
+        body.Should().Contain("the amount is wrong").And.Contain("coffee 250").And.Contain("not 200")
+            .And.Contain("could not read").And.Contain("A correction that never applied");
     }
 }

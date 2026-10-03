@@ -6,6 +6,7 @@ using Microsoft.Extensions.Time.Testing;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Diagnostics.Integrity;
+using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.TestKit;
 
 namespace Noof.Ledger.Ai.Tests;
@@ -23,11 +24,15 @@ public class ChatFindingExplainerTests
 
     static readonly IOperationTimer NoopTimer = new OperationTimer(TimeProvider.System, new SlowOperationOptions());
 
+    static readonly IFiscalVerificationUrl VerificationUrl =
+        new FiscalVerificationUrl(new FiscalVerificationUrlOptions { VerificationUrlPrefix = "https://suf.purs.gov.rs/v/?vl=" });
+
     static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     static ChatFindingExplainer Build(
         IChatClient provider, IOperationTimer? timer = null, ILogger<ChatFindingExplainer>? logger = null) =>
-        new(new FixedChatClientFactory(provider), timer ?? NoopTimer, logger ?? NullLogger<ChatFindingExplainer>.Instance);
+        new(new FixedChatClientFactory(provider), VerificationUrl, timer ?? NoopTimer,
+            logger ?? NullLogger<ChatFindingExplainer>.Instance);
 
     static FunctionCallContent Answer(string text = "Reply to the echo with the amount you received.", bool looksLikeBug = false) =>
         new("call_1", "write_explanation", new Dictionary<string, object?> { ["text"] = text, ["looks_like_bug"] = looksLikeBug });
@@ -91,6 +96,39 @@ public class ChatFindingExplainerTests
         await Build(provider).ExplainAsync(new ExplanationRequest(Findings, operatorText, recordSummary), Ct);
 
         UserTurnOf(provider).Should().Be("Operator's report: (none)\n\nRecord:\n(no record)\n\n" + Findings);
+    }
+
+    [Fact]
+    public async Task A_fiscal_link_is_stripped_from_the_words_the_record_and_the_findings()
+    {
+        var provider = new ScriptedChatClient().Answer(Answer());
+        var request = new ExplanationRequest(
+            Findings + "\n   Last error: could not read https://suf.purs.gov.rs/v/?vl=LastErrorVl\n   Idle for: 2 d 0 h",
+            "the amount is wrong https://suf.purs.gov.rs/v/?vl=OperatorTextVl",
+            "Record: Expense · Completed · captured from Text\n"
+            + "Text: coffee https://suf.purs.gov.rs/v/?vl=RawTextVl 250\n"
+            + "Revisions:\n- 2026-09-30 10:05 UTC · Correction · it was https://suf.purs.gov.rs/v/?vl=RevisionVl not 200");
+
+        await Build(provider).ExplainAsync(request, Ct);
+
+        UserTurnOf(provider).Should().Be(
+            "Operator's report: the amount is wrong\n\nRecord:\n"
+            + "Record: Expense · Completed · captured from Text\n"
+            + "Text: coffee 250\n"
+            + "Revisions:\n- 2026-09-30 10:05 UTC · Correction · it was not 200\n\n"
+            + Findings + "\n   Last error: could not read\n   Idle for: 2 d 0 h");
+    }
+
+    [Fact]
+    public async Task Words_that_are_nothing_but_a_fiscal_link_count_as_none()
+    {
+        var provider = new ScriptedChatClient().Answer(Answer());
+
+        await Build(provider).ExplainAsync(
+            new ExplanationRequest(Findings, "https://suf.purs.gov.rs/v/?vl=OnlyALinkVl"), Ct);
+
+        UserTurnOf(provider).Should().StartWith("Operator's report: (none)\n");
+        UserTurnOf(provider).Should().NotContain("OnlyALinkVl");
     }
 
     [Theory]

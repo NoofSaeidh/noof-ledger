@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
@@ -5,11 +6,13 @@ using Microsoft.Extensions.Logging;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Diagnostics.Integrity;
+using Noof.Ledger.Application.Receipts;
 
 namespace Noof.Ledger.Ai;
 
 internal sealed class ChatFindingExplainer(
-    IChatClientFactory clientFactory, IOperationTimer timer, ILogger<ChatFindingExplainer> logger) : IFindingExplainer
+    IChatClientFactory clientFactory, IFiscalVerificationUrl verificationUrl, IOperationTimer timer,
+    ILogger<ChatFindingExplainer> logger) : IFindingExplainer
 {
     const string WriteExplanationName = "write_explanation";
     const string WriteExplanationDescription =
@@ -22,7 +25,7 @@ internal sealed class ChatFindingExplainer(
         using var chat = await clientFactory.CreateAsync(cancellationToken);
 
         var response = await chat.GetResponseAsync(
-            [new ChatMessage(ChatRole.User, FindingExplanationPrompt.BuildUserTurn(request))],
+            [new ChatMessage(ChatRole.User, FindingExplanationPrompt.BuildUserTurn(Stripped(request)))],
             new ChatOptions
             {
                 Instructions = FindingExplanationPrompt.System,
@@ -46,6 +49,18 @@ internal sealed class ChatFindingExplainer(
 
         return new Explanation(payload.Text.Trim(), payload.LooksLikeBug);
     }
+
+    // Stripped here even though the bug-report store strips what it saves: a request composed anywhere - the
+    // dashboard's live findings included - must not carry a verification URL to the model (CLAUDE.md §4 Secrets).
+    // Line by line, so a removed link never joins two lines: StripUrl also takes the line break touching a link.
+    ExplanationRequest Stripped(ExplanationRequest request) => new(
+        StripLines(request.Findings),
+        StripLines(request.OperatorText),
+        StripLines(request.RecordSummary));
+
+    [return: NotNullIfNotNull(nameof(text))]
+    string? StripLines(string? text) =>
+        text is null ? null : string.Join('\n', text.Split('\n').Select(line => verificationUrl.StripUrl(line) ?? ""));
 
     static FunctionCallContent? FindCall(ChatResponse response) =>
         response.Messages
