@@ -118,6 +118,12 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
         (BugReportJson.ReadLogLines(row.LogLinesJson) ?? throw new InvalidOperationException("The report holds no log lines."))
         .Select(line => line.Message);
 
+    // Closing is the row change itself, so the queue's tests do not depend on SetStatusAsync.
+    static Task CloseAsync(LedgerDbContext db, int number) =>
+        db.BugReports.Where(r => r.Number == number).ExecuteUpdateAsync(set => set
+            .SetProperty(r => r.Status, BugReportStatus.Closed)
+            .SetProperty(r => r.ClosedAt, (DateTimeOffset?)Filed), Ct);
+
     [Fact]
     public async Task A_telegram_report_is_saved_open_and_pending_with_its_message()
     {
@@ -473,5 +479,154 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
         var logLines = (await RowAsync(h.Db, saved.Number)).LogLinesJson;
         logLines.Should().NotContain("4567").And.NotContain("111222333");
         LogMessages(await RowAsync(h.Db, saved.Number)).Should().Equal("Replied to bot message [telegram id]");
+    }
+
+    [Fact]
+    public async Task The_next_due_report_is_the_oldest_open_pending_one_whose_time_has_come()
+    {
+        await using var h = await CreateAsync();
+        // The harness clock starts at Filed and a FakeTimeProvider never goes back, so this one starts earlier.
+        var clock = new FakeTimeProvider(Filed.AddMinutes(-30));
+        var store = NewStore(h.Db, clock, h.Checks);
+        var closed = await store.SaveFromTelegramAsync(FromTelegram("closed"), Ct);
+        var explained = await store.SaveFromTelegramAsync(FromTelegram("explained"), Ct);
+        clock.SetUtcNow(Filed.AddMinutes(-20));
+        var waiting = await store.SaveFromTelegramAsync(FromTelegram("waiting for its retry"), Ct);
+        clock.SetUtcNow(Filed.AddMinutes(-10));
+        var due = await store.SaveFromTelegramAsync(FromTelegram("due"), Ct);
+        await store.SaveFromTelegramAsync(FromTelegram("filed in the same instant, after it"), Ct);
+        await CloseAsync(h.Db, closed.Number);
+        await store.CompleteExplanationAsync(await IdOfAsync(h.Db, explained.Number), new Explanation("Done.", false), Ct);
+        await store.RecordFailedAttemptAsync(await IdOfAsync(h.Db, waiting.Number), Filed.AddMinutes(1), maxAttempts: 3, Ct);
+
+        var next = await store.NextDueAsync(Filed, Ct);
+
+        next.Should().Be(new BugReportToExplain(await IdOfAsync(h.Db, due.Number), due.Number, 0, "due", null, Snapshot: null));
+    }
+
+    [Fact]
+    public async Task The_next_due_report_carries_the_snapshot_it_already_took()
+    {
+        await using var h = await CreateAsync();
+        var recordId = await AddRecordAsync(h.Db);
+        h.Checks.FindForTransactionAsync(recordId, Arg.Any<CancellationToken>()).Returns(Findings(WaitingOn(recordId)));
+        var saved = await h.Store.SaveFromTelegramAsync(FromTelegram(transactionId: recordId), Ct);
+        await h.Store.TakeSnapshotAsync(await IdOfAsync(h.Db, saved.Number), Ct);
+
+        var next = await h.Store.NextDueAsync(Filed, Ct) ?? throw new InvalidOperationException("Nothing is due.");
+
+        next.Should().BeEquivalentTo(new
+        {
+            saved.Number,
+            TransactionId = (Guid?)recordId,
+            Snapshot = new { TakenAt = Filed, Findings = new[] { WaitingOn(recordId) }, CollectionFailures = (string?)null },
+        }, options => options.PreferringRuntimeMemberTypes());
+    }
+
+    [Fact]
+    public async Task An_explanation_completes_a_pending_report_once_and_without_its_fiscal_link()
+    {
+        await using var h = await CreateAsync();
+        var saved = await h.Store.SaveFromTelegramAsync(FromTelegram(), Ct);
+        var reportId = await IdOfAsync(h.Db, saved.Number);
+
+        await h.Store.CompleteExplanationAsync(reportId, new Explanation($"Reply with the amount. {FiscalLink}", LooksLikeBug: false), Ct);
+        await h.Store.CompleteExplanationAsync(reportId, new Explanation("A second answer", LooksLikeBug: true), Ct);
+
+        (await RowAsync(h.Db, saved.Number)).Should().BeEquivalentTo(new
+        {
+            ExplanationState = BugExplanationState.Done,
+            Explanation = "Reply with the amount.",
+            LooksLikeBug = (bool?)false,
+        });
+        (await h.Store.NextDueAsync(Filed.AddDays(1), Ct)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task An_explanation_that_is_nothing_but_a_fiscal_link_is_kept_as_an_empty_answer()
+    {
+        await using var h = await CreateAsync();
+        var saved = await h.Store.SaveFromTelegramAsync(FromTelegram(), Ct);
+
+        await h.Store.CompleteExplanationAsync(await IdOfAsync(h.Db, saved.Number), new Explanation(FiscalLink, LooksLikeBug: true), Ct);
+
+        (await RowAsync(h.Db, saved.Number)).Should().BeEquivalentTo(new
+        {
+            ExplanationState = BugExplanationState.Done,
+            Explanation = "",
+            LooksLikeBug = (bool?)true,
+        });
+    }
+
+    [Fact]
+    public async Task A_failed_attempt_counts_and_waits_and_the_last_one_fails_the_report()
+    {
+        await using var h = await CreateAsync();
+        var saved = await h.Store.SaveFromTelegramAsync(FromTelegram(), Ct);
+        var reportId = await IdOfAsync(h.Db, saved.Number);
+        List<BugExplanationState> states = [];
+
+        for (var attempt = 1; attempt <= 4; attempt++)
+            states.Add(await h.Store.RecordFailedAttemptAsync(reportId, Filed.AddMinutes(attempt), maxAttempts: 3, Ct));
+
+        states.Should().Equal(
+            BugExplanationState.Pending, BugExplanationState.Pending, BugExplanationState.Failed, BugExplanationState.Failed);
+        var row = await RowAsync(h.Db, saved.Number);
+        row.ExplanationAttempts.Should().Be(3, "an attempt on a report that is no longer pending changes nothing");
+        row.ExplanationNextAt.Should().Be(Filed.AddMinutes(3));
+        row.Explanation.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Pending_deliveries_are_open_telegram_reports_with_an_answer_and_no_reply_yet()
+    {
+        await using var h = await CreateAsync();
+        var recordId = await AddRecordAsync(h.Db);
+        h.Checks.FindForTransactionAsync(recordId, Arg.Any<CancellationToken>())
+            .Returns(Findings(WaitingOn(recordId), WaitingOn(recordId, "SameWallet")));
+        h.Checks.FindAllAsync(Arg.Any<CancellationToken>()).ThrowsAsync(new TimeoutException());
+
+        var explained = FromTelegram("linked", recordId);
+        var explainedNumber = (await h.Store.SaveFromTelegramAsync(explained, Ct)).Number;
+        var explainedId = await IdOfAsync(h.Db, explainedNumber);
+        await h.Store.TakeSnapshotAsync(explainedId, Ct);
+        await h.Store.CompleteExplanationAsync(explainedId, new Explanation("Reply with the amount.", LooksLikeBug: false), Ct);
+
+        var gaveUp = FromTelegram("unlinked");
+        var gaveUpNumber = (await h.Store.SaveFromTelegramAsync(gaveUp, Ct)).Number;
+        var gaveUpId = await IdOfAsync(h.Db, gaveUpNumber);
+        await h.Store.TakeSnapshotAsync(gaveUpId, Ct);
+        await h.Store.RecordFailedAttemptAsync(gaveUpId, Filed, maxAttempts: 1, Ct);
+
+        await h.Store.SaveFromTelegramAsync(FromTelegram("not explained yet"), Ct);
+        var closedNumber = (await h.Store.SaveFromTelegramAsync(FromTelegram("closed first"), Ct)).Number;
+        await h.Store.CompleteExplanationAsync(await IdOfAsync(h.Db, closedNumber), new Explanation("x", false), Ct);
+        await CloseAsync(h.Db, closedNumber);
+        var repliedId = await IdOfAsync(h.Db, (await h.Store.SaveFromTelegramAsync(FromTelegram("replied"), Ct)).Number);
+        await h.Store.CompleteExplanationAsync(repliedId, new Explanation("y", false), Ct);
+        await h.Store.MarkDeliveredAsync(repliedId, 4242, Ct);
+
+        var deliveries = await h.Store.PendingDeliveriesAsync(Ct);
+
+        deliveries.Should().Equal(
+            new BugReportDelivery(explainedId, explainedNumber, ChatId, explained.MessageId, BugExplanationState.Done,
+                "Reply with the amount.", false, Linked: true, FindingsCount: 2),
+            new BugReportDelivery(gaveUpId, gaveUpNumber, ChatId, gaveUp.MessageId, BugExplanationState.Failed,
+                null, null, Linked: false, FindingsCount: null));
+    }
+
+    [Fact]
+    public async Task A_delivered_report_keeps_its_reply_and_leaves_the_delivery_list()
+    {
+        await using var h = await CreateAsync();
+        var saved = await h.Store.SaveFromTelegramAsync(FromTelegram(), Ct);
+        var reportId = await IdOfAsync(h.Db, saved.Number);
+        await h.Store.CompleteExplanationAsync(reportId, new Explanation("Reply with the amount.", false), Ct);
+
+        await h.Store.MarkDeliveredAsync(reportId, 4242, Ct);
+        await h.Store.MarkDeliveredAsync(reportId, 4343, Ct);
+
+        (await RowAsync(h.Db, saved.Number)).ReplyMessageId.Should().Be(4242);
+        (await h.Store.PendingDeliveriesAsync(Ct)).Should().BeEmpty();
     }
 }
