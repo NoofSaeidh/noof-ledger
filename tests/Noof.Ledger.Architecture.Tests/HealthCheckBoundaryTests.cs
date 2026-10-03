@@ -6,7 +6,11 @@ namespace Noof.Ledger.Architecture.Tests;
 // Scope item for Phase 5 Task 6: the LLM plays no part in health. AiKeysHealthCheck reads
 // IModelProvider/ISpeechProvider - both Application interfaces - never Noof.Ledger.Ai's own model
 // or speech types directly. Phase 8a (spec §1 "Boundary"): the integrity checks feed the health tile,
-// so they are held to the same rule, and neither may name the finding explainer.
+// so they are held to the same rule, and neither may name the finding explainer. Persistence cannot
+// reference the Ai assembly, so naming an Application interface that Ai implements with a model call
+// is the only way a check could reach one - those interfaces are all listed. The whole Integrity
+// folder is scanned, so a helper the run executes, or a check that derives from a base class, cannot
+// slip past the declaration pattern.
 public class HealthCheckBoundaryTests
 {
     static readonly string SrcRoot = Path.Combine(RepoRoot.Find().FullName, "src");
@@ -18,7 +22,8 @@ public class HealthCheckBoundaryTests
 
     static readonly string[] ModelStack =
     [
-        "Microsoft.Extensions.AI", "IChatClient", "ISpeechToTextClient", "ICategorizer", "ITranscriber", "IFindingExplainer",
+        "Microsoft.Extensions.AI", "IChatClient", "ISpeechToTextClient", "ICategorizer", "ITranscriber",
+        "IReceiptVision", "IReceiptCategorizer", "IFindingExplainer",
     ];
 
     [Fact]
@@ -28,9 +33,12 @@ public class HealthCheckBoundaryTests
             .Select(file => (Path: Path.GetRelativePath(SrcRoot, file), Text: File.ReadAllText(file)))
             .ToArray();
         var healthCheckFiles = sources.Where(source => HealthCheckDeclaration.IsMatch(source.Text)).ToArray();
+        var integrityFolderFiles = sources
+            .Where(source => source.Path.StartsWith(IntegrityFolder, StringComparison.Ordinal))
+            .ToArray();
         var integrityFiles = sources.Where(source => IntegrityCheckDeclaration.IsMatch(source.Text)).ToArray();
 
-        var offenders = healthCheckFiles.Concat(integrityFiles)
+        var offenders = healthCheckFiles.Concat(integrityFolderFiles).Concat(integrityFiles)
             .Where(source => ModelStack.Any(name => source.Text.Contains(name, StringComparison.Ordinal)))
             .Select(source => source.Path)
             .Distinct()
@@ -44,6 +52,9 @@ public class HealthCheckBoundaryTests
         healthCheckFiles.Select(source => source.Path)
             .Should().Contain(file => file.StartsWith("Noof.Ledger.Ai" + Path.DirectorySeparatorChar, StringComparison.Ordinal),
                 "AiKeysHealthCheck must still be found under src/Noof.Ledger.Ai/");
+        integrityFolderFiles.Should().NotBeEmpty(
+            "src/Noof.Ledger.Persistence/Diagnostics/Integrity/ must hold the integrity checks, or an empty offender "
+            + "list proves nothing for them");
         integrityFiles.Select(source => source.Path)
             .Should().Contain(file => file.StartsWith(IntegrityFolder, StringComparison.Ordinal),
                 "the integrity pattern must find the checks under src/Noof.Ledger.Persistence/Diagnostics/Integrity/, "
