@@ -51,4 +51,26 @@ public class BugsCommandParsingTests
 
         arguments.Should().BeNull();
     }
+
+    // Only ever called with null here: given arguments, RunAsync resolves the operator's own connection string,
+    // which names noof_ledger.
+    [Fact]
+    public async Task A_usage_error_prints_the_usage_line_and_exits_2()
+    {
+        var original = Console.Out;
+        using var captured = new StringWriter();
+        Console.SetOut(captured);
+        int exitCode;
+        try
+        {
+            exitCode = await BugsCommand.RunAsync(null);
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+
+        exitCode.Should().Be(2);
+        captured.ToString().Should().Be(BugsCommand.Usage + Environment.NewLine);
+    }
 }

@@ -1,6 +1,9 @@
 using System.Globalization;
 using System.Text;
+using Noof.Ledger.Application;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Diagnostics.BugReports;
+using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Persistence;
 
 namespace Noof.Ledger.Host.Cli;
@@ -19,6 +22,53 @@ internal static class BugsCommand
     }
 
     static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
+
+    public static async Task<int> RunAsync(BugsExportArguments? arguments)
+    {
+        if (arguments is null)
+        {
+            Console.WriteLine(Usage);
+            return 2;
+        }
+
+        // Unqualified "Host" resolves to our own Noof.Ledger.Host namespace here. The content root is the install
+        // directory, as Program.cs sets it: the Receipts prefix lives in that directory's appsettings.json, and
+        // FiscalVerificationUrl refuses to be built without it. Args stay empty so the verb's own options never
+        // reach configuration.
+        var builder = Microsoft.Extensions.Hosting.Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+        {
+            Args = [],
+            ContentRootPath = AppContext.BaseDirectory,
+        });
+
+        // The verb's one line is its whole output; the default console logger would interleave EF Core's own.
+        builder.Logging.ClearProviders();
+
+        try
+        {
+            LedgerConnectionString.Resolve(builder.Configuration.GetConnectionString("Ledger"));
+        }
+        catch (InvalidOperationException exposed)
+        {
+            Console.WriteLine(exposed.Message);
+            return 1;
+        }
+
+        var slowOperations = new SlowOperationOptions();
+        builder.Configuration.GetSection(SlowOperationOptions.ConfigurationSection).Bind(slowOperations.ThresholdMs);
+        var fiscalVerificationUrlOptions = new FiscalVerificationUrlOptions();
+        builder.Configuration.GetSection(FiscalVerificationUrlOptions.ConfigurationSection).Bind(fiscalVerificationUrlOptions);
+
+        builder.Services.AddNoofApplication(slowOperations, fiscalVerificationUrlOptions);
+        builder.Services.AddSingleton(TimeProvider.System);
+        // maxJobAttempts is inert on this path: the verb never resolves IJobQueue.
+        builder.Services.AddNoofPersistence(builder.Configuration, maxJobAttempts: 1);
+
+        using var host = builder.Build();
+
+        // No cancellation: Ctrl+C ends this read-only process outright, which it can afford.
+        return await ExportAsync(host.Services, arguments, TimeProvider.System, Console.Out, CancellationToken.None);
+    }
 
     internal static async Task<int> ExportAsync(
         IServiceProvider services, BugsExportArguments arguments, TimeProvider timeProvider, TextWriter output,
