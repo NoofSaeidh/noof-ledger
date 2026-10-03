@@ -92,6 +92,40 @@ internal sealed class PostingsDisagreeCheck(LedgerDbContext db) : IIntegrityChec
           AND (@transactionId IS NULL OR t.id = @transactionId)
         """;
 
+    // A charge's own pricing: what it charged against its Principal lines in its currency at the rate it used. Where
+    // a charge may sit at all (a spending, a foreign currency) is I-2's.
+    const string MispricedChargesSql = """
+        SELECT t.id AS "TransactionId", t.created_at AS "CreatedAt", t.wallet_id AS "RecordWalletId",
+               c.currency AS "ChargeCurrency", w.currency AS "WalletCurrency", c.charged_amount AS "Charged",
+               priced.amount AS "LinesAtRate"
+        FROM charges c
+        JOIN transactions t ON t.id = c.transaction_id
+        JOIN wallets w ON w.id = t.wallet_id
+        CROSS JOIN LATERAL (
+            SELECT round(SUM(li.amount) * c.rate_used, 2) AS amount
+            FROM line_items li
+            WHERE li.transaction_id = t.id AND li.role = 0 AND li.currency = c.currency
+        ) priced
+        WHERE c.charged_amount IS DISTINCT FROM priced.amount
+          AND (@transactionId IS NULL OR t.id = @transactionId)
+        """;
+
+    // A spending's fee lines in its wallet's currency are its charges' fees. A fee line in another currency is I-2's.
+    const string FeeMismatchSql = """
+        SELECT t.id AS "TransactionId", t.created_at AS "CreatedAt", t.wallet_id AS "RecordWalletId",
+               w.currency AS "WalletCurrency", fees.charged AS "ChargeFees", fees.lines AS "FeeLines"
+        FROM transactions t
+        JOIN wallets w ON w.id = t.wallet_id
+        CROSS JOIN LATERAL (
+            SELECT (SELECT coalesce(SUM(c.fee_amount), 0) FROM charges c WHERE c.transaction_id = t.id) AS charged,
+                   (SELECT coalesce(SUM(li.amount), 0) FROM line_items li
+                    WHERE li.transaction_id = t.id AND li.role = 1 AND li.currency = w.currency) AS lines
+        ) fees
+        WHERE t.kind = 0
+          AND fees.charged <> fees.lines
+          AND (@transactionId IS NULL OR t.id = @transactionId)
+        """;
+
     public IntegrityCheck Check => IntegrityCheck.PostingsDisagree;
 
     public IntegrityGroup Group => IntegrityGroup.Bug;
@@ -100,11 +134,15 @@ internal sealed class PostingsDisagreeCheck(LedgerDbContext db) : IIntegrityChec
     {
         var disagreeing = await IntegrityRows.ReadAsync<DisagreeingRow>(db, DisagreeingSql, scope, cancellationToken);
         var misplaced = await IntegrityRows.ReadAsync<MisplacedEntryRow>(db, MisplacedSql, scope, cancellationToken);
+        var mispriced = await IntegrityRows.ReadAsync<MispricedChargeRow>(db, MispricedChargesSql, scope, cancellationToken);
+        var feeMismatches = await IntegrityRows.ReadAsync<FeeMismatchRow>(db, FeeMismatchSql, scope, cancellationToken);
 
         IEnumerable<RecordKey> records =
         [
             .. disagreeing.Select(row => new RecordKey(row.TransactionId, row.CreatedAt, row.RecordWalletId)),
             .. misplaced.Select(row => new RecordKey(row.TransactionId, row.CreatedAt, row.RecordWalletId)),
+            .. mispriced.Select(row => new RecordKey(row.TransactionId, row.CreatedAt, row.RecordWalletId)),
+            .. feeMismatches.Select(row => new RecordKey(row.TransactionId, row.CreatedAt, row.RecordWalletId)),
         ];
 
         return
@@ -128,6 +166,13 @@ internal sealed class PostingsDisagreeCheck(LedgerDbContext db) : IIntegrityChec
                             .ThenBy(row => row.Currency, StringComparer.Ordinal)
                             .ThenBy(row => row.Amount)
                             .SelectMany(MisplacedFacts),
+                        .. mispriced
+                            .Where(row => row.TransactionId == record.TransactionId)
+                            .OrderBy(row => row.ChargeCurrency, StringComparer.Ordinal)
+                            .SelectMany(MispricedFacts),
+                        .. feeMismatches
+                            .Where(row => row.TransactionId == record.TransactionId)
+                            .SelectMany(FeeMismatchFacts),
                     ])),
         ];
     }
@@ -149,6 +194,27 @@ internal sealed class PostingsDisagreeCheck(LedgerDbContext db) : IIntegrityChec
         new TextFact("Entry on another wallet", row.WalletName),
         new MoneyFact("Entry", row.Amount, new CurrencyCode(row.Currency)),
     ];
+
+    static IEnumerable<IntegrityFact> MispricedFacts(MispricedChargeRow row)
+    {
+        var walletCurrency = new CurrencyCode(row.WalletCurrency);
+        return
+        [
+            new TextFact("Charge", row.ChargeCurrency),
+            new MoneyFact("Charged", row.Charged, walletCurrency),
+            new MoneyFact("Lines at its rate", row.LinesAtRate ?? 0m, walletCurrency),
+        ];
+    }
+
+    static IEnumerable<IntegrityFact> FeeMismatchFacts(FeeMismatchRow row)
+    {
+        var walletCurrency = new CurrencyCode(row.WalletCurrency);
+        return
+        [
+            new MoneyFact("Charge fees", row.ChargeFees, walletCurrency),
+            new MoneyFact("Fee lines", row.FeeLines, walletCurrency),
+        ];
+    }
 
     readonly record struct RecordKey(Guid TransactionId, DateTimeOffset CreatedAt, Guid? WalletId);
 }
@@ -173,4 +239,25 @@ internal sealed class MisplacedEntryRow
     public string WalletName { get; init; } = string.Empty;
     public string Currency { get; init; } = string.Empty;
     public decimal Amount { get; init; }
+}
+
+internal sealed class MispricedChargeRow
+{
+    public Guid TransactionId { get; init; }
+    public DateTimeOffset CreatedAt { get; init; }
+    public Guid? RecordWalletId { get; init; }
+    public string ChargeCurrency { get; init; } = string.Empty;
+    public string WalletCurrency { get; init; } = string.Empty;
+    public decimal Charged { get; init; }
+    public decimal? LinesAtRate { get; init; }
+}
+
+internal sealed class FeeMismatchRow
+{
+    public Guid TransactionId { get; init; }
+    public DateTimeOffset CreatedAt { get; init; }
+    public Guid? RecordWalletId { get; init; }
+    public string WalletCurrency { get; init; } = string.Empty;
+    public decimal ChargeFees { get; init; }
+    public decimal FeeLines { get; init; }
 }
