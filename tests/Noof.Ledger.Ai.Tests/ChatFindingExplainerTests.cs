@@ -158,6 +158,95 @@ public class ChatFindingExplainerTests
         logger.Entries.Should().ContainSingle(entry => (string)entry.Properties["Operation"] == "model.explainFinding");
     }
 
+    const string SecretWords = "OperatorSecretWords";
+
+    static CapturedLogEntry[] FailuresIn(CapturingLogger<ChatFindingExplainer> logger) =>
+        [.. logger.Entries.Where(entry => entry.EventId.Id == 2001)];
+
+    static void ShouldHaveLoggedOnlyTheFailureType(CapturingLogger<ChatFindingExplainer> logger, string failureType)
+    {
+        var failure = FailuresIn(logger).Should().ContainSingle().Subject;
+        failure.Level.Should().Be(LogLevel.Warning);
+        failure.Properties["FailureType"].Should().Be(failureType);
+        failure.Exception.Should().BeNull("the exception's message can quote the operator's report");
+        logger.Entries.SelectMany(entry => entry.Properties.Values).OfType<string>()
+            .Should().NotContain(value => value.Contains(SecretWords, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_model_failure_is_rethrown_and_logged_with_its_kind_only()
+    {
+        var logger = new CapturingLogger<ChatFindingExplainer>();
+        var failure = new ModelCallException(ModelFailureKind.Terminal, $"status 401 for {SecretWords}");
+        var provider = new ScriptedChatClient().Fail(failure);
+
+        var act = () => Build(provider, logger: logger).ExplainAsync(new ExplanationRequest(Findings, SecretWords), Ct);
+
+        (await act.Should().ThrowAsync<ModelCallException>()).Which.Should().BeSameAs(failure);
+        ShouldHaveLoggedOnlyTheFailureType(logger, "Terminal");
+    }
+
+    [Fact]
+    public async Task Any_other_failure_is_rethrown_and_logged_with_its_type_name_only()
+    {
+        var logger = new CapturingLogger<ChatFindingExplainer>();
+        var provider = new ScriptedChatClient().Fail(new InvalidOperationException($"the model said {SecretWords}"));
+
+        var act = () => Build(provider, logger: logger).ExplainAsync(new ExplanationRequest(Findings), Ct);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        ShouldHaveLoggedOnlyTheFailureType(logger, "InvalidOperationException");
+    }
+
+    [Fact]
+    public async Task A_malformed_answer_escapes_as_the_JsonException_it_is_and_is_logged_by_type()
+    {
+        var logger = new CapturingLogger<ChatFindingExplainer>();
+        var provider = new ScriptedChatClient().Answer(new FunctionCallContent(
+            "call_1", "write_explanation",
+            new Dictionary<string, object?> { ["text"] = SecretWords, ["looks_like_bug"] = "yes" }));
+
+        var act = () => Build(provider, logger: logger).ExplainAsync(new ExplanationRequest(Findings), Ct);
+
+        await act.Should().ThrowAsync<System.Text.Json.JsonException>();
+        ShouldHaveLoggedOnlyTheFailureType(logger, "JsonException");
+    }
+
+    [Fact]
+    public async Task A_blank_text_is_logged_as_a_transient_failure()
+    {
+        var logger = new CapturingLogger<ChatFindingExplainer>();
+        var provider = new ScriptedChatClient().Answer(Answer(text: " "));
+
+        var act = () => Build(provider, logger: logger).ExplainAsync(new ExplanationRequest(Findings), Ct);
+
+        await act.Should().ThrowAsync<ModelCallException>();
+        ShouldHaveLoggedOnlyTheFailureType(logger, "Transient");
+    }
+
+    [Fact]
+    public async Task Cancellation_is_rethrown_without_a_warning()
+    {
+        var logger = new CapturingLogger<ChatFindingExplainer>();
+        var provider = new ScriptedChatClient().Fail(new OperationCanceledException());
+
+        var act = () => Build(provider, logger: logger).ExplainAsync(new ExplanationRequest(Findings), Ct);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        FailuresIn(logger).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task An_answer_logs_no_failure()
+    {
+        var logger = new CapturingLogger<ChatFindingExplainer>();
+        var provider = new ScriptedChatClient().Answer(Answer());
+
+        await Build(provider, logger: logger).ExplainAsync(new ExplanationRequest(Findings), Ct);
+
+        FailuresIn(logger).Should().BeEmpty();
+    }
+
     static AIContent Malformed(string scenario) => scenario switch
     {
         "no tool call" => new TextContent("The exchange is waiting for the amount you received."),

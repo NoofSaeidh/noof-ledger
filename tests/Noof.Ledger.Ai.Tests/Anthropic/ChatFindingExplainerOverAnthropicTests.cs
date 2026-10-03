@@ -6,11 +6,13 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Noof.Ledger.Ai.Anthropic;
 using Noof.Ledger.Application;
+using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Diagnostics.Integrity;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Domain;
+using Noof.Ledger.TestKit;
 
 namespace Noof.Ledger.Ai.Tests.Anthropic;
 
@@ -169,5 +171,20 @@ public class ChatFindingExplainerOverAnthropicTests
             body.Should().NotContain(payload);
         body.Should().Contain("the amount is wrong").And.Contain("coffee 250").And.Contain("not 200")
             .And.Contain("could not read").And.Contain("A correction that never applied");
+    }
+
+    [Fact]
+    public async Task An_authentication_failure_surfaces_as_a_terminal_model_failure_logged_by_kind()
+    {
+        var logger = new CapturingLogger<ChatFindingExplainer>();
+        var (explainer, handler) = Build(logger);
+        handler.Enqueue(HttpStatusCode.Unauthorized, AnthropicResponses.AuthenticationError);
+
+        var act = () => explainer.ExplainAsync(Request(), Ct);
+
+        (await act.Should().ThrowAsync<ModelCallException>()).Which.Kind.Should().Be(ModelFailureKind.Terminal);
+        var failure = logger.Entries.Should().ContainSingle(entry => entry.EventId.Id == 2001).Subject;
+        failure.Properties["FailureType"].Should().Be("Terminal");
+        failure.Exception.Should().BeNull();
     }
 }

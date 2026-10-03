@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
+using Noof.Ledger.Ai.FindingExplainerLogging;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Diagnostics.Integrity;
@@ -20,12 +21,25 @@ internal sealed class ChatFindingExplainer(
 
     public async Task<Explanation> ExplainAsync(ExplanationRequest request, CancellationToken cancellationToken)
     {
+        try
+        {
+            return await AskAsync(Stripped(request), cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger.ExplanationFailed(FailureType(exception));
+            throw;
+        }
+    }
+
+    async Task<Explanation> AskAsync(ExplanationRequest request, CancellationToken cancellationToken)
+    {
         using var timing = timer.Start(logger, TimedOperations.ModelExplainFinding);
 
         using var chat = await clientFactory.CreateAsync(cancellationToken);
 
         var response = await chat.GetResponseAsync(
-            [new ChatMessage(ChatRole.User, FindingExplanationPrompt.BuildUserTurn(Stripped(request)))],
+            [new ChatMessage(ChatRole.User, FindingExplanationPrompt.BuildUserTurn(request))],
             new ChatOptions
             {
                 Instructions = FindingExplanationPrompt.System,
@@ -61,6 +75,9 @@ internal sealed class ChatFindingExplainer(
     [return: NotNullIfNotNull(nameof(text))]
     string? StripLines(string? text) =>
         text is null ? null : string.Join('\n', text.Split('\n').Select(line => verificationUrl.StripUrl(line) ?? ""));
+
+    static string FailureType(Exception exception) =>
+        exception is ModelCallException modelFailure ? modelFailure.Kind.ToString() : exception.GetType().Name;
 
     static FunctionCallContent? FindCall(ChatResponse response) =>
         response.Messages
