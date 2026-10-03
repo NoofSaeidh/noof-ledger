@@ -2,11 +2,11 @@ using Noof.Ledger.Application.Diagnostics.Integrity;
 
 namespace Noof.Ledger.Application.Diagnostics.BugReports;
 
-public enum BugReportSource { Telegram = 0, Dashboard = 1 }
+public enum BugReportSource { Unknown = 0, Telegram = 1, Dashboard = 2 }
 
-public enum BugReportStatus { Open = 0, Closed = 1 }
+public enum BugReportStatus { Unknown = 0, Open = 1, Closed = 2 }
 
-public enum BugExplanationState { Pending = 0, Done = 1, Failed = 2 }
+public enum BugExplanationState { Unknown = 0, Pending = 1, Done = 2, Failed = 3 }
 
 public sealed record TelegramBugReport(long ChatId, int MessageId, string? Text, Guid? TransactionId);
 
