@@ -90,6 +90,8 @@ internal static class WorkerRegistration
             sp.GetRequiredService<IOperationTimer>(),
             sp.GetRequiredService<ILogger<LogRetentionWorker>>()));
 
+        services.AddHostedService<BugReportExplanationWorker>();
+
         return services;
     }
 }

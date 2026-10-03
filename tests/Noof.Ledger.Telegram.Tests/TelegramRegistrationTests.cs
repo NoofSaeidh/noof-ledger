@@ -41,6 +41,7 @@ public class TelegramRegistrationTests
         services.AddScoped(_ => Substitute.For<Application.Receipts.IReceiptStore>());
         services.AddScoped(_ => Substitute.For<IRecordEcho>());
         services.AddScoped(_ => Substitute.For<ISystemHealth>());
+        services.AddScoped(_ => Substitute.For<Application.Diagnostics.BugReports.IBugReportStore>());
         services.AddNoofTelegram();
 
         using var provider = services.BuildServiceProvider();
@@ -48,6 +49,7 @@ public class TelegramRegistrationTests
 
         scope.ServiceProvider.GetRequiredService<IChatNotifier>().Should().BeOfType<TelegramChatNotifier>();
         scope.ServiceProvider.GetRequiredService<ITelegramUpdateRouter>().Should().BeOfType<TelegramUpdateRouter>();
+        scope.ServiceProvider.GetRequiredService<BugCommandHandler>().Should().NotBeNull();
         scope.ServiceProvider.GetRequiredService<IVoiceFileSource>().Should().BeOfType<TelegramVoiceFileSource>();
         provider.GetServices<IHostedService>().OfType<TelegramPollingService>().Should().ContainSingle();
     }

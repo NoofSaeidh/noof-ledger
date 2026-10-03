@@ -37,7 +37,7 @@ public class HostedServiceOrderTests
         var otherWorkerIndexes = hostedServices
             .Select((service, index) => (service, index))
             .Where(entry => entry.service is SecretSnapshotRefreshWorker or CategorizationWorker or RecordExchangeWorker
-                or TranscriptionWorker or LogRetentionWorker
+                or TranscriptionWorker or LogRetentionWorker or BugReportExplanationWorker
                 || entry.service.GetType().Name == "TelegramPollingService")
             .Select(entry => entry.index)
             .ToArray();
