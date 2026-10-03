@@ -24,17 +24,19 @@ the plugin's stop-time review gate: it would review on every Stop and burn the q
   ```
 
   The CLI rejects a PROMPT combined with `--base`, so this form takes no prompt.
-- **Adversarial**, for a PR that makes design choices — and the default when unsure. Use the plugin's
-  companion script, which supports both a base branch and a focus prompt:
+- **Adversarial**, for a PR that makes design choices — and the default when unsure. Run it from the
+  PR's worktree through the wrapper around the plugin's companion script, which takes both a base
+  branch and a focus prompt:
 
   ```
-  node <path> adversarial-review --wait --base <base-branch> "<focus>"
+  .\run.ps1 codex review -Base <base-branch> -Focus "<focus>"
   ```
 
   The focus asks it to challenge the approach, assumptions, trade-offs and failure modes — not just
-  defects. Resolve `<path>` with Glob on
-  `~/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs`; the version directory
-  changes on update, so never hard-code it.
+  defects. Never call `codex-companion.mjs` directly: it leaves a broker process running in the
+  worktree until reboot, and the worktree then cannot be removed. The wrapper stops it afterwards;
+  `.\run.ps1 codex sweep -Stop` clears any a direct call left behind. One review per worktree at a
+  time — two would share the broker (`ops/RUNBOOK.md`).
 - Run either in the foreground with a 600000 ms timeout.
 - Findings are judged, not obeyed (triage per §1): fix what's confirmed, reply in the PR description
   to what's rejected and why.
@@ -65,7 +67,7 @@ per fix round cost ~5 hours on PR #3.
 
 All three Fable reviews run in parallel with a Codex adversarial review of the same scope:
 
-- **Closing:** the companion script above with `--base <base>`.
+- **Closing:** `.\run.ps1 codex review -Base <base>` as above.
 - **Spec and plan:** one prompt, given verbatim to both reviewers, naming the files — the spec, and
   for the plan review every plan file even under the ignored `.superpowers/` — and the focus above:
 

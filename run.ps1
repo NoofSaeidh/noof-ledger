@@ -29,7 +29,8 @@ Commands (run `.\run.ps1 help <command>` for the detail on any one of them):
   backups            - open the backup directory
   inspect            - the solution-wide accessibility sweep (ops/inspect.ps1)
   pr-wait            - block until a PR's CI (and, if pending, Copilot review) land (ops/pr-wait.ps1)
-  help               - this table, or `.\run.ps1 help <command>` for one command's detail
+  codex              - Codex adversarial review that cleans up after itself; stop/sweep leftover brokers
+  help           - this table, or `.\run.ps1 help <command>` for one command's detail
 
 An unrecognised command prints this table and exits 1.
 
@@ -118,6 +119,15 @@ Keeps printing new log lines as the running host writes them.
 .\run.ps1 pr-wait 8
 Blocks until PR #8's CI checks have landed for its current head commit (and Copilot's review too, only
 if Copilot is actually pending on it), or 9 minutes pass.
+
+.EXAMPLE
+.\run.ps1 codex review -Base phase-8 -Focus "Challenge the approach, not just defects"
+Runs the Codex adversarial review of this branch against phase-8, then stops the Codex broker it
+started for this worktree.
+
+.EXAMPLE
+.\run.ps1 codex sweep -Stop
+Stops every Codex broker left running in a worktree that has since been removed.
 
 .EXAMPLE
 .\run.ps1 help test
@@ -355,7 +365,8 @@ Demo.Tests tagged [Trait("Category", "Database")] (AppLogSinkTests, DashboardCul
 ReadyGatedBufferSinkDbTests, SecretRedactionSentinelTests; RefreshTests, MockLedgerTests), which
 create databases whenever PostgreSQL is reachable and so belong under the lock, not in fast.
 Without -Filter, fast first runs the agent tooling's own tests: the hook tests
-(`node --test .claude/hooks/*.test.js`), ops\pr-wait.tests.ps1 and ops\gh-bot.tests.ps1. CI runs
+(`node --test .claude/hooks/*.test.js`), ops\pr-wait.tests.ps1, ops\gh-bot.tests.ps1 and
+ops\codex-broker.tests.ps1. CI runs
 exactly this command.
 
 db runs Noof.Ledger.Persistence.Tests plus those Database-tagged classes, e2e runs
@@ -525,6 +536,29 @@ conflicts with its base - GitHub runs no CI then, so rebase or merge the base an
 Prerequisites: `gh` authenticated against this repo.
 '@
     }
+    'codex' = @{
+        Summary = 'Codex adversarial review that cleans up after itself; stop/sweep leftover brokers'
+        Detail  = @'
+codex review -Base <branch> -Focus <text> [-Cwd <dir>]
+codex stop -Path <dir>
+codex sweep [-Stop]
+
+Runs ops\codex-broker.ps1. The Codex plugin starts one detached broker (and a codex app-server
+process chain) per directory it reviews, and its SessionEnd hook stops only the session's own, so a
+review run in a worktree keeps that worktree open - removing it fails with "being used by another
+process".
+
+review runs the plugin's companion `adversarial-review --wait` in -Cwd (default: the current
+directory) against -Base with the -Focus prompt, then always stops that directory's broker, even when
+the review fails; exits with the review's exit code. stop stops one directory's broker - run it before
+removing a worktree. sweep lists every broker with a verdict; an orphan is one in a directory under
+.claude\worktrees\ that is no longer a registered worktree or no longer exists, and -Stop stops those.
+The main checkout's broker (its Claude Code session stops it) and registered worktrees' brokers in
+a sweep (other sessions may be reviewing there) are never touched.
+
+Prerequisites: the Codex plugin (codex@openai-codex) installed; node on PATH.
+'@
+    }
 }
 
 function Write-CommandTable {
@@ -663,6 +697,7 @@ switch ($CommandName) {
                     Invoke-Checked { node --test (Join-Path $Root '.claude/hooks/*.test.js') }
                     Invoke-Checked { pwsh -NoProfile -File (Join-Path $Root 'ops\pr-wait.tests.ps1') }
                     Invoke-Checked { pwsh -NoProfile -File (Join-Path $Root 'ops\gh-bot.tests.ps1') }
+                    Invoke-Checked { pwsh -NoProfile -File (Join-Path $Root 'ops\codex-broker.tests.ps1') }
                 }
                 foreach ($project in $fastProjects) {
                     $full = Join-Path $Root $project
@@ -817,6 +852,10 @@ switch ($CommandName) {
         # silently succeed (exit 0) no matter what pr-wait.ps1 itself reported. Invoke-Checked reads
         # $LASTEXITCODE and re-raises it as run.ps1's own exit code (1/2/3), not just "0 vs failure".
         Invoke-Checked { & (Join-Path $Root 'ops\pr-wait.ps1') @Rest }
+    }
+
+    'codex' {
+        Invoke-Checked { & (Join-Path $Root 'ops\codex-broker.ps1') @Rest }
     }
 
     default {
