@@ -93,6 +93,7 @@ public static class PersistenceRegistration
         services.AddScoped<IIntegrityChecks, EfIntegrityChecks>();
 
         services.AddScoped<ISystemHealthCheck, MigrationsHealthCheck>();
+        services.AddScoped<ISystemHealthCheck, IntegrityHealthCheck>();
 
         return services;
     }
