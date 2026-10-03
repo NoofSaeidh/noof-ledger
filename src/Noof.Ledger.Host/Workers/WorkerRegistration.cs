@@ -2,6 +2,7 @@
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Diagnostics.Integrity;
 using Noof.Ledger.Application.Receipts;
 
 namespace Noof.Ledger.Host.Workers;
@@ -89,6 +90,15 @@ internal static class WorkerRegistration
             sp.GetRequiredService<TimeProvider>(),
             sp.GetRequiredService<IOperationTimer>(),
             sp.GetRequiredService<ILogger<LogRetentionWorker>>()));
+
+        services.AddHostedService(sp => new BugReportExplanationWorker(
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            sp.GetRequiredService<TimeProvider>(),
+            options,
+            sp.GetRequiredService<IFindingText>(),
+            sp.GetRequiredService<IDatabaseGate>(),
+            sp.GetRequiredService<IOperationTimer>(),
+            sp.GetRequiredService<ILogger<BugReportExplanationWorker>>()));
 
         return services;
     }
