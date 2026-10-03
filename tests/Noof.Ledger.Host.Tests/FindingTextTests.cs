@@ -1,6 +1,10 @@
 using System.Globalization;
 using AwesomeAssertions;
+using Microsoft.Extensions.DependencyInjection;
+using Noof.Ledger.Application;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Diagnostics.Integrity;
+using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Host.Tests;
@@ -48,6 +52,14 @@ public class FindingTextTests
         "   Idle for: 2 d 3 h (since 2026-09-30 11:04 UTC)",
         "   Date: 2026-09-18",
         "   Amount: 1840.50 RSD",
+    ];
+
+    static string CheckLine(IntegrityCheck check) => $"- {Text.Title(check)}: {Text.Description(check)}";
+
+    static IntegrityFinding[] Many(int disagreements, int waiting) =>
+    [
+        .. Enumerable.Range(0, disagreements).Select(_ => Disagreement()),
+        .. Enumerable.Range(0, waiting).Select(_ => WaitingForRecordAnyway()),
     ];
 
     [Theory]
@@ -140,4 +152,119 @@ public class FindingTextTests
     [Fact]
     public void No_findings_make_an_empty_block() =>
         Text.FindingsBlock([], AsOf).Should().BeEmpty();
+
+    [Fact]
+    public void Explaining_one_finding_describes_its_check_then_lists_it_and_nothing_else()
+    {
+        string[] expected =
+        [
+            "Checks:",
+            "- Postings disagree with their sources: A record's ledger entries differ from what its lines, charges and transfer legs add up to, sit on a wallet the record does not use, or a foreign charge is priced differently from the lines it prices. The wallet's balance is then wrong. It usually means the app wrote the entries incorrectly — a bug in the app.",
+            "",
+            "Findings:",
+            .. DisagreementLines(1),
+        ];
+
+        var request = Text.ForFinding(Disagreement(), AsOf);
+
+        request.Findings.Should().Be(string.Join("\n", expected));
+        request.OperatorText.Should().BeNull();
+        request.RecordSummary.Should().BeNull();
+    }
+
+    [Fact]
+    public void A_report_passes_its_text_and_summary_through_as_given()
+    {
+        const string operatorText = "the amount is wrong https://suf.purs.gov.rs/v/?vl=QUJDREVGR0g=";
+        const string summary = "Record: Expense · Completed · captured from Text";
+
+        var request = Text.ForReport(operatorText, summary, [Disagreement()], AsOf);
+
+        request.OperatorText.Should().Be(operatorText, "stripping a fiscal link is each sink's own job, the explainer's included");
+        request.RecordSummary.Should().Be(summary);
+    }
+
+    [Fact]
+    public void A_report_describes_each_check_once_in_check_order_and_lists_findings_in_check_order()
+    {
+        string[] expected =
+        [
+            "Checks:",
+            CheckLine(IntegrityCheck.PostingsDisagree),
+            CheckLine(IntegrityCheck.NotApplied),
+            "",
+            "Findings:",
+            .. DisagreementLines(1),
+            .. DisagreementLines(2),
+            .. WaitingLines(3),
+        ];
+
+        var request = Text.ForReport(null, null, [WaitingForRecordAnyway(), Disagreement(), Disagreement()], AsOf);
+
+        request.Findings.Should().Be(string.Join("\n", expected));
+    }
+
+    [Fact]
+    public void A_report_with_no_findings_or_findings_not_collected_says_which()
+    {
+        Text.ForReport("text", null, [], AsOf).Findings.Should().Be("No integrity findings.");
+        Text.ForReport("text", null, null, AsOf).Findings.Should().Be("Findings could not be collected.");
+    }
+
+    [Fact]
+    public void Over_twenty_findings_the_first_twenty_are_shown_and_the_total_is_named()
+    {
+        var findings = Many(disagreements: 20, waiting: 3);
+
+        var request = Text.ForReport(null, null, findings, AsOf);
+
+        request.Findings.Should().Be(string.Join("\n",
+            "Checks:",
+            CheckLine(IntegrityCheck.PostingsDisagree),
+            "",
+            "Findings:",
+            Text.FindingsBlock([.. findings.Take(20)], AsOf),
+            "Showing the first 20 of 23 findings."));
+    }
+
+    [Fact]
+    public void The_cap_takes_the_first_twenty_in_check_order_whatever_order_they_arrive_in()
+    {
+        IntegrityFinding[] findings = [.. Many(disagreements: 0, waiting: 3), .. Many(disagreements: 20, waiting: 0)];
+
+        var request = Text.ForReport(null, null, findings, AsOf);
+
+        request.Findings.Should().Be(string.Join("\n",
+            "Checks:",
+            CheckLine(IntegrityCheck.PostingsDisagree),
+            "",
+            "Findings:",
+            Text.FindingsBlock(Many(disagreements: 20, waiting: 0), AsOf),
+            "Showing the first 20 of 23 findings."));
+    }
+
+    [Fact]
+    public void Exactly_twenty_findings_are_all_shown_without_a_total()
+    {
+        var findings = Many(disagreements: 19, waiting: 1);
+
+        var request = Text.ForReport(null, null, findings, AsOf);
+
+        request.Findings.Should().EndWith(string.Join("\n", WaitingLines(20)));
+        request.Findings.Should().NotContain("Showing the first");
+    }
+
+    [Fact]
+    public void AddNoofApplication_registers_the_finding_text_as_one_singleton()
+    {
+        var services = new ServiceCollection();
+        services.AddNoofApplication(
+            new SlowOperationOptions(),
+            new FiscalVerificationUrlOptions { VerificationUrlPrefix = "https://suf.purs.gov.rs/v/?vl=" });
+
+        using var provider = services.BuildServiceProvider();
+
+        provider.GetRequiredService<IFindingText>().Should().BeOfType<FindingText>()
+            .And.BeSameAs(provider.GetRequiredService<IFindingText>());
+    }
 }

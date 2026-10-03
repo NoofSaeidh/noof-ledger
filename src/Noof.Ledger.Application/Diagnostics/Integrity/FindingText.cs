@@ -2,8 +2,17 @@ using System.Globalization;
 
 namespace Noof.Ledger.Application.Diagnostics.Integrity;
 
-internal sealed class FindingText
+internal sealed class FindingText : IFindingText
 {
+    const int MaxFindingsForExplainer = 20;
+
+    public ExplanationRequest ForFinding(IntegrityFinding finding, DateTimeOffset asOf) =>
+        new(FindingsForExplainer([finding], asOf));
+
+    public ExplanationRequest ForReport(
+        string? operatorText, string? recordSummary, IReadOnlyList<IntegrityFinding>? findings, DateTimeOffset asOf) =>
+        new(FindingsForExplainer(findings, asOf), operatorText, recordSummary);
+
     public string Title(IntegrityCheck check) => check switch
     {
         IntegrityCheck.PostingsDisagree => "Postings disagree with their sources",
@@ -65,6 +74,30 @@ internal sealed class FindingText
         string.Create(CultureInfo.InvariantCulture, $"{number}. {Title(finding.Check)} ({GroupLabel(finding.Group)})"),
         .. finding.Facts.Select(fact => $"   {Format(fact, asOf)}"),
     ];
+
+    string FindingsForExplainer(IReadOnlyList<IntegrityFinding>? findings, DateTimeOffset asOf)
+    {
+        if (findings is null)
+            return "Findings could not be collected.";
+        if (findings.Count == 0)
+            return "No integrity findings.";
+
+        IntegrityFinding[] shown = [.. findings.OrderBy(finding => finding.Check).Take(MaxFindingsForExplainer)];
+        List<string> lines =
+        [
+            "Checks:",
+            .. shown.Select(finding => finding.Check).Distinct()
+                .Select(check => $"- {Title(check)}: {Description(check)}"),
+            "",
+            "Findings:",
+            FindingsBlock(shown, asOf),
+        ];
+        if (findings.Count > MaxFindingsForExplainer)
+            lines.Add(string.Create(CultureInfo.InvariantCulture,
+                $"Showing the first {MaxFindingsForExplainer} of {findings.Count} findings."));
+
+        return string.Join("\n", lines);
+    }
 
     // A start after asOf - demo data, a clock change - is a wait that has not begun, not a negative age.
     static string SinceValue(DateTimeOffset since, DateTimeOffset asOf)
