@@ -1,12 +1,15 @@
 using System.Globalization;
 using Noof.Ledger.Application.Diagnostics.Integrity;
+using Noof.Ledger.Application.Receipts;
 
 namespace Noof.Ledger.Application.Diagnostics.BugReports;
 
 // One Markdown form for a report or several: the dashboard's Download and Copy and the CLI's export render through it.
-// Every free-text field sits inside a fence one backtick longer than any run inside it, so a heading or a fence the
-// operator or a log line wrote cannot leave its section.
-internal sealed class BugReportMarkdown(IFindingText findingText) : IBugReportMarkdown
+// Every free-text field loses its fiscal links and then sits inside a fence one backtick longer than any run inside it,
+// so a heading or a fence the operator or a log line wrote cannot leave its section. It strips what it renders whatever
+// the store already did: every free-text field loses its fiscal link before it reaches the Markdown (spec §2;
+// CLAUDE.md §4 Secrets).
+internal sealed class BugReportMarkdown(IFindingText findingText, IFiscalVerificationUrl verificationUrl) : IBugReportMarkdown
 {
     const string PrivacyWarning =
         "> Contains the operator's own financial data. Never paste it into a public issue, commit, PR or backlog entry.";
@@ -44,7 +47,7 @@ internal sealed class BugReportMarkdown(IFindingText findingText) : IBugReportMa
         yield return report.Revisions.Count == 0
             ? "(none)"
             : Fenced(string.Join('\n', report.Revisions.Select(revision =>
-                $"{Minute(revision.At)} UTC · {revision.ChangeKind} · {revision.Details}")));
+                $"{Minute(revision.At)} UTC · {revision.ChangeKind} · {Strip(revision.Details)}")));
 
         yield return "### Findings when filed";
         yield return Findings(report.FindingsThen, report.SnapshotAt ?? report.CreatedAt, absent: "(not collected)");
@@ -74,24 +77,31 @@ internal sealed class BugReportMarkdown(IFindingText findingText) : IBugReportMa
     {
         null => absent,
         [] => "(none)",
-        _ => Fenced(findingText.FindingsBlock(findings, asOf)),
+        _ => Fenced(findingText.FindingsBlock([.. findings.Select(WithoutLinks)], asOf)),
     };
 
-    static string LogLine(BugReportLogLine line)
+    // Stripped fact by fact, before FindingsBlock joins them: a link removed from the finished block would take the
+    // line break after it along and merge two facts onto one line.
+    IntegrityFinding WithoutLinks(IntegrityFinding finding) => finding with
+    {
+        Facts = [.. finding.Facts.Select(fact => fact is TextFact text ? text with { Text = Strip(text.Text) } : fact)],
+    };
+
+    string LogLine(BugReportLogLine line)
     {
         List<string> lines =
         [
             $"{line.LoggedAt.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)} UTC "
-                + $"{line.Level} {line.Source ?? "-"}",
-            .. LinesOf(line.Message).Select(text => $"  {text}"),
+                + $"{line.Level} {verificationUrl.StripUrl(line.Source) ?? "-"}",
+            .. LinesOf(Strip(line.Message)).Select(text => $"  {text}"),
         ];
 
         if (line.PropertiesJson is { } properties)
-            lines.Add($"  properties: {properties}");
+            lines.Add($"  properties: {Strip(properties)}");
 
         if (line.Exception is { } exception)
         {
-            var exceptionLines = LinesOf(exception);
+            var exceptionLines = LinesOf(Strip(exception));
             lines.Add($"  exception: {exceptionLines[0]}");
             lines.AddRange(exceptionLines.Skip(1).Select(text => $"  {text}"));
         }
@@ -110,7 +120,10 @@ internal sealed class BugReportMarkdown(IFindingText findingText) : IBugReportMa
         null => "—",
     };
 
-    static string FencedOr(string? text, string absent) => string.IsNullOrWhiteSpace(text) ? absent : Fenced(text);
+    string FencedOr(string? text, string absent) =>
+        verificationUrl.StripUrl(text) is { } kept && !string.IsNullOrWhiteSpace(kept) ? Fenced(kept) : absent;
+
+    string Strip(string? text) => verificationUrl.StripUrl(text) ?? "";
 
     static string Fenced(string text)
     {

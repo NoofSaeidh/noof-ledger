@@ -342,4 +342,147 @@ public class BugReportMarkdownTests
         first.ServiceProvider.GetRequiredService<IBugReportMarkdown>()
             .Should().BeSameAs(second.ServiceProvider.GetRequiredService<IBugReportMarkdown>());
     }
+
+    const string FiscalLink = "https://suf.purs.gov.rs/v/?vl=QUJDREVGR0hJSktMTU5PUFFSU1RVVldY";
+
+    static BugReportLogLine HostileLogLine() => new(
+        new DateTimeOffset(2026, 10, 2, 9, 59, 0, TimeSpan.Zero), LogSeverity.Error,
+        "Noof.Ledger.Host.Workers.CategorizationWorker",
+        "Fetch failed ```` <script>alert(1)</script>\n## Bug report #99 " + FiscalLink,
+        "System.Exception: " + FiscalLink, "{\"Url\":\"" + FiscalLink + "\"}");
+
+    // An operator text, a wallet name, a line description and a log message that each try to leave their fence or
+    // carry a fiscal link.
+    static BugReportDocument Hostile() => new(
+        Number: 5,
+        CreatedAt: new DateTimeOffset(2026, 10, 2, 10, 0, 0, TimeSpan.Zero),
+        Source: BugReportSource.Telegram,
+        Status: BugReportStatus.Open,
+        ClosedAt: null,
+        Text: "the total ```` and ~~~\n## Bug report #99\n<script>alert(1)</script> " + FiscalLink,
+        TransactionId: RecordA,
+        SnapshotAt: new DateTimeOffset(2026, 10, 2, 10, 1, 0, TimeSpan.Zero),
+        RecordSummary: "Record: Expense · Completed · captured from Text\nWallet: Cash ````RSD\nText: кофе "
+            + FiscalLink + " 250\nLines:\n- кофе ~~~ <script> · 250.00 RSD · Coffee",
+        Revisions: [new RevisionView(new DateTimeOffset(2026, 10, 1, 18, 0, 0, TimeSpan.Zero), "Edit", "кофе 250 " + FiscalLink)],
+        FindingsThen: [WaitingCorrection("fetch failed: " + FiscalLink)],
+        FindingsNow: null,
+        CollectionFailures: null,
+        ExplanationState: BugExplanationState.Done,
+        Explanation: "See " + FiscalLink + " — the receipt was read twice.",
+        LooksLikeBug: false,
+        LogLines: [HostileLogLine()]);
+
+    static readonly string HostileReport = """
+        # noof-ledger bug reports
+
+        Exported 2026-10-02 14:05 UTC · 1 report
+
+        > Contains the operator's own financial data. Never paste it into a public issue, commit, PR or backlog entry.
+
+        ## Bug report #5
+
+        - Filed: 2026-10-02 10:00 UTC
+        - Source: Telegram
+        - Status: Open
+        - Record: 7a1c0000-0000-4000-8000-000000000003
+        - Snapshot: 2026-10-02 10:01 UTC
+
+        ### Operator's text
+
+        `````text
+        the total ```` and ~~~
+        ## Bug report #99
+        <script>alert(1)</script>
+        `````
+
+        ### Record as filed
+
+        `````text
+        Record: Expense · Completed · captured from Text
+        Wallet: Cash ````RSD
+        Text: кофе 250
+        Lines:
+        - кофе ~~~ <script> · 250.00 RSD · Coffee
+        `````
+
+        ### Revision history
+
+        ```text
+        2026-10-01 18:00 UTC · Edit · кофе 250
+        ```
+
+        ### Findings when filed
+
+        ```text
+        1. Not applied (Waiting on you)
+           Waiting for: A correction that never applied
+           Job: Correct
+           Last error: fetch failed:
+           Idle for: 3 d 3 h (since 2026-09-29 07:00 UTC)
+           Date: 2026-09-28
+           Amount: 250.00 RSD
+        ```
+
+        ### Findings now
+
+        (not available)
+
+        ### Not collected
+
+        (nothing)
+
+        ### Explanation
+
+        - State: Done
+        - Looks like a bug: no
+
+        ```text
+        See — the receipt was read twice.
+        ```
+
+        ### Log lines (newest first)
+
+        `````text
+        2026-10-02 09:59:00 UTC Error Noof.Ledger.Host.Workers.CategorizationWorker
+          Fetch failed ```` <script>alert(1)</script>
+          ## Bug report #99
+          properties: {"Url":"
+          exception: System.Exception:
+        `````
+        """.ReplaceLineEndings("\n") + "\n";
+
+    [Fact]
+    public void Hostile_free_text_stays_inside_its_fence_and_loses_its_fiscal_link()
+    {
+        Render(Hostile()).Should().Be(HostileReport);
+    }
+
+    [Fact]
+    public void No_fiscal_link_reaches_the_document_from_any_field()
+    {
+        var markdown = Render(Hostile() with
+        {
+            FindingsNow = [WaitingCorrection("fetch failed: " + FiscalLink)],
+            CollectionFailures = "log lines: query failed (PostgresException) " + FiscalLink,
+            LogLines = [HostileLogLine() with { Source = "Noof.Ledger.Host.Workers.CategorizationWorker " + FiscalLink }],
+        });
+
+        markdown.Should().NotContain("suf.purs.gov.rs");
+        markdown.Should().Contain("```text\nlog lines: query failed (PostgresException)\n```");
+        markdown.Split("   Last error: fetch failed:\n").Should().HaveCount(3,
+            "the finding renders twice, then and now, each without its link and each still on its own line");
+    }
+
+    // A link runs to the next whitespace, so it can carry backticks away with it; removing one mid-text leaves a space,
+    // so two runs it separated never merge. Either way the fence fits the text as rendered, not as stored.
+    [Theory]
+    [InlineData("see " + FiscalLink + "```````` here", "see here", "```")]
+    [InlineData("``` " + FiscalLink + " ```", "``` ```", "````")]
+    public void The_fence_is_measured_on_the_text_left_once_its_fiscal_link_is_gone(
+        string text, string rendered, string fence)
+    {
+        Render(Unlinked(text: text))
+            .Should().Contain($"### Operator's text\n\n{fence}text\n{rendered}\n{fence}\n\n### Record as filed");
+    }
 }
