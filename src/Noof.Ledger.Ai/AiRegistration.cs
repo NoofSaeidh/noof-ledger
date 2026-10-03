@@ -6,6 +6,7 @@ using Noof.Ledger.Ai.Diagnostics;
 using Noof.Ledger.Ai.Groq;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Diagnostics.Integrity;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Application.Transcription;
 
@@ -30,6 +31,7 @@ public static class AiRegistration
         services.AddScoped<ISystemHealthCheck, AiKeysHealthCheck>();
         services.AddScoped<IReceiptVision, ChatReceiptVision>();
         services.AddScoped<IReceiptCategorizer, ChatReceiptCategorizer>();
+        services.AddScoped<IFindingExplainer, ChatFindingExplainer>();
 
         return services;
     }
