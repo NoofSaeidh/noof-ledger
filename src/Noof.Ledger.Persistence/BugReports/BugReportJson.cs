@@ -138,8 +138,8 @@ internal static class BugReportJson
     };
 
     static IntegrityFinding ToFinding(FindingJson finding) => new(
-        Name<IntegrityCheck>(finding.Check),
-        Name<IntegrityGroup>(finding.Group),
+        KnownName<IntegrityCheck>(finding.Check),
+        KnownName<IntegrityGroup>(finding.Group),
         finding.TransactionId,
         finding.WalletId,
         finding.JobId,
@@ -192,11 +192,17 @@ internal static class BugReportJson
 
     static string Required(string? value) => value ?? throw new FormatException("A required field is missing.");
 
-    // Enum.Parse alone would also take "1"; a column holds names only.
+    // Enum.Parse alone would also take "1"; a column holds names only, so spec R-1's renumbering left it readable.
     static T Name<T>(string? value) where T : struct, Enum =>
         value is not null && Enum.GetNames<T>().Contains(value, StringComparer.Ordinal)
             ? Enum.Parse<T>(value)
             : throw new FormatException($"'{value}' is not a {typeof(T).Name} name.");
+
+    // Spec R-1: Unknown is no check and no group; no check produces it, so a column naming it was never written by one.
+    static T KnownName<T>(string? value) where T : struct, Enum =>
+        Name<T>(value) is var known && !EqualityComparer<T>.Default.Equals(known, default)
+            ? known
+            : throw new FormatException($"'{value}' is not a known {typeof(T).Name}.");
 
     sealed record FindingJson(
         [property: JsonPropertyName("check")] string? Check,

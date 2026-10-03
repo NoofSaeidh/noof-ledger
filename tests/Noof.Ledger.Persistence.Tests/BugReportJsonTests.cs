@@ -73,6 +73,8 @@ public class BugReportJsonTests
     [InlineData("null")]
     [InlineData("""[{"check":"Nope","group":"Bug","transaction_id":null,"wallet_id":null,"job_id":null,"facts":[]}]""")]
     [InlineData("""[{"check":"1","group":"Bug","transaction_id":null,"wallet_id":null,"job_id":null,"facts":[]}]""")]
+    [InlineData("""[{"check":"Unknown","group":"Bug","transaction_id":null,"wallet_id":null,"job_id":null,"facts":[]}]""")]
+    [InlineData("""[{"check":"PostingsDisagree","group":"Unknown","transaction_id":null,"wallet_id":null,"job_id":null,"facts":[]}]""")]
     [InlineData("""[{"check":"PostingsDisagree","group":"Bug","transaction_id":null,"wallet_id":null,"job_id":null}]""")]
     [InlineData("""[{"check":"PostingsDisagree","group":"Bug","transaction_id":null,"wallet_id":null,"job_id":null,"facts":[{"kind":"money","name":"Expected","amount":"-250","currency":"RS1"}]}]""")]
     [InlineData("""[{"check":"PostingsDisagree","group":"Bug","transaction_id":null,"wallet_id":null,"job_id":null,"facts":[{"kind":"weather","name":"Sky"}]}]""")]

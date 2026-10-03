@@ -14,8 +14,7 @@ internal sealed class BugReport
     public required BugReportSource Source { get; init; }
     public string? Text { get; init; }
     public Guid? TransactionId { get; init; }
-    public long? TelegramChatId { get; init; }
-    public int? TelegramMessageId { get; init; }
+    public string? ReplyTo { get; init; }
     public required BugReportStatus Status { get; set; }
     public DateTimeOffset? ClosedAt { get; set; }
     public DateTimeOffset? SnapshotAt { get; set; }
@@ -28,5 +27,5 @@ internal sealed class BugReport
     public required DateTimeOffset ExplanationNextAt { get; set; }
     public string? Explanation { get; set; }
     public bool? LooksLikeBug { get; set; }
-    public int? ReplyMessageId { get; set; }
+    public string? DeliveredAs { get; set; }
 }
