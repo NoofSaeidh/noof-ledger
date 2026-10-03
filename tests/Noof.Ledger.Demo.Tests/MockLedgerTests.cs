@@ -1,6 +1,8 @@
+using System.Globalization;
 using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Diagnostics.BugReports;
 using Noof.Ledger.Application.Diagnostics.Integrity;
 using Noof.Ledger.Application.Reporting;
 using Noof.Ledger.Application.Wallets;
@@ -255,5 +257,50 @@ public sealed class MockLedgerTests(DemoTestDatabase database) : IClassFixture<D
         lastActive.Keys.Should().BeEquivalentTo(
             new[] { MockData.FailedTransactionId, MockData.UnconfirmedReceiptTransactionId, MockData.HeldSlipTransactionId });
         lastActive.Values.Should().AllSatisfy(at => at.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromMinutes(10)));
+    }
+
+    // Inserted by column name with literal JSON, so the store reading them back is what proves the shape.
+    [Fact]
+    public async Task The_demo_bug_reports_read_back_as_filed_and_the_dashboard_one_has_a_finding_then_and_none_now()
+    {
+        if (database.Unavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await Refresh.RunAsync(database.Admin, database.Name, database.Paths, cancellationToken);
+
+        await using var services = DemoServices.Build(database.ConnectionString, database.Paths, clock: TimeProvider.System);
+        await using var scope = services.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<IBugReportStore>();
+
+        (await store.ListAsync(includeClosed: true, cancellationToken))
+            .Select(report => (report.Number, report.Source, report.Status, report.ExplanationState))
+            .Should().Equal(
+                (3, BugReportSource.Telegram, BugReportStatus.Closed, BugExplanationState.Failed),
+                (2, BugReportSource.Dashboard, BugReportStatus.Open, BugExplanationState.Done),
+                (1, BugReportSource.Telegram, BugReportStatus.Open, BugExplanationState.Done));
+        (await store.CountOpenAsync(cancellationToken)).Should().Be(2);
+
+        var dashboard = (await store.GetAsync(2, cancellationToken))!;
+        dashboard.FindingsThen.Should().ContainSingle().Which.Facts
+            .Should().Contain(new TextFact("Condition", "Failure reason on a record that is not failed"));
+        dashboard.FindingsNow.Should().BeEmpty("the traced record is consistent today");
+        dashboard.LooksLikeBug.Should().BeTrue();
+        dashboard.LogLines.Should().HaveCount(3);
+        dashboard.Revisions.Should().HaveCount(2, "the traced record's Initial and Correction, read live");
+        dashboard.RecordSummary.Should().ContainAll(
+            dashboard.Revisions.Select(revision =>
+                $"- {revision.At.ToUniversalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)} UTC · {revision.ChangeKind} · {revision.Details}"),
+            "the record as filed dates its revisions as the record's own trace does");
+
+        var exchange = (await store.GetAsync(1, cancellationToken))!;
+        exchange.FindingsThen.Should().ContainSingle().Which.TransactionId.Should().Be(MockData.WaitingTransactionId);
+        exchange.FindingsNow.Should().ContainSingle("the exchange still waits on the operator");
+        exchange.LooksLikeBug.Should().BeFalse();
+
+        var closed = (await store.GetAsync(3, cancellationToken))!;
+        closed.FindingsThen.Should().BeNull();
+        closed.CollectionFailures.Should().Be("findings: check failed (TimeoutException)");
+        closed.LogLines.Should().HaveCount(2);
     }
 }
