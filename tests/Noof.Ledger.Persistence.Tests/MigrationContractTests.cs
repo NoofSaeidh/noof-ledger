@@ -2,6 +2,8 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Noof.Ledger.Persistence.Tests;
 
@@ -67,5 +69,32 @@ public class MigrationContractTests(PostgresFixture fixture)
             .Select(t => t.OccurredOn)
             .ToListAsync(TestContext.Current.CancellationToken);
         days.Should().Equal(new DateOnly(2026, 9, 1), new DateOnly(2026, 8, 31));
+    }
+
+    static ServiceProvider Persistence(string connectionString) => new ServiceCollection()
+        .AddNoofPersistence(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:Ledger"] = connectionString })
+                .Build(),
+            maxJobAttempts: 8)
+        .BuildServiceProvider();
+
+    [Fact]
+    public async Task A_migrated_database_counts_no_pending_migration()
+    {
+        await using var services = Persistence(await fixture.CreateDatabaseConnectionStringAsync());
+
+        (await services.CountPendingNoofMigrationsAsync(TestContext.Current.CancellationToken)).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task An_empty_database_counts_every_migration_as_pending()
+    {
+        await using var services = Persistence(await fixture.CreateEmptyDatabaseConnectionStringAsync());
+        using var scope = services.CreateScope();
+        var every = scope.ServiceProvider.GetRequiredService<LedgerDbContext>().Database.GetMigrations().Count();
+
+        (await services.CountPendingNoofMigrationsAsync(TestContext.Current.CancellationToken))
+            .Should().Be(every).And.BePositive();
     }
 }

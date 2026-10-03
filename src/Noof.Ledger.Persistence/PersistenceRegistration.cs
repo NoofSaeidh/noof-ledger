@@ -121,4 +121,14 @@ public static class PersistenceRegistration
         await connection.OpenAsync(cancellationToken);
         await connection.CloseAsync();
     }
+
+    // The number of migrations the database has not applied; throws what opening the connection throws.
+    public static async Task<int> CountPendingNoofMigrationsAsync(
+        this IServiceProvider services, CancellationToken cancellationToken = default)
+    {
+        using var scope = services.CreateScope();
+        var pending = await scope.ServiceProvider.GetRequiredService<LedgerDbContext>()
+            .Database.GetPendingMigrationsAsync(cancellationToken);
+        return pending.Count();
+    }
 }
