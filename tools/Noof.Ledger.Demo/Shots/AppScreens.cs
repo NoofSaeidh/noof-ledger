@@ -13,8 +13,9 @@ internal static class AppScreens
     public static readonly Viewport Phone = new("phone", 390, 844, 2);
     public static readonly Viewport Desktop = new("desktop", 1440, 900, 1);
 
-    // The one value on these pages that follows the host's real clock: each health check's "Checked at".
-    public const string HideLiveValues = "#diagnostics-checks tbody td:nth-child(4) { visibility: hidden; }";
+    // The values on these pages that follow the host's real clock: each health check's "Checked at" and a finding's age.
+    public const string HideLiveValues =
+        "#diagnostics-checks tbody td:nth-child(4) { visibility: hidden; } .noof-live-value { visibility: hidden; }";
 
     public static IReadOnlyList<AppScreen> All { get; } =
     [
@@ -35,6 +36,7 @@ internal static class AppScreens
         new("trace-slip-check", "An exchange slip waiting for Record anyway",
             $"/transactions/{MockData.HeldSlipTransactionId}/trace", "#trace-receipt-awaiting-confirmation"),
         new("diagnostics", "Diagnostics", "/diagnostics", "#diagnostics-checks", Prepare: HideFreeDiskSpaceAsync),
+        new("integrity", "Integrity", "/diagnostics/integrity", "#integrity-waiting"),
         new("logs", "Logs", "/diagnostics/logs", "#logs-grid", Prepare: FilterLogsToTheMockWindowAsync),
         new("log-settings", "Log settings", "/diagnostics/logs/settings", "#retention-verbose"),
         new("secrets", "Secrets", "/settings/secrets", "#status-anthropic-api-key"),
