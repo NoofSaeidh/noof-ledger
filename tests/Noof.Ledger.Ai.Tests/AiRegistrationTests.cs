@@ -6,6 +6,7 @@ using Noof.Ledger.Ai.Groq;
 using Noof.Ledger.Application;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Diagnostics.Integrity;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Application.Transcription;
@@ -67,6 +68,15 @@ public class AiRegistrationTests
         using var scope = provider.CreateScope();
 
         scope.ServiceProvider.GetRequiredService<ITranscriber>().Should().BeOfType<SpeechTranscriber>();
+    }
+
+    [Fact]
+    public void AddNoofAi_registers_the_finding_explainer()
+    {
+        using var provider = Provider();
+        using var scope = provider.CreateScope();
+
+        scope.ServiceProvider.GetRequiredService<IFindingExplainer>().Should().BeOfType<ChatFindingExplainer>();
     }
 
     [Fact]

@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Noof.Ledger.Persistence;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Noof.Ledger.Persistence.Migrations
 {
     [DbContext(typeof(LedgerDbContext))]
-    partial class LedgerDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261003144600_AddBugReports")]
+    partial class AddBugReports
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -981,10 +984,6 @@ namespace Noof.Ledger.Persistence.Migrations
                         .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
 
-                    b.Property<string>("DeliveredAs")
-                        .HasColumnType("text")
-                        .HasColumnName("delivered_as");
-
                     b.Property<string>("Explanation")
                         .HasColumnType("text")
                         .HasColumnName("explanation");
@@ -1024,9 +1023,9 @@ namespace Noof.Ledger.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("record_summary");
 
-                    b.Property<string>("ReplyTo")
-                        .HasColumnType("text")
-                        .HasColumnName("reply_to");
+                    b.Property<int?>("ReplyMessageId")
+                        .HasColumnType("integer")
+                        .HasColumnName("reply_message_id");
 
                     b.Property<DateTimeOffset?>("SnapshotAt")
                         .HasColumnType("timestamptz")
@@ -1039,6 +1038,14 @@ namespace Noof.Ledger.Persistence.Migrations
                     b.Property<int>("Status")
                         .HasColumnType("integer")
                         .HasColumnName("status");
+
+                    b.Property<long?>("TelegramChatId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("telegram_chat_id");
+
+                    b.Property<int?>("TelegramMessageId")
+                        .HasColumnType("integer")
+                        .HasColumnName("telegram_message_id");
 
                     b.Property<string>("Text")
                         .HasColumnType("text")
@@ -1055,18 +1062,18 @@ namespace Noof.Ledger.Persistence.Migrations
 
                     b.HasIndex("TransactionId");
 
-                    b.HasIndex("Source", "ReplyTo")
+                    b.HasIndex("TelegramChatId", "TelegramMessageId")
                         .IsUnique()
-                        .HasDatabaseName("IX_bug_reports_source_reply_to")
-                        .HasFilter("reply_to IS NOT NULL");
+                        .HasDatabaseName("IX_bug_reports_telegram_chat_id_telegram_message_id")
+                        .HasFilter("telegram_chat_id IS NOT NULL");
 
                     b.ToTable("bug_reports", "public", t =>
                         {
-                            t.HasCheckConstraint("ck_bug_reports_closed_at_matches_status", "status <> 0 AND (status = 2) = (closed_at IS NOT NULL)");
+                            t.HasCheckConstraint("ck_bug_reports_closed_at_matches_status", "(status = 1) = (closed_at IS NOT NULL)");
 
-                            t.HasCheckConstraint("ck_bug_reports_explanation_matches_state", "explanation_state <> 0 AND (explanation_state = 2) = (explanation IS NOT NULL AND looks_like_bug IS NOT NULL)");
+                            t.HasCheckConstraint("ck_bug_reports_explanation_matches_state", "(explanation_state = 1) = (explanation IS NOT NULL AND looks_like_bug IS NOT NULL)");
 
-                            t.HasCheckConstraint("ck_bug_reports_source_and_reply_to", "source <> 0 AND (delivered_as IS NULL OR reply_to IS NOT NULL)");
+                            t.HasCheckConstraint("ck_bug_reports_telegram_ids_match_source", "(source = 0 AND telegram_chat_id IS NOT NULL AND telegram_message_id IS NOT NULL) OR (source = 1 AND telegram_chat_id IS NULL AND telegram_message_id IS NULL AND reply_message_id IS NULL)");
                         });
                 });
 
