@@ -116,4 +116,171 @@ public class FactsMismatchKindCheckTests(PostgresFixture fixture)
             Condition("Transfer legs on a record that is not a transfer"),
             Condition("Checkpoint on a record that is not a statement"));
     }
+
+    static Task AddChargeAsync(LedgerDbContext db, Guid transactionId, string currency) =>
+        BreakAsync(db, $"""
+            INSERT INTO charges (transaction_id, currency, charged_amount, fee_amount, rate_used, source)
+            VALUES ({transactionId}, {currency}, 100, 0, 1, 0)
+            """);
+
+    static async Task<(Guid Cash, Guid Withdrawal)> WithdrawalAsync(LedgerDbContext db)
+    {
+        var cash = await AddWalletAsync(db, "Cash RSD", CurrencyCode.Rsd);
+        var withdrawal = await RecordAsync(db, TransferOutcome(
+            new TransferFacts(MainWalletId, Rsd(10150m), cash, Rsd(10000m), Rsd(150m), TransferLeg.From, null)));
+        return (cash, withdrawal);
+    }
+
+    [Fact]
+    public async Task Charges_on_an_income_are_one_finding_naming_its_kind_and_each_charge()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var wise = await AddWalletAsync(db, "Wise EUR", CurrencyCode.Eur);
+        var salary = await RecordAsync(db, Income(wise, Line(2000m, CurrencyCode.Eur)));
+        await AddChargeAsync(db, salary, "USD");
+        await AddChargeAsync(db, salary, "RSD");
+
+        (await FindAsync(db)).Should().ContainSingle().Which.ShouldBeBug(
+            IntegrityCheck.FactsMismatchKind, salary, wise,
+            Condition("Charge on a record that is not an expense"), new TextFact("Kind", "Income"),
+            new TextFact("Charge currency", "RSD"), new TextFact("Charge currency", "USD"));
+    }
+
+    [Fact]
+    public async Task A_charge_in_the_wallets_own_currency_is_one_finding()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var spending = await RecordAsync(db, Expense(MainWalletId, Line(250m, CurrencyCode.Rsd)));
+        await AddChargeAsync(db, spending, "RSD");
+
+        (await FindAsync(db)).Should().ContainSingle().Which.ShouldBeBug(
+            IntegrityCheck.FactsMismatchKind, spending, MainWalletId,
+            Condition("Charge in the wallet's own currency"), new TextFact("Charge currency", "RSD"));
+    }
+
+    [Fact]
+    public async Task An_expense_fee_line_in_another_currency_than_its_wallets_is_one_finding()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var spending = await RecordAsync(db, Expense(MainWalletId, Line(250m, CurrencyCode.Rsd)));
+        await AddRawLineAsync(db, spending, EntryRole.Fee, 2m, "EUR");
+
+        (await FindAsync(db)).Should().ContainSingle().Which.ShouldBeBug(
+            IntegrityCheck.FactsMismatchKind, spending, MainWalletId,
+            Condition("Expense fee line in another currency than the wallet's"),
+            new TextFact("Fee line currency", "EUR"), new TextFact("Wallet currency", "RSD"));
+    }
+
+    // Spec §1: exactly one, not "at least one" as the oracle's existence test read it.
+    [Fact]
+    public async Task A_fee_leg_with_a_second_fee_line_is_one_finding()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (_, withdrawal) = await WithdrawalAsync(db);
+        await AddRawLineAsync(db, withdrawal, EntryRole.Fee, 10m, "RSD");
+
+        (await FindAsync(db)).Should().ContainSingle().Which.ShouldBeBug(
+            IntegrityCheck.FactsMismatchKind, withdrawal, MainWalletId,
+            Condition("Fee leg without exactly one fee line"), new TextFact("Fee leg", "From"), new CountFact("Fee lines", 2));
+    }
+
+    [Fact]
+    public async Task A_fee_leg_without_its_fee_line_is_one_finding()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (_, withdrawal) = await WithdrawalAsync(db);
+        await BreakAsync(db, $"DELETE FROM line_items WHERE transaction_id = {withdrawal} AND role = 1");
+
+        (await FindAsync(db)).Should().ContainSingle().Which.ShouldBeBug(
+            IntegrityCheck.FactsMismatchKind, withdrawal, MainWalletId,
+            Condition("Fee leg without exactly one fee line"), new TextFact("Fee leg", "From"), new CountFact("Fee lines", 0));
+    }
+
+    [Fact]
+    public async Task A_fee_line_on_a_transfer_without_a_fee_leg_is_one_finding()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (cash, topUp) = await TopUpAsync(db);
+        await AddRawLineAsync(db, topUp, EntryRole.Fee, 10m, "RSD");
+
+        (await FindAsync(db)).Should().ContainSingle().Which.ShouldBeBug(
+            IntegrityCheck.FactsMismatchKind, topUp, cash,
+            Condition("Fee line on a transfer without a fee leg"), new CountFact("Fee lines", 1));
+    }
+
+    [Fact]
+    public async Task A_transfer_leg_in_another_currency_than_its_wallets_is_one_finding()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (cash, topUp) = await TopUpAsync(db);
+        await BreakAsync(db, $"UPDATE transfers SET to_currency = 'EUR' WHERE transaction_id = {topUp}");
+
+        (await FindAsync(db)).Should().ContainSingle().Which.ShouldBeBug(
+            IntegrityCheck.FactsMismatchKind, topUp, cash,
+            Condition("Transfer leg in another currency than its wallet's"),
+            new TextFact("Leg", "To"), new TextFact("Leg currency", "EUR"), new TextFact("Wallet currency", "RSD"));
+    }
+
+    [Fact]
+    public async Task A_checkpoint_on_another_wallet_than_the_records_is_one_finding()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var cash = await AddWalletAsync(db, "Cash RSD", CurrencyCode.Rsd);
+        var statement = await RecordAsync(db, Statement(MainWalletId, 45000m, CurrencyCode.Rsd));
+        await BreakAsync(db, $"UPDATE balance_checks SET wallet_id = {cash} WHERE transaction_id = {statement}");
+
+        (await FindAsync(db)).Should().ContainSingle().Which.ShouldBeBug(
+            IntegrityCheck.FactsMismatchKind, statement, MainWalletId,
+            Condition("Checkpoint on another wallet than the record's"),
+            new TextFact("Record wallet", MainWalletName), new TextFact("Checkpoint wallet", "Cash RSD"));
+    }
+
+    [Fact]
+    public async Task A_transfer_whose_record_has_no_wallet_is_one_finding_naming_none()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (_, topUp) = await TopUpAsync(db);
+        await BreakAsync(db, $"UPDATE transactions SET wallet_id = NULL WHERE id = {topUp}");
+
+        (await FindAsync(db)).Should().ContainSingle().Which.ShouldBeBug(
+            IntegrityCheck.FactsMismatchKind, topUp, null,
+            Condition("Transfer source is not the record's wallet"),
+            new TextFact("Record wallet", "(none)"), new TextFact("Source wallet", "Cash RSD"));
+    }
+
+    [Fact]
+    public async Task A_failure_reason_on_a_completed_or_captured_record_is_one_finding_each()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var spending = await RecordAsync(db, Expense(MainWalletId, Line(250m, CurrencyCode.Rsd)));
+        var captured = await CaptureAsync(db, Day.AddDays(1));
+        await BreakAsync(db, $"UPDATE transactions SET failure_reason = 1 WHERE id = {spending}");
+        await BreakAsync(db, $"UPDATE transactions SET failure_reason = 6 WHERE id = {captured}");
+
+        var findings = await FindAsync(db);
+
+        findings.Should().HaveCount(2);
+        findings[0].ShouldBeBug(
+            IntegrityCheck.FactsMismatchKind, spending, MainWalletId,
+            Condition("Failure reason on a record that is not failed"),
+            new TextFact("Status", "Completed"), new TextFact("Failure reason", "MissingReceivedAmount"));
+        findings[1].ShouldBeBug(
+            IntegrityCheck.FactsMismatchKind, captured, null,
+            Condition("Failure reason on a record that is not failed"),
+            new TextFact("Status", "Captured"), new TextFact("Failure reason", "SlipIncomplete"));
+    }
+
+    // IR-11: Cancel keeps the reason, so the Cancelled echo and Restore can show it.
+    [Fact]
+    public async Task A_failed_or_cancelled_record_may_keep_its_failure_reason()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var failed = await CaptureAsync(db, Day);
+        await MarkFailedAsync(db, failed, RecordFailureReason.MissingReceivedAmount);
+        var cancelled = await CaptureAsync(db, Day);
+        await MarkFailedAsync(db, cancelled, RecordFailureReason.SameWallet);
+        await CancelAsync(db, cancelled);
+
+        (await FindAsync(db)).Should().BeEmpty();
+    }
 }
