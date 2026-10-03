@@ -258,7 +258,8 @@ public sealed class BugsCommandDbTests
     {
         await using var scope = services.CreateAsyncScope();
         var saved = await scope.ServiceProvider.GetRequiredService<IBugReportStore>()
-            .SaveFromTelegramAsync(new TelegramBugReport(ChatId: 1001, MessageId: 1, text, TransactionId: null), Ct);
+            .FileAsync(new NewBugReport(
+                BugReportSource.Telegram, ReplyTo: "1001:1", text, TransactionId: null, Finding: null, Explanation: null), Ct);
         return saved.Number;
     }
 

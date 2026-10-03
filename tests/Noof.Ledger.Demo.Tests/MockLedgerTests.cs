@@ -303,4 +303,45 @@ public sealed class MockLedgerTests(DemoTestDatabase database) : IClassFixture<D
         closed.CollectionFailures.Should().Be("findings: check failed (TimeoutException)");
         closed.LogLines.Should().HaveCount(2);
     }
+
+    // The demo host's explanation worker must find nothing to explain or send: the demo never calls the model and has no
+    // bot token. A Telegram report's reply address is the Telegram layer's "<chat id>:<message id>", the form the
+    // BugReportsReplyTo migration back-fills (R-2); a dashboard report has none.
+    [Fact]
+    public async Task The_demo_bug_reports_leave_the_worker_nothing_to_explain_or_deliver()
+    {
+        if (database.Unavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await Refresh.RunAsync(database.Admin, database.Name, database.Paths, cancellationToken);
+
+        await using var services = DemoServices.Build(database.ConnectionString, database.Paths, clock: TimeProvider.System);
+        await using (var scope = services.CreateAsyncScope())
+        {
+            var store = scope.ServiceProvider.GetRequiredService<IBugReportStore>();
+            (await store.NextDueAsync(DateTimeOffset.UtcNow.AddYears(1), cancellationToken)).Should().BeNull();
+            (await store.PendingDeliveriesAsync(cancellationToken)).Should().BeEmpty();
+        }
+
+        await using var connection = new NpgsqlConnection(database.ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            "SELECT number, reply_to, delivered_as FROM bug_reports ORDER BY number", connection);
+
+        var addresses = new List<(int Number, string? ReplyTo, string? DeliveredAs)>();
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                addresses.Add((reader.GetInt32(0), reader.IsDBNull(1) ? null : reader.GetString(1),
+                    reader.IsDBNull(2) ? null : reader.GetString(2)));
+            }
+        }
+
+        addresses.Should().Equal(
+            (1, $"{MockData.TelegramChatId}:9001", "19001"),
+            (2, null, null),
+            (3, $"{MockData.TelegramChatId}:9003", "19003"));
+    }
 }

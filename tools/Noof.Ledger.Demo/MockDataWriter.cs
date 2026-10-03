@@ -304,12 +304,12 @@ internal static class MockDataWriter
     // left to the identity column, which numbers the reports #1-#3 in this order.
     const string InsertBugReport =
         """
-        INSERT INTO bug_reports (id, created_at, source, text, transaction_id, telegram_chat_id, telegram_message_id, status,
+        INSERT INTO bug_reports (id, created_at, source, text, transaction_id, reply_to, status,
             closed_at, snapshot_at, record_summary, findings, log_lines, collection_failures, explanation_state,
-            explanation_attempts, explanation_next_at, explanation, looks_like_bug, reply_message_id)
-        VALUES (@id, @createdAt, @source, @text, @transactionId, @chatId, @messageId, @status,
+            explanation_attempts, explanation_next_at, explanation, looks_like_bug, delivered_as)
+        VALUES (@id, @createdAt, @source, @text, @transactionId, @replyTo, @status,
             @closedAt, @snapshotAt, @recordSummary, @findings, @logLines, @collectionFailures, @explanationState,
-            @attempts, @createdAt, @explanation, @looksLikeBug, @replyMessageId)
+            @attempts, @createdAt, @explanation, @looksLikeBug, @deliveredAs)
         """;
 
     static async Task WriteBugReportsAsync(LedgerDbContext db, Dictionary<string, Guid> wallets, CancellationToken cancellationToken)
@@ -334,8 +334,7 @@ internal static class MockDataWriter
         Parameter("source", NpgsqlDbType.Integer, (int)report.Source),
         Parameter("text", NpgsqlDbType.Text, report.Text),
         Parameter("transactionId", NpgsqlDbType.Uuid, report.TransactionId),
-        Parameter("chatId", NpgsqlDbType.Bigint, report.TelegramMessageId is null ? null : MockData.TelegramChatId),
-        Parameter("messageId", NpgsqlDbType.Integer, report.TelegramMessageId),
+        Parameter("replyTo", NpgsqlDbType.Text, report.ReplyTo),
         Parameter("status", NpgsqlDbType.Integer, (int)report.Status),
         Parameter("closedAt", NpgsqlDbType.TimestampTz, report.ClosedAt),
         Parameter("snapshotAt", NpgsqlDbType.TimestampTz, report.SnapshotAt),
@@ -347,7 +346,7 @@ internal static class MockDataWriter
         Parameter("attempts", NpgsqlDbType.Integer, report.ExplanationAttempts),
         Parameter("explanation", NpgsqlDbType.Text, report.Explanation),
         Parameter("looksLikeBug", NpgsqlDbType.Boolean, report.LooksLikeBug),
-        Parameter("replyMessageId", NpgsqlDbType.Integer, report.ReplyMessageId),
+        Parameter("deliveredAs", NpgsqlDbType.Text, report.DeliveredAs),
     ];
 
     static NpgsqlParameter Parameter(string name, NpgsqlDbType type, object? value) =>

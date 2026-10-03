@@ -3,6 +3,7 @@ using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Playwright;
 using Microsoft.Playwright.Xunit.v3;
+using Noof.Ledger.Application.Diagnostics.BugReports;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence;
 using Npgsql;
@@ -218,7 +219,8 @@ public sealed class FindingsAndReportsTests(CookieModeHostFixture fixture) : Pag
         return id;
     }
 
-    // A Dashboard report, so no Telegram id is needed; Done, so the check constraints hold. Its time is a fixed literal.
+    // A Dashboard report, so no reply address is needed; Done, so the check constraints hold. Its time is a fixed literal.
+    // The stored numbers come from the enums, so they move with R-1's numbering (DiagnosticsEnumTests pins it).
     async Task<int> SeedDashboardReportAsync(string text, bool closed = false)
     {
         var filedAt = new DateTimeOffset(2026, 9, 30, 10, 0, 0, TimeSpan.Zero);
@@ -229,14 +231,17 @@ public sealed class FindingsAndReportsTests(CookieModeHostFixture fixture) : Pag
             """
             INSERT INTO bug_reports (id, created_at, source, text, status, closed_at, explanation_state,
                 explanation_attempts, explanation_next_at, explanation, looks_like_bug)
-            VALUES (@id, @filedAt, 1, @text, @status, @closedAt, 1, 0, @filedAt, 'Seeded explanation.', true)
+            VALUES (@id, @filedAt, @source, @text, @status, @closedAt, @done, 0, @filedAt, 'Seeded explanation.', true)
             RETURNING number
             """,
             connection);
         command.Parameters.Add(new NpgsqlParameter("id", NpgsqlDbType.Uuid) { Value = Guid.NewGuid() });
         command.Parameters.Add(new NpgsqlParameter("filedAt", NpgsqlDbType.TimestampTz) { Value = filedAt });
         command.Parameters.Add(new NpgsqlParameter("text", NpgsqlDbType.Text) { Value = text });
-        command.Parameters.Add(new NpgsqlParameter("status", NpgsqlDbType.Integer) { Value = closed ? 1 : 0 });
+        var status = closed ? BugReportStatus.Closed : BugReportStatus.Open;
+        command.Parameters.Add(new NpgsqlParameter("source", NpgsqlDbType.Integer) { Value = (int)BugReportSource.Dashboard });
+        command.Parameters.Add(new NpgsqlParameter("status", NpgsqlDbType.Integer) { Value = (int)status });
+        command.Parameters.Add(new NpgsqlParameter("done", NpgsqlDbType.Integer) { Value = (int)BugExplanationState.Done });
         command.Parameters.Add(new NpgsqlParameter("closedAt", NpgsqlDbType.TimestampTz)
         {
             Value = closed ? filedAt.AddHours(1) : DBNull.Value,

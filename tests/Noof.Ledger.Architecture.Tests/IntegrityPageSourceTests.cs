@@ -47,7 +47,7 @@ public class IntegrityPageSourceTests
         source.Should().Contain("RunExclusiveAsync(",
             "the circuit has one LedgerDbContext: the load shares the one-at-a-time gate with Explain and Create");
         source.Should().Contain("FindingExplanationFlow");
-        source.Should().NotContain("CreateFromDashboardAsync(",
+        source.Should().NotContain("FileAsync(",
             "Create goes through FindingExplanationFlow, which Host.Tests drives (spec P-18)");
     }
 

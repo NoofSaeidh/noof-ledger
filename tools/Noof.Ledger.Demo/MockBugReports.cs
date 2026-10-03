@@ -20,8 +20,8 @@ internal static class MockBugReports
             Source: BugReportSource.Telegram,
             Text: "didn't record the exchange — I got 11700 dinars",
             TransactionId: MockData.WaitingTransactionId,
-            TelegramMessageId: 9_001,
-            ReplyMessageId: 19_001,
+            ReplyTo: TelegramReplyTo(9_001),
+            DeliveredAs: "19001",
             Status: BugReportStatus.Open,
             ClosedAt: null,
             SnapshotAt: MockData.At(19, 20, 16),
@@ -59,8 +59,8 @@ internal static class MockBugReports
             Source: BugReportSource.Dashboard,
             Text: null,
             TransactionId: MockData.TracedTransactionId,
-            TelegramMessageId: null,
-            ReplyMessageId: null,
+            ReplyTo: null,
+            DeliveredAs: null,
             Status: BugReportStatus.Open,
             ClosedAt: null,
             SnapshotAt: MockData.At(20, 9, 30),
@@ -100,8 +100,8 @@ internal static class MockBugReports
             Source: BugReportSource.Telegram,
             Text: "the dashboard total looks off",
             TransactionId: null,
-            TelegramMessageId: 9_003,
-            ReplyMessageId: 19_003,
+            ReplyTo: TelegramReplyTo(9_003),
+            DeliveredAs: "19003",
             Status: BugReportStatus.Closed,
             ClosedAt: MockData.At(20, 12, 0),
             SnapshotAt: MockData.At(20, 11, 6),
@@ -117,6 +117,11 @@ internal static class MockBugReports
             Explanation: null,
             LooksLikeBug: null),
     ];
+
+    // The Telegram layer's own reply address, "<chat id>:<message id>" - the form the BugReportsReplyTo migration
+    // back-fills (R-2); delivered_as is the reply message id as text.
+    static string TelegramReplyTo(int messageId) =>
+        string.Create(CultureInfo.InvariantCulture, $"{MockData.TelegramChatId}:{messageId}");
 
     // \n whatever this file's own line endings are: the record summary is \n-joined, as RecordSummaryComposer writes it.
     static string Lines(params string[] lines) => string.Join('\n', lines);
@@ -166,8 +171,8 @@ internal sealed record MockBugReport(
     BugReportSource Source,
     string? Text,
     Guid? TransactionId,
-    int? TelegramMessageId,
-    int? ReplyMessageId,
+    string? ReplyTo,
+    string? DeliveredAs,
     BugReportStatus Status,
     DateTimeOffset? ClosedAt,
     DateTimeOffset SnapshotAt,

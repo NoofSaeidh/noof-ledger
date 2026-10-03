@@ -33,6 +33,11 @@ public sealed class FindingExplanationFlowTests
 
     FindingExplanationFlow Flow() => new(explainer, store, findingText, new FakeTimeProvider(Now));
 
+    // R-2: the dashboard files through the one source-agnostic FileAsync - no reply address, no text of the operator's,
+    // the finding's record, and the finding with the answer shown, so the report is filed already explained.
+    static NewBugReport FiledFromDashboard(Explanation answer) =>
+        new(BugReportSource.Dashboard, ReplyTo: null, Text: null, RecordId, Finding, answer);
+
     void Answers(Explanation explanation) =>
         explainer.ExplainAsync(Request, Arg.Any<CancellationToken>()).Returns(explanation);
 
@@ -85,13 +90,14 @@ public sealed class FindingExplanationFlowTests
     {
         var answer = new Explanation("The entries were written wrong. This is a bug — file it.", true);
         Answers(answer);
-        store.CreateFromDashboardAsync(Finding, answer, Arg.Any<CancellationToken>()).Returns(12);
+        store.FileAsync(FiledFromDashboard(answer), Arg.Any<CancellationToken>())
+            .Returns(new BugReportSaved(12, Created: true));
         var flow = Flow();
         await flow.ExplainAsync(0, Finding, Ct);
 
         await flow.CreateAsync(0, Finding, Ct);
 
-        await store.Received(1).CreateFromDashboardAsync(Finding, answer, Arg.Any<CancellationToken>());
+        await store.Received(1).FileAsync(FiledFromDashboard(answer), Arg.Any<CancellationToken>());
         flow.StateOf(0).Should().Be(new FindingExplanationState(Explanation: answer, CreatedNumber: 12));
         flow.StateOf(0).OffersReport.Should().BeFalse("a report is filed once");
         FindingExplanationFlow.CreatedText(12).Should().Be("Bug report #12 created.");
@@ -107,7 +113,7 @@ public sealed class FindingExplanationFlowTests
         await flow.ExplainAsync(0, Finding, Ct);
         await flow.CreateAsync(0, Finding, Ct);
 
-        await store.DidNotReceiveWithAnyArgs().CreateFromDashboardAsync(default!, default!, Arg.Any<CancellationToken>());
+        await store.DidNotReceiveWithAnyArgs().FileAsync(default!, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -115,7 +121,7 @@ public sealed class FindingExplanationFlowTests
     {
         var answer = new Explanation("This is a bug — file it.", true);
         Answers(answer);
-        store.CreateFromDashboardAsync(Finding, answer, Arg.Any<CancellationToken>())
+        store.FileAsync(FiledFromDashboard(answer), Arg.Any<CancellationToken>())
             .ThrowsAsync(new InvalidOperationException("The database went away."));
         var flow = Flow();
         await flow.ExplainAsync(0, Finding, Ct);
@@ -140,7 +146,7 @@ public sealed class FindingExplanationFlowTests
 
         flow.StateOf(0).Should().Be(new FindingExplanationState(Explanation: answer, Dismissed: true));
         flow.StateOf(0).OffersReport.Should().BeFalse();
-        await store.DidNotReceiveWithAnyArgs().CreateFromDashboardAsync(default!, default!, Arg.Any<CancellationToken>());
+        await store.DidNotReceiveWithAnyArgs().FileAsync(default!, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -188,17 +194,17 @@ public sealed class FindingExplanationFlowTests
     {
         var answer = new Explanation("This is a bug — file it.", true);
         Answers(answer);
-        var filing = new TaskCompletionSource<int>();
-        store.CreateFromDashboardAsync(Finding, answer, Arg.Any<CancellationToken>()).Returns(filing.Task);
+        var filing = new TaskCompletionSource<BugReportSaved>();
+        store.FileAsync(FiledFromDashboard(answer), Arg.Any<CancellationToken>()).Returns(filing.Task);
         var flow = Flow();
         await flow.ExplainAsync(0, Finding, Ct);
 
         var pressed = flow.CreateAsync(0, Finding, Ct);
         var pressedAgain = flow.CreateAsync(0, Finding, Ct);
-        filing.SetResult(12);
+        filing.SetResult(new BugReportSaved(12, Created: true));
         await Task.WhenAll(pressed, pressedAgain);
 
-        await store.Received(1).CreateFromDashboardAsync(Finding, answer, Arg.Any<CancellationToken>());
+        await store.Received(1).FileAsync(FiledFromDashboard(answer), Arg.Any<CancellationToken>());
         flow.StateOf(0).CreatedNumber.Should().Be(12);
     }
 

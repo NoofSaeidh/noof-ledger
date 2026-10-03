@@ -88,8 +88,11 @@ internal sealed class FindingExplanationFlow(
         {
             try
             {
-                var number = await store.CreateFromDashboardAsync(finding, explanation, token);
-                states[index] = before with { CreatedNumber = number, CreateFailed = false };
+                // No reply address: the page shows the number itself (R-2).
+                var report = new NewBugReport(
+                    BugReportSource.Dashboard, ReplyTo: null, Text: null, finding.TransactionId, finding, explanation);
+                var saved = await store.FileAsync(report, token);
+                states[index] = before with { CreatedNumber = saved.Number, CreateFailed = false };
             }
             catch (Exception) when (!token.IsCancellationRequested)
             {
