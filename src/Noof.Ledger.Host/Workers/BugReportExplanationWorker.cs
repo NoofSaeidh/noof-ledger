@@ -24,6 +24,10 @@ internal sealed class BugReportExplanationWorker(
     // it warns once more.
     readonly HashSet<Guid> undeliverable = [];
 
+    // A paid answer whose write failed: the next tick that takes its report writes it instead of asking the model again,
+    // and a failed write spends no attempt (P-11). Per process; after a restart the model is asked once more.
+    readonly Dictionary<Guid, Explanation> unwritten = [];
+
     // CategorizationWorker's rule (spec P-21): a refused account fails every report alike, so it spends no attempt and
     // explaining pauses instead; a key fixed later still gets the report explained.
     DateTimeOffset accountCooldownUntil = DateTimeOffset.MinValue;
@@ -48,15 +52,35 @@ internal sealed class BugReportExplanationWorker(
             using var scope = scopeFactory.CreateScope();
             var store = scope.ServiceProvider.GetRequiredService<IBugReportStore>();
 
-            var explained = await ExplainNextAsync(scope.ServiceProvider, store, now, cancellationToken);
+            var explained = await TryExplainNextAsync(scope.ServiceProvider, store, now, cancellationToken);
             var delivered = await DeliverAsync(scope.ServiceProvider.GetRequiredService<IChatNotifier>(), store, cancellationToken);
 
-            return explained || delivered ? BugReportTickResult.Processed : BugReportTickResult.Idle;
+            return explained switch
+            {
+                null => BugReportTickResult.Failed,
+                true => BugReportTickResult.Processed,
+                false => delivered ? BugReportTickResult.Processed : BugReportTickResult.Idle,
+            };
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.TickFailed(ex);
             return BugReportTickResult.Failed;
+        }
+    }
+
+    // Its own failure boundary, so a report that fails on every tick never holds back another report's reply (P-13).
+    async Task<bool?> TryExplainNextAsync(
+        IServiceProvider services, IBugReportStore store, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await ExplainNextAsync(services, store, now, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.TickFailed(ex);
+            return null;
         }
     }
 
@@ -71,7 +95,18 @@ internal sealed class BugReportExplanationWorker(
             return false;
 
         if (await store.NextDueAsync(now, cancellationToken) is not { } report)
+        {
+            // A failed write leaves its report due, so nothing due means each unwritten answer's report was closed or
+            // explained elsewhere.
+            unwritten.Clear();
             return false;
+        }
+
+        if (unwritten.TryGetValue(report.Id, out var answered))
+        {
+            await StoreExplanationAsync(store, report, answered, cancellationToken);
+            return true;
+        }
 
         var snapshot = report.Snapshot ?? await TakeSnapshotAsync(store, report, cancellationToken);
         var request = findingText.ForReport(report.Text, snapshot.RecordSummary, snapshot.Findings, snapshot.TakenAt);
@@ -95,9 +130,17 @@ internal sealed class BugReportExplanationWorker(
             return true;
         }
 
-        await store.CompleteExplanationAsync(report.Id, explanation, cancellationToken);
-        logger.Explained(report.Number, explanation.LooksLikeBug);
+        unwritten[report.Id] = explanation;
+        await StoreExplanationAsync(store, report, explanation, cancellationToken);
         return true;
+    }
+
+    async Task StoreExplanationAsync(
+        IBugReportStore store, BugReportToExplain report, Explanation explanation, CancellationToken cancellationToken)
+    {
+        await store.CompleteExplanationAsync(report.Id, explanation, cancellationToken);
+        unwritten.Remove(report.Id);
+        logger.Explained(report.Number, explanation.LooksLikeBug);
     }
 
     async Task<BugReportSnapshot> TakeSnapshotAsync(IBugReportStore store, BugReportToExplain report, CancellationToken cancellationToken)

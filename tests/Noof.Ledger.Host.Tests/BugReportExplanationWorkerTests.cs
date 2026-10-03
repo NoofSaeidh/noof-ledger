@@ -235,6 +235,71 @@ public class BugReportExplanationWorkerTests
     }
 
     [Fact]
+    public async Task An_answer_whose_write_failed_is_written_on_a_later_tick_without_asking_the_model_again()
+    {
+        var harness = new Harness();
+        harness.Store.NextDueAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(Due(snapshot: Snapshot()));
+        harness.Explainer.ExplainAsync(Request, Arg.Any<CancellationToken>())
+            .Returns(Answer, new Explanation("A second, paid answer.", LooksLikeBug: true));
+        harness.Store.CompleteExplanationAsync(Arg.Any<Guid>(), Arg.Any<Explanation>(), Arg.Any<CancellationToken>()).Returns(
+            _ => Task.FromException(new InvalidOperationException("database unreachable")),
+            _ => Task.FromException(new InvalidOperationException("database unreachable")),
+            _ => Task.CompletedTask);
+        var worker = harness.Worker();
+
+        var results = new List<BugReportTickResult>();
+        for (var tick = 0; tick < 3; tick++)
+            results.Add(await worker.RunTickAsync(Ct));
+
+        results.Should().Equal(BugReportTickResult.Failed, BugReportTickResult.Failed, BugReportTickResult.Processed);
+        await harness.Explainer.Received(1).ExplainAsync(Request, Arg.Any<CancellationToken>());
+        await harness.Store.Received(3).CompleteExplanationAsync(ReportId(7), Answer, Arg.Any<CancellationToken>());
+        await harness.Store.DidNotReceiveWithAnyArgs().RecordFailedAttemptAsync(default, default, default, Arg.Any<CancellationToken>());
+        harness.Logger.Entries.Should().ContainSingle(entry => entry.EventId.Id == 1902);
+    }
+
+    // A failed write leaves the report due, so a tick with nothing due means it was closed or explained elsewhere.
+    [Fact]
+    public async Task An_unwritten_answer_is_dropped_once_its_report_is_no_longer_due()
+    {
+        var harness = new Harness();
+        harness.Store.NextDueAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(Due(snapshot: Snapshot()), (BugReportToExplain?)null, Due(snapshot: Snapshot()));
+        harness.Store.CompleteExplanationAsync(Arg.Any<Guid>(), Arg.Any<Explanation>(), Arg.Any<CancellationToken>()).Returns(
+            _ => Task.FromException(new InvalidOperationException("database unreachable")),
+            _ => Task.CompletedTask);
+        var worker = harness.Worker();
+
+        for (var tick = 0; tick < 3; tick++)
+            await worker.RunTickAsync(Ct);
+
+        await harness.Explainer.Received(2).ExplainAsync(Request, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Replies_still_go_out_while_explaining_a_report_fails_on_every_tick()
+    {
+        var harness = new Harness();
+        harness.Store.NextDueAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(Due());
+        harness.Store.TakeSnapshotAsync(ReportId(7), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("database unreachable"));
+        IReadOnlyList<BugReportDelivery> pending = [Delivery(5, BugExplanationState.Done, looksLikeBug: false)];
+        harness.Store.PendingDeliveriesAsync(Arg.Any<CancellationToken>()).Returns(pending, NoDeliveries);
+        harness.ChatNotifier.ReplyToBugReportAsync(111L, 55, Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
+            .Returns(900);
+        var worker = harness.Worker();
+
+        var first = await worker.RunTickAsync(Ct);
+        var second = await worker.RunTickAsync(Ct);
+
+        (first, second).Should().Be((BugReportTickResult.Failed, BugReportTickResult.Failed));
+        await harness.Store.Received(1).MarkDeliveredAsync(ReportId(5), 900, Arg.Any<CancellationToken>());
+        harness.Logger.Entries.Where(entry => entry.EventId.Id == 1901).Should().HaveCount(2)
+            .And.OnlyContain(entry => entry.Exception is InvalidOperationException);
+        harness.Logger.Entries.Should().ContainSingle(entry => entry.EventId.Id == 1907);
+    }
+
+    [Fact]
     public async Task Any_exception_from_the_explainer_spends_an_attempt_and_is_named_by_its_type()
     {
         var harness = new Harness();
