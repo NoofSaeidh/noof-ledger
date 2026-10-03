@@ -9,6 +9,7 @@ using Noof.Ledger.Application.Backup;
 using Noof.Ledger.Application.Capture;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Diagnostics.BugReports;
 using Noof.Ledger.Application.Diagnostics.Integrity;
 using Noof.Ledger.Application.Editing;
 using Noof.Ledger.Application.Jobs;
@@ -20,6 +21,7 @@ using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Persistence.Auth;
 using Noof.Ledger.Persistence.Backup;
 using Noof.Ledger.Persistence.Balances;
+using Noof.Ledger.Persistence.BugReports;
 using Noof.Ledger.Persistence.Capture;
 using Noof.Ledger.Persistence.Categorization;
 using Noof.Ledger.Persistence.Diagnostics;
@@ -91,6 +93,7 @@ public static class PersistenceRegistration
         services.AddScoped<ITransactionTrace, EfTransactionTrace>();
         services.AddScoped<IReceiptStore, EfReceiptStore>();
         services.AddScoped<IIntegrityChecks, EfIntegrityChecks>();
+        services.AddScoped<IBugReportStore, EfBugReportStore>();
 
         services.AddScoped<ISystemHealthCheck, MigrationsHealthCheck>();
         services.AddScoped<ISystemHealthCheck, IntegrityHealthCheck>();

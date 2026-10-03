@@ -1,6 +1,9 @@
 using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
+using Noof.Ledger.Application;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Diagnostics.BugReports;
 using Noof.Ledger.Application.Diagnostics.Integrity;
@@ -8,6 +11,7 @@ using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.BugReports;
 using Noof.Ledger.Persistence.Diagnostics;
+using Noof.Ledger.Persistence.Receipts;
 using Noof.Ledger.Persistence.Revisions;
 using Npgsql;
 using NSubstitute;
@@ -628,5 +632,286 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
 
         (await RowAsync(h.Db, saved.Number)).ReplyMessageId.Should().Be(4242);
         (await h.Store.PendingDeliveriesAsync(Ct)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_dashboard_report_is_filed_done_with_its_finding_and_the_record_as_it_was()
+    {
+        await using var h = await CreateAsync();
+        var recordId = await AddRecordAsync(h.Db);
+        h.Db.AppLogs.Add(LogEntry(1, Filed.AddMinutes(-1), LogSeverity.Debug, "No received amount", recordId));
+        await h.Db.SaveChangesAsync(Ct);
+        var finding = WaitingOn(recordId);
+
+        var number = await h.Store.CreateFromDashboardAsync(
+            finding, new Explanation($"Looks like our bug. {FiscalLink}", LooksLikeBug: true), Ct);
+
+        var document = await h.Store.GetAsync(number, Ct) ?? throw new InvalidOperationException("The report was not found.");
+        document.Should().BeEquivalentTo(new
+        {
+            Number = number,
+            CreatedAt = Filed,
+            Source = BugReportSource.Dashboard,
+            Status = BugReportStatus.Open,
+            Text = (string?)null,
+            TransactionId = (Guid?)recordId,
+            SnapshotAt = (DateTimeOffset?)Filed,
+            CollectionFailures = (string?)null,
+            ExplanationState = BugExplanationState.Done,
+            Explanation = "Looks like our bug.",
+            LooksLikeBug = (bool?)true,
+            FindingsThen = new[] { finding },
+        }, options => options.PreferringRuntimeMemberTypes());
+        document.RecordSummary.Should().StartWith("Record: Expense · Failed · failure reason MissingReceivedAmount");
+        document.LogLines.Should().ContainSingle().Which.Message.Should().Be("No received amount");
+        var row = await RowAsync(h.Db, number);
+        row.TelegramChatId.Should().BeNull();
+        row.TelegramMessageId.Should().BeNull();
+        (await h.Store.NextDueAsync(Filed.AddDays(1), Ct)).Should().BeNull("a dashboard report is explained already");
+        (await h.Store.PendingDeliveriesAsync(Ct)).Should().BeEmpty("a dashboard report has no message to reply to");
+    }
+
+    // The scope's context is shared - a dashboard circuit keeps its own - so a row a failed Create left Added would be
+    // inserted again by the operator's next one.
+    [Fact]
+    public async Task A_failed_dashboard_create_leaves_nothing_for_the_next_one_to_file()
+    {
+        await using var h = await CreateAsync();
+        var recordId = await AddRecordAsync(h.Db);
+        var explanation = new Explanation("Looks like our bug.", LooksLikeBug: true);
+
+        var act = () => h.Store.CreateFromDashboardAsync(WaitingOn(Guid.NewGuid()), explanation, Ct);
+
+        (await act.Should().ThrowAsync<DbUpdateException>())
+            .WithInnerException<PostgresException>()
+            .Which.SqlState.Should().Be(PostgresErrorCodes.ForeignKeyViolation);
+        var number = await h.Store.CreateFromDashboardAsync(WaitingOn(recordId), explanation, Ct);
+        (await h.Db.BugReports.CountAsync(Ct)).Should().Be(1);
+        (await RowAsync(h.Db, number)).TransactionId.Should().Be(recordId);
+    }
+
+    [Fact]
+    public async Task A_document_reads_its_revisions_and_the_findings_now_live_without_fiscal_links()
+    {
+        await using var h = await CreateAsync();
+        var recordId = await AddRecordAsync(h.Db);
+        h.Db.TransactionRevisions.Add(new TransactionRevision
+        {
+            Id = Guid.NewGuid(),
+            TransactionId = recordId,
+            RevisionNumber = 1,
+            Kind = RevisionKind.Correction,
+            Instruction = $"it was 117 {FiscalLink}",
+            StatusBefore = TransactionStatus.Failed,
+            StatusAfter = TransactionStatus.Failed,
+            Snapshot = "{}",
+            CreatedAt = Filed.AddDays(-1),
+        });
+        await h.Db.SaveChangesAsync(Ct);
+        // Then: the finding as filed. Now (GetAsync, then the export): the same finding, its reason carrying a fiscal link
+        // as a check would report it - checks never strip.
+        h.Checks.FindForTransactionAsync(recordId, Arg.Any<CancellationToken>()).Returns(
+            Findings(WaitingOn(recordId)), Findings(WaitingOn(recordId, $"MissingReceivedAmount {FiscalLink}")));
+        var number = (await h.Store.SaveFromTelegramAsync(FromTelegram(transactionId: recordId), Ct)).Number;
+        await h.Store.TakeSnapshotAsync(await IdOfAsync(h.Db, number), Ct);
+
+        var document = await h.Store.GetAsync(number, Ct) ?? throw new InvalidOperationException("The report was not found.");
+        var exported = (await h.Store.LoadForExportAsync(includeClosed: false, Ct)).Single();
+
+        document.Revisions.Select(revision => (revision.ChangeKind, revision.Details)).Should().Equal(("Correction", "it was 117"));
+        exported.Revisions.Select(revision => revision.Details).Should().Equal("it was 117");
+        document.FindingsThen.Should().ContainSingle();
+        document.FindingsNow.Should().BeEquivalentTo(new[] { WaitingOn(recordId) }, options => options.PreferringRuntimeMemberTypes(),
+            "the live findings lose their fiscal links as the stored ones do");
+        exported.FindingsNow.Should().BeEquivalentTo(new[] { WaitingOn(recordId) }, options => options.PreferringRuntimeMemberTypes());
+    }
+
+    // Spec P-23: a cross-currency transfer whose fee sits on its To leg in the From leg's currency is an I-2 fault, and the
+    // trace page's summary throws CurrencyMismatchException adding that fee to the leg. The report filed about it must
+    // still read and export, its record summary included.
+    [Fact]
+    public async Task A_report_on_a_transfer_too_broken_for_the_trace_page_still_reads_and_exports()
+    {
+        await using var h = await CreateAsync();
+        var recordId = await AddRecordAsync(h.Db);
+        await h.Db.Transactions.Where(t => t.Id == recordId)
+            .ExecuteUpdateAsync(set => set.SetProperty(t => t.Kind, TransactionKind.Transfer), Ct);
+        var cashEur = new Wallet { Id = Guid.NewGuid(), Name = "Cash EUR", Currency = CurrencyCode.Eur, CreatedAt = Filed };
+        var cashRsd = new Wallet { Id = Guid.NewGuid(), Name = "Cash RSD", Currency = CurrencyCode.Rsd, CreatedAt = Filed };
+        h.Db.Wallets.AddRange(cashEur, cashRsd);
+        h.Db.Transfers.Add(new Transfer
+        {
+            TransactionId = recordId,
+            FromWalletId = cashEur.Id,
+            From = new Money(100m, CurrencyCode.Eur),
+            ToWalletId = cashRsd.Id,
+            To = new Money(11_500m, CurrencyCode.Rsd),
+            FeeLeg = TransferLeg.To,
+        });
+        h.Db.LineItems.Add(new LineItem
+        {
+            Id = Guid.NewGuid(),
+            TransactionId = recordId,
+            Description = "Fee",
+            Amount = new Money(2m, CurrencyCode.Eur),
+            CategorizedBy = CategorizationAuthority.Rule,
+            Ordinal = 1,
+            Role = EntryRole.Fee,
+        });
+        h.Db.TransactionRevisions.Add(new TransactionRevision
+        {
+            Id = Guid.NewGuid(),
+            TransactionId = recordId,
+            RevisionNumber = 1,
+            Kind = RevisionKind.Correction,
+            Instruction = "it was 11500 dinars",
+            StatusBefore = TransactionStatus.Failed,
+            StatusAfter = TransactionStatus.Failed,
+            Snapshot = "{}",
+            CreatedAt = Filed.AddDays(-1),
+        });
+        await h.Db.SaveChangesAsync(Ct);
+        var trace = new EfTransactionTrace(h.Db, new EfReceiptStore(h.Db, h.Clock));
+        var traceCall = () => trace.GetAsync(recordId, Ct);
+        await traceCall.Should().ThrowAsync<CurrencyMismatchException>("this record really is too broken for the trace page");
+        h.Checks.FindForTransactionAsync(recordId, Arg.Any<CancellationToken>()).Returns(NoFindings);
+        var number = (await h.Store.SaveFromTelegramAsync(FromTelegram(transactionId: recordId), Ct)).Number;
+        await h.Store.TakeSnapshotAsync(await IdOfAsync(h.Db, number), Ct);
+
+        var document = await h.Store.GetAsync(number, Ct) ?? throw new InvalidOperationException("The report was not found.");
+        var exported = await h.Store.LoadForExportAsync(includeClosed: false, Ct);
+
+        document.RecordSummary.Should().NotBeNull("the summary is composed from the rows, not from the trace page");
+        document.CollectionFailures.Should().BeNull();
+        document.Revisions.Select(revision => (revision.ChangeKind, revision.Details))
+            .Should().Equal(("Correction", "it was 11500 dinars"));
+        exported.Should().ContainSingle().Which.Number.Should().Be(number);
+    }
+
+    [Fact]
+    public async Task An_unlinked_document_has_no_revisions_and_no_findings_now()
+    {
+        await using var h = await CreateAsync();
+        var number = (await h.Store.SaveFromTelegramAsync(FromTelegram("the dashboard total looks off"), Ct)).Number;
+
+        var document = await h.Store.GetAsync(number, Ct) ?? throw new InvalidOperationException("The report was not found.");
+
+        document.Should().BeEquivalentTo(new
+        {
+            Text = "the dashboard total looks off",
+            Revisions = Array.Empty<object>(),
+            FindingsThen = (object?)null,
+            FindingsNow = (object?)null,
+            LogLines = (object?)null,
+            SnapshotAt = (DateTimeOffset?)null,
+        });
+        await h.Checks.DidNotReceive().FindAllAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task The_findings_now_are_not_available_when_the_checks_fail()
+    {
+        await using var h = await CreateAsync();
+        var recordId = await AddRecordAsync(h.Db);
+        h.Checks.FindForTransactionAsync(recordId, Arg.Any<CancellationToken>()).ThrowsAsync(new TimeoutException());
+        var number = (await h.Store.SaveFromTelegramAsync(FromTelegram(transactionId: recordId), Ct)).Number;
+
+        var document = await h.Store.GetAsync(number, Ct) ?? throw new InvalidOperationException("The report was not found.");
+
+        document.FindingsNow.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_number_nobody_filed_has_no_document()
+    {
+        await using var h = await CreateAsync();
+
+        (await h.Store.GetAsync(9_999, Ct)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task The_list_shows_open_reports_newest_first_or_every_report()
+    {
+        await using var h = await CreateAsync();
+        var recordId = await AddRecordAsync(h.Db);
+        var first = (await h.Store.SaveFromTelegramAsync(FromTelegram("first"), Ct)).Number;
+        var second = (await h.Store.SaveFromTelegramAsync(FromTelegram("second", recordId), Ct)).Number;
+        var third = (await h.Store.SaveFromTelegramAsync(FromTelegram("third"), Ct)).Number;
+        await h.Store.SetStatusAsync(second, BugReportStatus.Closed, Ct);
+
+        var open = await h.Store.ListAsync(includeClosed: false, Ct);
+        var all = await h.Store.ListAsync(includeClosed: true, Ct);
+
+        open.Select(item => item.Number).Should().Equal(third, first);
+        all.Select(item => item.Number).Should().Equal(third, second, first);
+        all[1].Should().Be(new BugReportListItem(
+            second, Filed, BugReportSource.Telegram, BugReportStatus.Closed, "second", recordId, BugExplanationState.Pending));
+    }
+
+    [Fact]
+    public async Task Export_loads_open_reports_oldest_number_first_or_every_report()
+    {
+        await using var h = await CreateAsync();
+        var first = (await h.Store.SaveFromTelegramAsync(FromTelegram("first"), Ct)).Number;
+        var second = (await h.Store.SaveFromTelegramAsync(FromTelegram("second"), Ct)).Number;
+        var third = (await h.Store.SaveFromTelegramAsync(FromTelegram("third"), Ct)).Number;
+        await h.Store.SetStatusAsync(second, BugReportStatus.Closed, Ct);
+
+        (await h.Store.LoadForExportAsync(includeClosed: false, Ct)).Select(document => document.Number).Should().Equal(first, third);
+        (await h.Store.LoadForExportAsync(includeClosed: true, Ct)).Select(document => document.Number).Should().Equal(first, second, third);
+    }
+
+    [Fact]
+    public async Task A_status_changes_once_and_closing_stamps_when()
+    {
+        await using var h = await CreateAsync();
+        var number = (await h.Store.SaveFromTelegramAsync(FromTelegram(), Ct)).Number;
+        h.Clock.Advance(TimeSpan.FromHours(1));
+
+        (await h.Store.SetStatusAsync(number, BugReportStatus.Closed, Ct)).Should().BeTrue();
+        var closed = await RowAsync(h.Db, number);
+        (await h.Store.SetStatusAsync(number, BugReportStatus.Closed, Ct)).Should().BeFalse("it is closed already");
+        (await h.Store.SetStatusAsync(number + 1_000, BugReportStatus.Closed, Ct)).Should().BeFalse("nobody filed that number");
+        (await h.Store.SetStatusAsync(number, BugReportStatus.Open, Ct)).Should().BeTrue();
+        var reopened = await RowAsync(h.Db, number);
+
+        (closed.Status, closed.ClosedAt).Should().Be((BugReportStatus.Closed, (DateTimeOffset?)Filed.AddHours(1)));
+        (reopened.Status, reopened.ClosedAt).Should().Be((BugReportStatus.Open, (DateTimeOffset?)null));
+    }
+
+    [Fact]
+    public async Task Only_open_reports_are_counted()
+    {
+        await using var h = await CreateAsync();
+        await h.Store.SaveFromTelegramAsync(FromTelegram(), Ct);
+        var closed = (await h.Store.SaveFromTelegramAsync(FromTelegram(), Ct)).Number;
+        await h.Store.SaveFromTelegramAsync(FromTelegram(), Ct);
+        await h.Store.SetStatusAsync(closed, BugReportStatus.Closed, Ct);
+
+        (await h.Store.CountOpenAsync(Ct)).Should().Be(2);
+    }
+
+    // Resolving never opens a connection: the address is one nothing listens on.
+    [Fact]
+    public void AddNoofPersistence_registers_the_store()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(TimeProvider.System);
+        services.AddNoofApplication(
+            new SlowOperationOptions(),
+            new FiscalVerificationUrlOptions { VerificationUrlPrefix = "https://suf.purs.gov.rs/v/?vl=" });
+        services.AddNoofPersistence(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["ConnectionStrings:Ledger"] = "Host=127.0.0.1;Port=59999;Database=never_dialled;Username=none",
+                })
+                .Build(),
+            maxJobAttempts: 8);
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        scope.ServiceProvider.GetRequiredService<IBugReportStore>().Should().BeOfType<EfBugReportStore>();
     }
 }

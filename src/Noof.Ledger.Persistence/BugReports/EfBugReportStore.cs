@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Diagnostics.BugReports;
 using Noof.Ledger.Application.Diagnostics.Integrity;
 using Noof.Ledger.Application.Receipts;
@@ -10,6 +11,7 @@ namespace Noof.Ledger.Persistence.BugReports;
 // "deliver once" and "status changes once" hold without a lease (spec P-11).
 internal sealed class EfBugReportStore(
     LedgerDbContext db, IIntegrityChecks checks, IFiscalVerificationUrl verificationUrl, TimeProvider timeProvider)
+    : IBugReportStore
 {
     BugReportEvidence Evidence => new(db, checks, verificationUrl);
 
@@ -175,6 +177,130 @@ internal sealed class EfBugReportStore(
         await db.BugReports
             .Where(r => r.Id == reportId && r.ReplyMessageId == null)
             .ExecuteUpdateAsync(set => set.SetProperty(r => r.ReplyMessageId, (int?)replyMessageId), cancellationToken);
+
+    // What the operator saw on the dashboard, already explained; the record and its log lines as they are now.
+    public async Task<int> CreateFromDashboardAsync(
+        IntegrityFinding finding, Explanation explanation, CancellationToken cancellationToken)
+    {
+        var now = timeProvider.GetUtcNow();
+        var evidence = Evidence;
+        var logLines = await evidence.LogLinesAsync(finding.TransactionId, now, cancellationToken);
+        var summary = await evidence.RecordSummaryAsync(finding.TransactionId, cancellationToken);
+
+        var row = new BugReport
+        {
+            Id = Guid.NewGuid(),
+            CreatedAt = now,
+            Source = BugReportSource.Dashboard,
+            TransactionId = finding.TransactionId,
+            Status = BugReportStatus.Open,
+            SnapshotAt = now,
+            RecordSummary = summary.Summary,
+            FindingsJson = BugReportJson.WriteFindings([finding], verificationUrl),
+            LogLinesJson = logLines.Json,
+            CollectionFailures = BugReportEvidence.Failures(logLines.Failure, summary.Failure),
+            ExplanationState = BugExplanationState.Done,
+            ExplanationAttempts = 0,
+            ExplanationNextAt = now,
+            Explanation = verificationUrl.StripUrl(explanation.Text) ?? "",
+            LooksLikeBug = explanation.LooksLikeBug,
+        };
+        db.BugReports.Add(row);
+
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            return row.Number;
+        }
+        catch
+        {
+            // The scope's context is shared (a dashboard circuit keeps its own), so a row left Added would be inserted
+            // by the next SaveChanges.
+            db.Entry(row).State = EntityState.Detached;
+            throw;
+        }
+    }
+
+    public async Task<IReadOnlyList<BugReportListItem>> ListAsync(bool includeClosed, CancellationToken cancellationToken) =>
+        await Reports(includeClosed)
+            .OrderByDescending(r => r.Number)
+            .Select(r => new BugReportListItem(r.Number, r.CreatedAt, r.Source, r.Status, r.Text, r.TransactionId, r.ExplanationState))
+            .ToListAsync(cancellationToken);
+
+    public async Task<BugReportDocument?> GetAsync(int number, CancellationToken cancellationToken)
+    {
+        var report = await db.BugReports.AsNoTracking().SingleOrDefaultAsync(r => r.Number == number, cancellationToken);
+        return report is null ? null : await DocumentAsync(report, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<BugReportDocument>> LoadForExportAsync(bool includeClosed, CancellationToken cancellationToken)
+    {
+        var reports = await Reports(includeClosed).OrderBy(r => r.Number).ToListAsync(cancellationToken);
+        List<BugReportDocument> documents = [];
+        foreach (var report in reports)
+            documents.Add(await DocumentAsync(report, cancellationToken));
+
+        return documents;
+    }
+
+    public async Task<bool> SetStatusAsync(int number, BugReportStatus status, CancellationToken cancellationToken)
+    {
+        DateTimeOffset? closedAt = status == BugReportStatus.Closed ? timeProvider.GetUtcNow() : null;
+
+        var changed = await db.BugReports
+            .Where(r => r.Number == number && r.Status != status)
+            .ExecuteUpdateAsync(set => set
+                .SetProperty(r => r.Status, status)
+                .SetProperty(r => r.ClosedAt, closedAt),
+                cancellationToken);
+        return changed == 1;
+    }
+
+    public Task<int> CountOpenAsync(CancellationToken cancellationToken) =>
+        db.BugReports.CountAsync(r => r.Status == BugReportStatus.Open, cancellationToken);
+
+    // Revisions and the findings now are read live; both lose their fiscal links here, so every free-text field of the
+    // document is already stripped, whatever reads it.
+    async Task<BugReportDocument> DocumentAsync(BugReport report, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<RevisionView> revisions = [];
+        IReadOnlyList<IntegrityFinding>? findingsNow = null;
+        if (report.TransactionId is { } transactionId)
+        {
+            revisions = await RevisionsAsync(transactionId, cancellationToken);
+            findingsNow = (await Evidence.FindingsAsync(transactionId, cancellationToken)).Findings is { } live
+                ? BugReportJson.WithoutLinks(live, verificationUrl)
+                : null;
+        }
+
+        return new BugReportDocument(
+            report.Number, report.CreatedAt, report.Source, report.Status, report.ClosedAt, report.Text, report.TransactionId,
+            report.SnapshotAt, report.RecordSummary, revisions, BugReportJson.ReadFindings(report.FindingsJson), findingsNow,
+            report.CollectionFailures, report.ExplanationState, report.Explanation, report.LooksLikeBug,
+            BugReportJson.ReadLogLines(report.LogLinesJson));
+    }
+
+    // Spec P-23: not through ITransactionTrace, which builds the record's current summary first and throws on the very
+    // transfer faults (a fee line in another currency than its leg) a report is filed about. Only At, ChangeKind and
+    // Details are rendered, so the snapshot is not read.
+    async Task<IReadOnlyList<RevisionView>> RevisionsAsync(Guid transactionId, CancellationToken cancellationToken)
+    {
+        var history = await db.TransactionRevisions.AsNoTracking()
+            .Where(r => r.TransactionId == transactionId)
+            .OrderBy(r => r.RevisionNumber)
+            .Select(r => new { r.CreatedAt, r.Kind, r.Instruction, r.StatusBefore, r.StatusAfter })
+            .ToListAsync(cancellationToken);
+
+        return
+        [
+            .. history.Select(r => new RevisionView(
+                r.CreatedAt, r.Kind.ToString(), verificationUrl.StripUrl(r.Instruction) ?? $"{r.StatusBefore} → {r.StatusAfter}")),
+        ];
+    }
+
+    IQueryable<BugReport> Reports(bool includeClosed) => includeClosed
+        ? db.BugReports.AsNoTracking()
+        : db.BugReports.AsNoTracking().Where(r => r.Status == BugReportStatus.Open);
 
     Task<BugReport> FindAsync(Guid reportId, CancellationToken cancellationToken) =>
         db.BugReports.AsNoTracking().SingleAsync(r => r.Id == reportId, cancellationToken);
