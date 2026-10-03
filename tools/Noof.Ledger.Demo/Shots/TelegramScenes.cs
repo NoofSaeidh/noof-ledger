@@ -3,8 +3,10 @@ using Noof.Ledger.Application;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Diagnostics.BugReports;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Domain;
+using Noof.Ledger.Host.Workers;
 using Noof.Ledger.Persistence.Receipts;
 using Noof.Ledger.Telegram;
 
@@ -26,6 +28,15 @@ internal static class TelegramScenes
     static readonly FiscalVerificationUrlOptions FiscalLinks = new() { VerificationUrlPrefix = "https://suf.purs.gov.rs/v/?vl=" };
 
     const string BugText = "/bug the amount is wrong";
+
+    // Explained, linked to the record, one finding (it has waited on a reply for over a day), and the data's fault, not
+    // the app's — so the answer carries Close report. Synthetic text, as the model might write it.
+    static readonly BugReportDelivery BugAnswer = new(
+        Guid.Empty, 4, MockData.TelegramChatId, 1, BugExplanationState.Done,
+        "This exchange was not recorded: the message says 100.00 EUR went out but not how many dinars came back, so "
+        + "the bot asked for the amount received and is still waiting for it. That is missing data, not a bug in the "
+        + "app — reply to the echo with the amount, for example \"11700 rsd\", or cancel the record.",
+        LooksLikeBug: false, Linked: true, FindingsCount: 1);
 
     public static IRecordEcho CreateEcho()
     {
@@ -190,6 +201,8 @@ internal static class TelegramScenes
             [
                 Operator(BugText, "10:31") with { Quote = echo.Compose(waitingExchange).Text },
                 new(ChatSide.Bot, BugCommandHandler.SavedText(4), "10:31", Quote: BugText),
+                new(ChatSide.Bot, BugReportReplies.Compose(BugAnswer), "10:32", Quote: BugText,
+                    Buttons: [BugReportButtons.CloseLabel]),
             ]),
         ];
     }

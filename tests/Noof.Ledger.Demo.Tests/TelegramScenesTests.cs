@@ -35,6 +35,7 @@ public sealed class TelegramScenesTests
     [InlineData("slip-check", "This exchange slip doesn't look right — Menjačnica Zlatnik", new[] { "Record anyway", "Cancel" })]
     [InlineData("slip-incomplete", "Slip read, but", new[] { "Edit" })]
     [InlineData("slip-unsupported-currency", "Slip read, but CHF", new[] { "Edit" })]
+    [InlineData("bug", "This exchange was not recorded", new[] { "Close report" })]
     public void The_bot_bubble_carries_the_apps_own_text_and_buttons(string scene, string start, string[] buttons)
     {
         var reply = Scenes.Single(candidate => candidate.Name == scene).Bubbles.Last(bubble => bubble.Side == ChatSide.Bot);
@@ -135,5 +136,6 @@ public sealed class TelegramScenesTests
         bubbles[0].Quote.Should().StartWith("Exchange not recorded");
         bubbles[1].Text.Should().Be("Bug report #4 saved.");
         bubbles[1].Quote.Should().Be("/bug the amount is wrong");
+        bubbles[^1].Text.Should().EndWith("\n\n1 finding on this record");
     }
 }
