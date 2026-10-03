@@ -81,8 +81,13 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
         return record.Id;
     }
 
-    static TelegramBugReport FromTelegram(string? text = "the amount is wrong", Guid? transactionId = null) =>
-        new(ChatId, Interlocked.Increment(ref nextMessageId), text, transactionId);
+    // ReplyTo is opaque to the store; any string the source chooses will do.
+    static NewBugReport FromTelegram(string? text = "the amount is wrong", Guid? transactionId = null) =>
+        new(BugReportSource.Telegram, $"{ChatId}:{Interlocked.Increment(ref nextMessageId)}", text, transactionId,
+            Finding: null, Explanation: null);
+
+    static NewBugReport FromDashboard(IntegrityFinding finding, Explanation explanation) =>
+        new(BugReportSource.Dashboard, ReplyTo: null, Text: null, finding.TransactionId, finding, explanation);
 
     static Task<BugReport> RowAsync(LedgerDbContext db, int number) =>
         db.BugReports.AsNoTracking().SingleAsync(r => r.Number == number, Ct);
@@ -129,13 +134,13 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
             .SetProperty(r => r.ClosedAt, (DateTimeOffset?)Filed), Ct);
 
     [Fact]
-    public async Task A_telegram_report_is_saved_open_and_pending_with_its_message()
+    public async Task A_report_is_filed_open_and_pending_with_its_reply_address()
     {
         await using var h = await CreateAsync();
         var recordId = await AddRecordAsync(h.Db);
         var report = FromTelegram("the amount is wrong", recordId);
 
-        var saved = await h.Store.SaveFromTelegramAsync(report, Ct);
+        var saved = await h.Store.FileAsync(report, Ct);
 
         saved.Created.Should().BeTrue();
         (await RowAsync(h.Db, saved.Number)).Should().BeEquivalentTo(new
@@ -144,8 +149,7 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
             Source = BugReportSource.Telegram,
             Text = "the amount is wrong",
             TransactionId = (Guid?)recordId,
-            TelegramChatId = (long?)ChatId,
-            TelegramMessageId = (int?)report.MessageId,
+            report.ReplyTo,
             Status = BugReportStatus.Open,
             ClosedAt = (DateTimeOffset?)null,
             SnapshotAt = (DateTimeOffset?)null,
@@ -154,19 +158,19 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
             ExplanationNextAt = Filed,
             Explanation = (string?)null,
             LooksLikeBug = (bool?)null,
-            ReplyMessageId = (int?)null,
+            DeliveredAs = (string?)null,
         });
     }
 
     [Fact]
-    public async Task A_redelivered_bug_command_finds_its_report_files_nothing_and_skips_no_number()
+    public async Task A_redelivered_report_finds_the_one_it_filed_files_nothing_and_skips_no_number()
     {
         await using var h = await CreateAsync();
         var report = FromTelegram();
 
-        var first = await h.Store.SaveFromTelegramAsync(report, Ct);
-        var again = await h.Store.SaveFromTelegramAsync(report with { Text = "edited before the retry" }, Ct);
-        var next = await h.Store.SaveFromTelegramAsync(FromTelegram(), Ct);
+        var first = await h.Store.FileAsync(report, Ct);
+        var again = await h.Store.FileAsync(report with { Text = "edited before the retry" }, Ct);
+        var next = await h.Store.FileAsync(FromTelegram(), Ct);
 
         first.Created.Should().BeTrue();
         again.Should().Be(new BugReportSaved(first.Number, Created: false));
@@ -174,7 +178,25 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
         (await RowAsync(h.Db, first.Number)).Text.Should().Be("the amount is wrong");
     }
 
-    // The race backstop, made deterministic: a rival transaction holds the same message's index entry uncommitted, so
+    // Spec R-2: one source's address says nothing about another's, and a report with no address is never a redelivery.
+    [Fact]
+    public async Task Filing_is_idempotent_per_source_and_reply_address_only()
+    {
+        await using var h = await CreateAsync();
+        var report = FromTelegram();
+        var unaddressed = FromTelegram() with { ReplyTo = null };
+
+        var telegram = await h.Store.FileAsync(report, Ct);
+        var sameAddressElsewhere = await h.Store.FileAsync(report with { Source = BugReportSource.Dashboard }, Ct);
+        var firstUnaddressed = await h.Store.FileAsync(unaddressed, Ct);
+        var secondUnaddressed = await h.Store.FileAsync(unaddressed, Ct);
+
+        sameAddressElsewhere.Should().Be(new BugReportSaved(telegram.Number + 1, Created: true));
+        firstUnaddressed.Should().Be(new BugReportSaved(telegram.Number + 2, Created: true));
+        secondUnaddressed.Should().Be(new BugReportSaved(telegram.Number + 3, Created: true));
+    }
+
+    // The race backstop, made deterministic: a rival transaction holds the same address's index entry uncommitted, so
     // the lookup finds nothing and the insert waits on the index until the rival commits, then fails with 23505.
     [Fact]
     public async Task A_duplicate_committed_between_the_lookup_and_the_insert_is_caught_and_only_its_row_detached()
@@ -188,9 +210,8 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
         {
             Id = Guid.NewGuid(),
             CreatedAt = Filed,
-            Source = BugReportSource.Telegram,
-            TelegramChatId = report.ChatId,
-            TelegramMessageId = report.MessageId,
+            Source = report.Source,
+            ReplyTo = report.ReplyTo,
             Status = BugReportStatus.Open,
             ExplanationState = BugExplanationState.Pending,
             ExplanationAttempts = 0,
@@ -200,7 +221,7 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
         rival.BugReports.Add(rivalRow);
         await rival.SaveChangesAsync(Ct);
 
-        var saving = NewStore(db, new FakeTimeProvider(Filed), Checks()).SaveFromTelegramAsync(report, Ct);
+        var saving = NewStore(db, new FakeTimeProvider(Filed), Checks()).FileAsync(report, Ct);
         await LockWaits.UntilABackendWaitsOnALockAsync(rival, Ct);
         await rivalTransaction.CommitAsync(Ct);
         var saved = await saving;
@@ -217,7 +238,7 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
     {
         await using var h = await CreateAsync();
 
-        var act = () => h.Store.SaveFromTelegramAsync(FromTelegram(transactionId: Guid.NewGuid()), Ct);
+        var act = () => h.Store.FileAsync(FromTelegram(transactionId: Guid.NewGuid()), Ct);
 
         (await act.Should().ThrowAsync<DbUpdateException>())
             .WithInnerException<PostgresException>()
@@ -234,7 +255,7 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
     {
         await using var h = await CreateAsync();
 
-        var saved = await h.Store.SaveFromTelegramAsync(FromTelegram(text), Ct);
+        var saved = await h.Store.FileAsync(FromTelegram(text), Ct);
 
         (await RowAsync(h.Db, saved.Number)).Text.Should().Be(stored);
     }
@@ -251,7 +272,7 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
             LogEntry(3, Filed.AddMinutes(-1), LogSeverity.Warning, "Another record's line", otherId));
         await h.Db.SaveChangesAsync(Ct);
         h.Checks.FindForTransactionAsync(recordId, Arg.Any<CancellationToken>()).Returns(Findings(WaitingOn(recordId)));
-        var saved = await h.Store.SaveFromTelegramAsync(FromTelegram(transactionId: recordId), Ct);
+        var saved = await h.Store.FileAsync(FromTelegram(transactionId: recordId), Ct);
         h.Clock.Advance(TimeSpan.FromSeconds(30));
 
         var snapshot = await h.Store.TakeSnapshotAsync(await IdOfAsync(h.Db, saved.Number), Ct);
@@ -277,7 +298,7 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
             LogEntry(5, Filed.AddMinutes(5), LogSeverity.Error, "After filing"));
         await h.Db.SaveChangesAsync(Ct);
         h.Checks.FindAllAsync(Arg.Any<CancellationToken>()).Returns(Findings(WaitingOn(recordId)));
-        var saved = await h.Store.SaveFromTelegramAsync(FromTelegram("the dashboard total looks off"), Ct);
+        var saved = await h.Store.FileAsync(FromTelegram("the dashboard total looks off"), Ct);
         h.Clock.Advance(TimeSpan.FromMinutes(10));
 
         var snapshot = await h.Store.TakeSnapshotAsync(await IdOfAsync(h.Db, saved.Number), Ct);
@@ -297,7 +318,7 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
         h.Db.AppLogs.AddRange(Enumerable.Range(1, 205)
             .Select(n => LogEntry(n, Filed.AddMinutes(n - 300), LogSeverity.Information, $"line {n}", recordId)));
         await h.Db.SaveChangesAsync(Ct);
-        var saved = await h.Store.SaveFromTelegramAsync(FromTelegram(transactionId: recordId), Ct);
+        var saved = await h.Store.FileAsync(FromTelegram(transactionId: recordId), Ct);
 
         await h.Store.TakeSnapshotAsync(await IdOfAsync(h.Db, saved.Number), Ct);
 
@@ -312,7 +333,7 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
         await using var h = await CreateAsync();
         var recordId = await AddRecordAsync(h.Db);
         h.Checks.FindForTransactionAsync(recordId, Arg.Any<CancellationToken>()).Returns(Findings(WaitingOn(recordId)), NoFindings);
-        var reportId = await IdOfAsync(h.Db, (await h.Store.SaveFromTelegramAsync(FromTelegram(transactionId: recordId), Ct)).Number);
+        var reportId = await IdOfAsync(h.Db, (await h.Store.FileAsync(FromTelegram(transactionId: recordId), Ct)).Number);
         var first = await h.Store.TakeSnapshotAsync(reportId, Ct);
         h.Clock.Advance(TimeSpan.FromMinutes(5));
 
@@ -331,7 +352,7 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
         h.Db.AppLogs.Add(LogEntry(1, Filed.AddMinutes(-1), LogSeverity.Warning, "No received amount", recordId));
         await h.Db.SaveChangesAsync(Ct);
         h.Checks.FindForTransactionAsync(recordId, Arg.Any<CancellationToken>()).ThrowsAsync(new TimeoutException());
-        var saved = await h.Store.SaveFromTelegramAsync(FromTelegram(transactionId: recordId), Ct);
+        var saved = await h.Store.FileAsync(FromTelegram(transactionId: recordId), Ct);
 
         var snapshot = await h.Store.TakeSnapshotAsync(await IdOfAsync(h.Db, saved.Number), Ct);
 
@@ -347,7 +368,7 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
         await using var h = await CreateAsync();
         var recordId = await AddRecordAsync(h.Db);
         h.Checks.FindForTransactionAsync(recordId, Arg.Any<CancellationToken>()).ThrowsAsync(new TimeoutException());
-        var saved = await h.Store.SaveFromTelegramAsync(FromTelegram(transactionId: recordId), Ct);
+        var saved = await h.Store.FileAsync(FromTelegram(transactionId: recordId), Ct);
         await h.Db.Database.ExecuteSqlRawAsync(
             "ALTER TABLE public.app_log RENAME TO app_log_gone; "
             + "ALTER TABLE public.transaction_revisions RENAME TO transaction_revisions_gone;",
@@ -374,7 +395,7 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
             cancellation.Cancel();
             return Task.FromCanceled<IReadOnlyList<IntegrityFinding>>(cancellation.Token);
         });
-        var saved = await h.Store.SaveFromTelegramAsync(FromTelegram(transactionId: recordId), Ct);
+        var saved = await h.Store.FileAsync(FromTelegram(transactionId: recordId), Ct);
         var reportId = await IdOfAsync(h.Db, saved.Number);
 
         var act = () => h.Store.TakeSnapshotAsync(reportId, cancellation.Token);
@@ -446,7 +467,7 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
                 new TextFact("Job", "Correct"),
                 new TextFact("Last error", $"The fiscal fetch failed for {FiscalLink}"),
             ])));
-        var saved = await h.Store.SaveFromTelegramAsync(FromTelegram($"wrong rate {FiscalLink} please", recordId), Ct);
+        var saved = await h.Store.FileAsync(FromTelegram($"wrong rate {FiscalLink} please", recordId), Ct);
 
         await h.Store.TakeSnapshotAsync(await IdOfAsync(h.Db, saved.Number), Ct);
 
@@ -476,7 +497,7 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
         h.Db.AppLogs.Add(LogEntry(1, Filed.AddMinutes(-1), LogSeverity.Information, "Replied to bot message 4567", recordId,
             properties: """{"Stage":"Replied","BotMessageId":4567,"ChatId":111222333}"""));
         await h.Db.SaveChangesAsync(Ct);
-        var saved = await h.Store.SaveFromTelegramAsync(FromTelegram(transactionId: recordId), Ct);
+        var saved = await h.Store.FileAsync(FromTelegram(transactionId: recordId), Ct);
 
         await h.Store.TakeSnapshotAsync(await IdOfAsync(h.Db, saved.Number), Ct);
 
@@ -492,13 +513,13 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
         // The harness clock starts at Filed and a FakeTimeProvider never goes back, so this one starts earlier.
         var clock = new FakeTimeProvider(Filed.AddMinutes(-30));
         var store = NewStore(h.Db, clock, h.Checks);
-        var closed = await store.SaveFromTelegramAsync(FromTelegram("closed"), Ct);
-        var explained = await store.SaveFromTelegramAsync(FromTelegram("explained"), Ct);
+        var closed = await store.FileAsync(FromTelegram("closed"), Ct);
+        var explained = await store.FileAsync(FromTelegram("explained"), Ct);
         clock.SetUtcNow(Filed.AddMinutes(-20));
-        var waiting = await store.SaveFromTelegramAsync(FromTelegram("waiting for its retry"), Ct);
+        var waiting = await store.FileAsync(FromTelegram("waiting for its retry"), Ct);
         clock.SetUtcNow(Filed.AddMinutes(-10));
-        var due = await store.SaveFromTelegramAsync(FromTelegram("due"), Ct);
-        await store.SaveFromTelegramAsync(FromTelegram("filed in the same instant, after it"), Ct);
+        var due = await store.FileAsync(FromTelegram("due"), Ct);
+        await store.FileAsync(FromTelegram("filed in the same instant, after it"), Ct);
         await CloseAsync(h.Db, closed.Number);
         await store.CompleteExplanationAsync(await IdOfAsync(h.Db, explained.Number), new Explanation("Done.", false), Ct);
         await store.RecordFailedAttemptAsync(await IdOfAsync(h.Db, waiting.Number), Filed.AddMinutes(1), maxAttempts: 3, Ct);
@@ -514,7 +535,7 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
         await using var h = await CreateAsync();
         var recordId = await AddRecordAsync(h.Db);
         h.Checks.FindForTransactionAsync(recordId, Arg.Any<CancellationToken>()).Returns(Findings(WaitingOn(recordId)));
-        var saved = await h.Store.SaveFromTelegramAsync(FromTelegram(transactionId: recordId), Ct);
+        var saved = await h.Store.FileAsync(FromTelegram(transactionId: recordId), Ct);
         await h.Store.TakeSnapshotAsync(await IdOfAsync(h.Db, saved.Number), Ct);
 
         var next = await h.Store.NextDueAsync(Filed, Ct) ?? throw new InvalidOperationException("Nothing is due.");
@@ -531,7 +552,7 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
     public async Task An_explanation_completes_a_pending_report_once_and_without_its_fiscal_link()
     {
         await using var h = await CreateAsync();
-        var saved = await h.Store.SaveFromTelegramAsync(FromTelegram(), Ct);
+        var saved = await h.Store.FileAsync(FromTelegram(), Ct);
         var reportId = await IdOfAsync(h.Db, saved.Number);
 
         await h.Store.CompleteExplanationAsync(reportId, new Explanation($"Reply with the amount. {FiscalLink}", LooksLikeBug: false), Ct);
@@ -550,7 +571,7 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
     public async Task An_explanation_that_is_nothing_but_a_fiscal_link_is_kept_as_an_empty_answer()
     {
         await using var h = await CreateAsync();
-        var saved = await h.Store.SaveFromTelegramAsync(FromTelegram(), Ct);
+        var saved = await h.Store.FileAsync(FromTelegram(), Ct);
 
         await h.Store.CompleteExplanationAsync(await IdOfAsync(h.Db, saved.Number), new Explanation(FiscalLink, LooksLikeBug: true), Ct);
 
@@ -566,7 +587,7 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
     public async Task A_failed_attempt_counts_and_waits_and_the_last_one_fails_the_report()
     {
         await using var h = await CreateAsync();
-        var saved = await h.Store.SaveFromTelegramAsync(FromTelegram(), Ct);
+        var saved = await h.Store.FileAsync(FromTelegram(), Ct);
         var reportId = await IdOfAsync(h.Db, saved.Number);
         List<BugExplanationState> states = [];
 
@@ -582,7 +603,7 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
     }
 
     [Fact]
-    public async Task Pending_deliveries_are_open_telegram_reports_with_an_answer_and_no_reply_yet()
+    public async Task Pending_deliveries_are_open_answered_reports_with_a_reply_address_and_no_reply_yet()
     {
         await using var h = await CreateAsync();
         var recordId = await AddRecordAsync(h.Db);
@@ -591,51 +612,58 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
         h.Checks.FindAllAsync(Arg.Any<CancellationToken>()).ThrowsAsync(new TimeoutException());
 
         var explained = FromTelegram("linked", recordId);
-        var explainedNumber = (await h.Store.SaveFromTelegramAsync(explained, Ct)).Number;
+        var explainedNumber = (await h.Store.FileAsync(explained, Ct)).Number;
         var explainedId = await IdOfAsync(h.Db, explainedNumber);
         await h.Store.TakeSnapshotAsync(explainedId, Ct);
         await h.Store.CompleteExplanationAsync(explainedId, new Explanation("Reply with the amount.", LooksLikeBug: false), Ct);
 
         var gaveUp = FromTelegram("unlinked");
-        var gaveUpNumber = (await h.Store.SaveFromTelegramAsync(gaveUp, Ct)).Number;
+        var gaveUpNumber = (await h.Store.FileAsync(gaveUp, Ct)).Number;
         var gaveUpId = await IdOfAsync(h.Db, gaveUpNumber);
         await h.Store.TakeSnapshotAsync(gaveUpId, Ct);
         await h.Store.RecordFailedAttemptAsync(gaveUpId, Filed, maxAttempts: 1, Ct);
 
-        await h.Store.SaveFromTelegramAsync(FromTelegram("not explained yet"), Ct);
-        var closedNumber = (await h.Store.SaveFromTelegramAsync(FromTelegram("closed first"), Ct)).Number;
+        await h.Store.FileAsync(FromTelegram("not explained yet"), Ct);
+        var closedNumber = (await h.Store.FileAsync(FromTelegram("closed first"), Ct)).Number;
         await h.Store.CompleteExplanationAsync(await IdOfAsync(h.Db, closedNumber), new Explanation("x", false), Ct);
         await CloseAsync(h.Db, closedNumber);
-        var repliedId = await IdOfAsync(h.Db, (await h.Store.SaveFromTelegramAsync(FromTelegram("replied"), Ct)).Number);
+        var repliedId = await IdOfAsync(h.Db, (await h.Store.FileAsync(FromTelegram("replied"), Ct)).Number);
         await h.Store.CompleteExplanationAsync(repliedId, new Explanation("y", false), Ct);
-        await h.Store.MarkDeliveredAsync(repliedId, 4242, Ct);
+        await h.Store.MarkDeliveredAsync(repliedId, "4242", Ct);
+        var explainedHere = new Explanation("Looks like our bug.", LooksLikeBug: true);
+        await h.Store.FileAsync(FromDashboard(WaitingOn(recordId), explainedHere), Ct);
+        // Spec R-2: delivery follows the address, not the source.
+        var addressed = FromDashboard(WaitingOn(recordId), explainedHere) with { ReplyTo = "tab 7" };
+        var addressedNumber = (await h.Store.FileAsync(addressed, Ct)).Number;
 
         var deliveries = await h.Store.PendingDeliveriesAsync(Ct);
 
         deliveries.Should().Equal(
-            new BugReportDelivery(explainedId, explainedNumber, ChatId, explained.MessageId, BugExplanationState.Done,
-                "Reply with the amount.", false, Linked: true, FindingsCount: 2),
-            new BugReportDelivery(gaveUpId, gaveUpNumber, ChatId, gaveUp.MessageId, BugExplanationState.Failed,
-                null, null, Linked: false, FindingsCount: null));
+            new BugReportDelivery(explainedId, explainedNumber, BugReportSource.Telegram, explained.ReplyTo!,
+                BugExplanationState.Done, "Reply with the amount.", false, Linked: true, FindingsCount: 2),
+            new BugReportDelivery(gaveUpId, gaveUpNumber, BugReportSource.Telegram, gaveUp.ReplyTo!,
+                BugExplanationState.Failed, null, null, Linked: false, FindingsCount: null),
+            new BugReportDelivery(await IdOfAsync(h.Db, addressedNumber), addressedNumber, BugReportSource.Dashboard, "tab 7",
+                BugExplanationState.Done, "Looks like our bug.", true, Linked: true, FindingsCount: 1));
     }
 
     [Fact]
     public async Task A_delivered_report_keeps_its_reply_and_leaves_the_delivery_list()
     {
         await using var h = await CreateAsync();
-        var saved = await h.Store.SaveFromTelegramAsync(FromTelegram(), Ct);
+        var saved = await h.Store.FileAsync(FromTelegram(), Ct);
         var reportId = await IdOfAsync(h.Db, saved.Number);
         await h.Store.CompleteExplanationAsync(reportId, new Explanation("Reply with the amount.", false), Ct);
 
-        await h.Store.MarkDeliveredAsync(reportId, 4242, Ct);
-        await h.Store.MarkDeliveredAsync(reportId, 4343, Ct);
+        await h.Store.MarkDeliveredAsync(reportId, "4242", Ct);
+        await h.Store.MarkDeliveredAsync(reportId, "4343", Ct);
 
-        (await RowAsync(h.Db, saved.Number)).ReplyMessageId.Should().Be(4242);
+        (await RowAsync(h.Db, saved.Number)).DeliveredAs.Should().Be("4242");
         (await h.Store.PendingDeliveriesAsync(Ct)).Should().BeEmpty();
     }
 
     [Fact]
-    public async Task A_dashboard_report_is_filed_done_with_its_finding_and_the_record_as_it_was()
+    public async Task A_report_filed_explained_is_done_with_its_finding_and_the_record_as_it_was()
     {
         await using var h = await CreateAsync();
         var recordId = await AddRecordAsync(h.Db);
@@ -643,9 +671,11 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
         await h.Db.SaveChangesAsync(Ct);
         var finding = WaitingOn(recordId);
 
-        var number = await h.Store.CreateFromDashboardAsync(
-            finding, new Explanation($"Looks like our bug. {FiscalLink}", LooksLikeBug: true), Ct);
+        var saved = await h.Store.FileAsync(
+            FromDashboard(finding, new Explanation($"Looks like our bug. {FiscalLink}", LooksLikeBug: true)), Ct);
 
+        saved.Created.Should().BeTrue();
+        var number = saved.Number;
         var document = await h.Store.GetAsync(number, Ct) ?? throw new InvalidOperationException("The report was not found.");
         document.Should().BeEquivalentTo(new
         {
@@ -665,29 +695,44 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
         document.RecordSummary.Should().StartWith("Record: Expense · Failed · failure reason MissingReceivedAmount");
         document.LogLines.Should().ContainSingle().Which.Message.Should().Be("No received amount");
         var row = await RowAsync(h.Db, number);
-        row.TelegramChatId.Should().BeNull();
-        row.TelegramMessageId.Should().BeNull();
-        (await h.Store.NextDueAsync(Filed.AddDays(1), Ct)).Should().BeNull("a dashboard report is explained already");
-        (await h.Store.PendingDeliveriesAsync(Ct)).Should().BeEmpty("a dashboard report has no message to reply to");
+        row.ReplyTo.Should().BeNull();
+        row.DeliveredAs.Should().BeNull();
+        (await h.Store.NextDueAsync(Filed.AddDays(1), Ct)).Should().BeNull("a report filed explained needs no explaining");
+        (await h.Store.PendingDeliveriesAsync(Ct)).Should().BeEmpty("a report with no reply address has nowhere to reply");
     }
 
     // The scope's context is shared - a dashboard circuit keeps its own - so a row a failed Create left Added would be
     // inserted again by the operator's next one.
     [Fact]
-    public async Task A_failed_dashboard_create_leaves_nothing_for_the_next_one_to_file()
+    public async Task A_failed_explained_filing_leaves_nothing_for_the_next_one_to_file()
     {
         await using var h = await CreateAsync();
         var recordId = await AddRecordAsync(h.Db);
         var explanation = new Explanation("Looks like our bug.", LooksLikeBug: true);
 
-        var act = () => h.Store.CreateFromDashboardAsync(WaitingOn(Guid.NewGuid()), explanation, Ct);
+        var act = () => h.Store.FileAsync(FromDashboard(WaitingOn(Guid.NewGuid()), explanation), Ct);
 
         (await act.Should().ThrowAsync<DbUpdateException>())
             .WithInnerException<PostgresException>()
             .Which.SqlState.Should().Be(PostgresErrorCodes.ForeignKeyViolation);
-        var number = await h.Store.CreateFromDashboardAsync(WaitingOn(recordId), explanation, Ct);
+        var number = (await h.Store.FileAsync(FromDashboard(WaitingOn(recordId), explanation), Ct)).Number;
         (await h.Db.BugReports.CountAsync(Ct)).Should().Be(1);
         (await RowAsync(h.Db, number)).TransactionId.Should().Be(recordId);
+    }
+
+    [Fact]
+    public async Task A_finding_without_its_explanation_or_an_explanation_without_its_finding_is_refused()
+    {
+        await using var h = await CreateAsync();
+        var recordId = await AddRecordAsync(h.Db);
+        var explained = FromDashboard(WaitingOn(recordId), new Explanation("Looks like our bug.", LooksLikeBug: true));
+
+        var findingOnly = () => h.Store.FileAsync(explained with { Explanation = null }, Ct);
+        var explanationOnly = () => h.Store.FileAsync(explained with { Finding = null }, Ct);
+
+        await findingOnly.Should().ThrowAsync<ArgumentException>();
+        await explanationOnly.Should().ThrowAsync<ArgumentException>();
+        (await h.Db.BugReports.CountAsync(Ct)).Should().Be(0);
     }
 
     [Fact]
@@ -712,7 +757,7 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
         // as a check would report it - checks never strip.
         h.Checks.FindForTransactionAsync(recordId, Arg.Any<CancellationToken>()).Returns(
             Findings(WaitingOn(recordId)), Findings(WaitingOn(recordId, $"MissingReceivedAmount {FiscalLink}")));
-        var number = (await h.Store.SaveFromTelegramAsync(FromTelegram(transactionId: recordId), Ct)).Number;
+        var number = (await h.Store.FileAsync(FromTelegram(transactionId: recordId), Ct)).Number;
         await h.Store.TakeSnapshotAsync(await IdOfAsync(h.Db, number), Ct);
 
         var document = await h.Store.GetAsync(number, Ct) ?? throw new InvalidOperationException("The report was not found.");
@@ -775,7 +820,7 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
         var traceCall = () => trace.GetAsync(recordId, Ct);
         await traceCall.Should().ThrowAsync<CurrencyMismatchException>("this record really is too broken for the trace page");
         h.Checks.FindForTransactionAsync(recordId, Arg.Any<CancellationToken>()).Returns(NoFindings);
-        var number = (await h.Store.SaveFromTelegramAsync(FromTelegram(transactionId: recordId), Ct)).Number;
+        var number = (await h.Store.FileAsync(FromTelegram(transactionId: recordId), Ct)).Number;
         await h.Store.TakeSnapshotAsync(await IdOfAsync(h.Db, number), Ct);
 
         var document = await h.Store.GetAsync(number, Ct) ?? throw new InvalidOperationException("The report was not found.");
@@ -792,7 +837,7 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
     public async Task An_unlinked_document_has_no_revisions_and_no_findings_now()
     {
         await using var h = await CreateAsync();
-        var number = (await h.Store.SaveFromTelegramAsync(FromTelegram("the dashboard total looks off"), Ct)).Number;
+        var number = (await h.Store.FileAsync(FromTelegram("the dashboard total looks off"), Ct)).Number;
 
         var document = await h.Store.GetAsync(number, Ct) ?? throw new InvalidOperationException("The report was not found.");
 
@@ -814,7 +859,7 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
         await using var h = await CreateAsync();
         var recordId = await AddRecordAsync(h.Db);
         h.Checks.FindForTransactionAsync(recordId, Arg.Any<CancellationToken>()).ThrowsAsync(new TimeoutException());
-        var number = (await h.Store.SaveFromTelegramAsync(FromTelegram(transactionId: recordId), Ct)).Number;
+        var number = (await h.Store.FileAsync(FromTelegram(transactionId: recordId), Ct)).Number;
 
         var document = await h.Store.GetAsync(number, Ct) ?? throw new InvalidOperationException("The report was not found.");
 
@@ -834,9 +879,9 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
     {
         await using var h = await CreateAsync();
         var recordId = await AddRecordAsync(h.Db);
-        var first = (await h.Store.SaveFromTelegramAsync(FromTelegram("first"), Ct)).Number;
-        var second = (await h.Store.SaveFromTelegramAsync(FromTelegram("second", recordId), Ct)).Number;
-        var third = (await h.Store.SaveFromTelegramAsync(FromTelegram("third"), Ct)).Number;
+        var first = (await h.Store.FileAsync(FromTelegram("first"), Ct)).Number;
+        var second = (await h.Store.FileAsync(FromTelegram("second", recordId), Ct)).Number;
+        var third = (await h.Store.FileAsync(FromTelegram("third"), Ct)).Number;
         await h.Store.SetStatusAsync(second, BugReportStatus.Closed, Ct);
 
         var open = await h.Store.ListAsync(includeClosed: false, Ct);
@@ -852,9 +897,9 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
     public async Task Export_loads_open_reports_oldest_number_first_or_every_report()
     {
         await using var h = await CreateAsync();
-        var first = (await h.Store.SaveFromTelegramAsync(FromTelegram("first"), Ct)).Number;
-        var second = (await h.Store.SaveFromTelegramAsync(FromTelegram("second"), Ct)).Number;
-        var third = (await h.Store.SaveFromTelegramAsync(FromTelegram("third"), Ct)).Number;
+        var first = (await h.Store.FileAsync(FromTelegram("first"), Ct)).Number;
+        var second = (await h.Store.FileAsync(FromTelegram("second"), Ct)).Number;
+        var third = (await h.Store.FileAsync(FromTelegram("third"), Ct)).Number;
         await h.Store.SetStatusAsync(second, BugReportStatus.Closed, Ct);
 
         (await h.Store.LoadForExportAsync(includeClosed: false, Ct)).Select(document => document.Number).Should().Equal(first, third);
@@ -865,7 +910,7 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
     public async Task A_status_changes_once_and_closing_stamps_when()
     {
         await using var h = await CreateAsync();
-        var number = (await h.Store.SaveFromTelegramAsync(FromTelegram(), Ct)).Number;
+        var number = (await h.Store.FileAsync(FromTelegram(), Ct)).Number;
         h.Clock.Advance(TimeSpan.FromHours(1));
 
         (await h.Store.SetStatusAsync(number, BugReportStatus.Closed, Ct)).Should().BeTrue();
@@ -883,9 +928,9 @@ public class EfBugReportStoreTests(PostgresFixture fixture)
     public async Task Only_open_reports_are_counted()
     {
         await using var h = await CreateAsync();
-        await h.Store.SaveFromTelegramAsync(FromTelegram(), Ct);
-        var closed = (await h.Store.SaveFromTelegramAsync(FromTelegram(), Ct)).Number;
-        await h.Store.SaveFromTelegramAsync(FromTelegram(), Ct);
+        await h.Store.FileAsync(FromTelegram(), Ct);
+        var closed = (await h.Store.FileAsync(FromTelegram(), Ct)).Number;
+        await h.Store.FileAsync(FromTelegram(), Ct);
         await h.Store.SetStatusAsync(closed, BugReportStatus.Closed, Ct);
 
         (await h.Store.CountOpenAsync(Ct)).Should().Be(2);

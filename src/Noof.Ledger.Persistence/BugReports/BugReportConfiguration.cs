@@ -6,21 +6,22 @@ namespace Noof.Ledger.Persistence.BugReports;
 
 internal sealed class BugReportConfiguration : IEntityTypeConfiguration<BugReport>
 {
-    // One name for the index and for the catch that recognises a redelivered /bug by it.
-    internal const string TelegramMessageIndex = "IX_bug_reports_telegram_chat_id_telegram_message_id";
+    // One name for the index and for the catch that recognises a redelivered report by it.
+    internal const string ReplyToIndex = "IX_bug_reports_source_reply_to";
 
+    // The numbers are BugReportSource, BugReportStatus and BugExplanationState as spec R-1 numbers them; 0 is Unknown
+    // and never stored. No constraint names a source's own value (spec R-2): a new source adds no schema change.
     public void Configure(EntityTypeBuilder<BugReport> builder)
     {
         builder.ToTable("bug_reports", table =>
         {
             table.HasCheckConstraint(
-                "ck_bug_reports_telegram_ids_match_source",
-                "(source = 0 AND telegram_chat_id IS NOT NULL AND telegram_message_id IS NOT NULL) "
-                + "OR (source = 1 AND telegram_chat_id IS NULL AND telegram_message_id IS NULL AND reply_message_id IS NULL)");
-            table.HasCheckConstraint("ck_bug_reports_closed_at_matches_status", "(status = 1) = (closed_at IS NOT NULL)");
+                "ck_bug_reports_source_and_reply_to", "source <> 0 AND (delivered_as IS NULL OR reply_to IS NOT NULL)");
+            table.HasCheckConstraint(
+                "ck_bug_reports_closed_at_matches_status", "status <> 0 AND (status = 2) = (closed_at IS NOT NULL)");
             table.HasCheckConstraint(
                 "ck_bug_reports_explanation_matches_state",
-                "(explanation_state = 1) = (explanation IS NOT NULL AND looks_like_bug IS NOT NULL)");
+                "explanation_state <> 0 AND (explanation_state = 2) = (explanation IS NOT NULL AND looks_like_bug IS NOT NULL)");
         });
 
         builder.HasKey(r => r.Id);
@@ -31,8 +32,7 @@ internal sealed class BugReportConfiguration : IEntityTypeConfiguration<BugRepor
         builder.Property(r => r.Source).HasColumnName("source");
         builder.Property(r => r.Text).HasColumnName("text");
         builder.Property(r => r.TransactionId).HasColumnName("transaction_id");
-        builder.Property(r => r.TelegramChatId).HasColumnName("telegram_chat_id");
-        builder.Property(r => r.TelegramMessageId).HasColumnName("telegram_message_id");
+        builder.Property(r => r.ReplyTo).HasColumnName("reply_to");
         builder.Property(r => r.Status).HasColumnName("status");
         builder.Property(r => r.ClosedAt).HasColumnName("closed_at");
         builder.Property(r => r.SnapshotAt).HasColumnName("snapshot_at");
@@ -45,14 +45,14 @@ internal sealed class BugReportConfiguration : IEntityTypeConfiguration<BugRepor
         builder.Property(r => r.ExplanationNextAt).HasColumnName("explanation_next_at");
         builder.Property(r => r.Explanation).HasColumnName("explanation");
         builder.Property(r => r.LooksLikeBug).HasColumnName("looks_like_bug");
-        builder.Property(r => r.ReplyMessageId).HasColumnName("reply_message_id");
+        builder.Property(r => r.DeliveredAs).HasColumnName("delivered_as");
 
         builder.HasIndex(r => r.Number).IsUnique();
 
-        builder.HasIndex(r => new { r.TelegramChatId, r.TelegramMessageId })
+        builder.HasIndex(r => new { r.Source, r.ReplyTo })
             .IsUnique()
-            .HasFilter("telegram_chat_id IS NOT NULL")
-            .HasDatabaseName(TelegramMessageIndex);
+            .HasFilter("reply_to IS NOT NULL")
+            .HasDatabaseName(ReplyToIndex);
 
         // RESTRICT: a report is evidence about its record, as a revision is.
         builder.HasOne<Transaction>()

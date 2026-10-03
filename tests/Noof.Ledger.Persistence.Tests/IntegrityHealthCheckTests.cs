@@ -88,6 +88,18 @@ public class IntegrityHealthCheckTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task A_finding_in_no_known_group_is_not_counted_as_waiting()
+    {
+        var checks = Substitute.For<IIntegrityChecks>();
+        checks.FindAllAsync(Arg.Any<CancellationToken>())
+            .Returns([Finding(IntegrityCheck.NotApplied, IntegrityGroup.Unknown)]);
+
+        var run = () => new IntegrityHealthCheck(checks, GateWith(DatabaseState.Ready)).CheckAsync(Ct);
+
+        await run.Should().ThrowAsync<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
     public async Task Runs_the_checks_under_the_health_runs_own_token()
     {
         var checks = ChecksFinding(0, 0);

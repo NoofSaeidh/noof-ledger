@@ -151,8 +151,7 @@ CREATE TABLE public.bug_reports (
     source integer NOT NULL,
     text text,
     transaction_id uuid,
-    telegram_chat_id bigint,
-    telegram_message_id integer,
+    reply_to text,
     status integer NOT NULL,
     closed_at timestamptz,
     snapshot_at timestamptz,
@@ -165,11 +164,11 @@ CREATE TABLE public.bug_reports (
     explanation_next_at timestamptz NOT NULL,
     explanation text,
     looks_like_bug boolean,
-    reply_message_id integer,
+    delivered_as text,
     CONSTRAINT "PK_bug_reports" PRIMARY KEY (id),
-    CONSTRAINT ck_bug_reports_closed_at_matches_status CHECK ((status = 1) = (closed_at IS NOT NULL)),
-    CONSTRAINT ck_bug_reports_explanation_matches_state CHECK ((explanation_state = 1) = (explanation IS NOT NULL AND looks_like_bug IS NOT NULL)),
-    CONSTRAINT ck_bug_reports_telegram_ids_match_source CHECK ((source = 0 AND telegram_chat_id IS NOT NULL AND telegram_message_id IS NOT NULL) OR (source = 1 AND telegram_chat_id IS NULL AND telegram_message_id IS NULL AND reply_message_id IS NULL)),
+    CONSTRAINT ck_bug_reports_closed_at_matches_status CHECK (status <> 0 AND (status = 2) = (closed_at IS NOT NULL)),
+    CONSTRAINT ck_bug_reports_explanation_matches_state CHECK (explanation_state <> 0 AND (explanation_state = 2) = (explanation IS NOT NULL AND looks_like_bug IS NOT NULL)),
+    CONSTRAINT ck_bug_reports_source_and_reply_to CHECK (source <> 0 AND (delivered_as IS NULL OR reply_to IS NOT NULL)),
     CONSTRAINT "FK_bug_reports_transactions_transaction_id" FOREIGN KEY (transaction_id) REFERENCES public.transactions (id) ON DELETE RESTRICT
 );
 
@@ -353,7 +352,7 @@ CREATE INDEX "IX_balance_checks_wallet_id" ON public.balance_checks (wallet_id);
 CREATE UNIQUE INDEX "IX_bug_reports_number" ON public.bug_reports (number);
 
 
-CREATE UNIQUE INDEX "IX_bug_reports_telegram_chat_id_telegram_message_id" ON public.bug_reports (telegram_chat_id, telegram_message_id) WHERE telegram_chat_id IS NOT NULL;
+CREATE UNIQUE INDEX "IX_bug_reports_source_reply_to" ON public.bug_reports (source, reply_to) WHERE reply_to IS NOT NULL;
 
 
 CREATE INDEX "IX_bug_reports_transaction_id" ON public.bug_reports (transaction_id);

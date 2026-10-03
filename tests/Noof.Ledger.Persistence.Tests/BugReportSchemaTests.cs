@@ -15,26 +15,27 @@ public class BugReportSchemaTests(PostgresFixture fixture)
 
     static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    static BugReport FromTelegram(int? messageId = null, bool withMessage = true, Guid? transactionId = null) => new()
+    static string NextReplyTo() => $"111:{Interlocked.Increment(ref nextMessageId)}";
+
+    static BugReport FromTelegram(string? replyTo = null, Guid? transactionId = null) => new()
     {
         Id = Guid.NewGuid(),
         CreatedAt = Now,
         Source = BugReportSource.Telegram,
         TransactionId = transactionId,
-        TelegramChatId = withMessage ? 111 : null,
-        TelegramMessageId = withMessage ? messageId ?? Interlocked.Increment(ref nextMessageId) : null,
+        ReplyTo = replyTo ?? NextReplyTo(),
         Status = BugReportStatus.Open,
         ExplanationState = BugExplanationState.Pending,
         ExplanationAttempts = 0,
         ExplanationNextAt = Now,
     };
 
-    static BugReport FromDashboard(long? chatId = null) => new()
+    static BugReport FromDashboard(string? replyTo = null, BugReportSource source = BugReportSource.Dashboard) => new()
     {
         Id = Guid.NewGuid(),
         CreatedAt = Now,
-        Source = BugReportSource.Dashboard,
-        TelegramChatId = chatId,
+        Source = source,
+        ReplyTo = replyTo,
         Status = BugReportStatus.Open,
         ExplanationState = BugExplanationState.Done,
         ExplanationAttempts = 0,
@@ -87,7 +88,7 @@ public class BugReportSchemaTests(PostgresFixture fixture)
             INSERT INTO public.bug_reports
                 (id, number, created_at, source, status, explanation_state, explanation_attempts, explanation_next_at,
                  explanation, looks_like_bug)
-            VALUES ({Guid.NewGuid()}, 7, {Now}, 1, 0, 1, 0, {Now}, 'x', TRUE)
+            VALUES ({Guid.NewGuid()}, 7, {Now}, 2, 1, 2, 0, {Now}, 'x', TRUE)
             """,
             Ct);
 
@@ -95,19 +96,24 @@ public class BugReportSchemaTests(PostgresFixture fixture)
         (await act.Should().ThrowAsync<PostgresException>()).Which.SqlState.Should().Be("428C9");
     }
 
+    // Spec R-1 and R-2: the source is never Unknown, and a reply is delivered only to an address. Which source needs an
+    // address is its own layer's business, so a new source needs no schema change.
     [Fact]
-    public async Task A_telegram_report_carries_its_message_and_a_dashboard_report_none()
+    public async Task A_report_names_its_source_and_is_delivered_only_to_its_reply_address()
     {
         await using var db = await fixture.CreateMigratedContextAsync();
-        const string rule = "ck_bug_reports_telegram_ids_match_source";
-        var repliedOnTheDashboard = FromDashboard();
-        repliedOnTheDashboard.ReplyMessageId = 9;
+        const string rule = "ck_bug_reports_source_and_reply_to";
+        var unknownSource = FromDashboard(source: BugReportSource.Unknown);
+        var deliveredNowhere = FromDashboard();
+        deliveredNowhere.DeliveredAs = "9";
+        var delivered = FromTelegram();
+        delivered.DeliveredAs = "9";
 
-        (await ViolatedConstraintAsync(db, FromTelegram(withMessage: false))).Should().Be(rule);
-        (await ViolatedConstraintAsync(db, FromDashboard(chatId: 111))).Should().Be(rule);
-        (await ViolatedConstraintAsync(db, repliedOnTheDashboard)).Should().Be(rule);
-        (await ViolatedConstraintAsync(db, FromTelegram())).Should().BeNull();
+        (await ViolatedConstraintAsync(db, unknownSource)).Should().Be(rule);
+        (await ViolatedConstraintAsync(db, deliveredNowhere)).Should().Be(rule);
+        (await ViolatedConstraintAsync(db, delivered)).Should().BeNull();
         (await ViolatedConstraintAsync(db, FromDashboard())).Should().BeNull();
+        (await ViolatedConstraintAsync(db, FromDashboard(NextReplyTo()))).Should().BeNull();
     }
 
     [Fact]
@@ -119,12 +125,15 @@ public class BugReportSchemaTests(PostgresFixture fixture)
         closedWithoutTime.Status = BugReportStatus.Closed;
         var openWithTime = FromTelegram();
         openWithTime.ClosedAt = Now;
+        var unknownStatus = FromTelegram();
+        unknownStatus.Status = BugReportStatus.Unknown;
         var closed = FromTelegram();
         closed.Status = BugReportStatus.Closed;
         closed.ClosedAt = Now;
 
         (await ViolatedConstraintAsync(db, closedWithoutTime)).Should().Be(rule);
         (await ViolatedConstraintAsync(db, openWithTime)).Should().Be(rule);
+        (await ViolatedConstraintAsync(db, unknownStatus)).Should().Be(rule);
         (await ViolatedConstraintAsync(db, closed)).Should().BeNull();
     }
 
@@ -141,14 +150,21 @@ public class BugReportSchemaTests(PostgresFixture fixture)
         failedWithAnAnswer.ExplanationState = BugExplanationState.Failed;
         failedWithAnAnswer.Explanation = "x";
         failedWithAnAnswer.LooksLikeBug = false;
+        var unknownState = FromTelegram();
+        unknownState.ExplanationState = BugExplanationState.Unknown;
+        var failed = FromTelegram();
+        failed.ExplanationState = BugExplanationState.Failed;
 
         (await ViolatedConstraintAsync(db, doneWithoutText)).Should().Be(rule);
         (await ViolatedConstraintAsync(db, doneWithoutVerdict)).Should().Be(rule);
         (await ViolatedConstraintAsync(db, failedWithAnAnswer)).Should().Be(rule);
+        (await ViolatedConstraintAsync(db, unknownState)).Should().Be(rule);
+        (await ViolatedConstraintAsync(db, failed)).Should().BeNull();
+        (await ViolatedConstraintAsync(db, FromDashboard())).Should().BeNull();
     }
 
     [Fact]
-    public async Task One_telegram_message_files_one_report_and_dashboard_reports_never_collide()
+    public async Task One_reply_address_files_one_report_per_source_and_reports_without_one_never_collide()
     {
         await using var db = await fixture.CreateMigratedContextAsync();
         var first = FromTelegram();
@@ -156,8 +172,9 @@ public class BugReportSchemaTests(PostgresFixture fixture)
         await db.SaveChangesAsync(Ct);
         db.ChangeTracker.Clear();
 
-        (await ViolatedConstraintAsync(db, FromTelegram(first.TelegramMessageId)))
-            .Should().Be(BugReportConfiguration.TelegramMessageIndex);
+        (await ViolatedConstraintAsync(db, FromTelegram(first.ReplyTo)))
+            .Should().Be(BugReportConfiguration.ReplyToIndex);
+        (await ViolatedConstraintAsync(db, FromDashboard(first.ReplyTo))).Should().BeNull();
     }
 
     [Fact]

@@ -4,11 +4,9 @@ namespace Noof.Ledger.Application.Diagnostics.BugReports;
 
 public interface IBugReportStore
 {
-    // Idempotent per (ChatId, MessageId): a redelivered /bug writes nothing and returns the existing number.
-    Task<BugReportSaved> SaveFromTelegramAsync(TelegramBugReport report, CancellationToken cancellationToken);
-
-    // Filed already explained; the record summary and log lines are taken now, best-effort.
-    Task<int> CreateFromDashboardAsync(IntegrityFinding finding, Explanation explanation, CancellationToken cancellationToken);
+    // Idempotent per (Source, ReplyTo) when ReplyTo is set: a redelivered report writes nothing and returns the
+    // existing number. One filed already explained has its record summary and log lines taken now, best-effort.
+    Task<BugReportSaved> FileAsync(NewBugReport report, CancellationToken cancellationToken);
 
     // The oldest Open, Pending report whose next attempt is due. No lease: one host runs one worker.
     Task<BugReportToExplain?> NextDueAsync(DateTimeOffset now, CancellationToken cancellationToken);
@@ -24,7 +22,8 @@ public interface IBugReportStore
 
     Task<IReadOnlyList<BugReportDelivery>> PendingDeliveriesAsync(CancellationToken cancellationToken);
 
-    Task MarkDeliveredAsync(Guid reportId, int replyMessageId, CancellationToken cancellationToken);
+    // deliveredAs is the source's own reference to the reply it sent, opaque like ReplyTo.
+    Task MarkDeliveredAsync(Guid reportId, string deliveredAs, CancellationToken cancellationToken);
 
     // Newest number first.
     Task<IReadOnlyList<BugReportListItem>> ListAsync(bool includeClosed, CancellationToken cancellationToken);

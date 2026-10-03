@@ -123,6 +123,7 @@ MoneyFact
 MonthSummary
 MonthTotal
 MonthTransfer
+NewBugReport
 NewWallet
 OperationTiming
 PasswordVerifyResult
@@ -168,7 +169,6 @@ SlipProblem
 SlowOperationOptions
 StatedCharge
 SystemHealthReport
-TelegramBugReport
 TextFact
 TimedOperations
 TraceEvent
