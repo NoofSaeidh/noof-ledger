@@ -20,7 +20,7 @@ internal sealed class IntegrityHealthCheck(IIntegrityChecks checks, IDatabaseGat
             return HealthOutcome.Warning("Waiting for the database");
 
         var findings = await checks.FindAllAsync(cancellationToken);
-        var bugs = findings.Count(finding => finding.Group == IntegrityGroup.Bug);
+        var bugs = findings.Count(finding => IsBug(finding.Group));
 
         return (bugs, findings.Count) switch
         {
@@ -31,4 +31,11 @@ internal sealed class IntegrityHealthCheck(IIntegrityChecks checks, IDatabaseGat
             (_, var waiting) => HealthOutcome.Warning($"{waiting} waiting on you"),
         };
     }
+
+    static bool IsBug(IntegrityGroup group) => group switch
+    {
+        IntegrityGroup.Bug => true,
+        IntegrityGroup.WaitingOnYou => false,
+        _ => throw new ArgumentOutOfRangeException(nameof(group), group, "No health level for this group."),
+    };
 }

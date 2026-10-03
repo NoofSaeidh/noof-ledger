@@ -2,10 +2,10 @@ using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Application.Diagnostics.Integrity;
 
-// The declaration order is the check order every list of findings, page and explanation follows.
-public enum IntegrityCheck { PostingsDisagree = 0, FactsMismatchKind = 1, StuckInPipeline = 2, NotApplied = 3 }
+// After Unknown, the declaration order is the check order every list of findings, page and explanation follows.
+public enum IntegrityCheck { Unknown = 0, PostingsDisagree = 1, FactsMismatchKind = 2, StuckInPipeline = 3, NotApplied = 4 }
 
-public enum IntegrityGroup { Bug = 0, WaitingOnYou = 1 }
+public enum IntegrityGroup { Unknown = 0, Bug = 1, WaitingOnYou = 2 }
 
 public abstract record IntegrityFact(string Name);
 
