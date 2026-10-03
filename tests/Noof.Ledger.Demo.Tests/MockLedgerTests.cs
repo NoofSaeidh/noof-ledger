@@ -1,6 +1,7 @@
 using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Diagnostics.Integrity;
 using Noof.Ledger.Application.Reporting;
 using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
@@ -200,5 +201,59 @@ public sealed class MockLedgerTests(DemoTestDatabase database) : IClassFixture<D
 
         (await scope.ServiceProvider.GetRequiredService<ILogRetentionSettings>().GetAsync(TestContext.Current.CancellationToken))
             .Should().Be(MockData.LogRetention);
+    }
+
+    // The demo host runs on the real clock, and the checks measure idle time on the clock they are given - so this test
+    // passes the real one. The only finding is the seeded failed exchange; no Bug (spec P-19).
+    [Fact]
+    public async Task The_mock_ledger_has_exactly_the_seeded_findings()
+    {
+        if (database.Unavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await Refresh.RunAsync(database.Admin, database.Name, database.Paths, cancellationToken);
+
+        await using var services = DemoServices.Build(database.ConnectionString, database.Paths, clock: TimeProvider.System);
+        await using var scope = services.CreateAsyncScope();
+        var findings = await scope.ServiceProvider.GetRequiredService<IIntegrityChecks>().FindAllAsync(cancellationToken);
+
+        var finding = findings.Should().ContainSingle().Which;
+        finding.Check.Should().Be(IntegrityCheck.NotApplied);
+        finding.Group.Should().Be(IntegrityGroup.WaitingOnYou);
+        finding.TransactionId.Should().Be(MockData.WaitingTransactionId);
+        finding.Facts.Should().Contain(new TextFact("Waiting for", "A reply to the echo"));
+        finding.Facts.Should().Contain(new TextFact("Reason", "MissingReceivedAmount"));
+    }
+
+    // The failed record, the held receipt and the held slip are dated in the mock month; stamped with the real now at
+    // seeding, they never read as idle over a day, whichever day the pictures are taken.
+    [Fact]
+    public async Task The_month_dated_records_that_could_wait_on_the_operator_were_last_active_at_seeding()
+    {
+        if (database.Unavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await Refresh.RunAsync(database.Admin, database.Name, database.Paths, cancellationToken);
+
+        await using var connection = new NpgsqlConnection(database.ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            "SELECT transaction_id, max(updated_at) FROM categorization_jobs WHERE transaction_id = ANY(@ids) GROUP BY transaction_id",
+            connection);
+        command.Parameters.AddWithValue(
+            "ids", new[] { MockData.FailedTransactionId, MockData.UnconfirmedReceiptTransactionId, MockData.HeldSlipTransactionId });
+
+        var lastActive = new Dictionary<Guid, DateTimeOffset>();
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+                lastActive[reader.GetGuid(0)] = reader.GetFieldValue<DateTimeOffset>(1);
+        }
+
+        lastActive.Keys.Should().BeEquivalentTo(
+            new[] { MockData.FailedTransactionId, MockData.UnconfirmedReceiptTransactionId, MockData.HeldSlipTransactionId });
+        lastActive.Values.Should().AllSatisfy(at => at.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromMinutes(10)));
     }
 }

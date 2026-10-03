@@ -32,6 +32,7 @@ internal static class MockDataWriter
         foreach (var transfer in MockData.Transfers)
             await WriteTransferAsync(db, transfer, ++messageId, wallets, categories, cancellationToken);
         await WriteForeignSpendingAsync(db, MockData.ForeignSpending, ++messageId, wallets, categories, cancellationToken);
+        await WriteWaitingRecordAsync(db, MockData.Waiting, ++messageId, cancellationToken);
 
         await WriteTraceAsync(db, cancellationToken);
         await WriteReceiptTracesAsync(db, cancellationToken);
@@ -40,6 +41,7 @@ internal static class MockDataWriter
         await WriteUserAsync(services, cancellationToken);
         await WriteSecretsAsync(services.GetRequiredService<ISecretStore>(), cancellationToken);
         await WriteBackupRunAsync(db, cancellationToken);
+        await WriteJobStampsAsync(db, cancellationToken);
     }
 
     static async Task<Dictionary<string, Guid>> WriteWalletsAsync(
@@ -242,6 +244,57 @@ internal static class MockDataWriter
         await LedgerPostings.RewriteAsync(db, transaction, stated: null, transfer: null, cancellationToken);
         await RevisionLog.AppendAsync(
             db, transaction, RevisionKind.Initial, null, TransactionStatus.Captured, transaction.OccurredAt.AddSeconds(2), cancellationToken);
+    }
+
+    // Created two days before the real now: the integrity checks measure idle time against the host's own clock, as the
+    // Backups check measures a backup's age (WriteBackupRunAsync), so a record dated in the mock month could not wait
+    // "over a day" on every day the pictures are taken. Kept an Expense, as a failed capture keeps its kind.
+    static async Task WriteWaitingRecordAsync(LedgerDbContext db, MockWaitingRecord record, int messageId, CancellationToken cancellationToken)
+    {
+        db.Transactions.Add(new Transaction
+        {
+            Id = record.Id,
+            WalletId = null,
+            Kind = TransactionKind.Expense,
+            RawText = record.RawText,
+            CaptureKind = CaptureKind.Text,
+            Status = TransactionStatus.Failed,
+            FailureReason = record.Reason,
+            TimeZoneId = MockData.TimeZoneId,
+            OccurredAt = record.OccurredAt,
+            OccurredOn = record.Day,
+            TelegramChatId = MockData.TelegramChatId,
+            TelegramMessageId = messageId,
+            BotMessageId = 10_000 + messageId,
+            CreatedAt = DateTimeOffset.UtcNow.AddDays(-2),
+        });
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    // The failed record, the held receipt and the held slip are dated in the mock month and would read as Waiting on you
+    // or not depending on the day the pictures are taken. A job touched at the real now keeps each of them active.
+    static async Task WriteJobStampsAsync(LedgerDbContext db, CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        db.CategorizationJobs.Add(new CategorizationJob
+        {
+            Id = MockData.Id(5900),
+            TransactionId = MockData.FailedTransactionId,
+            Kind = JobKind.Categorize,
+            Status = JobStatus.Failed,
+            AttemptCount = 8,
+            RunAfter = now,
+            LastError = "The model call failed.",
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await db.SaveChangesAsync(cancellationToken);
+
+        Guid[] held = [MockData.UnconfirmedReceiptTransactionId, MockData.HeldSlipTransactionId];
+        await db.CategorizationJobs
+            .Where(job => held.Contains(job.TransactionId) && job.Kind == JobKind.ExtractReceipt)
+            .ExecuteUpdateAsync(set => set.SetProperty(job => job.UpdatedAt, now), cancellationToken);
     }
 
     static Transaction NewCompletedRecord(Guid id, Guid walletId, TransactionKind kind, string rawText, DateOnly day, int messageId)
