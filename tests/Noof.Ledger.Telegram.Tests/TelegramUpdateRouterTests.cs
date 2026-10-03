@@ -1,9 +1,11 @@
 ﻿using AwesomeAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Noof.Ledger.Application.Capture;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Diagnostics.BugReports;
 using Noof.Ledger.Application.Editing;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Application.Secrets;
@@ -38,34 +40,54 @@ public class TelegramUpdateRouterTests
         receiptStore.GetByTransactionAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((ReceiptView?)null);
         receiptStore.GetVerificationUrlAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((string?)null);
         var logger = new CapturingLogger<TelegramUpdateRouter>();
-        var router = new TelegramUpdateRouter(captureStore, chatNotifier, new TelegramOwnerGate(secretStore),
+        var ownerGate = new TelegramOwnerGate(secretStore);
+        var router = new TelegramUpdateRouter(captureStore, chatNotifier, ownerGate,
             new RecordActionHandler(editor, store, chatNotifier, Echo, receiptStore),
-            new CorrectionHandler(editor, chatNotifier, Echo, receiptStore, VerificationUrl), Echo,
-            Substitute.For<ISystemHealth>(), VerificationUrl, logger);
+            new CorrectionHandler(editor, chatNotifier, Echo, receiptStore, VerificationUrl),
+            new BugCommandHandler(ownerGate, editor, Substitute.For<IBugReportStore>(), chatNotifier, NullLogger<BugCommandHandler>.Instance),
+            Echo, Substitute.For<ISystemHealth>(), VerificationUrl, logger);
 
         return new Harness(router, captureStore, chatNotifier, editor, store, logger, receiptStore);
     }
 
-    static (TelegramUpdateRouter Router, IChatNotifier ChatNotifier, ISystemHealth SystemHealth, ISecretStore SecretStore)
-        CreateHealthHarness(SecretResult ownerSecret)
+    sealed record GateHarness(
+        TelegramUpdateRouter Router, IChatNotifier ChatNotifier, ISystemHealth SystemHealth, ISecretStore SecretStore,
+        IBugReportStore BugStore, ICaptureStore CaptureStore, IRecordEditor Editor);
+
+    static readonly SecretResult OwnedBy111 = new(SecretState.Present, "111");
+    static readonly SecretResult Unowned = new(SecretState.Missing, null);
+
+    static GateHarness CreateGateHarness(SecretResult ownerSecret)
     {
         var secretStore = Substitute.For<ISecretStore>();
         secretStore.GetAsync(SecretKeys.TelegramOwnerChatId, Arg.Any<CancellationToken>()).Returns(ownerSecret);
         var captureStore = Substitute.For<ICaptureStore>();
         var chatNotifier = Substitute.For<IChatNotifier>();
         var editor = Substitute.For<IRecordEditor>();
+        editor.FindByBotMessageAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns((EchoTarget?)null);
+        editor.FindByUserMessageAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns((EchoTarget?)null);
         var store = Substitute.For<ICategorizationStore>();
         var receiptStore = Substitute.For<IReceiptStore>();
         receiptStore.GetByTransactionAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((ReceiptView?)null);
         receiptStore.GetVerificationUrlAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((string?)null);
+        var bugStore = Substitute.For<IBugReportStore>();
+        bugStore.SaveFromTelegramAsync(Arg.Any<TelegramBugReport>(), Arg.Any<CancellationToken>()).Returns(new BugReportSaved(3, Created: true));
         var systemHealth = Substitute.For<ISystemHealth>();
-        var logger = new CapturingLogger<TelegramUpdateRouter>();
-        var router = new TelegramUpdateRouter(captureStore, chatNotifier, new TelegramOwnerGate(secretStore),
+        var ownerGate = new TelegramOwnerGate(secretStore);
+        var router = new TelegramUpdateRouter(captureStore, chatNotifier, ownerGate,
             new RecordActionHandler(editor, store, chatNotifier, Echo, receiptStore),
-            new CorrectionHandler(editor, chatNotifier, Echo, receiptStore, VerificationUrl), Echo,
-            systemHealth, VerificationUrl, logger);
+            new CorrectionHandler(editor, chatNotifier, Echo, receiptStore, VerificationUrl),
+            new BugCommandHandler(ownerGate, editor, bugStore, chatNotifier, NullLogger<BugCommandHandler>.Instance),
+            Echo, systemHealth, VerificationUrl, new CapturingLogger<TelegramUpdateRouter>());
 
-        return (router, chatNotifier, systemHealth, secretStore);
+        return new GateHarness(router, chatNotifier, systemHealth, secretStore, bugStore, captureStore, editor);
+    }
+
+    static (TelegramUpdateRouter Router, IChatNotifier ChatNotifier, ISystemHealth SystemHealth, ISecretStore SecretStore)
+        CreateHealthHarness(SecretResult ownerSecret)
+    {
+        var harness = CreateGateHarness(ownerSecret);
+        return (harness.Router, harness.ChatNotifier, harness.SystemHealth, harness.SecretStore);
     }
 
     static Update TextMessage(long chatId, int messageId, string text, DateTime date) => new()
@@ -895,5 +917,142 @@ public class TelegramUpdateRouterTests
 
         await captureStore.Received(1).CaptureAsync(
             Arg.Is<CapturedMessage>(m => m.Text == "/healthclub 500"), "Europe/Belgrade", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task The_owners_bug_command_files_a_report_answers_it_and_is_never_captured()
+    {
+        var harness = CreateGateHarness(OwnedBy111);
+
+        await harness.Router.HandleAsync(
+            TextMessage(111L, 5, "/bug the amount is wrong", DateTime.UtcNow), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await harness.BugStore.Received(1).SaveFromTelegramAsync(
+            new TelegramBugReport(111L, 5, "the amount is wrong", null), Arg.Any<CancellationToken>());
+        await harness.ChatNotifier.Received(1).ReplyToBugReportAsync(111L, 5, "Bug report #3 saved.", null, Arg.Any<CancellationToken>());
+        await harness.CaptureStore.DidNotReceiveWithAnyArgs().CaptureAsync(default!, default!, Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData("/BUG@other_bot text", "text")]
+    [InlineData("/bug@noof_ledger_bot", null)]
+    [InlineData("/bug first line\nsecond line", "first line\nsecond line")]
+    public async Task Every_form_of_the_bug_command_files_a_report_with_its_text(string text, string? reportText)
+    {
+        var harness = CreateGateHarness(OwnedBy111);
+
+        await harness.Router.HandleAsync(TextMessage(111L, 6, text, DateTime.UtcNow), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await harness.BugStore.Received(1).SaveFromTelegramAsync(
+            new TelegramBugReport(111L, 6, reportText, null), Arg.Any<CancellationToken>());
+        await harness.CaptureStore.DidNotReceiveWithAnyArgs().CaptureAsync(default!, default!, Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData("/bugfix 500")]
+    [InlineData("/bugs")]
+    public async Task Text_that_only_starts_like_the_bug_command_is_captured_as_spending(string text)
+    {
+        var harness = CreateGateHarness(OwnedBy111);
+
+        await harness.Router.HandleAsync(TextMessage(111L, 7, text, DateTime.UtcNow), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await harness.CaptureStore.Received(1).CaptureAsync(
+            Arg.Is<CapturedMessage>(m => m.Text == text), "Europe/Belgrade", Arg.Any<CancellationToken>());
+        harness.BugStore.ReceivedCalls().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_bug_replying_to_an_echo_files_a_linked_report_and_never_a_correction()
+    {
+        var harness = CreateGateHarness(OwnedBy111);
+        var transactionId = Guid.NewGuid();
+        harness.Editor.FindByBotMessageAsync(111L, 42, Arg.Any<CancellationToken>()).Returns(new EchoTarget(transactionId, 42));
+
+        await harness.Router.HandleAsync(ReplyTo(111L, 8, 42, "/bug сумма не та"), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await harness.BugStore.Received(1).SaveFromTelegramAsync(
+            new TelegramBugReport(111L, 8, "сумма не та", transactionId), Arg.Any<CancellationToken>());
+        await harness.Editor.DidNotReceiveWithAnyArgs().RequestCorrectionAsync(default, default!, default, default, Arg.Any<CancellationToken>());
+        await harness.CaptureStore.DidNotReceiveWithAnyArgs().CaptureAsync(default!, default!, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_bug_replying_to_the_bots_own_saved_message_files_an_unlinked_report_and_never_a_correction()
+    {
+        var harness = CreateGateHarness(OwnedBy111);
+
+        await harness.Router.HandleAsync(ReplyTo(111L, 9, 13, "/bug and another thing"), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await harness.BugStore.Received(1).SaveFromTelegramAsync(
+            new TelegramBugReport(111L, 9, "and another thing", null), Arg.Any<CancellationToken>());
+        await harness.Editor.DidNotReceiveWithAnyArgs().RequestCorrectionAsync(default, default!, default, default, Arg.Any<CancellationToken>());
+        await harness.CaptureStore.DidNotReceiveWithAnyArgs().CaptureAsync(default!, default!, Arg.Any<CancellationToken>());
+        // The one lookup is the handler's own: the router never offered this reply to the correction path.
+        await harness.Editor.Received(1).FindByBotMessageAsync(111L, 13, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_strangers_bug_command_files_nothing_and_gets_no_reply()
+    {
+        var harness = CreateGateHarness(OwnedBy111);
+
+        await harness.Router.HandleAsync(TextMessage(999L, 5, "/bug x", DateTime.UtcNow), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        harness.BugStore.ReceivedCalls().Should().BeEmpty();
+        harness.ChatNotifier.ReceivedCalls().Should().BeEmpty();
+        await harness.CaptureStore.DidNotReceiveWithAnyArgs().CaptureAsync(default!, default!, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_bug_command_on_an_unowned_bot_never_claims_it()
+    {
+        var harness = CreateGateHarness(Unowned);
+
+        await harness.Router.HandleAsync(TextMessage(111L, 5, "/bug x", DateTime.UtcNow), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await harness.SecretStore.DidNotReceive().TrySetIfMissingAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        harness.BugStore.ReceivedCalls().Should().BeEmpty();
+        harness.ChatNotifier.ReceivedCalls().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_photo_captioned_bug_is_still_a_receipt()
+    {
+        var harness = CreateGateHarness(OwnedBy111);
+
+        await harness.Router.HandleAsync(PhotoMessage(111L, 5, "photo-1", "/bug"), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await harness.CaptureStore.Received(1).CaptureReceiptAsync(
+            Arg.Is<CapturedReceipt>(r => r.Caption == "/bug" && r.TelegramFileId == "photo-1"), "Europe/Belgrade", Arg.Any<CancellationToken>());
+        harness.BugStore.ReceivedCalls().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task The_owners_close_report_press_reaches_the_bug_handler_not_the_record_buttons()
+    {
+        var harness = CreateGateHarness(OwnedBy111);
+        harness.BugStore.SetStatusAsync(12, BugReportStatus.Closed, Arg.Any<CancellationToken>()).Returns(true);
+
+        await harness.Router.HandleAsync(ButtonPress(111L, 60, "bug:close:12"), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await harness.ChatNotifier.Received(1).AnswerActionAsync("cb-1", Arg.Any<CancellationToken>());
+        await harness.ChatNotifier.Received(1).EditAsync(111L, 60,
+            Arg.Is<EchoMessage>(echo => echo.Text == "Bug report #12 closed." && echo.Actions.Count == 0), Arg.Any<CancellationToken>());
+        await harness.Editor.DidNotReceiveWithAnyArgs().FindByBotMessageAsync(default, default, Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData("bug:close:abc")]
+    [InlineData("bug:close:12")]
+    public async Task A_strangers_bug_press_on_an_unowned_bot_is_never_answered_and_never_claims_it(string data)
+    {
+        var harness = CreateGateHarness(Unowned);
+
+        await harness.Router.HandleAsync(ButtonPress(999L, 60, data), "Europe/Belgrade", TestContext.Current.CancellationToken);
+
+        await harness.SecretStore.DidNotReceive().TrySetIfMissingAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        harness.ChatNotifier.ReceivedCalls().Should().BeEmpty();
+        harness.BugStore.ReceivedCalls().Should().BeEmpty();
     }
 }
