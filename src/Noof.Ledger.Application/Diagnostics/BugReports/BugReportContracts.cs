@@ -8,9 +8,13 @@ public enum BugReportStatus { Unknown = 0, Open = 1, Closed = 2 }
 
 public enum BugExplanationState { Unknown = 0, Pending = 1, Done = 2, Failed = 3 }
 
-public sealed record TelegramBugReport(long ChatId, int MessageId, string? Text, Guid? TransactionId);
+// ReplyTo is the source's own address for its reply, opaque to everything but that source; null when the source
+// expects none. A report filed with a Finding and an Explanation is filed already explained.
+public sealed record NewBugReport(
+    BugReportSource Source, string? ReplyTo, string? Text, Guid? TransactionId, IntegrityFinding? Finding,
+    Explanation? Explanation);
 
-// Created is false when a redelivered /bug found the report it had already filed.
+// Created is false when a redelivered report found the one it had already filed.
 public sealed record BugReportSaved(int Number, bool Created);
 
 // Null Findings were not collected (CollectionFailures names why) - never an empty list standing in for them.
@@ -22,8 +26,8 @@ public sealed record BugReportToExplain(
 
 // A null FindingsCount means the findings were not collected.
 public sealed record BugReportDelivery(
-    Guid Id, int Number, long ChatId, int MessageId, BugExplanationState State, string? Explanation, bool? LooksLikeBug,
-    bool Linked, int? FindingsCount);
+    Guid Id, int Number, BugReportSource Source, string ReplyTo, BugExplanationState State, string? Explanation,
+    bool? LooksLikeBug, bool Linked, int? FindingsCount);
 
 public sealed record BugReportListItem(
     int Number, DateTimeOffset CreatedAt, BugReportSource Source, BugReportStatus Status, string? Text, Guid? TransactionId,
@@ -32,7 +36,7 @@ public sealed record BugReportListItem(
 public sealed record BugReportLogLine(
     DateTimeOffset LoggedAt, LogSeverity Level, string? Source, string Message, string? Exception, string? PropertiesJson);
 
-// Everything the Markdown and /bugs/{number} show. It carries no Telegram id, so neither can print one, and its free
+// Everything the Markdown and /bugs/{number} show. It carries no ReplyTo address, so neither can print one, and its free
 // text is already URL-stripped. Revisions are read live ([] when unlinked); a null list was not collected - or, for
 // FindingsNow, the report is unlinked or the live check failed.
 public sealed record BugReportDocument(
