@@ -122,7 +122,8 @@ public static class PersistenceRegistration
         await connection.CloseAsync();
     }
 
-    // The number of migrations the database has not applied; throws what opening the connection throws.
+    // The number of migrations the database has not applied. A missing database or history table counts every
+    // migration as pending (Npgsql swallows 3D000 and 42P01); it throws only when the server cannot be reached.
     public static async Task<int> CountPendingNoofMigrationsAsync(
         this IServiceProvider services, CancellationToken cancellationToken = default)
     {
