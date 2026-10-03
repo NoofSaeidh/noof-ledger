@@ -171,7 +171,7 @@ public class FactsMismatchKindCheckTests(PostgresFixture fixture)
             new TextFact("Fee line currency", "EUR"), new TextFact("Wallet currency", "RSD"));
     }
 
-    // Spec §1: exactly one, not "at least one" as the oracle's existence test read it.
+    // Spec §1: a fee leg has exactly one fee line, not merely at least one.
     [Fact]
     public async Task A_fee_leg_with_a_second_fee_line_is_one_finding()
     {
