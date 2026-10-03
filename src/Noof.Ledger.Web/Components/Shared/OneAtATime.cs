@@ -11,8 +11,9 @@ internal sealed class OneAtATime
 
     public bool Busy { get; private set; }
 
-    // False when the token is cancelled before or while the operation runs: the page is going away, and an
-    // OperationCanceledException escaping an event handler would end the whole circuit.
+    // False when the token is cancelled before or while the operation runs: the page has gone, so whatever the abandoned
+    // operation then throws - a cancellation, or a clipboard, database or model call failing late - has nowhere to be
+    // shown, and escaping an event handler it would end the whole circuit, the page the operator moved to included.
     public async Task<bool> RunAsync(Func<CancellationToken, Task> operation, CancellationToken cancellationToken)
     {
         try
@@ -30,7 +31,7 @@ internal sealed class OneAtATime
             await operation(cancellationToken);
             return !cancellationToken.IsCancellationRequested;
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
         {
             return false;
         }

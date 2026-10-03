@@ -223,6 +223,23 @@ public sealed class FindingExplanationFlowTests
     }
 
     [Fact]
+    public async Task A_model_call_that_fails_after_the_page_has_gone_lets_nothing_escape()
+    {
+        var modelCall = new TaskCompletionSource<Explanation>();
+        explainer.ExplainAsync(Request, Arg.Any<CancellationToken>()).Returns(modelCall.Task);
+        var flow = Flow();
+        using var leaving = new CancellationTokenSource();
+
+        var explaining = flow.ExplainAsync(0, Finding, leaving.Token);
+        await leaving.CancelAsync();
+        modelCall.SetException(new ModelCallException(ModelFailureKind.Transient, "The connection dropped."));
+        await explaining;
+
+        flow.StateOf(0).Should().Be(FindingExplanationState.Idle);
+        flow.Busy.Should().BeFalse();
+    }
+
+    [Fact]
     public void A_finding_links_to_its_records_trace_else_to_its_wallet_else_nowhere()
     {
         FindingExplanationFlow.LinkFor(Finding)
