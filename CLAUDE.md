@@ -79,6 +79,9 @@ How to run each, and the trial tally, are in `docs/REVIEWS.md`.
 - **No XML doc blocks** on private or internal members. No `#region`. No commented-out code — git remembers it.
 - **Names carry the meaning.** A well-named method needs no header comment. If you cannot name it clearly, the method is doing too much.
 - **Small and focused.** Short methods, one reason to change per class. A long file is a design signal, not a formatting problem.
+- **A new enum's `0` is `Unknown`** (or `None` where "nothing" is the honest name), never a real value, so a default
+  or missing value is never mistaken for one *(operator, 2026-10-03)*. Enums stored before Phase 8a keep their
+  values — `docs/backlog/zero-value-for-existing-enums.md`.
 
 **Use modern C# — this targets .NET 10, so write like it:**
 

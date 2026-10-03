@@ -83,6 +83,14 @@ public class FindingTextTests
     public void Each_group_has_its_label(IntegrityGroup group, string label) =>
         Text.GroupLabel(group).Should().Be(label);
 
+    [Fact]
+    public void An_unknown_check_or_group_has_no_text()
+    {
+        FluentActions.Invoking(() => Text.Title(IntegrityCheck.Unknown)).Should().Throw<ArgumentOutOfRangeException>();
+        FluentActions.Invoking(() => Text.Description(IntegrityCheck.Unknown)).Should().Throw<ArgumentOutOfRangeException>();
+        FluentActions.Invoking(() => Text.GroupLabel(IntegrityGroup.Unknown)).Should().Throw<ArgumentOutOfRangeException>();
+    }
+
     [Theory]
     [InlineData("-250", "-250.00 RSD")]
     [InlineData("-250.0000", "-250.00 RSD")]
