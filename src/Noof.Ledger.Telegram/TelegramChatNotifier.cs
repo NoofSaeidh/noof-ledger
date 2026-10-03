@@ -43,6 +43,19 @@ internal sealed class TelegramChatNotifier(TelegramClientHandle clientHandle, IO
         return message.Id;
     }
 
+    public async Task<int> ReplyToBugReportAsync(
+        long chatId, int replyToMessageId, string text, int? closeReportNumber, CancellationToken cancellationToken)
+    {
+        using var timing = timer.Start(logger, TimedOperations.TelegramSendMessage);
+        // The operator may delete the /bug message before its answer arrives. Without AllowSendingWithoutReply Telegram
+        // refuses the reply, and the worker would retry it every tick for ever.
+        var message = await Client().SendMessage(chatId, text,
+            replyParameters: new ReplyParameters { MessageId = replyToMessageId, AllowSendingWithoutReply = true },
+            replyMarkup: closeReportNumber is { } number ? new InlineKeyboardMarkup(BugReportButtons.Close(number)) : null,
+            cancellationToken: cancellationToken);
+        return message.Id;
+    }
+
     public async Task AnswerActionAsync(string actionId, CancellationToken cancellationToken)
     {
         using var timing = timer.Start(logger, TimedOperations.TelegramAnswerCallback);
