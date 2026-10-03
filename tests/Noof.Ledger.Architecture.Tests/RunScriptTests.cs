@@ -204,7 +204,8 @@ public class RunScriptTests
 
     // Spec P-17: the verb runs the Release host without a launch profile (Production, no build chatter), writes under
     // this repo's artifacts folder whatever the shell's current directory, and answers with its own line and exit code
-    // (1 PostgreSQL down or not migrated, 2 usage) - the checked-call helper would add a second, red line. Source text:
+    // (1 PostgreSQL down or not migrated; the verb's usage 2 never arrives, run.ps1 answers a usage error itself with
+    // 1) - the checked-call helper would add a second, red line. Source text:
     // running it for real reads noof_ledger.
     [Fact]
     public void Bugs_export_runs_the_Release_host_and_passes_its_exit_code_through()

@@ -371,8 +371,9 @@ closed ones too with --all - to one Markdown file, artifacts\bug-reports\<yyyy-M
 Claude Code skill runs exactly this.
 
 It only reads the database, so it works with the app stopped, and it waits for nothing: PostgreSQL
-down, or a database not migrated yet, ends it with one line saying so and exit code 1 (2 for a usage
-error). Closing a report is done on the dashboard, on /bugs.
+down, or a database not migrated yet, ends it with one line saying so and exit code 1. A usage error
+exits 1 too: run.ps1 rejects it before building (the verb itself would exit 2). Closing a report is done
+on the dashboard, on /bugs.
 
 The file holds the operator's own financial data: never commit it, and never paste it into a public
 issue.
@@ -686,8 +687,9 @@ switch ($CommandName) {
         $verb = @('bugs', 'export')
         if ($exportOptions -ccontains '--all') { $verb += '--all' }
         $verb += @('--output', (Join-Path $Root 'artifacts\bug-reports'))
-        # The verb's own line already says what went wrong, and its exit code (1 PostgreSQL down or not migrated,
-        # 2 usage) is the answer; the checked-call helper would only add a second, red line.
+        # The verb's own line already says what went wrong, and its exit code (1 PostgreSQL down or not migrated;
+        # never its usage 2, which the check above answers first with 1) is the answer; the checked-call helper
+        # would only add a second, red line.
         dotnet run --project (Join-Path $Root 'src\Noof.Ledger.Host') -c Release --no-launch-profile -- @verb
         exit $LASTEXITCODE
     }
