@@ -72,7 +72,7 @@ else
 
         <section id="bug-report-explanation" class="mt-6">
             <MudText HtmlTag="h2" Typo="Typo.h6">Explanation</MudText>
-            <MudText Typo="Typo.body2" Style="white-space: pre-wrap;">@ExplanationText(document)</MudText>
+            <MudText Typo="Typo.body2" Style="white-space: pre-wrap;">@BugReportText.Explanation(document.ExplanationState, document.Explanation)</MudText>
             @if (document.LooksLikeBug == true)
             {
                 <MudText Typo="Typo.body2" Class="mt-2">Looks like a bug in the app.</MudText>
@@ -262,14 +262,8 @@ else
     }, cancellation.Token);
 
     static string Meta(BugReportDocument report) =>
-        $"Filed {report.CreatedAt.ToUniversalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)} UTC · {report.Source} · {report.Status}";
-
-    static string ExplanationText(BugReportDocument report) => report.ExplanationState switch
-    {
-        BugExplanationState.Done => report.Explanation ?? string.Empty,
-        BugExplanationState.Failed => "Couldn't explain it.",
-        _ => "Not explained yet.",
-    };
+        $"Filed {report.CreatedAt.ToUniversalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)} UTC"
+            + $" · {BugReportText.Source(report.Source)} · {BugReportText.Status(report.Status)}";
 
     public void Dispose()
     {

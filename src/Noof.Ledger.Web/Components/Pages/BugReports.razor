@@ -88,7 +88,7 @@ else
                         </td>
                         <td>
                             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
-                                     Color="@(report.Status == BugReportStatus.Open ? Color.Warning : Color.Default)">@report.Status</MudChip>
+                                     Color="@(report.Status == BugReportStatus.Open ? Color.Warning : Color.Default)">@BugReportText.Status(report.Status)</MudChip>
                         </td>
                     </tr>
                 }

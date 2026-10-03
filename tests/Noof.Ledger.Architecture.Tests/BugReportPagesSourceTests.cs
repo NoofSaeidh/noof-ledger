@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using AwesomeAssertions;
 
 namespace Noof.Ledger.Architecture.Tests;
@@ -37,6 +38,19 @@ public class BugReportPagesSourceTests
         source.Should().Contain("OneAtATime", "the circuit shares one LedgerDbContext");
         foreach (var component in PopoverComponents)
             source.Should().NotContain(component, "the layout renders statically, so feedback is an inline MudAlert");
+    }
+
+    // R-1: an enum's ToString() would print Unknown as if it were a value; BugReportText refuses it instead.
+    [Theory]
+    [InlineData("BugReports.razor")]
+    [InlineData("BugReport.razor")]
+    public void Each_page_prints_a_reports_source_status_and_explanation_through_their_text_never_the_enum(string fileName)
+    {
+        var source = Page(fileName);
+
+        Regex.Matches(source, @"[@{]\(?\s*(report|document)\.(Source|Status|ExplanationState)\s*\)?\s*[}<]")
+            .Select(match => match.Value).Should().BeEmpty();
+        source.Should().Contain("BugReportText.");
     }
 
     [Fact]
