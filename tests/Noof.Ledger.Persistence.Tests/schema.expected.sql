@@ -144,6 +144,36 @@ CREATE TABLE public.balance_checks (
 );
 
 
+CREATE TABLE public.bug_reports (
+    id uuid NOT NULL,
+    number integer GENERATED ALWAYS AS IDENTITY,
+    created_at timestamptz NOT NULL,
+    source integer NOT NULL,
+    text text,
+    transaction_id uuid,
+    telegram_chat_id bigint,
+    telegram_message_id integer,
+    status integer NOT NULL,
+    closed_at timestamptz,
+    snapshot_at timestamptz,
+    record_summary text,
+    findings jsonb,
+    log_lines jsonb,
+    collection_failures text,
+    explanation_state integer NOT NULL,
+    explanation_attempts integer NOT NULL,
+    explanation_next_at timestamptz NOT NULL,
+    explanation text,
+    looks_like_bug boolean,
+    reply_message_id integer,
+    CONSTRAINT "PK_bug_reports" PRIMARY KEY (id),
+    CONSTRAINT ck_bug_reports_closed_at_matches_status CHECK ((status = 1) = (closed_at IS NOT NULL)),
+    CONSTRAINT ck_bug_reports_explanation_matches_state CHECK ((explanation_state = 1) = (explanation IS NOT NULL AND looks_like_bug IS NOT NULL)),
+    CONSTRAINT ck_bug_reports_telegram_ids_match_source CHECK ((source = 0 AND telegram_chat_id IS NOT NULL AND telegram_message_id IS NOT NULL) OR (source = 1 AND telegram_chat_id IS NULL AND telegram_message_id IS NULL AND reply_message_id IS NULL)),
+    CONSTRAINT "FK_bug_reports_transactions_transaction_id" FOREIGN KEY (transaction_id) REFERENCES public.transactions (id) ON DELETE RESTRICT
+);
+
+
 CREATE TABLE public.categorization_jobs (
     id uuid NOT NULL,
     transaction_id uuid NOT NULL,
@@ -318,6 +348,15 @@ CREATE INDEX "IX_app_log_transaction_id" ON public.app_log (transaction_id);
 
 
 CREATE INDEX "IX_balance_checks_wallet_id" ON public.balance_checks (wallet_id);
+
+
+CREATE UNIQUE INDEX "IX_bug_reports_number" ON public.bug_reports (number);
+
+
+CREATE UNIQUE INDEX "IX_bug_reports_telegram_chat_id_telegram_message_id" ON public.bug_reports (telegram_chat_id, telegram_message_id) WHERE telegram_chat_id IS NOT NULL;
+
+
+CREATE INDEX "IX_bug_reports_transaction_id" ON public.bug_reports (transaction_id);
 
 
 CREATE INDEX "IX_categories_parent_id" ON public.categories (parent_id);
