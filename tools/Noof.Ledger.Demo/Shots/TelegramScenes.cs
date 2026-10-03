@@ -25,6 +25,8 @@ internal static class TelegramScenes
     // The host's own appsettings.json value; the echo only needs it to be a valid prefix.
     static readonly FiscalVerificationUrlOptions FiscalLinks = new() { VerificationUrlPrefix = "https://suf.purs.gov.rs/v/?vl=" };
 
+    const string BugText = "/bug the amount is wrong";
+
     public static IRecordEcho CreateEcho()
     {
         using var services = new ServiceCollection().AddNoofApplication(new SlowOperationOptions(), FiscalLinks).BuildServiceProvider();
@@ -38,6 +40,14 @@ internal static class TelegramScenes
         {
             Lines = [Line("Dinner", 42.00m, CurrencyCode.Eur, "Restaurants", "Walter")],
             WalletBalances = [new Money(5660.00m, CurrencyCode.Eur)],
+        };
+        var waitingExchange = Expense("exchanged 100 eur for dinars", string.Empty, CurrencyCode.Rsd, 0m, []) with
+        {
+            Status = TransactionStatus.Failed,
+            Kind = TransactionKind.Transfer,
+            WalletCurrency = null,
+            WalletBalances = null,
+            FailureReason = RecordFailureReason.MissingReceivedAmount,
         };
 
         return
@@ -141,14 +151,7 @@ internal static class TelegramScenes
             new("exchange-question", "An exchange with no amount received",
             [
                 Operator("exchanged 100 eur for dinars", "10:30"),
-                Reply(echo.Compose(Expense("exchanged 100 eur for dinars", string.Empty, CurrencyCode.Rsd, 0m, []) with
-                {
-                    Status = TransactionStatus.Failed,
-                    Kind = TransactionKind.Transfer,
-                    WalletCurrency = null,
-                    WalletBalances = null,
-                    FailureReason = RecordFailureReason.MissingReceivedAmount,
-                }), "10:30"),
+                Reply(echo.Compose(waitingExchange), "10:30"),
             ]),
             ReceiptScene("receipt-qr", "A receipt photo, read from its fiscal QR", echo, MockData.ReceiptTransactionId, "17:42", 172096.06m),
             ReceiptScene("receipt-vision", "The tax site was down, so the lines were read from the photo", echo,
@@ -182,6 +185,11 @@ internal static class TelegramScenes
             [
                 Operator("/health", "08:00"),
                 new(ChatSide.Bot, HealthReplyFormatter.Format(Health), "08:00"),
+            ]),
+            new("bug", "/bug",
+            [
+                Operator(BugText, "10:31") with { Quote = echo.Compose(waitingExchange).Text },
+                new(ChatSide.Bot, BugCommandHandler.SavedText(4), "10:31", Quote: BugText),
             ]),
         ];
     }
