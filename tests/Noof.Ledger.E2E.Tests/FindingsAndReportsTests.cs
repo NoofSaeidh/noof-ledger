@@ -1,8 +1,12 @@
 using System.Globalization;
+using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Playwright;
 using Microsoft.Playwright.Xunit.v3;
 using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence;
+using Npgsql;
+using NpgsqlTypes;
 
 namespace Noof.Ledger.E2E.Tests;
 
@@ -55,6 +59,70 @@ public sealed class FindingsAndReportsTests(CookieModeHostFixture fixture) : Pag
         await Expect(Page.Locator($"#explain-{index}")).ToBeEnabledAsync();
     }
 
+    [Fact]
+    public async Task The_bug_reports_page_lists_open_reports_and_All_adds_the_closed_ones()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip(NoDatabase);
+
+        var marker = Guid.NewGuid().ToString("N");
+        var longText = $"open report {marker} " + new string('x', 100);
+        var open = await SeedDashboardReportAsync(longText);
+        var closed = await SeedDashboardReportAsync($"closed report {marker}", closed: true);
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/bugs");
+
+        var openRow = Page.Locator($"#bug-{open}");
+        await Expect(openRow).ToContainTextAsync($"#{open}");
+        await Expect(openRow).ToContainTextAsync("2026-09-30 10:00 UTC");
+        await Expect(openRow.Locator("td").Nth(2)).ToHaveTextAsync(longText[..80] + "…");
+        await Expect(openRow).ToContainTextAsync("Open");
+        await Expect(Page.Locator($"#bug-{closed}")).ToHaveCountAsync(0);
+        await Expect(Page.Locator("#bugs-filter-open")).ToHaveAttributeAsync("aria-current", "page");
+
+        await Page.ClickAsync("#bugs-filter-all");
+
+        await Expect(Page.Locator($"#bug-{closed}")).ToContainTextAsync("Closed");
+        await Expect(Page.Locator("#bugs-filter-all")).ToHaveAttributeAsync("aria-current", "page");
+    }
+
+    [Fact]
+    public async Task Download_open_reports_saves_one_markdown_file_holding_each_open_report()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip(NoDatabase);
+
+        var text = $"download me {Guid.NewGuid():N}";
+        var number = await SeedDashboardReportAsync(text);
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/bugs");
+        await Expect(Page.Locator($"#bug-{number}")).ToBeVisibleAsync();
+
+        var download = await Page.RunAndWaitForDownloadAsync(() => Page.ClickAsync("#bugs-download"));
+
+        download.SuggestedFilename.Should().MatchRegex(@"^bug-reports-\d{4}-\d{2}-\d{2}-\d{4}\.md$");
+        var markdown = await File.ReadAllTextAsync(await download.PathAsync(), Ct);
+        markdown.Should().StartWith("# noof-ledger bug reports\n");
+        markdown.Should().Contain($"## Bug report #{number}");
+        markdown.Should().Contain(text);
+    }
+
+    [Fact]
+    public async Task The_nav_bar_links_to_bug_reports_and_marks_it_current_there()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip(NoDatabase);
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/bugs");
+
+        var link = Page.Locator(".noof-appbar a", new PageLocatorOptions { HasText = "Bugs" });
+        await Expect(link).ToHaveAttributeAsync("href", "/bugs");
+        await Expect(link).ToHaveAttributeAsync("aria-current", "page");
+    }
+
     // Created two days before the real now: the host measures a record's idle time on its own clock.
     async Task<Guid> SeedUnansweredExchangeAsync()
     {
@@ -81,6 +149,33 @@ public sealed class FindingsAndReportsTests(CookieModeHostFixture fixture) : Pag
         await db.SaveChangesAsync(Ct);
 
         return id;
+    }
+
+    // A Dashboard report, so no Telegram id is needed; Done, so the check constraints hold. Its time is a fixed literal.
+    async Task<int> SeedDashboardReportAsync(string text, bool closed = false)
+    {
+        var filedAt = new DateTimeOffset(2026, 9, 30, 10, 0, 0, TimeSpan.Zero);
+
+        await using var connection = new NpgsqlConnection(fixture.ConnectionString);
+        await connection.OpenAsync(Ct);
+        await using var command = new NpgsqlCommand(
+            """
+            INSERT INTO bug_reports (id, created_at, source, text, status, closed_at, explanation_state,
+                explanation_attempts, explanation_next_at, explanation, looks_like_bug)
+            VALUES (@id, @filedAt, 1, @text, @status, @closedAt, 1, 0, @filedAt, 'Seeded explanation.', true)
+            RETURNING number
+            """,
+            connection);
+        command.Parameters.Add(new NpgsqlParameter("id", NpgsqlDbType.Uuid) { Value = Guid.NewGuid() });
+        command.Parameters.Add(new NpgsqlParameter("filedAt", NpgsqlDbType.TimestampTz) { Value = filedAt });
+        command.Parameters.Add(new NpgsqlParameter("text", NpgsqlDbType.Text) { Value = text });
+        command.Parameters.Add(new NpgsqlParameter("status", NpgsqlDbType.Integer) { Value = closed ? 1 : 0 });
+        command.Parameters.Add(new NpgsqlParameter("closedAt", NpgsqlDbType.TimestampTz)
+        {
+            Value = closed ? filedAt.AddHours(1) : DBNull.Value,
+        });
+
+        return Convert.ToInt32(await command.ExecuteScalarAsync(Ct), CultureInfo.InvariantCulture);
     }
 
     // Other tests in this class seed findings into the same clone, so a finding is found by its trace link, whose id
