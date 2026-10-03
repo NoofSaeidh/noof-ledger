@@ -285,15 +285,15 @@ public class BugReportExplanationWorkerTests
             .ThrowsAsync(new InvalidOperationException("database unreachable"));
         IReadOnlyList<BugReportDelivery> pending = [Delivery(5, BugExplanationState.Done, looksLikeBug: false)];
         harness.Store.PendingDeliveriesAsync(Arg.Any<CancellationToken>()).Returns(pending, NoDeliveries);
-        harness.ChatNotifier.ReplyToBugReportAsync(111L, 55, Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
-            .Returns(900);
+        harness.ChatNotifier.ReplyToBugReportAsync("reply-to-5", Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
+            .Returns("sent-900");
         var worker = harness.Worker();
 
         var first = await worker.RunTickAsync(Ct);
         var second = await worker.RunTickAsync(Ct);
 
         (first, second).Should().Be((BugReportTickResult.Failed, BugReportTickResult.Failed));
-        await harness.Store.Received(1).MarkDeliveredAsync(ReportId(5), 900, Arg.Any<CancellationToken>());
+        await harness.Store.Received(1).MarkDeliveredAsync(ReportId(5), "sent-900", Arg.Any<CancellationToken>());
         harness.Logger.Entries.Where(entry => entry.EventId.Id == 1901).Should().HaveCount(2)
             .And.OnlyContain(entry => entry.Exception is InvalidOperationException);
         harness.Logger.Entries.Should().ContainSingle(entry => entry.EventId.Id == 1907);
@@ -463,7 +463,7 @@ public class BugReportExplanationWorkerTests
     }
 
     static BugReportDelivery Delivery(int number, BugExplanationState state, bool? looksLikeBug) =>
-        new(ReportId(number), number, 111L, 50 + number, state,
+        new(ReportId(number), number, BugReportSource.Telegram, $"reply-to-{number}", state,
             state == BugExplanationState.Done ? "Reply to the echo with the amount." : null,
             looksLikeBug, Linked: true, FindingsCount: 1);
 
@@ -478,20 +478,20 @@ public class BugReportExplanationWorkerTests
             Delivery(8, BugExplanationState.Failed, looksLikeBug: null),
         ];
         harness.Store.PendingDeliveriesAsync(Arg.Any<CancellationToken>()).Returns(pending);
-        harness.ChatNotifier.ReplyToBugReportAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
-            .Returns(900, 901, 902);
+        harness.ChatNotifier.ReplyToBugReportAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
+            .Returns("sent-900", "sent-901", "sent-902");
 
         var result = await harness.Worker().RunTickAsync(Ct);
 
         result.Should().Be(BugReportTickResult.Processed);
         const string Explained = "Reply to the echo with the amount.\n\n1 finding on this record";
-        await harness.ChatNotifier.Received(1).ReplyToBugReportAsync(111L, 55, Explained, 5, Arg.Any<CancellationToken>());
-        await harness.ChatNotifier.Received(1).ReplyToBugReportAsync(111L, 56, Explained, null, Arg.Any<CancellationToken>());
+        await harness.ChatNotifier.Received(1).ReplyToBugReportAsync("reply-to-5", Explained, 5, Arg.Any<CancellationToken>());
+        await harness.ChatNotifier.Received(1).ReplyToBugReportAsync("reply-to-6", Explained, null, Arg.Any<CancellationToken>());
         await harness.ChatNotifier.Received(1).ReplyToBugReportAsync(
-            111L, 58, "Couldn't explain it — the report is saved.", null, Arg.Any<CancellationToken>());
-        await harness.Store.Received(1).MarkDeliveredAsync(ReportId(5), 900, Arg.Any<CancellationToken>());
-        await harness.Store.Received(1).MarkDeliveredAsync(ReportId(6), 901, Arg.Any<CancellationToken>());
-        await harness.Store.Received(1).MarkDeliveredAsync(ReportId(8), 902, Arg.Any<CancellationToken>());
+            "reply-to-8", "Couldn't explain it — the report is saved.", null, Arg.Any<CancellationToken>());
+        await harness.Store.Received(1).MarkDeliveredAsync(ReportId(5), "sent-900", Arg.Any<CancellationToken>());
+        await harness.Store.Received(1).MarkDeliveredAsync(ReportId(6), "sent-901", Arg.Any<CancellationToken>());
+        await harness.Store.Received(1).MarkDeliveredAsync(ReportId(8), "sent-902", Arg.Any<CancellationToken>());
         harness.Logger.Entries.Where(entry => entry.EventId.Id == 1907).Select(entry => entry.Properties["Number"])
             .Should().Equal(5, 6, 8);
         await harness.Explainer.DidNotReceiveWithAnyArgs().ExplainAsync(default!, Arg.Any<CancellationToken>());
@@ -504,12 +504,38 @@ public class BugReportExplanationWorkerTests
         harness.ModelProvider.IsConfiguredAsync(Arg.Any<CancellationToken>()).Returns(false);
         IReadOnlyList<BugReportDelivery> pending = [Delivery(8, BugExplanationState.Failed, looksLikeBug: null)];
         harness.Store.PendingDeliveriesAsync(Arg.Any<CancellationToken>()).Returns(pending);
-        harness.ChatNotifier.ReplyToBugReportAsync(111L, 58, Arg.Any<string>(), null, Arg.Any<CancellationToken>()).Returns(902);
+        harness.ChatNotifier.ReplyToBugReportAsync("reply-to-8", Arg.Any<string>(), null, Arg.Any<CancellationToken>()).Returns("sent-902");
 
         var result = await harness.Worker().RunTickAsync(Ct);
 
         result.Should().Be(BugReportTickResult.Processed);
-        await harness.Store.Received(1).MarkDeliveredAsync(ReportId(8), 902, Arg.Any<CancellationToken>());
+        await harness.Store.Received(1).MarkDeliveredAsync(ReportId(8), "sent-902", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_report_from_another_source_is_left_to_it_neither_sent_nor_counted_as_unsent()
+    {
+        var harness = new Harness();
+        var fromDashboard = Delivery(5, BugExplanationState.Done, looksLikeBug: false) with
+        {
+            Source = BugReportSource.Dashboard, ReplyTo = "tab 7",
+        };
+        IReadOnlyList<BugReportDelivery> firstTick = [fromDashboard, Delivery(6, BugExplanationState.Done, looksLikeBug: true)];
+        IReadOnlyList<BugReportDelivery> secondTick = [fromDashboard];
+        harness.Store.PendingDeliveriesAsync(Arg.Any<CancellationToken>()).Returns(firstTick, secondTick);
+        harness.ChatNotifier.ReplyToBugReportAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
+            .Returns("sent-900");
+        var worker = harness.Worker();
+
+        var first = await worker.RunTickAsync(Ct);
+        var second = await worker.RunTickAsync(Ct);
+
+        (first, second).Should().Be((BugReportTickResult.Processed, BugReportTickResult.Idle));
+        await harness.ChatNotifier.Received(1).ReplyToBugReportAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>());
+        await harness.ChatNotifier.Received(1).ReplyToBugReportAsync("reply-to-6", Arg.Any<string>(), null, Arg.Any<CancellationToken>());
+        await harness.Store.DidNotReceive().MarkDeliveredAsync(ReportId(5), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        harness.Logger.Entries.Should().NotContain(entry => entry.EventId.Id == 1905 || entry.EventId.Id == 1906);
     }
 
     [Fact]
@@ -523,9 +549,9 @@ public class BugReportExplanationWorkerTests
         harness.Store.NextDueAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(Due(number: 9, snapshot: Snapshot()), (BugReportToExplain?)null);
         harness.Store.PendingDeliveriesAsync(Arg.Any<CancellationToken>()).Returns(firstTick, secondTick, thirdTick);
-        harness.ChatNotifier.ReplyToBugReportAsync(111L, Arg.Is<int>(id => id != 55), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
-            .Returns(900);
-        harness.ChatNotifier.ReplyToBugReportAsync(111L, 55, Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
+        harness.ChatNotifier.ReplyToBugReportAsync(Arg.Is<string>(replyTo => replyTo != "reply-to-5"), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
+            .Returns("sent-900");
+        harness.ChatNotifier.ReplyToBugReportAsync("reply-to-5", Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new InvalidOperationException("The Telegram client is not ready yet: no bot token has been saved."));
         var worker = harness.Worker();
 
@@ -536,10 +562,10 @@ public class BugReportExplanationWorkerTests
         results.Should().Equal(BugReportTickResult.Processed, BugReportTickResult.Processed, BugReportTickResult.Idle);
         await harness.Explainer.Received(1).ExplainAsync(Request, Arg.Any<CancellationToken>());
         await harness.Store.DidNotReceiveWithAnyArgs().RecordFailedAttemptAsync(default, default, default, Arg.Any<CancellationToken>());
-        await harness.ChatNotifier.Received(3).ReplyToBugReportAsync(111L, 55, Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>());
-        await harness.Store.Received(1).MarkDeliveredAsync(ReportId(6), 900, Arg.Any<CancellationToken>());
-        await harness.Store.Received(1).MarkDeliveredAsync(ReportId(9), 900, Arg.Any<CancellationToken>());
-        await harness.Store.DidNotReceive().MarkDeliveredAsync(ReportId(5), Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await harness.ChatNotifier.Received(3).ReplyToBugReportAsync("reply-to-5", Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>());
+        await harness.Store.Received(1).MarkDeliveredAsync(ReportId(6), "sent-900", Arg.Any<CancellationToken>());
+        await harness.Store.Received(1).MarkDeliveredAsync(ReportId(9), "sent-900", Arg.Any<CancellationToken>());
+        await harness.Store.DidNotReceive().MarkDeliveredAsync(ReportId(5), Arg.Any<string>(), Arg.Any<CancellationToken>());
 
         var warned = harness.Logger.Entries.Should().ContainSingle(entry => entry.EventId.Id == 1905).Subject;
         warned.Level.Should().Be(LogLevel.Warning);
@@ -574,9 +600,9 @@ public class BugReportExplanationWorkerTests
         var harness = new Harness();
         IReadOnlyList<BugReportDelivery> pending = [Delivery(5, BugExplanationState.Done, looksLikeBug: false)];
         harness.Store.PendingDeliveriesAsync(Arg.Any<CancellationToken>()).Returns(pending);
-        harness.ChatNotifier.ReplyToBugReportAsync(111L, 55, Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
-            .Returns(900);
-        harness.Store.MarkDeliveredAsync(ReportId(5), 900, Arg.Any<CancellationToken>())
+        harness.ChatNotifier.ReplyToBugReportAsync("reply-to-5", Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
+            .Returns("sent-900");
+        harness.Store.MarkDeliveredAsync(ReportId(5), "sent-900", Arg.Any<CancellationToken>())
             .ThrowsAsync(new InvalidOperationException("database unreachable"));
 
         var result = await harness.Worker().RunTickAsync(Ct);

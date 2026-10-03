@@ -208,15 +208,15 @@ public class TelegramChatNotifierTests
     }
 
     [Fact]
-    public async Task ReplyToBugReportAsync_quotes_the_bug_message_even_once_it_is_deleted_and_returns_the_new_id()
+    public async Task ReplyToBugReportAsync_quotes_the_bug_message_even_once_it_is_deleted_and_returns_the_new_id_as_text()
     {
         var client = Substitute.For<ITelegramBotClient>();
         client.SendRequest(Arg.Any<SendMessageRequest>(), Arg.Any<CancellationToken>()).Returns(new Message { Id = 901 });
         var notifier = Notifier(client);
 
-        var replyId = await notifier.ReplyToBugReportAsync(42L, 555, "Bug report #12 saved.", null, TestContext.Current.CancellationToken);
+        var deliveredAs = await notifier.ReplyToBugReportAsync("42:555", "Bug report #12 saved.", null, TestContext.Current.CancellationToken);
 
-        replyId.Should().Be(901);
+        deliveredAs.Should().Be("901");
         await client.Received(1).SendRequest(
             Arg.Is<SendMessageRequest>(r => r.ChatId.Identifier == 42L && r.Text == "Bug report #12 saved."
                 && r.ReplyParameters!.MessageId == 555 && r.ReplyParameters.AllowSendingWithoutReply == true
@@ -231,7 +231,7 @@ public class TelegramChatNotifierTests
         client.SendRequest(Arg.Any<SendMessageRequest>(), Arg.Any<CancellationToken>()).Returns(new Message { Id = 902 });
         var notifier = Notifier(client);
 
-        await notifier.ReplyToBugReportAsync(42L, 555, "Reply with the amount.", 12, TestContext.Current.CancellationToken);
+        await notifier.ReplyToBugReportAsync("42:555", "Reply with the amount.", 12, TestContext.Current.CancellationToken);
 
         await client.Received(1).SendRequest(
             Arg.Is<SendMessageRequest>(r => r.ReplyMarkup is InlineKeyboardMarkup
@@ -248,9 +248,21 @@ public class TelegramChatNotifierTests
         client.SendRequest(Arg.Any<SendMessageRequest>(), Arg.Any<CancellationToken>())
             .Returns(_ => { clock.Advance(TimeSpan.FromMilliseconds(10)); return new Message { Id = 903 }; });
 
-        await notifier.ReplyToBugReportAsync(42L, 555, "Bug report #12 saved.", null, TestContext.Current.CancellationToken);
+        await notifier.ReplyToBugReportAsync("42:555", "Bug report #12 saved.", null, TestContext.Current.CancellationToken);
 
         logger.Entries.Should().ContainSingle(entry => (string)entry.Properties["Operation"] == "telegram.sendMessage");
+    }
+
+    [Fact]
+    public async Task ReplyToBugReportAsync_refuses_an_address_that_is_not_a_telegram_one_and_sends_nothing()
+    {
+        var client = Substitute.For<ITelegramBotClient>();
+        var notifier = Notifier(client);
+
+        var act = () => notifier.ReplyToBugReportAsync("tab 7", "Bug report #12 saved.", null, TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<FormatException>();
+        client.ReceivedCalls().Should().BeEmpty();
     }
 
     [Fact]
@@ -258,7 +270,7 @@ public class TelegramChatNotifierTests
     {
         var notifier = Notifier(null);
 
-        var act = () => notifier.ReplyToBugReportAsync(42L, 555, "Bug report #12 saved.", null, TestContext.Current.CancellationToken);
+        var act = () => notifier.ReplyToBugReportAsync("42:555", "Bug report #12 saved.", null, TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
     }

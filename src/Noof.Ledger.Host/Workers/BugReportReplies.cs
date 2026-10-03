@@ -12,7 +12,9 @@ internal static class BugReportReplies
     public static string Compose(BugReportDelivery delivery) => delivery switch
     {
         { State: BugExplanationState.Done, Explanation: { } explanation } => $"{Cut(explanation)}\n\n{FindingsLine(delivery)}",
-        _ => CouldNotExplain,
+        { State: BugExplanationState.Failed } => CouldNotExplain,
+        // Only an answered report is owed a reply, and Unknown is never stored (R-1).
+        _ => throw new ArgumentOutOfRangeException(nameof(delivery), delivery.State, "Only an answered bug report has a reply."),
     };
 
     public static string FindingsLine(BugReportDelivery delivery) => (delivery.FindingsCount, delivery.Linked) switch

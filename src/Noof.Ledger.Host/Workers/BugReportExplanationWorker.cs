@@ -164,16 +164,20 @@ internal sealed class BugReportExplanationWorker(
     }
 
     // A failed send spends no attempt and never calls the model again: the answer is stored, only the reply is owed.
-    // Storing a sent reply's id stays outside the send's catch, so a database fault there is the tick's 1901, not 1905.
+    // A sent reply's reference is stored outside the send's catch: a database fault there is the tick's 1901, not 1905.
     async Task<bool> DeliverAsync(IChatNotifier chatNotifier, IBugReportStore store, CancellationToken cancellationToken)
     {
         var delivered = false;
         foreach (var delivery in await store.PendingDeliveriesAsync(cancellationToken))
         {
-            if (await TrySendReplyAsync(chatNotifier, delivery, cancellationToken) is not { } replyId)
+            // R-2: only the chat's own address is the chat's to answer; another source's report is left to that source.
+            if (delivery.Source is not BugReportSource.Telegram)
                 continue;
 
-            await store.MarkDeliveredAsync(delivery.Id, replyId, cancellationToken);
+            if (await TrySendReplyAsync(chatNotifier, delivery, cancellationToken) is not { } deliveredAs)
+                continue;
+
+            await store.MarkDeliveredAsync(delivery.Id, deliveredAs, cancellationToken);
             undeliverable.Remove(delivery.Id);
             logger.ReplyDelivered(delivery.Number);
             delivered = true;
@@ -182,12 +186,12 @@ internal sealed class BugReportExplanationWorker(
         return delivered;
     }
 
-    async Task<int?> TrySendReplyAsync(IChatNotifier chatNotifier, BugReportDelivery delivery, CancellationToken cancellationToken)
+    async Task<string?> TrySendReplyAsync(IChatNotifier chatNotifier, BugReportDelivery delivery, CancellationToken cancellationToken)
     {
         try
         {
             return await chatNotifier.ReplyToBugReportAsync(
-                delivery.ChatId, delivery.MessageId, BugReportReplies.Compose(delivery), CloseButtonNumber(delivery), cancellationToken);
+                delivery.ReplyTo, BugReportReplies.Compose(delivery), CloseButtonNumber(delivery), cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

@@ -71,7 +71,7 @@ public class TelegramUpdateRouterTests
         receiptStore.GetByTransactionAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((ReceiptView?)null);
         receiptStore.GetVerificationUrlAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((string?)null);
         var bugStore = Substitute.For<IBugReportStore>();
-        bugStore.SaveFromTelegramAsync(Arg.Any<TelegramBugReport>(), Arg.Any<CancellationToken>()).Returns(new BugReportSaved(3, Created: true));
+        bugStore.FileAsync(Arg.Any<NewBugReport>(), Arg.Any<CancellationToken>()).Returns(new BugReportSaved(3, Created: true));
         var systemHealth = Substitute.For<ISystemHealth>();
         var ownerGate = new TelegramOwnerGate(secretStore);
         var router = new TelegramUpdateRouter(captureStore, chatNotifier, ownerGate,
@@ -927,9 +927,9 @@ public class TelegramUpdateRouterTests
         await harness.Router.HandleAsync(
             TextMessage(111L, 5, "/bug the amount is wrong", DateTime.UtcNow), "Europe/Belgrade", TestContext.Current.CancellationToken);
 
-        await harness.BugStore.Received(1).SaveFromTelegramAsync(
-            new TelegramBugReport(111L, 5, "the amount is wrong", null), Arg.Any<CancellationToken>());
-        await harness.ChatNotifier.Received(1).ReplyToBugReportAsync(111L, 5, "Bug report #3 saved.", null, Arg.Any<CancellationToken>());
+        await harness.BugStore.Received(1).FileAsync(
+            new NewBugReport(BugReportSource.Telegram, "111:5", "the amount is wrong", null, null, null), Arg.Any<CancellationToken>());
+        await harness.ChatNotifier.Received(1).ReplyToBugReportAsync("111:5", "Bug report #3 saved.", null, Arg.Any<CancellationToken>());
         await harness.CaptureStore.DidNotReceiveWithAnyArgs().CaptureAsync(default!, default!, Arg.Any<CancellationToken>());
     }
 
@@ -943,8 +943,8 @@ public class TelegramUpdateRouterTests
 
         await harness.Router.HandleAsync(TextMessage(111L, 6, text, DateTime.UtcNow), "Europe/Belgrade", TestContext.Current.CancellationToken);
 
-        await harness.BugStore.Received(1).SaveFromTelegramAsync(
-            new TelegramBugReport(111L, 6, reportText, null), Arg.Any<CancellationToken>());
+        await harness.BugStore.Received(1).FileAsync(
+            new NewBugReport(BugReportSource.Telegram, "111:6", reportText, null, null, null), Arg.Any<CancellationToken>());
         await harness.CaptureStore.DidNotReceiveWithAnyArgs().CaptureAsync(default!, default!, Arg.Any<CancellationToken>());
     }
 
@@ -971,8 +971,8 @@ public class TelegramUpdateRouterTests
 
         await harness.Router.HandleAsync(ReplyTo(111L, 8, 42, "/bug сумма не та"), "Europe/Belgrade", TestContext.Current.CancellationToken);
 
-        await harness.BugStore.Received(1).SaveFromTelegramAsync(
-            new TelegramBugReport(111L, 8, "сумма не та", transactionId), Arg.Any<CancellationToken>());
+        await harness.BugStore.Received(1).FileAsync(
+            new NewBugReport(BugReportSource.Telegram, "111:8", "сумма не та", transactionId, null, null), Arg.Any<CancellationToken>());
         await harness.Editor.DidNotReceiveWithAnyArgs().RequestCorrectionAsync(default, default!, default, default, Arg.Any<CancellationToken>());
         await harness.CaptureStore.DidNotReceiveWithAnyArgs().CaptureAsync(default!, default!, Arg.Any<CancellationToken>());
     }
@@ -984,8 +984,8 @@ public class TelegramUpdateRouterTests
 
         await harness.Router.HandleAsync(ReplyTo(111L, 9, 13, "/bug and another thing"), "Europe/Belgrade", TestContext.Current.CancellationToken);
 
-        await harness.BugStore.Received(1).SaveFromTelegramAsync(
-            new TelegramBugReport(111L, 9, "and another thing", null), Arg.Any<CancellationToken>());
+        await harness.BugStore.Received(1).FileAsync(
+            new NewBugReport(BugReportSource.Telegram, "111:9", "and another thing", null, null, null), Arg.Any<CancellationToken>());
         await harness.Editor.DidNotReceiveWithAnyArgs().RequestCorrectionAsync(default, default!, default, default, Arg.Any<CancellationToken>());
         await harness.CaptureStore.DidNotReceiveWithAnyArgs().CaptureAsync(default!, default!, Arg.Any<CancellationToken>());
         // The one lookup is the handler's own: the router never offered this reply to the correction path.

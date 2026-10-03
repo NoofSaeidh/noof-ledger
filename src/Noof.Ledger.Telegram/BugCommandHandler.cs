@@ -28,13 +28,14 @@ internal sealed class BugCommandHandler(
             ? await FindRecordAsync(chatId, repliedTo.Id, cancellationToken)
             : null;
 
-        // Saved before the reply: a failed send fails the update, and its redelivery must find this report, not file a
-        // second one.
-        var saved = await store.SaveFromTelegramAsync(
-            new TelegramBugReport(chatId, message.Id, reportText, transactionId), cancellationToken);
+        // Filed before the reply: a failed send fails the update, and its redelivery must find this report by its reply
+        // address, not file a second one.
+        var replyTo = new TelegramReplyAddress(chatId, message.Id).ToString();
+        var saved = await store.FileAsync(
+            new NewBugReport(BugReportSource.Telegram, replyTo, reportText, transactionId, null, null), cancellationToken);
         logger.BugReportSavedFromTelegram(saved.Number, transactionId is not null, saved.Created);
 
-        await chatNotifier.ReplyToBugReportAsync(chatId, message.Id, SavedText(saved.Number), null, cancellationToken);
+        await chatNotifier.ReplyToBugReportAsync(replyTo, SavedText(saved.Number), null, cancellationToken);
     }
 
     public async Task HandleCloseAsync(CallbackQuery query, Message message, CancellationToken cancellationToken)

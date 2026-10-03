@@ -32,7 +32,7 @@ public class BugCommandHandlerTests
         editor.FindByBotMessageAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns((EchoTarget?)null);
         editor.FindByUserMessageAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns((EchoTarget?)null);
         var store = Substitute.For<IBugReportStore>();
-        store.SaveFromTelegramAsync(Arg.Any<TelegramBugReport>(), Arg.Any<CancellationToken>()).Returns(new BugReportSaved(12, Created: true));
+        store.FileAsync(Arg.Any<NewBugReport>(), Arg.Any<CancellationToken>()).Returns(new BugReportSaved(12, Created: true));
         var chatNotifier = Substitute.For<IChatNotifier>();
         var logger = new CapturingLogger<BugCommandHandler>();
 
@@ -49,6 +49,10 @@ public class BugCommandHandlerTests
         ReplyToMessage = replyTo is { } repliedTo ? new Message { Id = repliedTo, Chat = new Chat { Id = chatId } } : null,
     };
 
+    // The address is spelled out, not composed: it must stay what the BugReportsReplyTo migration back-filled.
+    static NewBugReport Filed(string replyTo, string? text, Guid? transactionId) =>
+        new(BugReportSource.Telegram, replyTo, text, transactionId, null, null);
+
     static CallbackQuery Press(long chatId, string data) => new() { Id = "cb-7", Data = data, From = new User { Id = chatId } };
 
     static Message Pressed(long chatId, string? text = DeliveredText) => new() { Id = 60, Chat = new Chat { Id = chatId }, Text = text };
@@ -60,9 +64,9 @@ public class BugCommandHandlerTests
 
         await harness.Handler.HandleAsync(BugMessage(Owner, 5), "the total looks off", Ct);
 
-        await harness.Store.Received(1).SaveFromTelegramAsync(
-            new TelegramBugReport(Owner, 5, "the total looks off", null), Arg.Any<CancellationToken>());
-        await harness.ChatNotifier.Received(1).ReplyToBugReportAsync(Owner, 5, "Bug report #12 saved.", null, Arg.Any<CancellationToken>());
+        await harness.Store.Received(1).FileAsync(
+            Filed("111:5", "the total looks off", null), Arg.Any<CancellationToken>());
+        await harness.ChatNotifier.Received(1).ReplyToBugReportAsync("111:5", "Bug report #12 saved.", null, Arg.Any<CancellationToken>());
         var saved = harness.Logger.Entries.Should().ContainSingle(entry => entry.EventId.Id == 6202).Subject;
         saved.Level.Should().Be(LogLevel.Information);
         saved.Properties["Number"].Should().Be(12);
@@ -79,8 +83,8 @@ public class BugCommandHandlerTests
 
         await harness.Handler.HandleAsync(BugMessage(Owner, 8, replyTo: 42), "сумма не та", Ct);
 
-        await harness.Store.Received(1).SaveFromTelegramAsync(
-            new TelegramBugReport(Owner, 8, "сумма не та", transactionId), Arg.Any<CancellationToken>());
+        await harness.Store.Received(1).FileAsync(
+            Filed("111:8", "сумма не та", transactionId), Arg.Any<CancellationToken>());
         await harness.Editor.DidNotReceiveWithAnyArgs().FindByUserMessageAsync(default, default, Arg.Any<CancellationToken>());
         harness.Logger.Entries.Single(entry => entry.EventId.Id == 6202).Properties["Linked"].Should().Be(true);
     }
@@ -94,8 +98,8 @@ public class BugCommandHandlerTests
 
         await harness.Handler.HandleAsync(BugMessage(Owner, 9, replyTo: 5), null, Ct);
 
-        await harness.Store.Received(1).SaveFromTelegramAsync(
-            new TelegramBugReport(Owner, 9, null, transactionId), Arg.Any<CancellationToken>());
+        await harness.Store.Received(1).FileAsync(
+            Filed("111:9", null, transactionId), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -105,8 +109,8 @@ public class BugCommandHandlerTests
 
         await harness.Handler.HandleAsync(BugMessage(Owner, 14, replyTo: 13), "and another thing", Ct);
 
-        await harness.Store.Received(1).SaveFromTelegramAsync(
-            new TelegramBugReport(Owner, 14, "and another thing", null), Arg.Any<CancellationToken>());
+        await harness.Store.Received(1).FileAsync(
+            Filed("111:14", "and another thing", null), Arg.Any<CancellationToken>());
         await harness.Editor.DidNotReceiveWithAnyArgs().RequestCorrectionAsync(default, default!, default, default, Arg.Any<CancellationToken>());
     }
 
@@ -114,11 +118,11 @@ public class BugCommandHandlerTests
     public async Task A_redelivered_bug_is_answered_with_the_number_it_was_saved_under()
     {
         var harness = Create();
-        harness.Store.SaveFromTelegramAsync(Arg.Any<TelegramBugReport>(), Arg.Any<CancellationToken>()).Returns(new BugReportSaved(12, Created: false));
+        harness.Store.FileAsync(Arg.Any<NewBugReport>(), Arg.Any<CancellationToken>()).Returns(new BugReportSaved(12, Created: false));
 
         await harness.Handler.HandleAsync(BugMessage(Owner, 5), "the total looks off", Ct);
 
-        await harness.ChatNotifier.Received(1).ReplyToBugReportAsync(Owner, 5, "Bug report #12 saved.", null, Arg.Any<CancellationToken>());
+        await harness.ChatNotifier.Received(1).ReplyToBugReportAsync("111:5", "Bug report #12 saved.", null, Arg.Any<CancellationToken>());
         harness.Logger.Entries.Single(entry => entry.EventId.Id == 6202).Properties["Created"].Should().Be(false);
     }
 
@@ -126,13 +130,13 @@ public class BugCommandHandlerTests
     public async Task A_report_that_could_not_be_saved_is_never_announced()
     {
         var harness = Create();
-        harness.Store.SaveFromTelegramAsync(Arg.Any<TelegramBugReport>(), Arg.Any<CancellationToken>())
+        harness.Store.FileAsync(Arg.Any<NewBugReport>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new InvalidOperationException("database unreachable"));
 
         var act = () => harness.Handler.HandleAsync(BugMessage(Owner, 5), "x", Ct);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
-        await harness.ChatNotifier.DidNotReceiveWithAnyArgs().ReplyToBugReportAsync(default, default, default!, default, Arg.Any<CancellationToken>());
+        await harness.ChatNotifier.DidNotReceiveWithAnyArgs().ReplyToBugReportAsync(default!, default!, default, Arg.Any<CancellationToken>());
     }
 
     [Fact]

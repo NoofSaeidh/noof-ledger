@@ -9,7 +9,7 @@ public class BugReportRepliesTests
     static BugReportDelivery Delivery(
         BugExplanationState state = BugExplanationState.Done, string explanation = "Reply to the echo with the amount.",
         bool linked = true, int? findingsCount = 1) =>
-        new(Guid.NewGuid(), 4, 111L, 5, state,
+        new(Guid.NewGuid(), 4, BugReportSource.Telegram, "reply-to-4", state,
             state == BugExplanationState.Done ? explanation : null,
             state == BugExplanationState.Done ? false : null,
             linked, findingsCount);
@@ -24,6 +24,16 @@ public class BugReportRepliesTests
     public void A_report_that_could_not_be_explained_says_it_is_saved_and_nothing_more()
     {
         BugReportReplies.Compose(Delivery(BugExplanationState.Failed)).Should().Be("Couldn't explain it — the report is saved.");
+    }
+
+    [Theory]
+    [InlineData(BugExplanationState.Pending)]
+    [InlineData(BugExplanationState.Unknown)]
+    public void A_report_not_answered_yet_or_in_no_state_at_all_has_no_reply(BugExplanationState state)
+    {
+        var act = () => BugReportReplies.Compose(Delivery(state));
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
     [Theory]
