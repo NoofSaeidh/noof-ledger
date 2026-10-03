@@ -37,6 +37,8 @@ internal static class AppScreens
             $"/transactions/{MockData.HeldSlipTransactionId}/trace", "#trace-receipt-awaiting-confirmation"),
         new("diagnostics", "Diagnostics", "/diagnostics", "#diagnostics-checks", Prepare: HideFreeDiskSpaceAsync),
         new("integrity", "Integrity", "/diagnostics/integrity", "#integrity-waiting"),
+        new("bugs", "Bug reports", "/bugs", "#bugs-list"),
+        new("bug-report", "A bug report", "/bugs/2", "#bug-report-explanation"),
         new("logs", "Logs", "/diagnostics/logs", "#logs-grid", Prepare: FilterLogsToTheMockWindowAsync),
         new("log-settings", "Log settings", "/diagnostics/logs/settings", "#retention-verbose"),
         new("secrets", "Secrets", "/settings/secrets", "#status-anthropic-api-key"),

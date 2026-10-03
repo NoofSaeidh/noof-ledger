@@ -30,7 +30,7 @@ public sealed class GalleryTests
         AppScreens.All.Select(screen => screen.Name).Should().Equal(
             "login", "dashboard", "dashboard-transfers", "wallets", "transactions", "trace", "trace-failed",
             "trace-exchange", "trace-foreign-spending", "trace-receipt", "trace-receipt-vision", "trace-receipt-check",
-            "trace-slip-check", "diagnostics", "integrity", "logs", "log-settings", "secrets");
+            "trace-slip-check", "diagnostics", "integrity", "bugs", "bug-report", "logs", "log-settings", "secrets");
     }
 
     [Fact]
