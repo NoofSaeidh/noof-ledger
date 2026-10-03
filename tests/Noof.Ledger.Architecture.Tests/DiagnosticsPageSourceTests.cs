@@ -35,6 +35,21 @@ public class DiagnosticsPageSourceTests
     }
 
     [Fact]
+    public void Diagnostics_page_links_the_Integrity_row_to_its_findings_and_the_open_bug_reports()
+    {
+        var source = SourceText("Diagnostics.razor");
+
+        source.Should().Contain("item.Name == IntegrityHealth.CheckName",
+            "the row is recognised by its check's name, not by a new HealthItem field");
+        source.Should().Contain("id=\"diagnostics-integrity-link\"");
+        source.Should().Contain("IntegrityHealth.PagePath");
+        source.Should().Contain("id=\"diagnostics-bug-reports-link\"");
+        source.Should().Contain("Href=\"/bugs\"");
+        source.Should().Contain("CountOpenAsync(");
+        source.Should().NotContain("@rendermode", "/diagnostics stays a static page");
+    }
+
+    [Fact]
     public void Logs_page_is_routable_authorised_interactive_and_paged_without_virtualize()
     {
         var source = SourceText("DiagnosticsLogs.razor");

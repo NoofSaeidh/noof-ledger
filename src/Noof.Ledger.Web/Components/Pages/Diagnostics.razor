@@ -1,7 +1,10 @@
 @page "/diagnostics"
 @attribute [Authorize]
 @using Noof.Ledger.Application.Diagnostics
+@using Noof.Ledger.Application.Diagnostics.BugReports
+@using Noof.Ledger.Application.Diagnostics.Integrity
 @inject ISystemHealth SystemHealth
+@inject IBugReportStore BugReports
 @inject IDatabaseGate Gate
 
 <PageTitle>Diagnostics</PageTitle>
@@ -37,6 +40,11 @@ else
                         <td>@item.Summary</td>
                         <td class="noof-hide-narrow noof-nowrap">@item.CheckedAt.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", System.Globalization.CultureInfo.InvariantCulture)</td>
                         <td>
+                            @if (item.Name == IntegrityHealth.CheckName)
+                            {
+                                <MudLink id="diagnostics-integrity-link" Href="@IntegrityHealth.PagePath" Class="mr-3">Findings</MudLink>
+                                <MudLink id="diagnostics-bug-reports-link" Href="/bugs" Class="mr-3">@OpenReportsText(openReports)</MudLink>
+                            }
                             @if (item.Level != HealthLevel.Ok)
                             {
                                 <MudLink Href="@($"/diagnostics/logs?source={Uri.EscapeDataString(item.LogCategory)}")">Logs</MudLink>
@@ -53,6 +61,7 @@ else
 
 @code {
     SystemHealthReport? report;
+    int? openReports;
 
     static Color LevelColor(HealthLevel level) => level switch
     {
@@ -62,9 +71,33 @@ else
         _ => Color.Default,
     };
 
+    static string OpenReportsText(int? count) => count switch
+    {
+        null => "Bug reports",
+        0 => "No open reports",
+        1 => "1 open report",
+        _ => $"{count} open reports",
+    };
+
     protected override async Task OnInitializedAsync()
     {
-        if (Gate.State == DatabaseState.Ready)
-            report = await SystemHealth.GetAsync(fresh: true, CancellationToken.None);
+        if (Gate.State != DatabaseState.Ready)
+            return;
+
+        report = await SystemHealth.GetAsync(fresh: true, CancellationToken.None);
+        openReports = await CountOpenReportsAsync();
+    }
+
+    // The operator opens this page when something is failing; the one query it adds must not turn it into an error page.
+    async Task<int?> CountOpenReportsAsync()
+    {
+        try
+        {
+            return await BugReports.CountOpenAsync(CancellationToken.None);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 }
