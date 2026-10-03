@@ -123,6 +123,73 @@ public sealed class FindingsAndReportsTests(CookieModeHostFixture fixture) : Pag
         await Expect(link).ToHaveAttributeAsync("aria-current", "page");
     }
 
+    [Fact]
+    public async Task Close_and_Reopen_change_the_reports_status_on_its_page()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip(NoDatabase);
+
+        var number = await SeedDashboardReportAsync($"close me {Guid.NewGuid():N}");
+
+        await SignInAsync();
+        await Page.GotoAsync($"{fixture.BaseUrl}/bugs/{number}");
+
+        var meta = Page.Locator("#bug-report-meta");
+        await Expect(meta).ToHaveTextAsync("Filed 2026-09-30 10:00 UTC · Dashboard · Open");
+        await Expect(Page.Locator("#bug-report-explanation")).ToContainTextAsync("Seeded explanation.");
+        await Expect(Page.Locator("#bug-report-explanation")).ToContainTextAsync("Looks like a bug in the app.");
+        await Expect(Page.Locator("#bug-report-findings-then")).ToContainTextAsync("Not collected");
+        await Expect(Page.Locator("#bug-report-findings-now")).ToHaveCountAsync(0);
+
+        await Page.ClickAsync("#bug-report-close");
+        await Expect(meta).ToHaveTextAsync("Filed 2026-09-30 10:00 UTC · Dashboard · Closed");
+
+        await Page.ClickAsync("#bug-report-reopen");
+        await Expect(meta).ToHaveTextAsync("Filed 2026-09-30 10:00 UTC · Dashboard · Open");
+        await Expect(Page.Locator("#bug-report-close")).ToBeVisibleAsync();
+    }
+
+    [Fact]
+    public async Task Copy_as_Markdown_puts_the_report_on_the_clipboard_beside_the_privacy_warning()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip(NoDatabase);
+
+        var number = await SeedDashboardReportAsync($"copy me {Guid.NewGuid():N}");
+        // Reading the real clipboard back in headless Chromium needs the page focused, which Playwright does not
+        // guarantee: MudBlazor's copyToClipboard calls navigator.clipboard.writeText, so the test records what is
+        // written there instead.
+        await Page.AddInitScriptAsync("""
+            Object.defineProperty(navigator, "clipboard", {
+                configurable: true,
+                value: { writeText: text => { window.__copied = text; return Promise.resolve(); } },
+            });
+            """);
+
+        await SignInAsync();
+        await Page.GotoAsync($"{fixture.BaseUrl}/bugs/{number}");
+
+        await Expect(Page.Locator("#bug-report-copy-warning"))
+            .ToHaveTextAsync("Contains your data — never paste it into a public issue.");
+        await Page.ClickAsync("#bug-report-copy");
+
+        await Expect(Page.Locator("#bug-report-copied")).ToContainTextAsync("Copied.");
+        await Page.WaitForFunctionAsync(
+            "expected => typeof window.__copied === 'string' && window.__copied.includes(expected)", $"## Bug report #{number}");
+    }
+
+    [Fact]
+    public async Task An_unknown_report_number_says_there_is_none()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip(NoDatabase);
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/bugs/999999");
+
+        await Expect(Page.Locator("#bug-report-missing")).ToContainTextAsync("No bug report #999999.");
+    }
+
     // Created two days before the real now: the host measures a record's idle time on its own clock.
     async Task<Guid> SeedUnansweredExchangeAsync()
     {

@@ -1,0 +1,279 @@
+@page "/bugs/{Number:int}"
+@attribute [Authorize]
+@implements IDisposable
+@using System.Globalization
+@using Noof.Ledger.Application.Diagnostics
+@using Noof.Ledger.Application.Diagnostics.BugReports
+@inject IBugReportStore Store
+@inject IBugReportMarkdown Markdown
+@inject IDatabaseGate Gate
+@inject TimeProvider TimeProvider
+@inject IJsApiService JsApi
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+
+<PageTitle>@Title</PageTitle>
+
+<MudText HtmlTag="h1" Typo="Typo.h4" Class="mb-2">@Title</MudText>
+
+@if (Gate.State != DatabaseState.Ready)
+{
+    <DatabaseGateBanner />
+}
+else
+{
+    @if (error is not null)
+    {
+        <MudAlert id="bug-report-error" Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-4">@error</MudAlert>
+    }
+
+    @if (!loaded)
+    {
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">Loading…</MudText>
+    }
+    else if (document is null)
+    {
+        if (error is null)
+        {
+            <MudAlert id="bug-report-missing" Severity="Severity.Info" Variant="Variant.Outlined">@($"No bug report #{Number}.")</MudAlert>
+        }
+    }
+    else
+    {
+        <MudText id="bug-report-meta" Typo="Typo.body2" Class="mud-text-secondary mb-4">@Meta(document)</MudText>
+
+        <div class="d-flex flex-wrap align-center gap-3">
+            @if (document.Status == BugReportStatus.Open)
+            {
+                <MudButton id="bug-report-close" Variant="Variant.Outlined" Disabled="@operations.Busy"
+                           OnClick="@(() => SetStatusAsync(BugReportStatus.Closed))">Close</MudButton>
+            }
+            else
+            {
+                <MudButton id="bug-report-reopen" Variant="Variant.Outlined" Disabled="@operations.Busy"
+                           OnClick="@(() => SetStatusAsync(BugReportStatus.Open))">Reopen</MudButton>
+            }
+            <MudButton id="bug-report-copy" Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.ContentCopy"
+                       Disabled="@operations.Busy" OnClick="CopyAsync">Copy as Markdown</MudButton>
+            @if (document.TransactionId is { } transactionId)
+            {
+                <MudLink id="bug-report-trace-link" Href="@($"/transactions/{transactionId}/trace")">Trace</MudLink>
+            }
+        </div>
+        <MudText id="bug-report-copy-warning" Typo="Typo.caption" Class="mud-text-secondary">Contains your data — never paste it into a public issue.</MudText>
+        @if (copied)
+        {
+            <MudAlert id="bug-report-copied" Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="mt-2">Copied.</MudAlert>
+        }
+
+        <section id="bug-report-text" class="mt-6">
+            <MudText HtmlTag="h2" Typo="Typo.h6">Your text</MudText>
+            <MudText Typo="Typo.body2" Style="white-space: pre-wrap;">@(document.Text ?? "—")</MudText>
+        </section>
+
+        <section id="bug-report-explanation" class="mt-6">
+            <MudText HtmlTag="h2" Typo="Typo.h6">Explanation</MudText>
+            <MudText Typo="Typo.body2" Style="white-space: pre-wrap;">@ExplanationText(document)</MudText>
+            @if (document.LooksLikeBug == true)
+            {
+                <MudText Typo="Typo.body2" Class="mt-2">Looks like a bug in the app.</MudText>
+            }
+        </section>
+
+        <section id="bug-report-findings-then" class="mt-6">
+            <MudText HtmlTag="h2" Typo="Typo.h6">Findings when filed</MudText>
+            @if (document.FindingsThen is not { } findingsThen)
+            {
+                <MudText Typo="Typo.body2">Not collected</MudText>
+            }
+            else if (findingsThen.Count == 0)
+            {
+                <MudText Typo="Typo.body2">None</MudText>
+            }
+            else
+            {
+                @foreach (var finding in findingsThen)
+                {
+                    <MudPaper Outlined="true" Elevation="0" Class="pa-4 mb-3">
+                        <FindingFacts Finding="finding" AsOf="@(document.SnapshotAt ?? document.CreatedAt)" />
+                    </MudPaper>
+                }
+            }
+        </section>
+
+        @if (document.TransactionId is not null)
+        {
+            <section id="bug-report-findings-now" class="mt-6">
+                <MudText HtmlTag="h2" Typo="Typo.h6">Findings now</MudText>
+                @if (document.FindingsNow is not { } findingsNow)
+                {
+                    <MudText Typo="Typo.body2">Not available</MudText>
+                }
+                else if (findingsNow.Count == 0)
+                {
+                    <MudText Typo="Typo.body2">None</MudText>
+                }
+                else
+                {
+                    @foreach (var finding in findingsNow)
+                    {
+                        <MudPaper Outlined="true" Elevation="0" Class="pa-4 mb-3">
+                            <FindingFacts Finding="finding" AsOf="now" />
+                        </MudPaper>
+                    }
+                }
+            </section>
+        }
+
+        <section id="bug-report-record" class="mt-6">
+            <MudText HtmlTag="h2" Typo="Typo.h6">Record as filed</MudText>
+            @if (document.RecordSummary is { } summary)
+            {
+                <pre class="mt-2" style="white-space: pre-wrap;">@summary</pre>
+            }
+            else
+            {
+                <MudText Typo="Typo.body2">None</MudText>
+            }
+        </section>
+
+        @if (document.CollectionFailures is { } failures)
+        {
+            <section id="bug-report-not-collected" class="mt-6">
+                <MudText HtmlTag="h2" Typo="Typo.h6">Not collected</MudText>
+                <pre class="mt-2" style="white-space: pre-wrap;">@failures</pre>
+            </section>
+        }
+
+        <section id="bug-report-log-lines" class="mt-6">
+            <MudText HtmlTag="h2" Typo="Typo.h6">Log lines when filed</MudText>
+            @if (document.LogLines is not { } logLines)
+            {
+                <MudText Typo="Typo.body2">Not collected</MudText>
+            }
+            else if (logLines.Count == 0)
+            {
+                <MudText Typo="Typo.body2">None</MudText>
+            }
+            else
+            {
+                <MudSimpleTable Dense="true" Elevation="0" Outlined="true" Class="mt-2">
+                    <thead>
+                        <tr>
+                            <th>Logged at</th>
+                            <th>Level</th>
+                            <th class="noof-hide-narrow">Source</th>
+                            <th>Message</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var line in logLines)
+                        {
+                            <tr>
+                                <td class="noof-nowrap">@line.LoggedAt.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture)</td>
+                                <td>@line.Level</td>
+                                <td class="noof-hide-narrow">@(line.Source ?? "—")</td>
+                                <td>
+                                    <div style="white-space: pre-wrap;">@line.Message</div>
+                                    @if (line.Exception is { } exception)
+                                    {
+                                        <pre class="mt-1" style="white-space: pre-wrap;">@exception</pre>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            }
+        </section>
+    }
+}
+
+@code {
+    [Parameter] public int Number { get; set; }
+
+    readonly CancellationTokenSource cancellation = new();
+    readonly OneAtATime operations = new();
+    BugReportDocument? document;
+    DateTimeOffset now;
+    bool loaded;
+    bool copied;
+    string? error;
+
+    string Title => $"Bug report #{Number}";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Gate.State != DatabaseState.Ready)
+            return;
+
+        copied = false;
+        await operations.RunAsync(LoadAsync, cancellation.Token);
+    }
+
+    async Task LoadAsync(CancellationToken token)
+    {
+        try
+        {
+            now = TimeProvider.GetUtcNow();
+            document = await Store.GetAsync(Number, token);
+            error = null;
+        }
+        catch (Exception exception) when (!token.IsCancellationRequested)
+        {
+            document = null;
+            error = $"Couldn't load bug report #{Number} ({exception.GetType().Name}).";
+        }
+
+        loaded = true;
+    }
+
+    // A repeated press finds the report already in that status; SetStatusAsync then answers false and the reload shows
+    // what is stored either way.
+    Task SetStatusAsync(BugReportStatus status) => operations.RunAsync(async token =>
+    {
+        try
+        {
+            await Store.SetStatusAsync(Number, status, token);
+        }
+        catch (Exception exception) when (!token.IsCancellationRequested)
+        {
+            error = $"Couldn't change the report's status ({exception.GetType().Name}).";
+            return;
+        }
+
+        copied = false;
+        await LoadAsync(token);
+    }, cancellation.Token);
+
+    Task CopyAsync() => operations.RunAsync(async token =>
+    {
+        if (document is not { } report)
+            return;
+
+        try
+        {
+            await JsApi.CopyToClipboardAsync(Markdown.Render([report], TimeProvider.GetUtcNow()));
+            copied = true;
+        }
+        catch (Exception exception) when (!token.IsCancellationRequested)
+        {
+            error = $"Couldn't copy the report ({exception.GetType().Name}).";
+        }
+    }, cancellation.Token);
+
+    static string Meta(BugReportDocument report) =>
+        $"Filed {report.CreatedAt.ToUniversalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)} UTC · {report.Source} · {report.Status}";
+
+    static string ExplanationText(BugReportDocument report) => report.ExplanationState switch
+    {
+        BugExplanationState.Done => report.Explanation ?? string.Empty,
+        BugExplanationState.Failed => "Couldn't explain it.",
+        _ => "Not explained yet.",
+    };
+
+    public void Dispose()
+    {
+        cancellation.Cancel();
+        cancellation.Dispose();
+    }
+}
