@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Diagnostics.Integrity;
 using Noof.Ledger.Application.Receipts;
 
 namespace Noof.Ledger.Application;
@@ -21,6 +22,7 @@ public static class ApplicationRegistration
         services.AddSingleton<IProposalMapper, ProposalMapper>();
         services.AddSingleton<IMerchantScan, MerchantScan>();
         services.AddSingleton<IRecordEcho, RecordEcho>();
+        services.AddSingleton<IFindingText, FindingText>();
 
         services.AddSingleton(slowOperations);
         services.AddSingleton<IOperationTimer, OperationTimer>();
