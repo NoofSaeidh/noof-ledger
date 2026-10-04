@@ -1,6 +1,9 @@
+using System.Globalization;
 using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Diagnostics.BugReports;
+using Noof.Ledger.Application.Diagnostics.Integrity;
 using Noof.Ledger.Application.Reporting;
 using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
@@ -200,5 +203,145 @@ public sealed class MockLedgerTests(DemoTestDatabase database) : IClassFixture<D
 
         (await scope.ServiceProvider.GetRequiredService<ILogRetentionSettings>().GetAsync(TestContext.Current.CancellationToken))
             .Should().Be(MockData.LogRetention);
+    }
+
+    // The demo host runs on the real clock, and the checks measure idle time on the clock they are given - so this test
+    // passes the real one. The only finding is the seeded failed exchange; no Bug (spec P-19).
+    [Fact]
+    public async Task The_mock_ledger_has_exactly_the_seeded_findings()
+    {
+        if (database.Unavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await Refresh.RunAsync(database.Admin, database.Name, database.Paths, cancellationToken);
+
+        await using var services = DemoServices.Build(database.ConnectionString, database.Paths, clock: TimeProvider.System);
+        await using var scope = services.CreateAsyncScope();
+        var findings = await scope.ServiceProvider.GetRequiredService<IIntegrityChecks>().FindAllAsync(cancellationToken);
+
+        var finding = findings.Should().ContainSingle().Which;
+        finding.Check.Should().Be(IntegrityCheck.NotApplied);
+        finding.Group.Should().Be(IntegrityGroup.WaitingOnYou);
+        finding.TransactionId.Should().Be(MockData.WaitingTransactionId);
+        finding.Facts.Should().Contain(new TextFact("Waiting for", "A reply to the echo"));
+        finding.Facts.Should().Contain(new TextFact("Reason", "MissingReceivedAmount"));
+    }
+
+    // The failed record, the held receipt and the held slip are dated in the mock month; stamped with the real now at
+    // seeding, they never read as idle over a day, whichever day the pictures are taken.
+    [Fact]
+    public async Task The_month_dated_records_that_could_wait_on_the_operator_were_last_active_at_seeding()
+    {
+        if (database.Unavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await Refresh.RunAsync(database.Admin, database.Name, database.Paths, cancellationToken);
+
+        await using var connection = new NpgsqlConnection(database.ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            "SELECT transaction_id, max(updated_at) FROM categorization_jobs WHERE transaction_id = ANY(@ids) GROUP BY transaction_id",
+            connection);
+        command.Parameters.AddWithValue(
+            "ids", new[] { MockData.FailedTransactionId, MockData.UnconfirmedReceiptTransactionId, MockData.HeldSlipTransactionId });
+
+        var lastActive = new Dictionary<Guid, DateTimeOffset>();
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+                lastActive[reader.GetGuid(0)] = reader.GetFieldValue<DateTimeOffset>(1);
+        }
+
+        lastActive.Keys.Should().BeEquivalentTo(
+            new[] { MockData.FailedTransactionId, MockData.UnconfirmedReceiptTransactionId, MockData.HeldSlipTransactionId });
+        lastActive.Values.Should().AllSatisfy(at => at.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromMinutes(10)));
+    }
+
+    // Inserted by column name with literal JSON, so the store reading them back is what proves the shape.
+    [Fact]
+    public async Task The_demo_bug_reports_read_back_as_filed_and_the_dashboard_one_has_a_finding_then_and_none_now()
+    {
+        if (database.Unavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await Refresh.RunAsync(database.Admin, database.Name, database.Paths, cancellationToken);
+
+        await using var services = DemoServices.Build(database.ConnectionString, database.Paths, clock: TimeProvider.System);
+        await using var scope = services.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<IBugReportStore>();
+
+        (await store.ListAsync(includeClosed: true, cancellationToken))
+            .Select(report => (report.Number, report.Source, report.Status, report.ExplanationState))
+            .Should().Equal(
+                (3, BugReportSource.Telegram, BugReportStatus.Closed, BugExplanationState.Failed),
+                (2, BugReportSource.Dashboard, BugReportStatus.Open, BugExplanationState.Done),
+                (1, BugReportSource.Telegram, BugReportStatus.Open, BugExplanationState.Done));
+        (await store.CountOpenAsync(cancellationToken)).Should().Be(2);
+
+        var dashboard = (await store.GetAsync(2, cancellationToken))!;
+        dashboard.FindingsThen.Should().ContainSingle().Which.Facts
+            .Should().Contain(new TextFact("Condition", "Failure reason on a record that is not failed"));
+        dashboard.FindingsNow.Should().BeEmpty("the traced record is consistent today");
+        dashboard.LooksLikeBug.Should().BeTrue();
+        dashboard.LogLines.Should().HaveCount(3);
+        dashboard.Revisions.Should().HaveCount(2, "the traced record's Initial and Correction, read live");
+        dashboard.RecordSummary.Should().ContainAll(
+            dashboard.Revisions.Select(revision =>
+                $"- {revision.At.ToUniversalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)} UTC · {revision.ChangeKind} · {revision.Details}"),
+            "the record as filed dates its revisions as the record's own trace does");
+
+        var exchange = (await store.GetAsync(1, cancellationToken))!;
+        exchange.FindingsThen.Should().ContainSingle().Which.TransactionId.Should().Be(MockData.WaitingTransactionId);
+        exchange.FindingsNow.Should().ContainSingle("the exchange still waits on the operator");
+        exchange.LooksLikeBug.Should().BeFalse();
+
+        var closed = (await store.GetAsync(3, cancellationToken))!;
+        closed.FindingsThen.Should().BeNull();
+        closed.CollectionFailures.Should().Be("findings: check failed (TimeoutException)");
+        closed.LogLines.Should().HaveCount(2);
+    }
+
+    // The demo host's explanation worker must find nothing to explain or send: the demo never calls the model and has no
+    // bot token. A Telegram report's reply address is the Telegram layer's "<chat id>:<message id>", the form the
+    // BugReportsReplyTo migration back-fills (R-2); a dashboard report has none.
+    [Fact]
+    public async Task The_demo_bug_reports_leave_the_worker_nothing_to_explain_or_deliver()
+    {
+        if (database.Unavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await Refresh.RunAsync(database.Admin, database.Name, database.Paths, cancellationToken);
+
+        await using var services = DemoServices.Build(database.ConnectionString, database.Paths, clock: TimeProvider.System);
+        await using (var scope = services.CreateAsyncScope())
+        {
+            var store = scope.ServiceProvider.GetRequiredService<IBugReportStore>();
+            (await store.NextDueAsync(DateTimeOffset.UtcNow.AddYears(1), cancellationToken)).Should().BeNull();
+            (await store.PendingDeliveriesAsync(cancellationToken)).Should().BeEmpty();
+        }
+
+        await using var connection = new NpgsqlConnection(database.ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            "SELECT number, reply_to, delivered_as FROM bug_reports ORDER BY number", connection);
+
+        var addresses = new List<(int Number, string? ReplyTo, string? DeliveredAs)>();
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                addresses.Add((reader.GetInt32(0), reader.IsDBNull(1) ? null : reader.GetString(1),
+                    reader.IsDBNull(2) ? null : reader.GetString(2)));
+            }
+        }
+
+        addresses.Should().Equal(
+            (1, $"{MockData.TelegramChatId}:9001", "19001"),
+            (2, null, null),
+            (3, $"{MockData.TelegramChatId}:9003", "19003"));
     }
 }

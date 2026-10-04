@@ -42,6 +42,12 @@ internal static class MockData
     public static readonly Guid ForeignSpendingTransactionId = Id(907);
     public static readonly Guid TransferTransactionId = Id(908);
     public static readonly Guid HeldSlipTransactionId = Id(909);
+    public static readonly Guid WaitingTransactionId = Id(910);
+
+    // A failed exchange the bot asked about and nobody answered: the one finding the integrity page shows. No wallet
+    // and no entries, so no balance moves (spec P-19).
+    public static MockWaitingRecord Waiting { get; } = new(
+        WaitingTransactionId, "exchanged 100 eur", Day(1), At(1, 9, 0), RecordFailureReason.MissingReceivedAmount);
 
     public static IReadOnlyList<MockLogRow> LogRows { get; } =
     [
@@ -226,3 +232,5 @@ internal sealed record MockReceipt(
 internal sealed record MockReceiptLine(string Name, decimal Quantity, string Unit, decimal UnitPrice, decimal Total, string? CategorySlug);
 
 internal sealed record MockLogRow(DateTimeOffset At, LogSeverity Level, string Source, string Message, string? Exception = null);
+
+internal sealed record MockWaitingRecord(Guid Id, string RawText, DateOnly Day, DateTimeOffset OccurredAt, RecordFailureReason Reason);

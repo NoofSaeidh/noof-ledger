@@ -497,6 +497,9 @@ detail — prerequisites included. `Get-Help .\run.ps1 -Full` works too. One lin
   refuses to publish on a failed or empty test run.
 - `start-published [-Path <dir>]` — run a published `Noof.Ledger.Host.exe`, from anywhere.
 - `set-password <username>` — create or reset a login; the only way a user is ever created.
+- `bugs export [--all]` — write the open bug reports (every one with `--all`) as one Markdown file under
+  `artifacts\bug-reports\` (git-ignored) and print its path; read-only, works with the app stopped. The `/bugs`
+  Claude Code skill runs it.
 - `test [fast|db|e2e|all] [-Filter <class>]` — fast needs no database (it excludes the Host.Tests
   classes tagged `[Trait("Category", "Database")]`); db/e2e/all take the shared suite lock, and db
   runs those tagged classes too.

@@ -32,7 +32,7 @@ internal sealed class BugReportMarkdown(IFindingText findingText, IFiscalVerific
         yield return $"## Bug report #{report.Number}";
         yield return string.Join('\n',
             $"- Filed: {Minute(report.CreatedAt)} UTC",
-            $"- Source: {report.Source}",
+            $"- Source: {Source(report.Source)}",
             $"- Status: {Status(report)}",
             $"- Record: {report.TransactionId?.ToString() ?? "none"}",
             $"- Snapshot: {(report.SnapshotAt is { } takenAt ? $"{Minute(takenAt)} UTC" : "not taken yet")}");
@@ -61,7 +61,7 @@ internal sealed class BugReportMarkdown(IFindingText findingText, IFiscalVerific
         yield return FencedOr(report.CollectionFailures, "(nothing)");
 
         yield return "### Explanation";
-        yield return $"- State: {report.ExplanationState}\n- Looks like a bug: {Verdict(report.LooksLikeBug)}";
+        yield return $"- State: {State(report.ExplanationState)}\n- Looks like a bug: {Verdict(report.LooksLikeBug)}";
         yield return FencedOr(report.Explanation, "(none)");
 
         yield return "### Log lines (newest first)";
@@ -109,9 +109,29 @@ internal sealed class BugReportMarkdown(IFindingText findingText, IFiscalVerific
         return string.Join('\n', lines);
     }
 
-    static string Status(BugReportDocument report) => report is { Status: BugReportStatus.Closed, ClosedAt: { } closedAt }
-        ? $"Closed (closed {Minute(closedAt)} UTC)"
-        : report.Status.ToString();
+    // Unknown is no report's value - bug_reports refuses 0 (spec R-1) - so it is refused rather than printed as one.
+    static string Source(BugReportSource source) => source switch
+    {
+        BugReportSource.Telegram => "Telegram",
+        BugReportSource.Dashboard => "Dashboard",
+        _ => throw new ArgumentOutOfRangeException(nameof(source), source, null),
+    };
+
+    static string Status(BugReportDocument report) => report switch
+    {
+        { Status: BugReportStatus.Open } => "Open",
+        { Status: BugReportStatus.Closed, ClosedAt: { } closedAt } => $"Closed (closed {Minute(closedAt)} UTC)",
+        { Status: BugReportStatus.Closed } => "Closed",
+        _ => throw new ArgumentOutOfRangeException(nameof(report), report.Status, null),
+    };
+
+    static string State(BugExplanationState state) => state switch
+    {
+        BugExplanationState.Pending => "Pending",
+        BugExplanationState.Done => "Done",
+        BugExplanationState.Failed => "Failed",
+        _ => throw new ArgumentOutOfRangeException(nameof(state), state, null),
+    };
 
     static string Verdict(bool? looksLikeBug) => looksLikeBug switch
     {

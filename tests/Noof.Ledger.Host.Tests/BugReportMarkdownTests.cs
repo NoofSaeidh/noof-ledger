@@ -308,6 +308,30 @@ public class BugReportMarkdownTests
     }
 
     [Fact]
+    public void A_report_waiting_for_its_explanation_says_so()
+    {
+        Render(Unlinked() with { ExplanationState = BugExplanationState.Pending })
+            .Should().Contain("### Explanation\n\n- State: Pending\n- Looks like a bug: —\n\n(none)\n");
+    }
+
+    // R-1: Unknown is no report's value - bug_reports refuses 0 - so the document never prints it as if it were one.
+    [Theory]
+    [InlineData("source")]
+    [InlineData("status")]
+    [InlineData("explanation state")]
+    public void A_report_naming_Unknown_is_refused_rather_than_printed(string field)
+    {
+        var report = field switch
+        {
+            "source" => Unlinked() with { Source = BugReportSource.Unknown },
+            "status" => Unlinked() with { Status = BugReportStatus.Unknown, ClosedAt = null },
+            _ => Unlinked() with { ExplanationState = BugExplanationState.Unknown },
+        };
+
+        FluentActions.Invoking(() => Render(report)).Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
     public void One_report_is_counted_in_the_singular()
     {
         Render(Unlinked()).Should().Contain("\nExported 2026-10-02 14:05 UTC · 1 report\n");

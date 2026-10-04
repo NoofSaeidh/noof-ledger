@@ -20,6 +20,12 @@ using Noof.Ledger.Web;
 using Noof.Ledger.Web.Components;
 using Serilog;
 
+if (BugsCommand.TryParse(args, out var bugsArguments))
+{
+    Environment.ExitCode = await BugsCommand.RunAsync(bugsArguments);
+    return;
+}
+
 if (UserCommand.TryParse(args, out var cliUsername))
 {
     Environment.ExitCode = await UserCommand.RunAsync(cliUsername, args);
