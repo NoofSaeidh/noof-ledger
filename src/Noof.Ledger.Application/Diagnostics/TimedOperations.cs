@@ -9,6 +9,7 @@ public static class TimedOperations
     public const string ModelProbe = "model.probe";
     public const string ModelReadReceipt = "model.readReceipt";
     public const string ModelCategorizeReceipt = "model.categorizeReceipt";
+    public const string ModelExplainFinding = "model.explainFinding";
     public const string SpeechProbe = "speech.probe";
     public const string SpeechTranscribe = "speech.transcribe";
     public const string ReceiptFiscalFetch = "receipt.fiscalFetch";
@@ -34,6 +35,7 @@ public static class TimedOperations
     public const string JobTranscribe = "job.transcribe";
     public const string JobExtractReceipt = "job.extractReceipt";
     public const string JobCategorizeReceipt = "job.categorizeReceipt";
+    public const string JobExplainBugReport = "job.explainBugReport";
 
     public const string BackupDump = "backup.dump";
     public const string LogsPrune = "logs.prune";
