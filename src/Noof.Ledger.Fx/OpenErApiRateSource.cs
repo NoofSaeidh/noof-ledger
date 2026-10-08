@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Noof.Ledger.Application.Diagnostics;
@@ -23,7 +24,7 @@ internal sealed class OpenErApiRateSource(
         OpenErApiPayload? payload;
         try
         {
-            payload = JsonSerializer.Deserialize<OpenErApiPayload>(body);
+            payload = JsonSerializer.Deserialize<OpenErApiPayload>(WithoutByteOrderMark(body));
         }
         catch (JsonException)
         {
@@ -40,7 +41,9 @@ internal sealed class OpenErApiRateSource(
         return rejection is null ? snapshot : Rejected(rejection);
     }
 
-    async Task<string?> ReadBodyAsync(CancellationToken cancellationToken)
+    // Bytes, not a string: JSON is UTF-8 (RFC 8259), and ReadAsStringAsync throws for a charset in Content-Type it does
+    // not know, which would escape as an exception instead of a null.
+    async Task<byte[]?> ReadBodyAsync(CancellationToken cancellationToken)
     {
         try
         {
@@ -48,7 +51,7 @@ internal sealed class OpenErApiRateSource(
             if (!response.IsSuccessStatusCode)
                 return NotFetched($"status {(int)response.StatusCode}");
 
-            return await response.Content.ReadAsStringAsync(cancellationToken);
+            return await response.Content.ReadAsByteArrayAsync(cancellationToken);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -60,7 +63,7 @@ internal sealed class OpenErApiRateSource(
         }
     }
 
-    string? NotFetched(string reason)
+    byte[]? NotFetched(string reason)
     {
         logger.RatesNotFetched(reason);
         return null;
@@ -71,6 +74,9 @@ internal sealed class OpenErApiRateSource(
         logger.RatesRejected(reason);
         return null;
     }
+
+    static ReadOnlySpan<byte> WithoutByteOrderMark(byte[] body) =>
+        body.AsSpan().StartsWith(Encoding.UTF8.Preamble) ? body.AsSpan(Encoding.UTF8.Preamble.Length) : body;
 
     static string ConnectionFailure(HttpRequestException exception) => exception.HttpRequestError switch
     {

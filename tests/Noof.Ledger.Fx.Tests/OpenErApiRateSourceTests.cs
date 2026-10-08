@@ -1,4 +1,6 @@
 using System.Net;
+using System.Net.Http.Headers;
+using System.Text;
 using AwesomeAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
@@ -141,6 +143,38 @@ public class OpenErApiRateSourceTests
         SingleWarning(logger, RejectedId).Properties["Reason"].Should().Be(reason);
     }
 
+    [Fact]
+    public async Task An_unknown_charset_in_the_content_type_is_read_as_UTF_8()
+    {
+        var logger = new CapturingLogger<OpenErApiRateSource>();
+        var handler = new StubHttpMessageHandler((_, _) =>
+        {
+            var content = new StringContent(OpenErApiPayloads.Latest());
+            content.Headers.ContentType = MediaTypeHeaderValue.Parse("application/json; charset=bogus");
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+        });
+
+        var snapshot = await SourceFor(handler, logger).FetchLatestAsync(Ct);
+
+        snapshot.Should().NotBeNull();
+        logger.Entries.Should().NotContain(entry => entry.Level >= LogLevel.Warning);
+    }
+
+    // Reading a string dropped a byte order mark for us; reading bytes must not turn it into invalid JSON.
+    [Fact]
+    public async Task An_answer_with_a_UTF_8_byte_order_mark_is_read()
+    {
+        var logger = new CapturingLogger<OpenErApiRateSource>();
+        byte[] body = [.. Encoding.UTF8.Preamble, .. Encoding.UTF8.GetBytes(OpenErApiPayloads.Latest())];
+        var handler = new StubHttpMessageHandler((_, _) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(body) }));
+
+        var snapshot = await SourceFor(handler, logger).FetchLatestAsync(Ct);
+
+        snapshot.Should().NotBeNull();
+        logger.Entries.Should().NotContain(entry => entry.Level >= LogLevel.Warning);
+    }
+
     [Theory]
     [InlineData("\"117.1532\"")]
     [InlineData("1e40")]
@@ -195,11 +229,13 @@ public class OpenErApiRateSourceTests
     [Fact]
     public async Task The_callers_own_cancellation_propagates()
     {
+        var logger = new CapturingLogger<OpenErApiRateSource>();
         using var cancelled = new CancellationTokenSource();
         await cancelled.CancelAsync();
 
-        var act = () => SourceFor(StubHttpMessageHandler.NeverResponding()).FetchLatestAsync(cancelled.Token);
+        var act = () => SourceFor(StubHttpMessageHandler.NeverResponding(), logger).FetchLatestAsync(cancelled.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
+        logger.Entries.Should().NotContain(entry => entry.Level >= LogLevel.Warning, "the caller stopped the fetch; nothing failed");
     }
 }
