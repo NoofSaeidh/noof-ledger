@@ -208,6 +208,20 @@ public class FactsMismatchKindCheckTests(PostgresFixture fixture)
             Condition("Fee line on a transfer without a fee leg"), new CountFact("Fee lines", 1));
     }
 
+    // P-23: I-1 cannot see a fee in another currency than its leg, since it derives both postings from the same line.
+    [Fact]
+    public async Task A_transfer_fee_line_in_another_currency_than_its_fee_legs_wallet_is_one_finding()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var (_, withdrawal) = await WithdrawalAsync(db);
+        await BreakAsync(db, $"UPDATE line_items SET currency = 'EUR' WHERE transaction_id = {withdrawal} AND role = 1");
+
+        (await FindAsync(db)).Should().ContainSingle().Which.ShouldBeBug(
+            IntegrityCheck.FactsMismatchKind, withdrawal, MainWalletId,
+            Condition("Transfer fee line in another currency than its fee leg's wallet"),
+            new TextFact("Fee leg", "From"), new TextFact("Fee line currency", "EUR"), new TextFact("Wallet currency", "RSD"));
+    }
+
     [Fact]
     public async Task A_transfer_leg_in_another_currency_than_its_wallets_is_one_finding()
     {

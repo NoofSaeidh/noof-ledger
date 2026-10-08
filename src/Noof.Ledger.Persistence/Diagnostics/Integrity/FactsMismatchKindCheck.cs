@@ -135,6 +135,23 @@ internal sealed class FactsMismatchKindCheck(LedgerDbContext db) : IIntegrityChe
           AND (@transactionId IS NULL OR t.id = @transactionId)
         """;
 
+    // P-23: I-1 derives the fee leg's principal and its fee entry from the same lines, so a fee in another currency
+    // than its leg agrees with its own postings and only shows here.
+    const string TransferFeeLineInAnotherCurrencySql = """
+        SELECT t.id AS "TransactionId", t.created_at AS "CreatedAt", t.wallet_id AS "WalletId",
+               NULL::int AS "Kind", NULL::int AS "Status", NULL::int AS "FailureReason", NULL::int AS "Count",
+               tr.fee_leg AS "Leg", li.currency::text AS "Currency", w.currency::text AS "WalletCurrency",
+               NULL::text AS "RecordWallet", NULL::text AS "OtherWallet"
+        FROM transactions t
+        JOIN transfers tr ON tr.transaction_id = t.id
+        JOIN line_items li ON li.transaction_id = t.id AND li.role = 1
+        JOIN wallets w ON w.id = CASE tr.fee_leg WHEN 0 THEN tr.from_wallet_id ELSE tr.to_wallet_id END
+        WHERE t.kind = 3
+          AND tr.fee_leg IS NOT NULL
+          AND li.currency <> w.currency
+          AND (@transactionId IS NULL OR t.id = @transactionId)
+        """;
+
     const string LegInAnotherCurrencySql = """
         SELECT t.id AS "TransactionId", t.created_at AS "CreatedAt", t.wallet_id AS "WalletId",
                NULL::int AS "Kind", NULL::int AS "Status", NULL::int AS "FailureReason", NULL::int AS "Count",
@@ -213,6 +230,13 @@ internal sealed class FactsMismatchKindCheck(LedgerDbContext db) : IIntegrityChe
             rows => [new TextFact("Fee leg", LegName(rows[0].Leg)), new CountFact("Fee lines", rows[0].Count.GetValueOrDefault())]),
         new("Fee line on a transfer without a fee leg", FeeLineWithoutFeeLegSql,
             rows => [new CountFact("Fee lines", rows[0].Count.GetValueOrDefault())]),
+        new("Transfer fee line in another currency than its fee leg's wallet", TransferFeeLineInAnotherCurrencySql,
+            rows =>
+            [
+                new TextFact("Fee leg", LegName(rows[0].Leg)),
+                .. ByCurrency(rows).Select(row => TextOf("Fee line currency", row.Currency)),
+                TextOf("Wallet currency", rows[0].WalletCurrency),
+            ]),
         new("Transfer leg in another currency than its wallet's", LegInAnotherCurrencySql,
             rows => [.. rows.OrderBy(row => row.Leg).SelectMany(LegFacts)]),
         new("Checkpoint on another wallet than the record's", CheckpointOnAnotherWalletSql,

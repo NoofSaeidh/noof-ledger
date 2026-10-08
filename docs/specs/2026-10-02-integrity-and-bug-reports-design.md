@@ -121,7 +121,7 @@ of `LedgerPostings`, which writes the entries (P-3).
 - a `charges` row on a record that is not an `Expense`, or in its wallet's own currency; an expense's
   `Fee` line in a currency other than its wallet's;
 - `fee_leg` set without exactly one `Fee` line on the record, or a `Fee` line on a transfer whose
-  `fee_leg` is null;
+  `fee_leg` is null; a transfer's `Fee` line in a currency other than its fee leg's wallet's (P-23);
 - a transfer leg whose currency differs from its wallet's;
 - `balance_checks.wallet_id` or `transfers.from_wallet_id` differing from `transactions.wallet_id`;
 - `failure_reason` other than `None` on a record that is `Captured` or `Completed` (IR-11).
