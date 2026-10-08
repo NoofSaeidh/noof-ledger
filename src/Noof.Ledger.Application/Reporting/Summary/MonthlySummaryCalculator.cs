@@ -119,10 +119,11 @@ internal static class MonthlySummaryCalculator
 
     // Spec §2: a charge replaces the Principal lines it prices, split in proportion to their amounts so the parts add
     // up to it exactly. Every caller splitting a charge passes the weights in ordinal order, so Home and the summary
-    // give the same cent to the same line.
+    // give the same cent to the same line. Keyed by reference: line_items has no unique (transaction_id, ordinal), so
+    // two lines can be equal by value and still each need their own share.
     static Dictionary<SummaryLineRow, decimal> ChargeShares(IReadOnlyList<SummaryLineRow> lines)
     {
-        var shares = new Dictionary<SummaryLineRow, decimal>();
+        var shares = new Dictionary<SummaryLineRow, decimal>(ReferenceEqualityComparer.Instance);
         var priced = lines
             .Where(line => line is { Kind: SummaryLineKind.Spent, Role: EntryRole.Principal, ChargedAmount: not null })
             .GroupBy(line => (line.TransactionId, line.Currency));
@@ -139,16 +140,18 @@ internal static class MonthlySummaryCalculator
         return shares;
     }
 
+    // A-5: a window before the scope's history start is unknown, not zero, so it is neither the previous month nor
+    // part of the average. The windows counted are always the most recent ones, so the previous month is known exactly
+    // when at least one is.
     static SummaryAmount Figure(IEnumerable<Item> items, int averageMonths)
     {
         var byWindow = new decimal[SummaryWindows.ComparedMonths + 1];
         foreach (var item in items)
             byWindow[item.Window] += item.Amount;
 
-        return new SummaryAmount(
-            byWindow[0],
-            byWindow[1],
-            averageMonths == 0 ? null : byWindow.Skip(1).Take(averageMonths).Sum() / averageMonths);
+        return averageMonths == 0
+            ? new SummaryAmount(byWindow[0], null, null)
+            : new SummaryAmount(byWindow[0], byWindow[1], byWindow.Skip(1).Take(averageMonths).Sum() / averageMonths);
     }
 
     static List<SummaryCategory> CategoryFigures(List<Item> spending, int averageMonths) =>

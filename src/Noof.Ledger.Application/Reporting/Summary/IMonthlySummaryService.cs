@@ -12,8 +12,8 @@ public readonly record struct SummaryScope(Guid? WalletId)
 // LastDay is today for the current month (Finished false), else the month's last day.
 public sealed record SummaryPeriod(DateOnly FirstDay, DateOnly LastDay, bool Finished);
 
-// Previous: the previous month's window; Average: the mean of AverageMonths windows (null when 0). Spec A-6 decides
-// how a change is shown; the record holds only figures.
+// Previous: the previous month's window, null when it is before the scope's history start (A-5); Average: the mean of
+// AverageMonths windows (null when 0). Spec A-6 decides how a change is shown; the record holds only figures.
 public sealed record SummaryAmount(decimal Amount, decimal? Previous, decimal? Average);
 
 public enum HighlightBase

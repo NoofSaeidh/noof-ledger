@@ -47,8 +47,8 @@ public class MonthlySummaryCalculatorTests
         summary.Received.Amount.Should().Be(2000.00m);
         summary.Net.Amount.Should().Be(1957.50m);                 // 2000.00 - 42.50
         summary.Categories.Should().Equal(
-            new SummaryCategory("Groceries", new SummaryAmount(30.00m, 0m, null)),
-            new SummaryCategory("Cafés", new SummaryAmount(12.50m, 0m, null)));
+            new SummaryCategory("Groceries", new SummaryAmount(30.00m, null, null)),
+            new SummaryCategory("Cafés", new SummaryAmount(12.50m, null, null)));
         summary.Wallets.Should().BeEmpty();
         summary.MovedOut.Should().Be(0m);
         summary.MovedIn.Should().Be(0m);
@@ -92,6 +92,26 @@ public class MonthlySummaryCalculatorTests
         // 2500.00 KZT over 30.00 and -5.00 USD (sum 25.00): Coupon 2500 × -5/25 = -500.00, Headphones the rest 3000.00.
         Amounts(summary).Should().Equal(("Electronics", 3000.00m), ("Discounts", -500.00m));
         summary.Spent.Amount.Should().Be(2500.00m);
+    }
+
+    [Fact]
+    public void Two_identical_foreign_lines_under_one_charge_each_keep_their_own_share()
+    {
+        // line_items has no unique (transaction_id, ordinal), so two rows can be equal field for field.
+        var recordId = Guid.NewGuid();
+        var book = new SummaryLineRow(recordId, Oct(4), KaspiId, Kzt, SummaryLineKind.Spent, EntryRole.Principal, 0,
+            "Books", "Paddle", "Book", 3.00m, Usd, 1000.00m);
+        var rows = new SummaryRows(
+            [new SummaryWallet(KaspiId, "Kaspi", Kzt, false, Oct(1))],
+            [book, book with { }, book with { Ordinal = 1, CategoryName = "Subscriptions", Description = "SaaS" }],
+            []);
+
+        var summary = ForWallet(rows, KaspiId);
+
+        // 1000.00 KZT over 3:3:3 - each 1000 × 3/9 = 333.333 → 333.33; the first book (largest weight, first on the
+        // tie) takes the rest, 1000.00 - 666.66 = 333.34. Books = 333.34 + 333.33 = 666.67.
+        Amounts(summary).Should().Equal(("Books", 666.67m), ("Subscriptions", 333.33m));
+        summary.Spent.Amount.Should().Be(1000.00m);
     }
 
     [Fact]
@@ -319,8 +339,49 @@ public class MonthlySummaryCalculatorTests
         var summary = ForWallet(rows.Build(), WiseId);
 
         summary.AverageMonths.Should().Be(0);
-        summary.Spent.Should().Be(new SummaryAmount(30.00m, 0m, null));
-        summary.Net.Should().Be(new SummaryAmount(-30.00m, 0m, null));
+        summary.Spent.Should().Be(new SummaryAmount(30.00m, null, null));
+        summary.Net.Should().Be(new SummaryAmount(-30.00m, null, null));
+    }
+
+    [Fact]
+    public void A_scopes_first_month_has_no_previous_month_to_compare_with()
+    {
+        var rows = new SummaryRowsBuilder()
+            .Wallet(WiseId, "Wise", Eur, Oct(1))
+            .Wallet(CashRsdId, "Cash RSD", Rsd, null);
+        rows.Expense(WiseId, Oct(3), "Maxi", Line("Groceries", 30.00m));
+        rows.Income(WiseId, Oct(5), "Employer", Line("Salary", 100.00m));
+        rows.Transfer(Oct(6), CashRsdId, 1170.00m, WiseId, 10.00m);
+        var built = rows.Build();
+
+        // A-5: September is before Wise's history, so it is unknown, not a zero to read as "new" against (A-6).
+        var wise = ForWallet(built, WiseId);
+        wise.Spent.Should().Be(new SummaryAmount(30.00m, null, null));
+        wise.Received.Should().Be(new SummaryAmount(100.00m, null, null));
+        wise.Net.Should().Be(new SummaryAmount(70.00m, null, null));
+        wise.Categories.Should().Equal(new SummaryCategory("Groceries", new SummaryAmount(30.00m, null, null)));
+
+        // A wallet with no history start has nothing to compare against at all.
+        ForWallet(built, CashRsdId).Spent.Should().Be(new SummaryAmount(0m, null, null));
+    }
+
+    [Fact]
+    public void An_empty_previous_month_after_the_history_start_is_a_real_zero()
+    {
+        var throughThe8th = new SummaryPeriod(Oct(1), Oct(8), Finished: false);
+        var rows = new SummaryRowsBuilder().Wallet(WiseId, "Wise", Eur, Sep(1));
+        rows.Expense(WiseId, Sep(20), "Maxi", Line("Groceries", 40.00m));    // after 8 Sep: the history starts, 1–8 Sep is empty
+        rows.Income(WiseId, Sep(25), "Employer", Line("Salary", 100.00m));
+        rows.Expense(WiseId, Oct(3), "Maxi", Line("Groceries", 30.00m));
+        rows.Income(WiseId, Oct(5), "Employer", Line("Salary", 50.00m));
+
+        var summary = ForWallet(rows.Build(), WiseId, period: throughThe8th);
+
+        summary.AverageMonths.Should().Be(1);
+        summary.Spent.Should().Be(new SummaryAmount(30.00m, 0m, 0m));
+        summary.Received.Should().Be(new SummaryAmount(50.00m, 0m, 0m));
+        summary.Net.Should().Be(new SummaryAmount(20.00m, 0m, 0m));                 // 50.00 - 30.00; 0 - 0; 0 - 0
+        summary.Categories.Should().Equal(new SummaryCategory("Groceries", new SummaryAmount(30.00m, 0m, 0m)));
     }
 
     [Fact]
