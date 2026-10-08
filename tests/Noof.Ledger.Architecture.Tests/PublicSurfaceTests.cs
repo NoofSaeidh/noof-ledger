@@ -45,7 +45,7 @@ public class PublicSurfaceTests
     [Fact]
     public void No_public_concrete_service_crosses_an_infrastructure_boundary()
     {
-        string[] infrastructure = ["Noof.Ledger.Persistence", "Noof.Ledger.Ai", "Noof.Ledger.Telegram", "Noof.Ledger.Receipts"];
+        string[] infrastructure = ["Noof.Ledger.Persistence", "Noof.Ledger.Ai", "Noof.Ledger.Telegram", "Noof.Ledger.Fx", "Noof.Ledger.Receipts"];
 
         var offenders = infrastructure
             .SelectMany(project => SourceFiles(project)
@@ -68,7 +68,7 @@ public class PublicSurfaceTests
         foreach (var project in ScannedProjects)
             Directory.Exists(ProjectRoot(project)).Should().BeTrue($"{project} must exist to be scanned");
 
-        // Fx is a legitimately empty placeholder, so "every list is non-empty" would be wrong.
+        // Host's list is legitimately empty - every type in it is internal - so "every list is non-empty" would be wrong.
         // Domain standing in for the set proves the regex still matches real declarations - a rule
         // whose subject set is empty passes forever and enforces nothing.
         PublicTypesIn("Noof.Ledger.Domain").Should().NotBeEmpty();
