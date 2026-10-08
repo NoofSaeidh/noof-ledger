@@ -7,6 +7,7 @@ using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Fx;
 using Noof.Ledger.Application.Jobs;
 using Noof.Ledger.Application.Reporting;
+using Noof.Ledger.Application.Reporting.Summary;
 using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Persistence;
@@ -50,6 +51,8 @@ public class PersistenceRegistrationTests
         scope.ServiceProvider.GetRequiredService<IJobQueue>().Should().NotBeNull();
         scope.ServiceProvider.GetRequiredService<IWalletDirectory>().Should().NotBeNull();
         scope.ServiceProvider.GetRequiredService<IFxRateStore>().Should().NotBeNull();
+        scope.ServiceProvider.GetRequiredService<IReportingCurrencySetting>().Should().NotBeNull();
+        scope.ServiceProvider.GetRequiredService<IAutoSummaryMarker>().Should().NotBeNull();
     }
 
     // Decision (c), 2026-09-26: a leftover Logging:Retention key (an operator's environment variable

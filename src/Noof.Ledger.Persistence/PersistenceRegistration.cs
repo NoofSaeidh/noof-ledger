@@ -16,6 +16,7 @@ using Noof.Ledger.Application.Fx;
 using Noof.Ledger.Application.Jobs;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Application.Reporting;
+using Noof.Ledger.Application.Reporting.Summary;
 using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Application.Transcription;
 using Noof.Ledger.Application.Wallets;
@@ -33,6 +34,7 @@ using Noof.Ledger.Persistence.Jobs;
 using Noof.Ledger.Persistence.Receipts;
 using Noof.Ledger.Persistence.Reporting;
 using Noof.Ledger.Persistence.Secrets;
+using Noof.Ledger.Persistence.Settings;
 using Noof.Ledger.Persistence.Transcription;
 using Noof.Ledger.Persistence.Wallets;
 
@@ -97,6 +99,8 @@ public static class PersistenceRegistration
         services.AddScoped<IIntegrityChecks, EfIntegrityChecks>();
         services.AddScoped<IBugReportStore, EfBugReportStore>();
         services.AddScoped<IFxRateStore, EfFxRateStore>();
+        services.AddScoped<IReportingCurrencySetting, EfReportingCurrencySetting>();
+        services.AddScoped<IAutoSummaryMarker, EfAutoSummaryMarker>();
 
         services.AddScoped<ISystemHealthCheck, MigrationsHealthCheck>();
         services.AddScoped<ISystemHealthCheck, IntegrityHealthCheck>();
