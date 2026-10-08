@@ -50,9 +50,9 @@ internal static class BugReportJson
 
         try
         {
-            var findings = JsonSerializer.Deserialize<List<FindingJson>>(json)
+            var findings = JsonSerializer.Deserialize<List<FindingJson?>>(json)
                 ?? throw new FormatException("The findings column holds a JSON null.");
-            return [.. findings.Select(ToFinding)];
+            return [.. findings.Select(finding => ToFinding(Present(finding)))];
         }
         catch (Exception exception) when (exception is JsonException or FormatException or ArgumentException or OverflowException)
         {
@@ -102,11 +102,11 @@ internal static class BugReportJson
 
         try
         {
-            var lines = JsonSerializer.Deserialize<List<LogLineJson>>(json)
+            var lines = JsonSerializer.Deserialize<List<LogLineJson?>>(json)
                 ?? throw new FormatException("The log_lines column holds a JSON null.");
             return
             [
-                .. lines.Select(line => new BugReportLogLine(
+                .. lines.Select(Present).Select(line => new BugReportLogLine(
                     DateTimeOffset.ParseExact(Required(line.LoggedAt), "O", CultureInfo.InvariantCulture),
                     Name<LogSeverity>(line.Level),
                     line.Source,
@@ -143,7 +143,7 @@ internal static class BugReportJson
         finding.TransactionId,
         finding.WalletId,
         finding.JobId,
-        [.. (finding.Facts ?? throw new FormatException("A finding without its facts.")).Select(ToFact)]);
+        [.. (finding.Facts ?? throw new FormatException("A finding without its facts.")).Select(fact => ToFact(Present(fact)))]);
 
     static IntegrityFact ToFact(FactJson fact) => fact.Kind switch
     {
@@ -192,6 +192,8 @@ internal static class BugReportJson
 
     static string Required(string? value) => value ?? throw new FormatException("A required field is missing.");
 
+    static T Present<T>(T? element) where T : class => element ?? throw new FormatException("A null element in a list.");
+
     // Enum.Parse alone would also take "1"; a column holds names only, so spec R-1's renumbering left it readable.
     static T Name<T>(string? value) where T : struct, Enum =>
         value is not null && Enum.GetNames<T>().Contains(value, StringComparer.Ordinal)
@@ -210,7 +212,7 @@ internal static class BugReportJson
         [property: JsonPropertyName("transaction_id")] Guid? TransactionId,
         [property: JsonPropertyName("wallet_id")] Guid? WalletId,
         [property: JsonPropertyName("job_id")] Guid? JobId,
-        [property: JsonPropertyName("facts")] IReadOnlyList<FactJson>? Facts);
+        [property: JsonPropertyName("facts")] IReadOnlyList<FactJson?>? Facts);
 
     sealed record FactJson(
         [property: JsonPropertyName("kind")] string? Kind,

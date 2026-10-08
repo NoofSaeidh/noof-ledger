@@ -78,6 +78,8 @@ public class BugReportJsonTests
     [InlineData("""[{"check":"PostingsDisagree","group":"Bug","transaction_id":null,"wallet_id":null,"job_id":null}]""")]
     [InlineData("""[{"check":"PostingsDisagree","group":"Bug","transaction_id":null,"wallet_id":null,"job_id":null,"facts":[{"kind":"money","name":"Expected","amount":"-250","currency":"RS1"}]}]""")]
     [InlineData("""[{"check":"PostingsDisagree","group":"Bug","transaction_id":null,"wallet_id":null,"job_id":null,"facts":[{"kind":"weather","name":"Sky"}]}]""")]
+    [InlineData("[null]")]
+    [InlineData("""[{"check":"PostingsDisagree","group":"Bug","transaction_id":null,"wallet_id":null,"job_id":null,"facts":[null]}]""")]
     public void A_findings_column_that_cannot_be_read_back_reads_as_not_collected(string json)
     {
         BugReportJson.ReadFindings(json).Should().BeNull();
@@ -171,6 +173,7 @@ public class BugReportJsonTests
     [InlineData("""[{"logged_at":"yesterday","level":"Warning","source":null,"message":"m","exception":null,"properties":null}]""")]
     [InlineData("""[{"logged_at":"2026-10-02T13:58:01.0000000+00:00","level":"Loud","source":null,"message":"m","exception":null,"properties":null}]""")]
     [InlineData("""[{"logged_at":"2026-10-02T13:58:01.0000000+00:00","level":"Warning","source":null,"exception":null,"properties":null}]""")]
+    [InlineData("[null]")]
     public void A_log_lines_column_that_cannot_be_read_back_reads_as_not_collected(string json)
     {
         BugReportJson.ReadLogLines(json).Should().BeNull();
