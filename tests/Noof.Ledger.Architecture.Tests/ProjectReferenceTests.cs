@@ -103,6 +103,13 @@ public class ProjectReferenceTests
     }
 
     [Fact]
+    public void Fx_package_references_are_exactly_its_allowed_set()
+    {
+        // AddNoofFx registers the open-er-api named client, as AddNoofReceipts registers suf-purs.
+        Packages("Noof.Ledger.Fx").Should().BeEquivalentTo("Microsoft.Extensions.Http");
+    }
+
+    [Fact]
     public void Web_has_no_program_cs()
     {
         var web = Path.Combine(RepoRoot.Find().FullName, "src", "Noof.Ledger.Web");
