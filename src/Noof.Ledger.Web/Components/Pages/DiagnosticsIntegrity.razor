@@ -1,0 +1,160 @@
+@page "/diagnostics/integrity"
+@attribute [Authorize]
+@implements IDisposable
+@using Noof.Ledger.Application.Diagnostics
+@using Noof.Ledger.Application.Diagnostics.BugReports
+@using Noof.Ledger.Application.Diagnostics.Integrity
+@using Noof.Ledger.Web.Components.Integrity
+@inject IIntegrityChecks Checks
+@inject IFindingExplainer Explainer
+@inject IBugReportStore BugReports
+@inject IFindingText FindingText
+@inject IDatabaseGate Gate
+@inject TimeProvider TimeProvider
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+
+<PageTitle>Integrity</PageTitle>
+
+<MudText HtmlTag="h1" Typo="Typo.h4" Class="mb-1">Integrity</MudText>
+<MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">Checks run each time this page opens.</MudText>
+
+@if (Gate.State != DatabaseState.Ready)
+{
+    <DatabaseGateBanner />
+}
+else if (loadError is not null)
+{
+    <MudAlert id="integrity-error" Severity="Severity.Error" Variant="Variant.Outlined">@loadError</MudAlert>
+}
+else if (findings is null)
+{
+    <MudText Typo="Typo.body2" Class="mud-text-secondary">Running the checks…</MudText>
+}
+else if (findings.Count == 0)
+{
+    <MudAlert id="integrity-empty" Severity="Severity.Success" Variant="Variant.Outlined">No findings</MudAlert>
+}
+else
+{
+    @foreach (var part in Sections)
+    {
+        var inSection = findings
+            .Select((finding, index) => (Finding: finding, Index: index))
+            .Where(item => item.Finding.Group == part.Group)
+            .ToList();
+
+        <section id="@part.Id" class="mb-8">
+            <MudText HtmlTag="h2" Typo="Typo.h6">@part.Heading</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">@part.Caption</MudText>
+
+            @if (inSection.Count == 0)
+            {
+                <MudText Typo="Typo.body2">None</MudText>
+            }
+
+            @foreach (var (finding, i) in inSection)
+            {
+                var state = Flow.StateOf(i);
+
+                <MudPaper id="@($"finding-{i}")" Outlined="true" Elevation="0" Class="pa-5 mb-4">
+                    <FindingFacts Finding="finding" AsOf="asOf" />
+
+                    <div class="d-flex flex-wrap align-center gap-4 mt-3">
+                        <MudButton id="@($"explain-{i}")" Variant="Variant.Outlined" Size="Size.Small" Disabled="@Flow.Busy"
+                                   OnClick="@(() => Flow.ExplainAsync(i, finding, cancellation.Token))">
+                            @(state.Explaining ? "Explaining…" : "Explain")
+                        </MudButton>
+                        @if (FindingExplanationFlow.LinkFor(finding) is { } link)
+                        {
+                            <MudLink id="@($"finding-{i}-link")" Href="@link.Href">@link.Label</MudLink>
+                        }
+                    </div>
+
+                    @if (state.ExplainFailed)
+                    {
+                        <MudAlert id="@($"explanation-{i}")" Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-3">
+                            @FindingExplanationFlow.CouldNotExplain
+                            @if (state.CreatedNumber is { } number)
+                            {
+                                <div class="mt-2">
+                                    <MudLink id="@($"created-{i}")" Href="@($"/bugs/{number}")">@FindingExplanationFlow.CreatedText(number)</MudLink>
+                                </div>
+                            }
+                        </MudAlert>
+                    }
+                    else if (state.Explanation is { } explanation)
+                    {
+                        <MudAlert id="@($"explanation-{i}")" Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-3">
+                            <div style="white-space: pre-wrap;">@explanation.Text</div>
+                            @if (state.OffersReport)
+                            {
+                                <div class="mt-2">@FindingExplanationFlow.LooksLikeBugOffer</div>
+                                <div class="d-flex gap-2 mt-2">
+                                    <MudButton id="@($"create-{i}")" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                                               Disabled="@Flow.Busy" OnClick="@(() => Flow.CreateAsync(i, finding, cancellation.Token))">
+                                        Create
+                                    </MudButton>
+                                    <MudButton id="@($"dismiss-{i}")" Variant="Variant.Text" Size="Size.Small"
+                                               Disabled="@Flow.Busy" OnClick="@(() => Flow.Dismiss(i))">
+                                        Dismiss
+                                    </MudButton>
+                                </div>
+                                @if (state.CreateFailed)
+                                {
+                                    <div class="mt-2">@FindingExplanationFlow.CouldNotCreate</div>
+                                }
+                            }
+                            @if (state.CreatedNumber is { } number)
+                            {
+                                <div class="mt-2">
+                                    <MudLink id="@($"created-{i}")" Href="@($"/bugs/{number}")">@FindingExplanationFlow.CreatedText(number)</MudLink>
+                                </div>
+                            }
+                        </MudAlert>
+                    }
+                </MudPaper>
+            }
+        </section>
+    }
+}
+
+@code {
+    static readonly (IntegrityGroup Group, string Id, string Heading, string Caption)[] Sections =
+    [
+        (IntegrityGroup.Bug, "integrity-bugs", "Bugs", "Our code wrote data that contradicts itself."),
+        (IntegrityGroup.WaitingOnYou, "integrity-waiting", "Waiting on you", "Something never reached the ledger or never applied."),
+    ];
+
+    readonly CancellationTokenSource cancellation = new();
+    FindingExplanationFlow? flow;
+    IReadOnlyList<IntegrityFinding>? findings;
+    DateTimeOffset asOf;
+    string? loadError;
+
+    FindingExplanationFlow Flow => flow ??= new(Explainer, BugReports, FindingText, TimeProvider);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Gate.State != DatabaseState.Ready)
+            return;
+
+        await Flow.RunExclusiveAsync(async token =>
+        {
+            try
+            {
+                asOf = TimeProvider.GetUtcNow();
+                findings = await Checks.FindAllAsync(token);
+            }
+            catch (Exception exception) when (!token.IsCancellationRequested)
+            {
+                loadError = $"Couldn't run the checks ({exception.GetType().Name}).";
+            }
+        }, cancellation.Token);
+    }
+
+    public void Dispose()
+    {
+        cancellation.Cancel();
+        cancellation.Dispose();
+    }
+}

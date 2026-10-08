@@ -2,13 +2,13 @@
 
 Personal finance tracker. Telegram bot captures spending (text, voice, receipt photos), an LLM categorises it per line item, a local Blazor dashboard shows it across multiple wallets and currencies. C# / .NET 10, EF Core, strict TDD, local hosting, **public repo**.
 
-> **Status:** Phases 0, 0b, 1A, 1B, 1C, 1D, 2, 3, 4, 5, 6 and 7 complete — full detail in `docs/STATUS.md`.
-> Editing receipt lines and correcting a vision-read fiscal receipt's amounts remain future phases.
+> **Status:** Phases 0, 0b, 1A, 1B, 1C, 1D, 2, 3, 4, 5, 6, 7 and 8a complete — full detail in `docs/STATUS.md`.
+> Phase 8b (spending analysis) is next; editing receipt lines and correcting a vision-read fiscal receipt's amounts remain future phases.
 > Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
 >
 > Deferred **decisions** live in `docs/decisions/`; deferred **work** lives in `docs/backlog/`. Check both before proposing something as missing.
 >
-> **`noof_ledger` holds the operator's real credentials now.** Never run tests, experiments or manual checks against it, or call the live model, without an explicit request. Tests use the `noof_ledger_test_template` clones only.
+> **`noof_ledger` holds the operator's real credentials now.** Never run tests, experiments or manual checks against it, or call the live model, without an explicit request. The `/bugs` skill is that request, to read it through `.\run.ps1 bugs export` only. Tests use the `noof_ledger_test_template` clones only.
 
 ---
 
@@ -34,15 +34,16 @@ policy below names.
 reasoning, never for small tasks. `low` for mechanical work.
 
 **Reviews — three cadences, don't substitute one for another** *(operator's decisions, 2026-09-28)*.
-How to run each, and the trial tally, are in `docs/REVIEWS.md`.
-- **Per task** inside a phase or plan: opus, effort medium. No Codex, no Fable per task.
+How to run each, and the closed trial's tally, are in `docs/REVIEWS.md`.
+- **Per task** inside a phase or plan: opus, effort medium. No Codex per task.
 - **Per PR:** one Codex review, a family different from the implementer — plain for a mechanical PR,
   adversarial for one that makes design choices or when unsure. Codex at its usage limit → an opus
   review, said so in the PR. Never enable the Codex plugin's stop-time review gate.
-- **Per phase:** Fable 5.1 at three points — the spec, the implementation plan (once written, before
-  any implementation starts) *(operator, 2026-10-01)*, and the close of the phase or a batch of PRs;
-  never per PR or per fix round. Trial for 3 phases: each runs in parallel with a Codex adversarial
-  review of the same scope, tallied per review.
+- **Per phase:** a Codex adversarial review at three points — the spec, the implementation plan (once
+  written, before any implementation starts) *(operator, 2026-10-01)*, and the close of the phase or a
+  batch of PRs; never per PR or per fix round *(operator, 2026-10-08, after the three-phase trial;
+  Fable dropped)*. It differs from the per-PR review in scope: the whole spec, plan or phase, not one
+  PR. Codex at its usage limit → an opus review, said so.
 - **Findings are triaged, not all fixed**, for Copilot and Codex alike: fix a critical finding (real
   bug, wrong money/balance, data loss, secret leak, security hole, broken build/test,
   *(settled)*-rule violation); reply with a sentence of reasoning and don't change code for a
@@ -60,7 +61,7 @@ How to run each, and the trial tally, are in `docs/REVIEWS.md`.
 - Choosing the model by how important a task *sounds*. A rename in money code is still sonnet; a
   judgment call in a small doc is still opus. The kind of work decides.
 - Re-running expensive work that is already cached or already done. Check first.
-- A Fable review per fix round or per Copilot round — this cost ~5 hours on PR #3.
+- A phase-point review per fix round or per Copilot round — this cost ~5 hours on PR #3.
 
 ## 2. Subagent usage
 
@@ -79,6 +80,9 @@ How to run each, and the trial tally, are in `docs/REVIEWS.md`.
 - **No XML doc blocks** on private or internal members. No `#region`. No commented-out code — git remembers it.
 - **Names carry the meaning.** A well-named method needs no header comment. If you cannot name it clearly, the method is doing too much.
 - **Small and focused.** Short methods, one reason to change per class. A long file is a design signal, not a formatting problem.
+- **A new enum's `0` is `Unknown`** (or `None` where "nothing" is the honest name), never a real value, so a default
+  or missing value is never mistaken for one *(operator, 2026-10-03)*. Enums stored before Phase 8a keep their
+  values — `docs/backlog/zero-value-for-existing-enums.md`.
 
 **Use modern C# — this targets .NET 10, so write like it:**
 
@@ -233,7 +237,7 @@ the code that builds the echo text.
   The aggregate PR leaves draft only once the phase is finalised, and then merges into `master`.
 - **Committed straight to the aggregate branch, never as a PR:** the phase's spec and its
   amendments *(operator, 2026-10-01)*, and small fixes *(operator, 2026-10-02)* — fixes from any
-  review (Codex, Fable, the phase's closing review), small bugs, follow-ups, plan and doc
+  review (Codex, opus, the phase's closing review), small bugs, follow-ups, plan and doc
   corrections, reference sweeps: anything that adds no behaviour and changes no design. Run the
   tests of the classes a fix touches before pushing; CI on the aggregate PR stays green. A direct
   fix gets no Codex review of its own — the phase's closing review covers it. Fixes made *after*

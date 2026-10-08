@@ -1,0 +1,19 @@
+@using Noof.Ledger.Application.Diagnostics.Integrity
+@inject IFindingText FindingText
+
+@* One wording of a finding for every page that shows one. An age (a SinceFact) is marked as a live value: it follows
+   the host's real clock, and AppScreens.HideLiveValues hides it in the screenshots by this class. *@
+@if (Finding is { } finding)
+{
+    <MudText Typo="Typo.subtitle1">@FindingText.Title(finding.Check)</MudText>
+    @foreach (var fact in finding.Facts)
+    {
+        <MudText Typo="Typo.body2">@fact.Name: <span class="@(fact is SinceFact ? "noof-live-value" : null)">@FindingText.FormatValue(fact, AsOf)</span></MudText>
+    }
+}
+
+@code {
+    [Parameter] public IntegrityFinding? Finding { get; set; }
+
+    [Parameter] public DateTimeOffset AsOf { get; set; }
+}

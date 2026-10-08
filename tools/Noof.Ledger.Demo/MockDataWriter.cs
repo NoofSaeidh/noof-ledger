@@ -12,6 +12,8 @@ using Noof.Ledger.Persistence.Balances;
 using Noof.Ledger.Persistence.Diagnostics;
 using Noof.Ledger.Persistence.Receipts;
 using Noof.Ledger.Persistence.Revisions;
+using Npgsql;
+using NpgsqlTypes;
 
 namespace Noof.Ledger.Demo;
 
@@ -32,6 +34,7 @@ internal static class MockDataWriter
         foreach (var transfer in MockData.Transfers)
             await WriteTransferAsync(db, transfer, ++messageId, wallets, categories, cancellationToken);
         await WriteForeignSpendingAsync(db, MockData.ForeignSpending, ++messageId, wallets, categories, cancellationToken);
+        await WriteWaitingRecordAsync(db, MockData.Waiting, ++messageId, cancellationToken);
 
         await WriteTraceAsync(db, cancellationToken);
         await WriteReceiptTracesAsync(db, cancellationToken);
@@ -40,6 +43,8 @@ internal static class MockDataWriter
         await WriteUserAsync(services, cancellationToken);
         await WriteSecretsAsync(services.GetRequiredService<ISecretStore>(), cancellationToken);
         await WriteBackupRunAsync(db, cancellationToken);
+        await WriteJobStampsAsync(db, cancellationToken);
+        await WriteBugReportsAsync(db, wallets, cancellationToken);
     }
 
     static async Task<Dictionary<string, Guid>> WriteWalletsAsync(
@@ -243,6 +248,109 @@ internal static class MockDataWriter
         await RevisionLog.AppendAsync(
             db, transaction, RevisionKind.Initial, null, TransactionStatus.Captured, transaction.OccurredAt.AddSeconds(2), cancellationToken);
     }
+
+    // Created two days before the real now: the integrity checks measure idle time against the host's own clock, as the
+    // Backups check measures a backup's age (WriteBackupRunAsync), so a record dated in the mock month could not wait
+    // "over a day" on every day the pictures are taken. Kept an Expense, as a failed capture keeps its kind.
+    static async Task WriteWaitingRecordAsync(LedgerDbContext db, MockWaitingRecord record, int messageId, CancellationToken cancellationToken)
+    {
+        db.Transactions.Add(new Transaction
+        {
+            Id = record.Id,
+            WalletId = null,
+            Kind = TransactionKind.Expense,
+            RawText = record.RawText,
+            CaptureKind = CaptureKind.Text,
+            Status = TransactionStatus.Failed,
+            FailureReason = record.Reason,
+            TimeZoneId = MockData.TimeZoneId,
+            OccurredAt = record.OccurredAt,
+            OccurredOn = record.Day,
+            TelegramChatId = MockData.TelegramChatId,
+            TelegramMessageId = messageId,
+            BotMessageId = 10_000 + messageId,
+            CreatedAt = DateTimeOffset.UtcNow.AddDays(-2),
+        });
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    // The failed record, the held receipt and the held slip are dated in the mock month and would read as Waiting on you
+    // or not depending on the day the pictures are taken. A job touched at the real now keeps each of them active.
+    static async Task WriteJobStampsAsync(LedgerDbContext db, CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        db.CategorizationJobs.Add(new CategorizationJob
+        {
+            Id = MockData.Id(5900),
+            TransactionId = MockData.FailedTransactionId,
+            Kind = JobKind.Categorize,
+            Status = JobStatus.Failed,
+            AttemptCount = 8,
+            RunAfter = now,
+            LastError = "The model call failed.",
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await db.SaveChangesAsync(cancellationToken);
+
+        Guid[] held = [MockData.UnconfirmedReceiptTransactionId, MockData.HeldSlipTransactionId];
+        await db.CategorizationJobs
+            .Where(job => held.Contains(job.TransactionId) && job.Kind == JobKind.ExtractReceipt)
+            .ExecuteUpdateAsync(set => set.SetProperty(job => job.UpdatedAt, now), cancellationToken);
+    }
+
+    // By column name: the table and its JSON are the phase's fixed shape, the entity's property names are not. Number is
+    // left to the identity column, which numbers the reports #1-#3 in this order.
+    const string InsertBugReport =
+        """
+        INSERT INTO bug_reports (id, created_at, source, text, transaction_id, reply_to, status,
+            closed_at, snapshot_at, record_summary, findings, log_lines, collection_failures, explanation_state,
+            explanation_attempts, explanation_next_at, explanation, looks_like_bug, delivered_as)
+        VALUES (@id, @createdAt, @source, @text, @transactionId, @replyTo, @status,
+            @closedAt, @snapshotAt, @recordSummary, @findings, @logLines, @collectionFailures, @explanationState,
+            @attempts, @createdAt, @explanation, @looksLikeBug, @deliveredAs)
+        """;
+
+    static async Task WriteBugReportsAsync(LedgerDbContext db, Dictionary<string, Guid> wallets, CancellationToken cancellationToken)
+    {
+        var waitingSince = await db.Transactions
+            .Where(transaction => transaction.Id == MockData.WaitingTransactionId)
+            .Select(transaction => transaction.CreatedAt)
+            .SingleAsync(cancellationToken);
+        var tracedAt = await db.Transactions
+            .Where(transaction => transaction.Id == MockData.TracedTransactionId)
+            .Select(transaction => transaction.OccurredAt)
+            .SingleAsync(cancellationToken);
+
+        foreach (var report in MockBugReports.Build(waitingSince, wallets["Wise"], tracedAt))
+            await db.Database.ExecuteSqlRawAsync(InsertBugReport, BugReportParameters(report), cancellationToken);
+    }
+
+    static NpgsqlParameter[] BugReportParameters(MockBugReport report) =>
+    [
+        Parameter("id", NpgsqlDbType.Uuid, report.Id),
+        Parameter("createdAt", NpgsqlDbType.TimestampTz, report.CreatedAt),
+        Parameter("source", NpgsqlDbType.Integer, (int)report.Source),
+        Parameter("text", NpgsqlDbType.Text, report.Text),
+        Parameter("transactionId", NpgsqlDbType.Uuid, report.TransactionId),
+        Parameter("replyTo", NpgsqlDbType.Text, report.ReplyTo),
+        Parameter("status", NpgsqlDbType.Integer, (int)report.Status),
+        Parameter("closedAt", NpgsqlDbType.TimestampTz, report.ClosedAt),
+        Parameter("snapshotAt", NpgsqlDbType.TimestampTz, report.SnapshotAt),
+        Parameter("recordSummary", NpgsqlDbType.Text, report.RecordSummary),
+        Parameter("findings", NpgsqlDbType.Jsonb, report.FindingsJson),
+        Parameter("logLines", NpgsqlDbType.Jsonb, report.LogLinesJson),
+        Parameter("collectionFailures", NpgsqlDbType.Text, report.CollectionFailures),
+        Parameter("explanationState", NpgsqlDbType.Integer, (int)report.ExplanationState),
+        Parameter("attempts", NpgsqlDbType.Integer, report.ExplanationAttempts),
+        Parameter("explanation", NpgsqlDbType.Text, report.Explanation),
+        Parameter("looksLikeBug", NpgsqlDbType.Boolean, report.LooksLikeBug),
+        Parameter("deliveredAs", NpgsqlDbType.Text, report.DeliveredAs),
+    ];
+
+    static NpgsqlParameter Parameter(string name, NpgsqlDbType type, object? value) =>
+        new(name, type) { Value = value ?? DBNull.Value };
 
     static Transaction NewCompletedRecord(Guid id, Guid walletId, TransactionKind kind, string rawText, DateOnly day, int messageId)
     {

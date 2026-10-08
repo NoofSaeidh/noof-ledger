@@ -334,8 +334,11 @@ shutdown, one warning line naming how many events never made it lands in the fil
 they are still in the file itself, just never copied to the table.
 
 **Reading `/diagnostics` and the trace page.** `/diagnostics` lists every health check — Database,
-Migrations, Telegram, AI keys, Backup, Disk, Log sink — each with a "Logs" link that opens
-`/diagnostics/logs` pre-filtered to that check's own log category. A check that throws or times out
+Migrations, Telegram, AI keys, Backup, Disk, Log sink, Receipts, Integrity — each with a "Logs" link that opens
+`/diagnostics/logs` pre-filtered to that check's own log category. **Integrity** runs the integrity checks on every
+health run: red (`N bugs found`) when the app wrote data that contradicts itself, amber (`N waiting on you`) when
+something has waited on you for over a day — a failed reading, a receipt or slip waiting for Record anyway, a
+correction that never applied, a record restored after a cancel that nothing will process. A check that throws or times out
 shows only the exception type ("Check failed (ExceptionType) — see logs" or "No answer within 5 s"),
 never the exception's message; the full exception is logged under the check's own category, which is
 exactly what its "Logs" link opens. `/diagnostics/logs` is a paged,
@@ -411,6 +414,16 @@ Ten minutes, no live model call, this costs nothing.
    is gone.
 5. **Ask the bot for its own health:** send `/health` from the owner's chat. Expect a plain-text
    summary — `Health: all good` or a line per check that is not Ok.
+
+## Bug reports
+
+The operator files them with `/bug` in the bot (as a reply to a record's echo to link it) or with **Create** after
+**Explain** on `/diagnostics/integrity`; `/bugs` lists them, and a report is closed or reopened on its own page,
+`/bugs/{number}`. To triage the open ones with Claude Code, type `/bugs` in a session in this repository: the skill
+runs `.\run.ps1 bugs export` — the one way an agent reads `noof_ledger` — and works through the Markdown it writes to
+`artifacts\bug-reports\`. That file holds the operator's own data: it is git-ignored and never committed or pasted
+into a public issue. The export only reads, works with the app stopped, and needs PostgreSQL up; it builds the
+Release output `.\run.ps1 start` runs from, so run it before changing code in a checkout whose host is running.
 
 ## GitHub bot identity (noof-ledger-bot)
 
@@ -494,6 +507,9 @@ detail — prerequisites included. `Get-Help .\run.ps1 -Full` works too. One lin
   refuses to publish on a failed or empty test run.
 - `start-published [-Path <dir>]` — run a published `Noof.Ledger.Host.exe`, from anywhere.
 - `set-password <username>` — create or reset a login; the only way a user is ever created.
+- `bugs export [--all]` — write the open bug reports (every one with `--all`) as one Markdown file under
+  `artifacts\bug-reports\` (git-ignored) and print its path; read-only, works with the app stopped. The `/bugs`
+  Claude Code skill runs it.
 - `test [fast|db|e2e|all] [-Filter <class>]` — fast needs no database (it excludes the Host.Tests
   classes tagged `[Trait("Category", "Database")]`); db/e2e/all take the shared suite lock, and db
   runs those tagged classes too.

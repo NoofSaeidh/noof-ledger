@@ -15,7 +15,7 @@ public class FatalStartupExitCodeTests
         {
             using var host = StartHostWithBrokenTimeZone(out logDirectory);
 
-            var exited = await WaitForExitAsync(host, TimeSpan.FromSeconds(30));
+            var exited = await BuiltHostProcess.WaitForExitAsync(host, TimeSpan.FromSeconds(30));
 
             exited.Should().BeTrue("a startup exception must not leave the process hanging");
             host.ExitCode.Should().NotBe(0, "a fatal startup failure must be detectable by a service manager");
@@ -29,60 +29,12 @@ public class FatalStartupExitCodeTests
 
     static Process StartHostWithBrokenTimeZone(out string logDirectory)
     {
-        var start = new ProcessStartInfo("dotnet")
-        {
-            ArgumentList = { HostAssembly(), "--urls", "http://127.0.0.1:0" },
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
+        var start = BuiltHostProcess.StartInfo(["--urls", "http://127.0.0.1:0"], out logDirectory);
+        start.RedirectStandardError = true;
 
         start.Environment["Database__MigrateOnStartup"] = "false";
         start.Environment["Capture__TimeZone"] = "Not/AZone";
-        logDirectory = start.UseTempLogDirectory();
 
         return Process.Start(start)!;
-    }
-
-    static string HostAssembly()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "global.json")))
-            directory = directory.Parent;
-
-        if (directory is null)
-            throw new InvalidOperationException("Could not locate the repository root from the test output directory.");
-
-        var assembly = Path.Combine(
-            directory.FullName, "artifacts", "bin", "Noof.Ledger.Host", "debug", "Noof.Ledger.Host.dll");
-
-        if (!File.Exists(assembly))
-            throw new InvalidOperationException($"Host assembly not found at {assembly}.");
-
-        return assembly;
-    }
-
-    static async Task<bool> WaitForExitAsync(Process host, TimeSpan timeout)
-    {
-        using var deadline = new CancellationTokenSource(timeout);
-
-        try
-        {
-            await host.WaitForExitAsync(deadline.Token);
-            return true;
-        }
-        catch (OperationCanceledException)
-        {
-            return false;
-        }
-        finally
-        {
-            if (!host.HasExited)
-            {
-                host.Kill(entireProcessTree: true);
-                await host.WaitForExitAsync(CancellationToken.None);
-            }
-        }
     }
 }

@@ -56,3 +56,9 @@ paths:
   or drops a column any of those three still expose to the view must `DROP VIEW wallet_balances`
   first and re-create it in the same migration, or the migration fails on the dependency.
   `schema.expected.sql` never shows views or triggers — `WalletBalancesViewTests` is their detector.
+- **The integrity checks are the write path's independent oracle** *(Phase 8a)*. `PostingsDisagreeCheck` and
+  `FactsMismatchKindCheck` (`Persistence/Diagnostics/Integrity/`) re-derive from `line_items`, `charges` and
+  `transfers` what `entries` and a record's facts must be, in their own SQL — never by calling `LedgerPostings`,
+  which writes the entries — and `LedgerWritePathTests` asserts they find nothing after every write path it
+  drives. A new invariant the write path must keep is a new condition in a check, so the tests and the
+  operator's integrity page see it alike. Nothing a check finds is stored.

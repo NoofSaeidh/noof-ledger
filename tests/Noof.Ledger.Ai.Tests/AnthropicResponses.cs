@@ -63,6 +63,12 @@ public static class AnthropicResponses
          "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":150,"output_tokens":20}}
         """;
 
+    public const string WriteExplanationJsonAnswer = """
+        {"id":"msg_13","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001",
+         "content":[{"type":"tool_use","id":"toolu_13","name":"write_explanation","input":{"text":"The exchange is waiting for the amount you received. Reply to the echo with it.","looks_like_bug":false}}],
+         "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":300,"output_tokens":30}}
+        """;
+
     public const string AuthenticationError = """
         {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}
         """;
