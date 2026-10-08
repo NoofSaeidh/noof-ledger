@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Storage;
-using Npgsql;
 using Noof.Ledger.Application.Reporting;
+using Noof.Ledger.Application.Reporting.Summary;
 using Noof.Ledger.Domain;
 
 namespace Noof.Ledger.Persistence.Reporting;
@@ -10,24 +9,6 @@ internal sealed class EfSpendingReadModel(LedgerDbContext db, TimeProvider timeP
     : ISpendingReadModel
 {
     internal const string UncategorisedLabel = "Uncategorised";
-
-    // Spending is the Principal lines of expenses plus every Fee line, a transfer's included (spec §1, §6); income is
-    // the Principal lines of incomes. Roles are filtered explicitly, never trusted from the kind (spec §2).
-    const string MonthTotalsSql = """
-        SELECT t.kind = @income AS received,
-               COALESCE(c.name_en, @uncategorised) AS category_name,
-               li.currency AS currency,
-               SUM(li.amount) AS total
-        FROM line_items li
-        JOIN transactions t ON t.id = li.transaction_id
-        LEFT JOIN categories c ON c.id = li.category_id
-        WHERE t.occurred_on >= @firstDay
-          AND t.occurred_on < @firstDayNextMonth
-          AND t.status <> @cancelled
-          AND ((li.role = @principal AND t.kind IN (@expense, @income))
-            OR (li.role = @fee AND t.kind IN (@expense, @transfer)))
-        GROUP BY 1, 2, 3
-        """;
 
     public async Task<IReadOnlyList<RecentTransaction>> RecentAsync(int limit, RecentView view, CancellationToken cancellationToken)
     {
@@ -117,43 +98,51 @@ internal sealed class EfSpendingReadModel(LedgerDbContext db, TimeProvider timeP
     public async Task<MonthSummary> ThisMonthAsync(CancellationToken cancellationToken)
     {
         var (firstDay, firstDayNextMonth) = ThisMonth();
+        var counted = Counted(await SummaryLines.ReadAsync(db, firstDay, firstDayNextMonth, cancellationToken));
 
-        await db.Database.OpenConnectionAsync(cancellationToken);
-        try
-        {
-            var connection = (NpgsqlConnection)db.Database.GetDbConnection();
-
-            await using var command = connection.CreateCommand();
-            command.Transaction = (NpgsqlTransaction?)db.Database.CurrentTransaction?.GetDbTransaction();
-            command.CommandText = MonthTotalsSql;
-            command.Parameters.Add(new NpgsqlParameter("uncategorised", UncategorisedLabel));
-            command.Parameters.Add(new NpgsqlParameter("firstDay", firstDay));
-            command.Parameters.Add(new NpgsqlParameter("firstDayNextMonth", firstDayNextMonth));
-            command.Parameters.Add(Integer("cancelled", (int)TransactionStatus.Cancelled));
-            command.Parameters.Add(Integer("expense", (int)TransactionKind.Expense));
-            command.Parameters.Add(Integer("income", (int)TransactionKind.Income));
-            command.Parameters.Add(Integer("transfer", (int)TransactionKind.Transfer));
-            command.Parameters.Add(Integer("principal", (int)EntryRole.Principal));
-            command.Parameters.Add(Integer("fee", (int)EntryRole.Fee));
-
-            var spent = new List<MonthTotal>();
-            var received = new List<MonthTotal>();
-            await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
-            {
-                while (await reader.ReadAsync(cancellationToken))
-                {
-                    var total = new MonthTotal(reader.GetString(1), new CurrencyCode(reader.GetString(2)), reader.GetDecimal(3));
-                    (reader.GetBoolean(0) ? received : spent).Add(total);
-                }
-            }
-
-            return new MonthSummary(firstDay, spent, received);
-        }
-        finally
-        {
-            await db.Database.CloseConnectionAsync();
-        }
+        return new MonthSummary(
+            firstDay,
+            TotalsOf(counted.Where(line => line.Kind is SummaryLineKind.Spent or SummaryLineKind.Refund)),
+            TotalsOf(counted.Where(line => line.Kind is SummaryLineKind.Received)));
     }
+
+    // A foreign line a charge prices counts as its share of the charge, in the wallet's currency (8b spec A-1), split by
+    // Money.Allocate in ordinal order exactly as the summary splits it; every other line counts as it is, in its own
+    // currency - This month never converts.
+    static IReadOnlyList<CountedLine> Counted(IReadOnlyList<SummaryLineSqlRow> lines) =>
+    [
+        .. lines
+            .Where(line => line.ChargedAmount is null)
+            .Select(line => new CountedLine(
+                (SummaryLineKind)line.Kind, line.CategoryName, new Money(line.Amount, new CurrencyCode(line.Currency)))),
+        .. lines
+            .Where(line => line.ChargedAmount is not null)
+            .GroupBy(line => (line.TransactionId, line.Currency))
+            .SelectMany(ShareOfCharge),
+    ];
+
+    static IEnumerable<CountedLine> ShareOfCharge(IEnumerable<SummaryLineSqlRow> linesOfOneCharge)
+    {
+        var lines = linesOfOneCharge.OrderBy(line => line.Ordinal).ToList();
+        // Grouped from lines that carry a charge, and a charge exists only on an expense with a wallet (ForeignCharges).
+        var charge = new Money(lines[0].ChargedAmount!.Value, new CurrencyCode(lines[0].WalletCurrency!));
+        var shares = charge.Allocate([.. lines.Select(line => line.Amount)]);
+        return lines.Zip(shares, (line, share) => new CountedLine((SummaryLineKind)line.Kind, line.CategoryName, share));
+    }
+
+    // A refund counts against its category (8b spec SS-19), so a category whose refunds exceed its purchases goes below
+    // zero.
+    static IReadOnlyList<MonthTotal> TotalsOf(IEnumerable<CountedLine> lines) =>
+    [
+        .. lines
+            .GroupBy(line => (line.CategoryName, line.Amount.Currency))
+            .Select(group => new MonthTotal(
+                group.Key.CategoryName,
+                group.Key.Currency,
+                group.Sum(line => line.Kind is SummaryLineKind.Refund ? -line.Amount.Amount : line.Amount.Amount))),
+    ];
+
+    readonly record struct CountedLine(SummaryLineKind Kind, string CategoryName, Money Amount);
 
     public async Task<IReadOnlyList<MonthTransfer>> TransfersThisMonthAsync(CancellationToken cancellationToken)
     {
@@ -181,9 +170,4 @@ internal sealed class EfSpendingReadModel(LedgerDbContext db, TimeProvider timeP
         var firstDay = new DateOnly(today.Year, today.Month, 1);
         return (firstDay, firstDay.AddMonths(1));
     }
-
-    // A constant 0 converts implicitly to any enum, so new NpgsqlParameter("x", (int)TransactionKind.Expense) - or
-    // EntryRole.Principal - matches both the NpgsqlDbType and the DbType overloads and does not compile (CS0121, an
-    // ambiguous call). An int parameter is not a constant, so this always reaches (string, object).
-    static NpgsqlParameter Integer(string name, int value) => new(name, value);
 }

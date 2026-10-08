@@ -106,8 +106,9 @@ public sealed class MockLedgerTests(DemoTestDatabase database) : IClassFixture<D
             new[] { MockData.WithdrawalTransactionId, MockData.ExchangeTransactionId, MockData.TransferTransactionId });
         month.Totals.Should().Contain(new MonthTotal("Fees & Charges", CurrencyCode.Rsd, 150.00m));
         month.Totals.Should().Contain(new MonthTotal("Fees & Charges", CurrencyCode.Kzt, 156.00m));
-        month.Totals.Should().Contain(new MonthTotal("Subscriptions", CurrencyCode.Usd, 30.00m),
-            "a foreign spending counts in the currency it was bought in (spec §4)");
+        month.Totals.Should().Contain(new MonthTotal("Subscriptions", CurrencyCode.Kzt, 15600.00m),
+            "a foreign spending counts as its charge, in its wallet's currency (8b spec A-1)");
+        month.Totals.Should().NotContain(total => total.CategoryName == "Subscriptions" && total.Currency == CurrencyCode.Usd);
         exchange.Transfer!.Line.Should().Be(new TransferLine(
             "Cash EUR", new Money(100.00m, CurrencyCode.Eur), "Cash RSD", new Money(11700.00m, CurrencyCode.Rsd),
             null, null, new ExchangeRate(CurrencyCode.Eur, 117m, CurrencyCode.Rsd)));

@@ -210,7 +210,7 @@ internal static class MockDataWriter
             db, transaction, RevisionKind.Initial, null, TransactionStatus.Captured, transaction.OccurredAt.AddSeconds(2), cancellationToken);
     }
 
-    // The line stays in its own currency for the statistics; LedgerPostings moves the wallet by the charge and its fee.
+    // The USD line counts as Kaspi's KZT charge, for This month as for LedgerPostings; the fee is a Fee line of its own.
     static async Task WriteForeignSpendingAsync(
         LedgerDbContext db, MockForeignSpending spending, int messageId, Dictionary<string, Guid> wallets,
         Dictionary<string, Guid> categories, CancellationToken cancellationToken)
