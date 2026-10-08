@@ -7,6 +7,7 @@ paths:
   - "src/Noof.Ledger.Host/Workers/TranscriptionWorker*.cs"
   - "src/Noof.Ledger.Host/Workers/ExtractReceiptWorker*.cs"
   - "src/Noof.Ledger.Host/Workers/ReceiptCategorizationWorker*.cs"
+  - "src/Noof.Ledger.Host/Workers/BugReport*.cs"
 ---
 
 ## CLAUDE.md §4 — Bot text *(settled 2026-09-23)*

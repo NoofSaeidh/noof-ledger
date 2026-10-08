@@ -14,7 +14,7 @@ public sealed class TelegramScenesTests
             "expense", "multi-line", "income", "balance", "cancel-restore", "correction", "failure",
             "transfer", "transfer-fee", "exchange", "foreign-spending", "no-terms", "exchange-question",
             "receipt-qr", "receipt-vision", "receipt-check", "slip", "slip-check", "slip-incomplete", "slip-unsupported-currency",
-            "health");
+            "health", "bug");
     }
 
     [Theory]
@@ -35,6 +35,7 @@ public sealed class TelegramScenesTests
     [InlineData("slip-check", "This exchange slip doesn't look right — Menjačnica Zlatnik", new[] { "Record anyway", "Cancel" })]
     [InlineData("slip-incomplete", "Slip read, but", new[] { "Edit" })]
     [InlineData("slip-unsupported-currency", "Slip read, but CHF", new[] { "Edit" })]
+    [InlineData("bug", "This exchange was not recorded", new[] { "Close report" })]
     public void The_bot_bubble_carries_the_apps_own_text_and_buttons(string scene, string start, string[] buttons)
     {
         var reply = Scenes.Single(candidate => candidate.Name == scene).Bubbles.Last(bubble => bubble.Side == ChatSide.Bot);
@@ -123,5 +124,18 @@ public sealed class TelegramScenesTests
             "\n30.00 USD → charged 15600.00 KZT (1 USD = 520.0000 KZT, wallet rate) + fee 156.00 KZT");
         Scenes.Single(scene => scene.Name == "no-terms").Bubbles[^1].Text.Should().EndWith(
             "\n20.00 EUR not converted — set a EUR rate for Kaspi on /wallets, or correct this record to apply it");
+    }
+
+    [Fact]
+    public void The_bug_scene_saves_the_report_then_answers_with_the_explanation_and_the_records_findings()
+    {
+        var bubbles = Scenes.Single(scene => scene.Name == "bug").Bubbles;
+
+        bubbles[0].Side.Should().Be(ChatSide.Operator);
+        bubbles[0].Text.Should().Be("/bug the amount is wrong");
+        bubbles[0].Quote.Should().StartWith("Exchange not recorded");
+        bubbles[1].Text.Should().Be("Bug report #4 saved.");
+        bubbles[1].Quote.Should().Be("/bug the amount is wrong");
+        bubbles[^1].Text.Should().EndWith("\n\n1 finding on this record");
     }
 }

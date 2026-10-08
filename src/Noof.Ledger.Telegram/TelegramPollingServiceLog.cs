@@ -28,6 +28,6 @@ internal static partial class TelegramPollingServiceLog
     public static partial void SkippedUpdateNotificationFailed(this ILogger logger, Exception exception, int updateId);
 
     [LoggerMessage(EventId = 6101, Level = LogLevel.Warning,
-        Message = "Failed to register the /health bot command for the owner chat")]
-    public static partial void HealthCommandRegistrationFailed(this ILogger logger, Exception exception);
+        Message = "Failed to register the bot commands for the owner chat")]
+    public static partial void CommandRegistrationFailed(this ILogger logger, Exception exception);
 }

@@ -144,6 +144,35 @@ CREATE TABLE public.balance_checks (
 );
 
 
+CREATE TABLE public.bug_reports (
+    id uuid NOT NULL,
+    number integer GENERATED ALWAYS AS IDENTITY,
+    created_at timestamptz NOT NULL,
+    source integer NOT NULL,
+    text text,
+    transaction_id uuid,
+    reply_to text,
+    status integer NOT NULL,
+    closed_at timestamptz,
+    snapshot_at timestamptz,
+    record_summary text,
+    findings jsonb,
+    log_lines jsonb,
+    collection_failures text,
+    explanation_state integer NOT NULL,
+    explanation_attempts integer NOT NULL,
+    explanation_next_at timestamptz NOT NULL,
+    explanation text,
+    looks_like_bug boolean,
+    delivered_as text,
+    CONSTRAINT "PK_bug_reports" PRIMARY KEY (id),
+    CONSTRAINT ck_bug_reports_closed_at_matches_status CHECK (status <> 0 AND (status = 2) = (closed_at IS NOT NULL)),
+    CONSTRAINT ck_bug_reports_explanation_matches_state CHECK (explanation_state <> 0 AND (explanation_state = 2) = (explanation IS NOT NULL AND looks_like_bug IS NOT NULL)),
+    CONSTRAINT ck_bug_reports_source_and_reply_to CHECK (source <> 0 AND (delivered_as IS NULL OR reply_to IS NOT NULL)),
+    CONSTRAINT "FK_bug_reports_transactions_transaction_id" FOREIGN KEY (transaction_id) REFERENCES public.transactions (id) ON DELETE RESTRICT
+);
+
+
 CREATE TABLE public.categorization_jobs (
     id uuid NOT NULL,
     transaction_id uuid NOT NULL,
@@ -318,6 +347,15 @@ CREATE INDEX "IX_app_log_transaction_id" ON public.app_log (transaction_id);
 
 
 CREATE INDEX "IX_balance_checks_wallet_id" ON public.balance_checks (wallet_id);
+
+
+CREATE UNIQUE INDEX "IX_bug_reports_number" ON public.bug_reports (number);
+
+
+CREATE UNIQUE INDEX "IX_bug_reports_source_reply_to" ON public.bug_reports (source, reply_to) WHERE reply_to IS NOT NULL;
+
+
+CREATE INDEX "IX_bug_reports_transaction_id" ON public.bug_reports (transaction_id);
 
 
 CREATE INDEX "IX_categories_parent_id" ON public.categories (parent_id);

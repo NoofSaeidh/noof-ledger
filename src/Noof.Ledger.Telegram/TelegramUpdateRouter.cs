@@ -14,6 +14,7 @@ internal sealed class TelegramUpdateRouter(
     TelegramOwnerGate ownerGate,
     RecordActionHandler actionHandler,
     CorrectionHandler correctionHandler,
+    BugCommandHandler bugCommandHandler,
     IRecordEcho recordEcho,
     ISystemHealth systemHealth,
     IFiscalVerificationUrl verificationUrl,
@@ -30,6 +31,11 @@ internal sealed class TelegramUpdateRouter(
             case { EditedMessage: { } edited }:
                 if (await ownerGate.IsAllowedAsync(edited.Chat.Id, cancellationToken))
                     await correctionHandler.HandleEditAsync(edited, cancellationToken);
+                break;
+            // Before the record buttons and their IsAllowedAsync: a bug-report press is authorised by IsOwnerAsync
+            // alone, so a stranger's press on an unowned bot never claims it.
+            case { CallbackQuery: { Message: { } pressed } query } when BugReportButtons.IsBugReportData(query.Data):
+                await bugCommandHandler.HandleCloseAsync(query, pressed, cancellationToken);
                 break;
             case { CallbackQuery: { Message: { } echo } query }:
                 // Rejected before reading Data, for the reason messages are rejected before reading Text.
@@ -48,6 +54,14 @@ internal sealed class TelegramUpdateRouter(
         if (message.Text is { Length: > 0 } possibleCommand && IsHealthCommand(possibleCommand))
         {
             await HandleHealthCommandAsync(message.Chat.Id, cancellationToken);
+            return;
+        }
+
+        // /bug, like /health, is recognised before the claim below, and also before the reply branch, which would
+        // otherwise turn a /bug replying to an echo into a correction of that record.
+        if (message.Text is { Length: > 0 } possibleBug && BugCommand.TryParse(possibleBug, out var reportText))
+        {
+            await bugCommandHandler.HandleAsync(message, reportText, cancellationToken);
             return;
         }
 

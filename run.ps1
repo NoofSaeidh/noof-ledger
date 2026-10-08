@@ -18,6 +18,7 @@ Commands (run `.\run.ps1 help <command>` for the detail on any one of them):
   publish            - build, test and publish to publish/ (ops/publish.ps1)
   start-published    - run the published Noof.Ledger.Host.exe from any current directory
   set-password       - create or reset a user's password (the host's `user set-password` verb)
+  bugs               - export bug reports as Markdown for triage (the host's `bugs export` verb)
   test               - run fast / db / e2e / all tests, with the shared PostgreSQL lock where needed
   update-test-template - apply the latest migration to noof_ledger_test_template
   clean-test-dbs     - drop leftover noof_test_*/noof_e2e_* databases (ops/clean-test-databases.ps1)
@@ -78,6 +79,10 @@ Runs a previously published host from whatever directory you happen to be in.
 .EXAMPLE
 .\run.ps1 set-password noof
 Prompts for a password (masked) and creates or resets the "noof" user.
+
+.EXAMPLE
+.\run.ps1 bugs export --all
+Writes every bug report, open or closed, to artifacts\bug-reports\<yyyy-MM-dd-HHmm>.md and prints its path.
 
 .EXAMPLE
 .\run.ps1 test fast
@@ -352,6 +357,30 @@ password on the console (masked while you type) and writes its hash to the datab
 only way a user is ever created; there is no registration page.
 
 Prerequisites: PostgreSQL reachable.
+'@
+    }
+    'bugs' = @{
+        Summary = 'Export bug reports as Markdown for triage (the host''s `bugs export` verb)'
+        Detail  = @'
+bugs export [--all]
+
+Runs the host's `bugs export` verb: `dotnet run --project src\Noof.Ledger.Host -c Release
+--no-launch-profile -- bugs export [--all] --output artifacts\bug-reports`. Writes the open bug reports -
+closed ones too with --all - to one Markdown file, artifacts\bug-reports\<yyyy-MM-dd-HHmm>.md
+(git-ignored), and prints its path; with nothing to export it says so and writes no file. The /bugs
+Claude Code skill runs exactly this.
+
+It only reads the database, so it works with the app stopped, and it waits for nothing: PostgreSQL
+down, or a database not migrated yet, ends it with one line saying so and exit code 1. A usage error
+exits 1 too: run.ps1 rejects it before building (the verb itself would exit 2). Closing a report is done
+on the dashboard, on /bugs.
+
+The file holds the operator's own financial data: never commit it, and never paste it into a public
+issue.
+
+Prerequisites: PostgreSQL up; a .NET 10 SDK. It builds the Release configuration `start` runs, so export
+before changing code in a checkout whose host is running - rebuilding a running host's changed files
+fails on locked files.
 '@
     }
     'test' = @{
@@ -648,6 +677,21 @@ switch ($CommandName) {
         Invoke-Checked {
             dotnet run --project (Join-Path $Root 'src\Noof.Ledger.Host') -- user set-password $username
         }
+    }
+
+    'bugs' {
+        $exportOptions = @($Rest | Select-Object -Skip 1)
+        if ($Rest.Count -lt 1 -or $Rest[0] -cne 'export' -or @($exportOptions | Where-Object { $_ -cne '--all' }).Count -gt 0) {
+            throw 'Usage: .\run.ps1 bugs export [--all]'
+        }
+        $verb = @('bugs', 'export')
+        if ($exportOptions -ccontains '--all') { $verb += '--all' }
+        $verb += @('--output', (Join-Path $Root 'artifacts\bug-reports'))
+        # The verb's own line already says what went wrong, and its exit code (1 PostgreSQL down or not migrated;
+        # never its usage 2, which the check above answers first with 1) is the answer; the checked-call helper
+        # would only add a second, red line.
+        dotnet run --project (Join-Path $Root 'src\Noof.Ledger.Host') -c Release --no-launch-profile -- @verb
+        exit $LASTEXITCODE
     }
 
     'test' {

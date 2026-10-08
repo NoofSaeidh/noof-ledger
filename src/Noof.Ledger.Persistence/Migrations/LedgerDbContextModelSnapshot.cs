@@ -962,6 +962,114 @@ namespace Noof.Ledger.Persistence.Migrations
                     b.ToTable("backup_runs", "public");
                 });
 
+            modelBuilder.Entity("Noof.Ledger.Persistence.BugReports.BugReport", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("ClosedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("closed_at");
+
+                    b.Property<string>("CollectionFailures")
+                        .HasColumnType("text")
+                        .HasColumnName("collection_failures");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("DeliveredAs")
+                        .HasColumnType("text")
+                        .HasColumnName("delivered_as");
+
+                    b.Property<string>("Explanation")
+                        .HasColumnType("text")
+                        .HasColumnName("explanation");
+
+                    b.Property<int>("ExplanationAttempts")
+                        .HasColumnType("integer")
+                        .HasColumnName("explanation_attempts");
+
+                    b.Property<DateTimeOffset>("ExplanationNextAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("explanation_next_at");
+
+                    b.Property<int>("ExplanationState")
+                        .HasColumnType("integer")
+                        .HasColumnName("explanation_state");
+
+                    b.Property<string>("FindingsJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("findings");
+
+                    b.Property<string>("LogLinesJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("log_lines");
+
+                    b.Property<bool?>("LooksLikeBug")
+                        .HasColumnType("boolean")
+                        .HasColumnName("looks_like_bug");
+
+                    b.Property<int>("Number")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("number");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityAlwaysColumn(b.Property<int>("Number"));
+
+                    b.Property<string>("RecordSummary")
+                        .HasColumnType("text")
+                        .HasColumnName("record_summary");
+
+                    b.Property<string>("ReplyTo")
+                        .HasColumnType("text")
+                        .HasColumnName("reply_to");
+
+                    b.Property<DateTimeOffset?>("SnapshotAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("snapshot_at");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("integer")
+                        .HasColumnName("source");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
+
+                    b.Property<string>("Text")
+                        .HasColumnType("text")
+                        .HasColumnName("text");
+
+                    b.Property<Guid?>("TransactionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("transaction_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Number")
+                        .IsUnique();
+
+                    b.HasIndex("TransactionId");
+
+                    b.HasIndex("Source", "ReplyTo")
+                        .IsUnique()
+                        .HasDatabaseName("IX_bug_reports_source_reply_to")
+                        .HasFilter("reply_to IS NOT NULL");
+
+                    b.ToTable("bug_reports", "public", t =>
+                        {
+                            t.HasCheckConstraint("ck_bug_reports_closed_at_matches_status", "status <> 0 AND (status = 2) = (closed_at IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_bug_reports_explanation_matches_state", "explanation_state <> 0 AND (explanation_state = 2) = (explanation IS NOT NULL AND looks_like_bug IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_bug_reports_source_and_reply_to", "source <> 0 AND (delivered_as IS NULL OR reply_to IS NOT NULL)");
+                        });
+                });
+
             modelBuilder.Entity("Noof.Ledger.Persistence.Diagnostics.AppLogEntry", b =>
                 {
                     b.Property<long>("Id")
@@ -1261,6 +1369,14 @@ namespace Noof.Ledger.Persistence.Migrations
                         .HasForeignKey("WalletId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Noof.Ledger.Persistence.BugReports.BugReport", b =>
+                {
+                    b.HasOne("Noof.Ledger.Domain.Transaction", null)
+                        .WithMany()
+                        .HasForeignKey("TransactionId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("Noof.Ledger.Persistence.Revisions.TransactionRevision", b =>

@@ -61,6 +61,18 @@ Do not edit by hand; a change to what the app shows regenerates them.
 
 <img src="app/diagnostics-desktop.png" width="640" alt="Diagnostics, desktop"> <img src="app/diagnostics-phone.png" width="200" alt="Diagnostics, phone">
 
+### Integrity
+
+<img src="app/integrity-desktop.png" width="640" alt="Integrity, desktop"> <img src="app/integrity-phone.png" width="200" alt="Integrity, phone">
+
+### Bug reports
+
+<img src="app/bugs-desktop.png" width="640" alt="Bug reports, desktop"> <img src="app/bugs-phone.png" width="200" alt="Bug reports, phone">
+
+### A bug report
+
+<img src="app/bug-report-desktop.png" width="640" alt="A bug report, desktop"> <img src="app/bug-report-phone.png" width="200" alt="A bug report, phone">
+
 ### Logs
 
 <img src="app/logs-desktop.png" width="640" alt="Logs, desktop"> <img src="app/logs-phone.png" width="200" alt="Logs, phone">
@@ -158,3 +170,7 @@ Do not edit by hand; a change to what the app shows regenerates them.
 ### /health
 
 <img src="telegram/health.png" width="300" alt="/health">
+
+### /bug
+
+<img src="telegram/bug.png" width="300" alt="/bug">
