@@ -487,4 +487,147 @@ public class MonthlySummaryCalculatorTests
 
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
+
+    [Fact]
+    public void Highlights_are_the_three_largest_changes_against_the_average_ties_by_name()
+    {
+        var rows = new SummaryRowsBuilder().Wallet(WiseId, "Wise", Eur, Jul(1));
+        foreach (var first in new[] { Jul(1), Aug(1), Sep(1) })
+        {
+            rows.Expense(WiseId, first.AddDays(2), "Maxi", Line("Groceries", 140.10m));
+            rows.Expense(WiseId, first.AddDays(3), "Café Central", Line("Cafés", 135.00m));
+            rows.Expense(WiseId, first.AddDays(4), "Landlord", Line("Rent", 500.00m));
+        }
+
+        rows.Expense(WiseId, Jul(10), "Bolt", Line("Transport", 60.00m));
+        rows.Expense(WiseId, Aug(10), "Bookstore", Line("Books", 27.00m));
+        rows.Expense(WiseId, Oct(3), "Maxi", Line("Groceries", 180.10m));
+        rows.Expense(WiseId, Oct(4), "Café Central", Line("Cafés", 95.00m));
+        rows.Expense(WiseId, Oct(5), "Landlord", Line("Rent", 500.00m));
+        rows.Expense(WiseId, Oct(6), "Bolt", Line("Transport", 50.00m));
+        rows.Expense(WiseId, Oct(7), "Bookstore", Line("Books", 10.00m));
+
+        var summary = ForWallet(rows.Build(), WiseId);
+
+        // Averages over Jul–Sep: Groceries 420.30 / 3 = 140.10, Cafés 405.00 / 3 = 135.00, Transport 60.00 / 3 = 20.00,
+        // Books 27.00 / 3 = 9.00, Rent 500.00. Changes: +40.00, -40.00, +30.00, +1.00, 0. Cafés and Groceries tie at
+        // 40.00 and go by name; Books is fourth; an unchanged Rent says nothing.
+        summary.Highlights.Should().Equal(
+            new SummaryHighlight("Cafés", 95.00m, -40.00m, HighlightBase.Average),
+            new SummaryHighlight("Groceries", 180.10m, 40.00m, HighlightBase.Average),
+            new SummaryHighlight("Transport", 50.00m, 30.00m, HighlightBase.Average));
+    }
+
+    [Fact]
+    public void A_scope_whose_history_starts_this_month_has_nothing_to_highlight()
+    {
+        var rows = new SummaryRowsBuilder().Wallet(WiseId, "Wise", Eur, Oct(1));
+        rows.Expense(WiseId, Oct(3), "Maxi", Line("Groceries", 180.10m));
+        rows.Expense(WiseId, Oct(4), "Café Central", Line("Cafés", 95.00m));
+
+        var summary = ForWallet(rows.Build(), WiseId);
+
+        // A-5: September is before Wise's history - unknown, not a zero - so there is neither an average nor a previous
+        // month to compare with, and reading it as 0 would call all of October a change.
+        summary.Highlights.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Top_merchants_rank_by_spent_with_their_record_counts()
+    {
+        var rows = new SummaryRowsBuilder().Wallet(WiseId, "Wise", Eur, Oct(1));
+        rows.Expense(WiseId, Oct(2), "Maxi", Line("Groceries", 10.00m));
+        rows.Expense(WiseId, Oct(3), "Maxi", Line("Groceries", 20.00m));
+        rows.Expense(WiseId, Oct(4), "Maxi", Line("Groceries", 30.00m));
+        rows.Expense(WiseId, Oct(5), "Lidl", Line("Groceries", 70.00m));
+        rows.Expense(WiseId, Oct(6), "Gigatron", Line("Electronics", 89.00m));
+        rows.Expense(WiseId, Oct(7), "IKEA", Line("Home", 15.00m));
+        rows.Expense(WiseId, Oct(8), "Zara", Line("Clothes", 25.00m));
+        rows.Expense(WiseId, Oct(9), "Bolt", Line("Transport", 5.00m));
+        rows.Expense(WiseId, Oct(10), null, Line("Rent", 100.00m, description: "Rent cash"));
+
+        var summary = ForWallet(rows.Build(), WiseId);
+
+        // Maxi: 10.00 + 20.00 + 30.00 over three records; Bolt is sixth; a record with no merchant is not a merchant.
+        summary.TopMerchants.Should().Equal(
+            new SummaryMerchant("Gigatron", 89.00m, 1),
+            new SummaryMerchant("Lidl", 70.00m, 1),
+            new SummaryMerchant("Maxi", 60.00m, 3),
+            new SummaryMerchant("Zara", 25.00m, 1),
+            new SummaryMerchant("IKEA", 15.00m, 1));
+    }
+
+    [Fact]
+    public void Largest_records_count_a_charge_with_its_fee_and_a_transfer_fee_is_a_record()
+    {
+        var rows = new SummaryRowsBuilder()
+            .Wallet(WiseId, "Wise", Eur, Oct(1))
+            .Wallet(CashRsdId, "Cash RSD", Rsd, null)
+            .Wallet(KaspiId, "Kaspi", Kzt, Oct(1));
+        var paddle = rows.ChargedExpense(KaspiId, Oct(4), "Paddle", charged: 15601.00m,
+            Line("Subscriptions", 30.00m, Usd, "SaaS"), Fee(156.00m, Kzt));
+        var maxi = rows.Expense(WiseId, Oct(2), "Maxi", Line("Groceries", 25.00m));
+        var kiosk = rows.Transfer(Oct(5), WiseId, 101.00m, CashRsdId, 11700.00m, TransferLeg.From, 1.00m, "Exchange Kiosk");
+        var bank = rows.Transfer(Oct(6), CashRsdId, 5850.00m, WiseId, 49.50m, TransferLeg.To, 0.50m);
+        rows.Refund(WiseId, Oct(9), "Maxi", Line("Groceries", 45.00m));
+        rows.Income(WiseId, Oct(1), "Employer", Line("Salary", 2000.00m));
+
+        var summary = ForAllWallets(rows.Build(), Eur);
+
+        // Paddle: (15601.00 charge + 156.00 fee) KZT / 520.00 = 30.3019 EUR; the refund record is negative, the salary
+        // spends nothing, the kiosk's fee is labelled by its venue and the bank transfer's by "Transfer fee".
+        summary.LargestRecords.Select(record => (record.TransactionId, record.Label))
+            .Should().Equal((paddle, "Paddle"), (maxi, "Maxi"), (kiosk, "Exchange Kiosk"), (bank, "Transfer fee"));
+        summary.LargestRecords[0].Amount.Should().BeApproximately(30.3019m, 0.0001m);
+        summary.LargestRecords[0].OccurredOn.Should().Be(Oct(4));
+        summary.LargestRecords.Skip(1).Select(record => record.Amount).Should().Equal(25.00m, 1.00m, 0.50m);
+        summary.LargestRecords.Should().OnlyContain(record => !record.Approximate);
+
+        // Maxi's refund outweighs its purchase (25.00 - 45.00 = -20.00), so Maxi is no top merchant; the kiosk's fee is.
+        summary.TopMerchants.Select(merchant => (merchant.MerchantName, merchant.Records))
+            .Should().Equal(("Paddle", 1), ("Exchange Kiosk", 1));
+    }
+
+    [Fact]
+    public void A_record_with_no_merchant_is_labelled_by_its_first_lines_description()
+    {
+        var rows = new SummaryRowsBuilder().Wallet(WiseId, "Wise", Eur, Oct(1));
+        var taxi = rows.Expense(WiseId, Oct(3), null,
+            Line("Transport", 20.00m, description: "Taxi to airport"),
+            Line("Transport", 2.00m, description: "Tip"));
+        var built = rows.Build();
+        var reversed = built with { Lines = [.. built.Lines.Reverse()] };
+
+        var summary = ForWallet(reversed, WiseId);
+
+        summary.LargestRecords.Should().Equal(new SummaryRecord(taxi, Oct(3), "Taxi to airport", 22.00m, false));
+    }
+
+    [Fact]
+    public void Largest_records_are_five_by_amount_then_day_then_label()
+    {
+        var rows = new SummaryRowsBuilder().Wallet(WiseId, "Wise", Eur, Oct(1));
+        rows.Expense(WiseId, Oct(9), "Alpha", Line("Groceries", 50.00m));
+        rows.Expense(WiseId, Oct(3), "Delta", Line("Groceries", 40.00m));
+        rows.Expense(WiseId, Oct(2), "Charlie", Line("Groceries", 40.00m));
+        rows.Expense(WiseId, Oct(2), "Bravo", Line("Groceries", 40.00m));
+        rows.Expense(WiseId, Oct(5), "Echo", Line("Groceries", 30.00m));
+        rows.Expense(WiseId, Oct(6), "Foxtrot", Line("Groceries", 20.00m));
+
+        var summary = ForWallet(rows.Build(), WiseId);
+
+        summary.LargestRecords.Select(record => record.Label).Should().Equal("Alpha", "Bravo", "Charlie", "Delta", "Echo");
+    }
+
+    [Fact]
+    public void A_converted_record_is_marked_approximate()
+    {
+        var rows = new SummaryRowsBuilder().Wallet(WiseId, "Wise", Eur, Oct(1));
+        var jetBrains = rows.Expense(WiseId, Oct(10), "JetBrains", Line("Software", 11.00m, Usd));
+
+        var summary = ForWallet(rows.Build(), WiseId);
+
+        summary.LargestRecords.Should().Equal(new SummaryRecord(jetBrains, Oct(10), "JetBrains", 10.00m, true));
+        summary.TopMerchants.Should().Equal(new SummaryMerchant("JetBrains", 10.00m, 1));
+    }
 }

@@ -8,6 +8,11 @@ namespace Noof.Ledger.Application.Reporting.Summary;
 // Nothing is rounded here; a figure is rounded only when it is formatted.
 internal static class MonthlySummaryCalculator
 {
+    const int MaxHighlights = 3;
+    const int MaxMerchants = 5;
+    const int MaxRecords = 5;
+    const string TransferFeeLabel = "Transfer fee";
+
     public static MonthlySummary Calculate(
         SummaryRows rows, RateTable rates, SummaryPeriod period, SummaryScope scope, CurrencyCode currency)
     {
@@ -26,6 +31,7 @@ internal static class MonthlySummaryCalculator
         var categories = CategoryFigures(spending, averageMonths);
         var movements = rows.Transfers.Where(transfer => period.Contains(transfer.OccurredOn)).ToList();
         var valued = items.Select(item => item.InTarget ?? item.InWallet).OfType<RateConversion>().ToList();
+        var transfers = rows.Transfers.ToDictionary(transfer => transfer.TransactionId);
         var noRates = wallet is null && rates.IsEmpty && items.Exists(item => item is { Window: 0, InTarget: null });
 
         return new MonthlySummary(
@@ -40,11 +46,11 @@ internal static class MonthlySummaryCalculator
             MovedOut: wallet is null ? null : MovedOut(movements, wallet.Id),
             MovedIn: wallet is null ? null : MovedIn(movements, wallet.Id),
             AverageMonths: averageMonths,
-            Highlights: [],
+            Highlights: Highlights(categories),
             Categories: [.. categories.Where(category => spending.Exists(
                 item => item.Window == 0 && item.Line.CategoryName == category.CategoryName))],
-            TopMerchants: [],
-            LargestRecords: [],
+            TopMerchants: TopMerchants(spending, transfers),
+            LargestRecords: LargestRecords(spending, rows.Lines, transfers),
             Wallets: wallet is null ? WalletLines(items, rows.Wallets) : [],
             NotConverted: NotConverted(items, everything: noRates),
             WalletOptions: WalletOptions(rows, scope),
@@ -163,6 +169,78 @@ internal static class MonthlySummaryCalculator
             .ThenBy(category => category.CategoryName, StringComparer.Ordinal),
     ];
 
+    // Spec §2 "Contents" compares with the previous month when there is no average, but under A-5 the previous month
+    // is known exactly when an average is: a scope whose history starts this month has nothing to compare with, so no
+    // highlights, rather than every category reading as a change from zero.
+    static List<SummaryHighlight> Highlights(List<SummaryCategory> categories) =>
+    [
+        .. categories
+            .Where(category => category.Amount.Average is not null)
+            .Select(category => new SummaryHighlight(
+                category.CategoryName,
+                category.Amount.Amount,
+                category.Amount.Amount - category.Amount.Average.GetValueOrDefault(),
+                HighlightBase.Average))
+            .Where(highlight => highlight.Change != 0)
+            .OrderByDescending(highlight => Math.Abs(highlight.Change))
+            .ThenBy(highlight => highlight.CategoryName, StringComparer.Ordinal)
+            .Take(MaxHighlights),
+    ];
+
+    static List<SummaryMerchant> TopMerchants(List<Item> spending, Dictionary<Guid, SummaryTransferRow> transfers) =>
+    [
+        .. spending
+            .Where(item => item.Window == 0)
+            .Select(item => MerchantOf(item.Line, transfers) is { } merchant ? new MerchantSpend(merchant, item) : null)
+            .OfType<MerchantSpend>()
+            .GroupBy(spend => spend.Merchant, StringComparer.Ordinal)
+            .Select(group => new SummaryMerchant(
+                group.Key,
+                group.Sum(spend => spend.Item.Amount),
+                group.Select(spend => spend.Item.Line.TransactionId).Distinct().Count()))
+            .Where(merchant => merchant.Amount > 0)
+            .OrderByDescending(merchant => merchant.Amount)
+            .ThenBy(merchant => merchant.MerchantName, StringComparer.Ordinal)
+            .Take(MaxMerchants),
+    ];
+
+    // A record's spent amount is its spending lines in the scope, its charge and fee included; a refund record is
+    // negative and never among the largest.
+    static List<SummaryRecord> LargestRecords(
+        List<Item> spending, IReadOnlyList<SummaryLineRow> lines, Dictionary<Guid, SummaryTransferRow> transfers)
+    {
+        var firstLines = lines
+            .GroupBy(line => line.TransactionId)
+            .ToDictionary(group => group.Key, group => group.OrderBy(line => line.Ordinal).First());
+
+        return
+        [
+            .. spending
+                .Where(item => item.Window == 0)
+                .GroupBy(item => item.Line.TransactionId)
+                .Select(group => new SummaryRecord(
+                    group.Key,
+                    group.First().Line.OccurredOn,
+                    LabelOf(firstLines[group.Key], transfers.GetValueOrDefault(group.Key)),
+                    group.Sum(item => item.Amount),
+                    group.Any(item => item.InTarget?.Approximate == true)))
+                .Where(record => record.Amount > 0)
+                .OrderByDescending(record => record.Amount)
+                .ThenBy(record => record.OccurredOn)
+                .ThenBy(record => record.Label, StringComparer.Ordinal)
+                .ThenBy(record => record.TransactionId)
+                .Take(MaxRecords),
+        ];
+    }
+
+    // P-7: a transfer's fee is labelled by its venue, else "Transfer fee"; any other record by its merchant, else by
+    // its first line's description.
+    static string LabelOf(SummaryLineRow firstLine, SummaryTransferRow? transfer) =>
+        transfer is not null ? transfer.VenueName ?? TransferFeeLabel : firstLine.MerchantName ?? firstLine.Description;
+
+    static string? MerchantOf(SummaryLineRow line, Dictionary<Guid, SummaryTransferRow> transfers) =>
+        transfers.TryGetValue(line.TransactionId, out var transfer) ? transfer.VenueName : line.MerchantName;
+
     // SS-16, as LedgerPostings posts a transfer: a leg's principal is its stored amount without the fee inside it,
     // so a wallet's moved amount and its fee line add up to the leg as stored.
     static decimal MovedOut(List<SummaryTransferRow> transfers, Guid walletId) =>
@@ -244,4 +322,6 @@ internal static class MonthlySummaryCalculator
 
         public decimal Amount => InTarget?.Amount ?? 0m;
     }
+
+    sealed record MerchantSpend(string Merchant, Item Item);
 }
