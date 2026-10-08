@@ -1,0 +1,165 @@
+@page "/bugs"
+@attribute [Authorize]
+@implements IDisposable
+@using System.Globalization
+@using Microsoft.JSInterop
+@using Noof.Ledger.Application.Diagnostics
+@using Noof.Ledger.Application.Diagnostics.BugReports
+@inject IBugReportStore Store
+@inject IBugReportMarkdown Markdown
+@inject IDatabaseGate Gate
+@inject TimeProvider TimeProvider
+@inject IJSRuntime JS
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+
+<PageTitle>Bug reports</PageTitle>
+
+<MudText HtmlTag="h1" Typo="Typo.h4" Class="mb-4">Bug reports</MudText>
+
+@if (Gate.State != DatabaseState.Ready)
+{
+    <DatabaseGateBanner />
+}
+else
+{
+    @* Links rather than tabs: the filter lives in the URL, so a report list can be linked to. *@
+    <div class="d-flex flex-wrap align-center gap-4 mb-4">
+        <MudLink id="bugs-filter-open" Href="/bugs"
+                 Color="@(includeClosed ? Color.Default : Color.Primary)"
+                 Underline="@(includeClosed ? Underline.Hover : Underline.Always)"
+                 aria-current="@(includeClosed ? null : "page")">Open</MudLink>
+        <MudLink id="bugs-filter-all" Href="/bugs?status=all"
+                 Color="@(includeClosed ? Color.Primary : Color.Default)"
+                 Underline="@(includeClosed ? Underline.Always : Underline.Hover)"
+                 aria-current="@(includeClosed ? "page" : null)">All</MudLink>
+        <MudSpacer />
+        <MudButton id="bugs-download" Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.Download"
+                   Disabled="@(operations.Busy || !HasOpenReports)" OnClick="DownloadAsync">
+            Download open reports (.md)
+        </MudButton>
+    </div>
+
+    @if (error is not null)
+    {
+        <MudAlert id="bugs-error" Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-4">@error</MudAlert>
+    }
+
+    @if (reports is null)
+    {
+        if (error is null)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">Loading…</MudText>
+        }
+    }
+    else if (reports.Count == 0)
+    {
+        <MudAlert id="bugs-empty" Severity="Severity.Info" Variant="Variant.Outlined">
+            @(includeClosed ? "No bug reports" : "No open bug reports")
+        </MudAlert>
+    }
+    else
+    {
+        <MudSimpleTable id="bugs-list" Dense="true" Hover="true" Elevation="0" Outlined="true">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Filed</th>
+                    <th>Text</th>
+                    <th>Record</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var report in reports)
+                {
+                    <tr id="@($"bug-{report.Number}")">
+                        <td><MudLink id="@($"bug-{report.Number}-link")" Href="@($"/bugs/{report.Number}")">@($"#{report.Number}")</MudLink></td>
+                        <td class="noof-nowrap">@report.CreatedAt.ToUniversalTime().ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture)</td>
+                        <td>@Shorten(report.Text)</td>
+                        <td>
+                            @if (report.TransactionId is { } transactionId)
+                            {
+                                <MudLink id="@($"bug-{report.Number}-trace-link")" Href="@($"/transactions/{transactionId}/trace")">Trace</MudLink>
+                            }
+                            else
+                            {
+                                <text>—</text>
+                            }
+                        </td>
+                        <td>
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                     Color="@(report.Status == BugReportStatus.Open ? Color.Warning : Color.Default)">@BugReportText.Status(report.Status)</MudChip>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    }
+}
+
+@code {
+    // SupplyParameterFromQuery does not bind enums, hence the string: "all" includes closed reports, anything else not.
+    [SupplyParameterFromQuery]
+    public string? Status { get; set; }
+
+    readonly CancellationTokenSource cancellation = new();
+    readonly OneAtATime operations = new();
+    IReadOnlyList<BugReportListItem>? reports;
+    bool includeClosed;
+    bool loaded;
+    string? error;
+
+    bool HasOpenReports => reports?.Any(report => report.Status == BugReportStatus.Open) == true;
+
+    // Clicking Open or All navigates inside the circuit, which sets the parameters again without a new component.
+    protected override async Task OnParametersSetAsync()
+    {
+        var wantsClosed = string.Equals(Status, "all", StringComparison.OrdinalIgnoreCase);
+        if (Gate.State != DatabaseState.Ready || (loaded && wantsClosed == includeClosed))
+            return;
+
+        includeClosed = wantsClosed;
+        loaded = true;
+        await operations.RunAsync(async token =>
+        {
+            try
+            {
+                reports = await Store.ListAsync(includeClosed, token);
+                error = null;
+            }
+            catch (Exception exception) when (!token.IsCancellationRequested)
+            {
+                error = $"Couldn't load the bug reports ({exception.GetType().Name}).";
+            }
+        }, cancellation.Token);
+    }
+
+    Task DownloadAsync() => operations.RunAsync(async token =>
+    {
+        try
+        {
+            var now = TimeProvider.GetUtcNow();
+            var markdown = Markdown.Render(await Store.LoadForExportAsync(includeClosed: false, token), now);
+            var fileName = $"bug-reports-{now.ToString("yyyy-MM-dd-HHmm", CultureInfo.InvariantCulture)}.md";
+            await JS.InvokeVoidAsync("noofLedger.downloadText", token, fileName, markdown);
+            error = null;
+        }
+        catch (Exception exception) when (!token.IsCancellationRequested)
+        {
+            error = $"Couldn't download the bug reports ({exception.GetType().Name}).";
+        }
+    }, cancellation.Token);
+
+    static string Shorten(string? text) => text switch
+    {
+        null => "—",
+        { Length: > 80 } => string.Concat(text.AsSpan(0, 80), "…"),
+        _ => text,
+    };
+
+    public void Dispose()
+    {
+        cancellation.Cancel();
+        cancellation.Dispose();
+    }
+}

@@ -8,7 +8,7 @@ Personal finance tracker. Telegram bot captures spending (text, voice, receipt p
 >
 > Deferred **decisions** live in `docs/decisions/`; deferred **work** lives in `docs/backlog/`. Check both before proposing something as missing.
 >
-> **`noof_ledger` holds the operator's real credentials now.** Never run tests, experiments or manual checks against it, or call the live model, without an explicit request. Tests use the `noof_ledger_test_template` clones only.
+> **`noof_ledger` holds the operator's real credentials now.** Never run tests, experiments or manual checks against it, or call the live model, without an explicit request. The `/bugs` skill is that request, to read it through `.\run.ps1 bugs export` only. Tests use the `noof_ledger_test_template` clones only.
 
 ---
 
