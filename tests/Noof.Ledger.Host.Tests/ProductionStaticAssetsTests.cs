@@ -45,6 +45,25 @@ public sealed partial class ProductionStaticAssetsTests
             "static web assets not wired in for Production would answer 200 with an empty body");
     }
 
+    [Fact]
+    public async Task The_download_script_is_served_non_empty_in_Production()
+    {
+        using var factory = Factory();
+        using var client = factory.CreateClient();
+
+        var html = await client.GetStringAsync("/account/login", TestContext.Current.CancellationToken);
+        var match = DownloadScriptSrcPattern().Match(html);
+        match.Success.Should().BeTrue("every page references the bug reports' download helper from App.razor");
+
+        var script = await client.GetStringAsync("/" + match.Groups[1].Value, TestContext.Current.CancellationToken);
+
+        script.Should().Contain("noofLedger.downloadText",
+            "static web assets not wired in for Production would answer 200 with an empty body");
+    }
+
     [GeneratedRegex(@"href=""(_content/Noof\.Ledger\.Web/app[^""]*\.css)""")]
     private static partial Regex AppCssHrefPattern();
+
+    [GeneratedRegex(@"src=""(_content/Noof\.Ledger\.Web/download[^""]*\.js)""")]
+    private static partial Regex DownloadScriptSrcPattern();
 }

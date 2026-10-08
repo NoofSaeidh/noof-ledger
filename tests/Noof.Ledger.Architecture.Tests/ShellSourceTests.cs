@@ -30,6 +30,20 @@ public class ShellSourceTests
             "components that need JavaScript fail silently without it - nothing logs, nothing throws");
     }
 
+    // Download open reports calls noofLedger.downloadText; with the tag missing the button does nothing, nothing logs
+    // and nothing throws - the same silent class of defect as a missing stylesheet.
+    [Fact]
+    public void The_document_loads_the_download_script_after_the_component_library()
+    {
+        var app = AppSource();
+        const string Download = "_content/Noof.Ledger.Web/download.js";
+
+        app.Should().Contain(Download, "the bug reports page downloads its Markdown through this script");
+        app.IndexOf(Download, StringComparison.Ordinal).Should().BeGreaterThan(
+            app.IndexOf("_content/MudBlazor/MudBlazor.min.js", StringComparison.Ordinal));
+        Read("wwwroot", "download.js").Should().Contain("window.noofLedger.downloadText");
+    }
+
     [Fact]
     public void The_layout_hosts_a_theme_provider()
     {

@@ -24,6 +24,25 @@ public sealed class DiagnosticsTests(CookieModeHostFixture fixture) : PageTest, 
         await Expect(table).ToContainTextAsync("Backup");
         await Expect(table).ToContainTextAsync("Disk");
         await Expect(table).ToContainTextAsync("Log sink");
+        await Expect(table).ToContainTextAsync("Integrity");
+    }
+
+    [Fact]
+    public async Task The_integrity_row_links_to_its_findings_and_to_the_open_bug_reports()
+    {
+        if (fixture.DatabaseUnavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        await SignInAsync();
+        await Page.GotoAsync(fixture.BaseUrl + "/diagnostics");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var row = Page.Locator("#diagnostics-checks tr", new PageLocatorOptions { HasText = "Integrity" });
+        await Expect(row).ToContainTextAsync("No findings");
+        await Expect(row.Locator("#diagnostics-integrity-link")).ToHaveAttributeAsync("href", "/diagnostics/integrity");
+        var reports = row.Locator("#diagnostics-bug-reports-link");
+        await Expect(reports).ToHaveAttributeAsync("href", "/bugs");
+        await Expect(reports).ToHaveTextAsync("No open reports");
     }
 
     [Fact]

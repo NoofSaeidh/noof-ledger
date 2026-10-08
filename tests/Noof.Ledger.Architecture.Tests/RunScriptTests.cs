@@ -10,7 +10,7 @@ public class RunScriptTests
 {
     static readonly string[] CommandNames =
     [
-        "start", "demo", "screenshots", "publish", "start-published", "set-password", "test", "update-test-template",
+        "start", "demo", "screenshots", "publish", "start-published", "set-password", "bugs", "test", "update-test-template",
         "clean-test-dbs", "restore-check", "db-auth-reset", "pg", "status", "logs", "backups", "inspect",
     ];
 
@@ -185,6 +185,42 @@ public class RunScriptTests
         source.Should().Contain(
             @"tests\Noof.Ledger.Receipts.Tests\Noof.Ledger.Receipts.Tests.csproj",
             "the fast suite must include the Receipts project added in Phase 6");
+    }
+
+    // Spec P-17: anything but `bugs export [--all]` stops in run.ps1 itself, before `dotnet run` builds the host or the
+    // verb opens the operator's ledger - so these run for real.
+    [Theory]
+    [InlineData(new object[] { new string[] { } })]
+    [InlineData(new object[] { new[] { "list" } })]
+    [InlineData(new object[] { new[] { "EXPORT" } })]
+    [InlineData(new object[] { new[] { "export", "--output", "elsewhere" } })]
+    public void Bugs_without_export_or_with_another_option_prints_its_usage_and_exits_1(string[] rest)
+    {
+        var (exitCode, output) = RunPwsh(["bugs", .. rest]);
+
+        exitCode.Should().Be(1);
+        output.Should().Contain(@"Usage: .\run.ps1 bugs export [--all]");
+    }
+
+    // Spec P-17: the verb runs the Release host without a launch profile (Production, no build chatter), writes under
+    // this repo's artifacts folder whatever the shell's current directory, and answers with its own line and exit code
+    // (1 PostgreSQL down or not migrated; the verb's usage 2 never arrives, run.ps1 answers a usage error itself with
+    // 1) - the checked-call helper would add a second, red line. Source text:
+    // running it for real reads noof_ledger.
+    [Fact]
+    public void Bugs_export_runs_the_Release_host_and_passes_its_exit_code_through()
+    {
+        var source = File.ReadAllText(Path.Combine(RepoRoot.Find().FullName, "run.ps1"));
+        var start = source.IndexOf("'bugs' {", StringComparison.Ordinal);
+        start.Should().BeGreaterThan(0, "run.ps1 must declare a 'bugs' command block");
+        var end = source.IndexOf("'test' {", start, StringComparison.Ordinal);
+        end.Should().BeGreaterThan(start, "'test' must still follow 'bugs' in the switch");
+        var block = source[start..end];
+
+        block.Should().Contain("-c Release --no-launch-profile");
+        block.Should().Contain(@"Join-Path $Root 'artifacts\bug-reports'");
+        block.Should().Contain("exit $LASTEXITCODE");
+        block.Should().NotContain("Invoke-Checked {");
     }
 
     public static TheoryData<string> CommandNameTheoryData()
