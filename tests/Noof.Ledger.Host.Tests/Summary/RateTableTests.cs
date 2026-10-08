@@ -77,6 +77,15 @@ public class RateTableTests
     }
 
     [Fact]
+    public void A_conversion_beyond_decimals_range_cannot_be_converted()
+    {
+        // Both rates fit numeric(24,12), yet 100000.00 / 0.000000000001 × 999999999999 ≈ 1e29 is past decimal's 7.9e28.
+        var extreme = new RateTable([new FxRate(Usd, Oct(7), 0.000000000001m), new FxRate(Rsd, Oct(7), 999999999999m)]);
+
+        extreme.TryConvert(100000.00m, Usd, Rsd, Oct(7)).Should().BeNull();
+    }
+
+    [Fact]
     public void A_table_without_any_rate_is_empty()
     {
         new RateTable([]).IsEmpty.Should().BeTrue();

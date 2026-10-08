@@ -112,6 +112,21 @@ public class NetWorthServiceTests
     }
 
     [Fact]
+    public async Task A_balance_whose_conversion_overflows_is_named_instead_of_breaking_the_total()
+    {
+        Holding(
+            Wallet("Cash RSD", Rsd, false, new Money(23400.00m, Rsd)),
+            Wallet("Kaspi", Kzt, false, new Money(100000.00m, Usd)));
+        Rates(new FxRate(Rsd, Today, 999999999999m), new FxRate(Usd, Today, 0.000000000001m));
+
+        var worth = await Service().GetAsync(Rsd, Ct);
+
+        // 100000.00 / 0.000000000001 × 999999999999 ≈ 1e29, past decimal's range: only the RSD counts.
+        worth.Total.Should().Be(23400.00m);
+        worth.Excluded.Should().Equal(Usd);
+    }
+
+    [Fact]
     public async Task Today_is_the_configured_zones_day()
     {
         clock.AdjustTime(new DateTimeOffset(2026, 10, 7, 23, 30, 0, TimeSpan.Zero));   // 01:30 on 8 Oct, local

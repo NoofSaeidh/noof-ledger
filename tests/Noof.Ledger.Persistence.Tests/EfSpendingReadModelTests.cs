@@ -684,10 +684,12 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
 
         var summary = await readModel.ThisMonthAsync(TestContext.Current.CancellationToken);
 
+        // 15600.10 over 20, 5, 5: exact 10400.0666…, 2600.0166… twice, cut to 10400.06 + 2600.01 + 2600.01 = 15600.08;
+        // the three tie on the fraction cut off, so the first two take the two cents: 10400.07 + 2600.02 and 2600.01.
         summary.Totals.Should().BeEquivalentTo(
         [
-            new MonthTotal("Subscriptions", CurrencyCode.Kzt, 13000.08m),
-            new MonthTotal("Coffee", CurrencyCode.Kzt, 2600.02m),
+            new MonthTotal("Subscriptions", CurrencyCode.Kzt, 13000.09m),
+            new MonthTotal("Coffee", CurrencyCode.Kzt, 2600.01m),
             new MonthTotal("Fees & Charges", CurrencyCode.Kzt, 156.00m),
         ], "a foreign spending counts as what left the wallet, its charge, split across its lines (8b spec A-1)");
     }

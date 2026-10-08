@@ -20,17 +20,32 @@ internal sealed class RateTable(IReadOnlyList<FxRate> rates)
         if (from == to)
             return new RateConversion(amount, false, null, null);
 
-        if (UnitsPerEur(from, day) is not { } source || UnitsPerEur(to, day) is not { } target)
+        if (UnitsPerEur(from, day) is not { } source || UnitsPerEur(to, day) is not { } target
+            || Converted(amount, source.Units, target.Units) is not { } converted)
             return null;
 
         DateOnly?[] dates = [source.AsOf, target.AsOf];
         var used = dates.OfType<DateOnly>().ToList();
 
         return new RateConversion(
-            amount / source.Units * target.Units,
+            converted,
             used.Exists(date => date > day || day.DayNumber - date.DayNumber > FreshDays),
             used.Min(),
             used.Max());
+    }
+
+    // Two rates that each fit the stored numeric(24,12) can still put a conversion past decimal's range; such an
+    // amount is reported as not converted rather than failing the whole report.
+    static decimal? Converted(decimal amount, decimal sourceUnits, decimal targetUnits)
+    {
+        try
+        {
+            return amount / sourceUnits * targetUnits;
+        }
+        catch (OverflowException)
+        {
+            return null;
+        }
     }
 
     UnitsOn? UnitsPerEur(CurrencyCode currency, DateOnly day)

@@ -108,8 +108,8 @@ public class MonthlySummaryCalculatorTests
 
         var summary = ForWallet(rows, KaspiId);
 
-        // 1000.00 KZT over 3:3:3 - each 1000 × 3/9 = 333.333 → 333.33; the first book (largest weight, first on the
-        // tie) takes the rest, 1000.00 - 666.66 = 333.34. Books = 333.34 + 333.33 = 666.67.
+        // 1000.00 KZT over 3:3:3 - each 1000 × 3/9 = 333.333… cut to 333.33, 999.99 in all; the three tie on the
+        // fraction cut off, so the first book takes the cent: 333.34. Books = 333.34 + 333.33 = 666.67.
         Amounts(summary).Should().Equal(("Books", 666.67m), ("Subscriptions", 333.33m));
         summary.Spent.Amount.Should().Be(1000.00m);
     }
