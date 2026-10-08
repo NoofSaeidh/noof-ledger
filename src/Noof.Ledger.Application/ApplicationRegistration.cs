@@ -6,6 +6,7 @@ using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Diagnostics.BugReports;
 using Noof.Ledger.Application.Diagnostics.Integrity;
 using Noof.Ledger.Application.Receipts;
+using Noof.Ledger.Application.Reporting.Summary;
 
 namespace Noof.Ledger.Application;
 
@@ -25,6 +26,7 @@ public static class ApplicationRegistration
         services.AddSingleton<IRecordEcho, RecordEcho>();
         services.AddSingleton<IFindingText, FindingText>();
         services.AddSingleton<IBugReportMarkdown, BugReportMarkdown>();
+        services.AddSingleton<IMonthlySummaryText, MonthlySummaryText>();
 
         services.AddSingleton(slowOperations);
         services.AddSingleton<IOperationTimer, OperationTimer>();
