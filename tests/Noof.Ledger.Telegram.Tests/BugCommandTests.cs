@@ -32,6 +32,20 @@ public class BugCommandTests
         reportText.Should().BeNull();
     }
 
+    // Matched before the owner gate, so a stranger's text must not cost time in proportion to its square.
+    [Fact]
+    public void A_long_run_of_whitespace_inside_the_text_is_matched_in_linear_time()
+    {
+        var text = "/bug x" + new string(' ', 300_000) + "y";
+        var (recognised, reportText) = (false, (string?)null);
+
+        Action parse = () => recognised = BugCommand.TryParse(text, out reportText);
+
+        parse.ExecutionTime().Should().BeLessThan(TimeSpan.FromSeconds(1));
+        recognised.Should().BeTrue();
+        reportText.Should().StartWith("x ").And.EndWith(" y");
+    }
+
     [Fact]
     public void The_close_button_carries_its_label_and_the_reports_number()
     {
