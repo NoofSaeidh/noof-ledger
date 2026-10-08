@@ -187,6 +187,17 @@ public class RunScriptTests
             "the fast suite must include the Receipts project added in Phase 6");
     }
 
+    // Noof.Ledger.Fx.Tests was added in Phase 8b and, like Receipts.Tests, needs neither PostgreSQL nor a browser.
+    [Fact]
+    public void Fast_project_list_includes_Fx_Tests()
+    {
+        var source = File.ReadAllText(Path.Combine(RepoRoot.Find().FullName, "run.ps1"));
+
+        source.Should().Contain(
+            @"tests\Noof.Ledger.Fx.Tests\Noof.Ledger.Fx.Tests.csproj",
+            "the fast suite must include the Fx project added in Phase 8b");
+    }
+
     // Spec P-17: anything but `bugs export [--all]` stops in run.ps1 itself, before `dotnet run` builds the host or the
     // verb opens the operator's ledger - so these run for real.
     [Theory]

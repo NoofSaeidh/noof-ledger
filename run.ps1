@@ -713,6 +713,7 @@ switch ($CommandName) {
             'tests\Noof.Ledger.Architecture.Tests\Noof.Ledger.Architecture.Tests.csproj',
             'tests\Noof.Ledger.Telegram.Tests\Noof.Ledger.Telegram.Tests.csproj',
             'tests\Noof.Ledger.Receipts.Tests\Noof.Ledger.Receipts.Tests.csproj',
+            'tests\Noof.Ledger.Fx.Tests\Noof.Ledger.Fx.Tests.csproj',
             'tests\Noof.Ledger.Host.Tests\Noof.Ledger.Host.Tests.csproj',
             'tests\Noof.Ledger.Demo.Tests\Noof.Ledger.Demo.Tests.csproj'
         )
