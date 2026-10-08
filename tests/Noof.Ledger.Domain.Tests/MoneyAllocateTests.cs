@@ -39,6 +39,22 @@ public class MoneyAllocateTests
     }
 
     [Fact]
+    public void An_exact_half_cent_share_rounds_away_from_zero_when_the_weight_ratio_does_not_terminate()
+    {
+        // 900.45 × 1/90 = 10.005 exactly → 10.01; 1/90 rounded to 28 digits first would give 10.00499… → 10.00.
+        // The 89 takes 900.45 - 10.01 = 890.44.
+        Kzt(900.45m).Allocate([1m, 89m]).Should().Equal(Kzt(10.01m), Kzt(890.44m));
+    }
+
+    [Fact]
+    public void The_largest_weight_is_the_largest_value_not_the_largest_magnitude()
+    {
+        // 10.00 over 5, -10, 8 (sum 3): 16.666… → 16.67 and -33.333… → -33.33; the 8 takes
+        // 10.00 - 16.67 + 33.33 = 26.66. Had the -10 taken the remainder it would be -33.34 and the 8 26.67.
+        Kzt(10.00m).Allocate([5m, -10m, 8m]).Should().Equal(Kzt(16.67m), Kzt(-33.33m), Kzt(26.66m));
+    }
+
+    [Fact]
     public void A_negative_amount_splits_by_the_same_rule()
     {
         // -10.00 × 1/3 = -3.333… → -3.33; the larger part takes -10.00 - (-3.33) = -6.67.

@@ -42,8 +42,9 @@ public readonly record struct Money(decimal Amount, CurrencyCode Currency) : ICo
         var amount = Amount;
         var currency = Currency;
 
-        // The ratio first: Amount × weight could overflow decimal where Amount × (weight / total) cannot.
-        var parts = weights.Select(weight => MoneyMath.Round(amount * (weight / total))).ToArray();
+        // Multiply before dividing: a ratio like 1/90 rounded to decimal's 28 digits would land an exact half-cent
+        // share just under its midpoint, and MoneyMath.Round would round it the wrong way.
+        var parts = weights.Select(weight => MoneyMath.Round(amount * weight / total)).ToArray();
         parts[largest] = amount - parts.Where((_, index) => index != largest).Sum();
 
         return [.. parts.Select(part => new Money(part, currency))];
