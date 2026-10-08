@@ -66,8 +66,8 @@ public interface IMonthlySummaryService
     // The first day of the current month in the configured zone (TimeZoneInfo singleton + TimeProvider).
     DateOnly CurrentMonth();
 
-    // firstDayOfMonth after CurrentMonth() throws ArgumentOutOfRangeException; currency outside ReportingCurrencies.All
-    // likewise (ignored, and may be anything, in a wallet scope). An id absent from SummaryRows.Wallets throws
-    // KeyNotFoundException; a real wallet with nothing in the months read gives zeros.
+    // firstDayOfMonth after CurrentMonth(), or not a month's first day, throws ArgumentOutOfRangeException; currency
+    // outside ReportingCurrencies.All likewise (ignored, and may be anything, in a wallet scope). An id absent from
+    // SummaryRows.Wallets throws KeyNotFoundException; a real wallet with nothing in the months read gives zeros.
     Task<MonthlySummary> BuildAsync(DateOnly firstDayOfMonth, SummaryScope scope, CurrencyCode currency, CancellationToken cancellationToken);
 }
