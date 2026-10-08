@@ -110,4 +110,14 @@ public class DashboardPageSourceTests
         source.Should().NotContain("MudMenu", "a menu needs the popover provider the static layout does not have");
         source.Should().NotContain("MudTabs", "tabs switch over a circuit, and a statically rendered page has none");
     }
+
+    [Fact]
+    public void The_donut_is_drawn_from_the_categories_above_zero_only()
+    {
+        var source = SourceText();
+
+        source.Should().Contain("@if (group.Slices.Count > 1)",
+            "a refund above its category's purchases leaves the category below zero, and a donut has no negative slice (8b spec SS-19)");
+        source.Should().Contain("ChartSeries=\"@group.Series\"");
+    }
 }

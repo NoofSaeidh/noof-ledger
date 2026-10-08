@@ -127,7 +127,7 @@ else
                                 @* One category is not a distribution, so a ring of a single slice would be a
                                    decoration that says nothing. The table below is the real answer either
                                    way; the chart only earns its space once there is a shape to see. *@
-                                @if (group.Totals.Count > 1)
+                                @if (group.Slices.Count > 1)
                                 {
                                     <div class="noof-chart">
                                         <MudChart T="double"
@@ -351,7 +351,7 @@ else
     RecentView recentView;
 
     IReadOnlyList<RecentTransaction> recent = [];
-    IReadOnlyList<CurrencyGroup> currencyGroups = [];
+    IReadOnlyList<MonthCurrencyGroup> currencyGroups = [];
     IReadOnlyList<MonthTransfer> monthTransfers = [];
     IReadOnlyList<Money> transferFees = [];
     IReadOnlyList<WalletBalance> activeBalances = [];
@@ -363,18 +363,6 @@ else
     readonly CancellationTokenSource cancellation = new();
 
     sealed record CurrencyTotal(string Currency, decimal Amount);
-
-    sealed record CurrencyGroup(string Currency, IReadOnlyList<MonthTotal> Totals, IReadOnlyList<MonthTotal> Received)
-    {
-        public decimal Total => Totals.Sum(total => total.Amount);
-
-        public decimal ReceivedTotal => Received.Sum(total => total.Amount);
-
-        public List<ChartSeries<double>> Series =>
-            [new() { Name = Currency, Data = new ChartData<double>([.. Totals.Select(total => (double)total.Amount)]) }];
-
-        public string[] Labels => [.. Totals.Select(total => total.CategoryName)];
-    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -449,13 +437,13 @@ else
         cancellation.Dispose();
     }
 
-    static IReadOnlyList<CurrencyGroup> GroupByCurrency(IReadOnlyList<MonthTotal> spent, IReadOnlyList<MonthTotal> received) =>
+    static IReadOnlyList<MonthCurrencyGroup> GroupByCurrency(IReadOnlyList<MonthTotal> spent, IReadOnlyList<MonthTotal> received) =>
     [
         .. spent.Concat(received)
             .Select(total => total.Currency.Value)
             .Distinct()
             .Order(StringComparer.Ordinal)
-            .Select(currency => new CurrencyGroup(currency, InCurrency(spent, currency), InCurrency(received, currency))),
+            .Select(currency => new MonthCurrencyGroup(currency, InCurrency(spent, currency), InCurrency(received, currency))),
     ];
 
     static IReadOnlyList<MonthTotal> InCurrency(IReadOnlyList<MonthTotal> totals, string currency) =>
