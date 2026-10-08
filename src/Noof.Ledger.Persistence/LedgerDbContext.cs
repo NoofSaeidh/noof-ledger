@@ -3,6 +3,7 @@ using Noof.Ledger.Domain;
 using Noof.Ledger.Persistence.Backup;
 using Noof.Ledger.Persistence.BugReports;
 using Noof.Ledger.Persistence.Diagnostics;
+using Noof.Ledger.Persistence.Fx;
 using Noof.Ledger.Persistence.Revisions;
 using Noof.Ledger.Persistence.Secrets;
 using Noof.Ledger.Persistence.Settings;
@@ -33,6 +34,7 @@ internal sealed class LedgerDbContext(DbContextOptions<LedgerDbContext> options)
     public DbSet<Receipt> Receipts => Set<Receipt>();
     public DbSet<ReceiptLine> ReceiptLines => Set<ReceiptLine>();
     public DbSet<BugReport> BugReports => Set<BugReport>();
+    public DbSet<FxRateRow> FxRates => Set<FxRateRow>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder builder)
     {

@@ -6,6 +6,7 @@ using Noof.Ledger.Application;
 using Noof.Ledger.Application.Auth;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Receipts;
+using Noof.Ledger.Fx;
 using Noof.Ledger.Host.Auth;
 using Noof.Ledger.Host.Cli;
 using Noof.Ledger.Host.Diagnostics;
@@ -136,6 +137,8 @@ try
     builder.Services.AddNoofAi(builder.Configuration);
 
     builder.Services.AddNoofReceipts();
+
+    builder.Services.AddNoofFx();
 
     builder.Services.AddNoofWorkers(categorizationOptions, backupOptions, captureTimeZone);
 

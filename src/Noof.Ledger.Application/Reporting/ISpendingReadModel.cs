@@ -34,7 +34,9 @@ public sealed record RecentTransaction(
 
 public sealed record MonthTotal(string CategoryName, CurrencyCode Currency, decimal Amount);
 
-// Totals is what was spent, Received what came in as income, each by category and currency and never converted.
+// Totals is what was spent and Received what came in as income, each by category and currency, never converted. A
+// foreign line a charge prices counts as its share of the charge, in its wallet's currency; a fiscal refund counts
+// against its category in Totals and never in Received, so a category can be below zero (8b spec A-1, SS-19).
 public sealed record MonthSummary(DateOnly FirstDay, IReadOnlyList<MonthTotal> Totals, IReadOnlyList<MonthTotal>? Received = null);
 
 public interface ISpendingReadModel
@@ -44,7 +46,8 @@ public interface ISpendingReadModel
 
     // "This month" is decided by the read model, not the page, so there is exactly one definition of
     // it. Rows are bucketed by occurred_on, the local day stamped per row at capture. Totals are the Principal lines of
-    // expenses plus the Fee lines of expenses and transfers; Received the Principal lines of incomes.
+    // expenses, less a fiscal refund's, plus the Fee lines of expenses and transfers; Received the Principal lines of
+    // the other incomes - the lines the monthly summary counts.
     Task<MonthSummary> ThisMonthAsync(CancellationToken cancellationToken);
 
     // Newest first, cancelled ones left out.

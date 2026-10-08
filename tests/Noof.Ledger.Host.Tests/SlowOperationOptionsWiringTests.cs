@@ -67,6 +67,18 @@ public class SlowOperationOptionsWiringTests
         options.ThresholdMs["receipt"].Should().Be(5000);
     }
 
+    // Phase 8b: fx.fetchRates is a call to open.er-api.com; without a group of its own it fell back to "default"
+    // (1000 ms) and would log Slow on an ordinary fetch.
+    [Fact]
+    public void The_fx_group_threshold_binds_from_the_real_appsettings_json()
+    {
+        using var factory = Factory();
+
+        var options = factory.Services.GetRequiredService<SlowOperationOptions>();
+
+        options.ThresholdMs["fx"].Should().Be(3000);
+    }
+
     // Item E: Receipts:VerificationUrlPrefix is the one source TelegramUpdateRouter, CorrectionHandler
     // and FiscalQrDecoder all read - proving it binds through the real host pipeline is what stands in
     // for a second copy of the constant being left behind.

@@ -49,7 +49,9 @@ function Get-Comparable([string]$Database) {
     # so a dump the worker made always has one fewer backup_runs row than the live database it was
     # taken from - by construction, not because anything is actually wrong. Excluded from the
     # gating comparison; its counts are still printed, informationally, below.
-    $ledgerTables = $tables | Where-Object { $_ -ne 'backup_runs' }
+    # fx_rates likewise (Phase 8b): FxRateWorker may append a day's rates between the dump and this comparison, and how
+    # many days of rates a database holds says nothing about whether the dump restored.
+    $ledgerTables = $tables | Where-Object { $_ -notin 'backup_runs', 'fx_rates' }
     $counts = foreach ($table in $ledgerTables) { Invoke-Psql $Database "SELECT '$table', count(*) FROM `"$table`"" }
     [PSCustomObject]@{
         Balances        = Invoke-Psql $Database "SELECT wallet_id, currency, balance, checked_on FROM wallet_balances ORDER BY wallet_id, currency"
@@ -89,7 +91,7 @@ try {
             $script:failed = $true
         }
         else {
-            Write-Host "restore-check OK: '$DumpPath' matches '$SourceDatabase' (wallet_balances and every ledger table's row count; backup_runs is informational only)."
+            Write-Host "restore-check OK: '$DumpPath' matches '$SourceDatabase' (wallet_balances and every ledger table's row count; backup_runs is informational only, fx_rates is not compared)."
             $script:failed = $false
         }
     }

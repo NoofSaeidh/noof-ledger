@@ -12,9 +12,11 @@ using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Diagnostics.BugReports;
 using Noof.Ledger.Application.Diagnostics.Integrity;
 using Noof.Ledger.Application.Editing;
+using Noof.Ledger.Application.Fx;
 using Noof.Ledger.Application.Jobs;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Application.Reporting;
+using Noof.Ledger.Application.Reporting.Summary;
 using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Application.Transcription;
 using Noof.Ledger.Application.Wallets;
@@ -27,10 +29,12 @@ using Noof.Ledger.Persistence.Categorization;
 using Noof.Ledger.Persistence.Diagnostics;
 using Noof.Ledger.Persistence.Diagnostics.Integrity;
 using Noof.Ledger.Persistence.Editing;
+using Noof.Ledger.Persistence.Fx;
 using Noof.Ledger.Persistence.Jobs;
 using Noof.Ledger.Persistence.Receipts;
 using Noof.Ledger.Persistence.Reporting;
 using Noof.Ledger.Persistence.Secrets;
+using Noof.Ledger.Persistence.Settings;
 using Noof.Ledger.Persistence.Transcription;
 using Noof.Ledger.Persistence.Wallets;
 
@@ -94,9 +98,14 @@ public static class PersistenceRegistration
         services.AddScoped<IReceiptStore, EfReceiptStore>();
         services.AddScoped<IIntegrityChecks, EfIntegrityChecks>();
         services.AddScoped<IBugReportStore, EfBugReportStore>();
+        services.AddScoped<IFxRateStore, EfFxRateStore>();
+        services.AddScoped<IReportingCurrencySetting, EfReportingCurrencySetting>();
+        services.AddScoped<IAutoSummaryMarker, EfAutoSummaryMarker>();
+        services.AddScoped<ISummaryRowsReader, EfSummaryRowsReader>();
 
         services.AddScoped<ISystemHealthCheck, MigrationsHealthCheck>();
         services.AddScoped<ISystemHealthCheck, IntegrityHealthCheck>();
+        services.AddScoped<ISystemHealthCheck, FxRatesHealthCheck>();
 
         return services;
     }

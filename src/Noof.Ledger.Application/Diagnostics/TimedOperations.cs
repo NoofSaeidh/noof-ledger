@@ -10,9 +10,11 @@ public static class TimedOperations
     public const string ModelReadReceipt = "model.readReceipt";
     public const string ModelCategorizeReceipt = "model.categorizeReceipt";
     public const string ModelExplainFinding = "model.explainFinding";
+    public const string ModelExplainSummary = "model.explainSummary";
     public const string SpeechProbe = "speech.probe";
     public const string SpeechTranscribe = "speech.transcribe";
     public const string ReceiptFiscalFetch = "receipt.fiscalFetch";
+    public const string FxFetchRates = "fx.fetchRates";
 
     public const string TelegramGetUpdates = "telegram.getUpdates";
     public const string TelegramHandleUpdate = "telegram.handleUpdate";

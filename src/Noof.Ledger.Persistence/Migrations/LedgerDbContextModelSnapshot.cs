@@ -1124,6 +1124,40 @@ namespace Noof.Ledger.Persistence.Migrations
                     b.ToTable("app_log", "public");
                 });
 
+            modelBuilder.Entity("Noof.Ledger.Persistence.Fx.FxRateRow", b =>
+                {
+                    b.Property<string>("Currency")
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("currency");
+
+                    b.Property<DateOnly>("AsOfDate")
+                        .HasColumnType("date")
+                        .HasColumnName("as_of_date");
+
+                    b.Property<string>("Source")
+                        .HasColumnType("text")
+                        .HasColumnName("source");
+
+                    b.Property<DateTimeOffset>("FetchedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("fetched_at");
+
+                    b.Property<decimal>("UnitsPerEur")
+                        .HasPrecision(24, 12)
+                        .HasColumnType("numeric(24,12)")
+                        .HasColumnName("units_per_eur");
+
+                    b.HasKey("Currency", "AsOfDate", "Source");
+
+                    b.ToTable("fx_rates", "public", t =>
+                        {
+                            t.HasCheckConstraint("ck_fx_rates_currency_not_eur", "currency <> 'EUR'");
+
+                            t.HasCheckConstraint("ck_fx_rates_units_per_eur_positive", "units_per_eur > 0");
+                        });
+                });
+
             modelBuilder.Entity("Noof.Ledger.Persistence.Revisions.TransactionRevision", b =>
                 {
                     b.Property<Guid>("Id")

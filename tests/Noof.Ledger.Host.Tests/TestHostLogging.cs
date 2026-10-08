@@ -12,12 +12,15 @@ namespace Noof.Ledger.Host.Tests;
 // can evict the operator's real files under retainedFileCountLimit) into it on every run. Every
 // such host build must route through this helper instead of setting Logging:File:Directory (or the
 // Logging__File__Directory environment variable) by hand.
+// Being the one call every in-process test host makes, the IWebHostBuilder overload also keeps it off open.er-api.com
+// (TestHostRates).
 public static class TestHostLogging
 {
     public static string UseTempLogDirectory(this IWebHostBuilder builder)
     {
         var directory = Directory.CreateTempSubdirectory("noof-host-test-logs-").FullName;
         builder.UseSetting(LoggingSetup.DirectoryConfigKey, directory);
+        builder.UseNoRemoteRates();
         return directory;
     }
 

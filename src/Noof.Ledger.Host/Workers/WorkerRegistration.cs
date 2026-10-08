@@ -92,6 +92,8 @@ internal static class WorkerRegistration
 
         services.AddHostedService<BugReportExplanationWorker>();
 
+        services.AddHostedService<FxRateWorker>();
+
         return services;
     }
 }

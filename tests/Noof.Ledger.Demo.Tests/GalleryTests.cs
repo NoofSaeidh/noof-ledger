@@ -39,4 +39,11 @@ public sealed class GalleryTests
         AppScreens.HideLiveValues.Should().Contain("#diagnostics-checks tbody td:nth-child(4) { visibility: hidden; }");
         AppScreens.HideLiveValues.Should().Contain(".noof-live-value { visibility: hidden; }");
     }
+
+    [Fact]
+    public void The_diagnostics_picture_hides_the_summaries_that_follow_the_machine_or_the_day()
+    {
+        AppScreens.HideLiveHealthSummaries.Should().Contain("'Disk'").And.Contain("'Exchange rates'");
+        AppScreens.All.Single(screen => screen.Name == "diagnostics").Prepare.Should().NotBeNull();
+    }
 }

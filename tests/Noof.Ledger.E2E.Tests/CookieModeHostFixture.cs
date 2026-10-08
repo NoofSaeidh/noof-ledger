@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Noof.Ledger.Host.Startup;
 using Noof.Ledger.Persistence;
+using Noof.Ledger.Persistence.Fx;
 using Noof.Ledger.Persistence.Secrets;
 using Noof.Ledger.TestKit;
 using Npgsql;
@@ -19,6 +20,8 @@ public sealed class CookieModeHostFixture : IAsyncLifetime
     string cloneDatabaseName = string.Empty;
 
     public bool DatabaseUnavailable { get; private set; }
+
+    public DateOnly RatesSeededFor { get; private set; }
 
     public string BaseUrl => host.BaseUrl;
 
@@ -83,6 +86,8 @@ public sealed class CookieModeHostFixture : IAsyncLifetime
 
             var cloneConnectionString = DatabaseSettings.For(cloneDatabaseName);
             await SeedUserAsync(publishDirectory, cloneConnectionString, cancellationToken);
+            RatesSeededFor = RateDateFreshAtStart();
+            await SeedRatesAsync(cloneConnectionString, RatesSeededFor, cancellationToken);
 
             await host.StartAsync(publishDirectory, new Dictionary<string, string>
             {
@@ -140,6 +145,17 @@ public sealed class CookieModeHostFixture : IAsyncLifetime
 
     static Task CreateCloneAsync(string name, CancellationToken cancellationToken) =>
         DatabaseSettings.CreateDatabaseFromTemplateAsync(name, cancellationToken);
+
+    // Spec P-2: synthetic rates dated the real UTC today make the host's FxRateWorker find the archive fresh, so no E2E
+    // host calls open.er-api.com. In the last quarter-hour before 00:00 UTC the next day's date is seeded instead, so a
+    // host whose first tick lands after midnight still finds it fresh.
+    static DateOnly RateDateFreshAtStart() => DateOnly.FromDateTime(DateTime.UtcNow.AddMinutes(15));
+
+    static async Task SeedRatesAsync(string connectionString, DateOnly asOfDate, CancellationToken cancellationToken)
+    {
+        await using var db = new LedgerDbContext(new DbContextOptionsBuilder<LedgerDbContext>().UseNpgsql(connectionString).Options);
+        await new EfFxRateStore(db, TimeProvider.System).AppendAsync(OpenErApiPayloads.Snapshot(asOfDate), cancellationToken);
+    }
 
     // Internal, not private: DiagnosticsLogsTests reuses this to seed its own isolated clone
     // (I-5, Phase 5 final review) rather than duplicating the `user set-password` CLI dance.

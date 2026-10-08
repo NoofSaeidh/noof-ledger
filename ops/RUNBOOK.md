@@ -295,6 +295,9 @@ dump the worker made will always have one fewer `backup_runs` row than the live 
 from — comparing it would report MISMATCH on every worker-made dump, by construction, not because
 anything is wrong.
 
+`fx_rates` is left out of the row counts too: `FxRateWorker` may append a day's rates between the dump and the
+comparison, and how many days of rates a database holds says nothing about whether the dump restored.
+
 The comparison overall is against the database as it stands **right now**, not as it stood when the
 dump was taken — anything written since (a captured message, a job row, a new backup run) shows up as
 a difference against `-SourceDatabase`. Run it while the host is idle (no capture in flight), or point
@@ -334,8 +337,10 @@ shutdown, one warning line naming how many events never made it lands in the fil
 they are still in the file itself, just never copied to the table.
 
 **Reading `/diagnostics` and the trace page.** `/diagnostics` lists every health check — Database,
-Migrations, Telegram, AI keys, Backup, Disk, Log sink, Receipts, Integrity — each with a "Logs" link that opens
-`/diagnostics/logs` pre-filtered to that check's own log category. **Integrity** runs the integrity checks on every
+Migrations, Telegram, AI keys, Backup, Disk, Log sink, Receipts, Integrity, Exchange rates — each with a "Logs" link that
+opens `/diagnostics/logs` pre-filtered to that check's own log category. **Exchange rates** is amber while no rate has
+been stored yet, or when the newest is more than three days old — normal after the PC was off for a few days; the
+summaries then mark what they convert with an older rate "≈". **Integrity** runs the integrity checks on every
 health run: red (`N bugs found`) when the app wrote data that contradicts itself, amber (`N waiting on you`) when
 something has waited on you for over a day — a failed reading, a receipt or slip waiting for Record anyway, a
 correction that never applied, a record restored after a cancel that nothing will process. A check that throws or times out

@@ -1,4 +1,5 @@
 using AwesomeAssertions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Noof.Ledger.Application.Reporting;
 using Noof.Ledger.Domain;
@@ -68,6 +69,7 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
     static readonly Guid FeesAndChargesId = new("00000000-0000-0000-0001-000000000013");
     static readonly Guid CoffeeId = new("00000000-0000-0000-0001-000000000017");
     static readonly Guid SalaryId = new("00000000-0000-0000-0001-000000000022");
+    static readonly Guid RefundId = new("00000000-0000-0000-0001-000000000023");
     static readonly Guid OtherIncomeId = new("00000000-0000-0000-0001-000000000025");
 
     static Transaction NewTransferRecord(
@@ -622,7 +624,7 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
     }
 
     [Fact]
-    public async Task ThisMonthAsync_counts_a_foreign_spending_in_its_own_currency_and_its_fee_in_the_wallets()
+    public async Task ThisMonthAsync_keeps_a_foreign_line_no_charge_prices_in_its_own_currency()
     {
         await using var db = await fixture.CreateMigratedContextAsync();
         var kaspi = NewWallet(CurrencyCode.Kzt, "Kaspi KZT");
@@ -647,7 +649,145 @@ public class EfSpendingReadModelTests(PostgresFixture fixture)
             new MonthTotal("Subscriptions", CurrencyCode.Usd, 30m),
             new MonthTotal("Fees & Charges", CurrencyCode.Kzt, 156m),
         ],
-            "a foreign spending counts in the currency it was bought in; its charge moves the wallet, not the statistics (spec §4)");
+            "with no charge there is no figure in the wallet's currency, and This month never converts (8b spec A-1, §2)");
+    }
+
+    [Fact]
+    public async Task ThisMonthAsync_counts_a_charged_foreign_spending_as_its_share_of_the_charge_in_the_wallets_currency()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var kaspi = NewWallet(CurrencyCode.Kzt, "Kaspi KZT");
+        db.Wallets.Add(kaspi);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var now = new DateTimeOffset(2026, 9, 10, 12, 0, 0, TimeSpan.Zero);
+        var spending = NewTransaction(kaspi.Id, now, "Europe/Belgrade", TransactionStatus.Completed);
+        db.Transactions.Add(spending);
+        db.LineItems.AddRange(
+            NewLineItem(spending.Id, "App Store", new Money(20.00m, CurrencyCode.Usd), SubscriptionsId, null, ordinal: 1),
+            NewLineItem(spending.Id, "iCloud", new Money(5.00m, CurrencyCode.Usd), SubscriptionsId, null, ordinal: 2),
+            NewLineItem(spending.Id, "Coffee beans", new Money(5.00m, CurrencyCode.Usd), CoffeeId, null, ordinal: 3),
+            NewFeeLine(spending.Id, new Money(156.00m, CurrencyCode.Kzt), ordinal: 4));
+        db.Charges.Add(new Charge
+        {
+            TransactionId = spending.Id,
+            Currency = CurrencyCode.Usd,
+            ChargedAmount = 15600.10m,
+            FeeAmount = 156.00m,
+            RateUsed = 520.003333333333m,
+            Source = ChargeSource.WalletTerms,
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var readModel = new EfSpendingReadModel(db, new FakeTimeProvider(now), TimeZoneInfo.Utc);
+
+        var summary = await readModel.ThisMonthAsync(TestContext.Current.CancellationToken);
+
+        // 15600.10 over 20, 5, 5: exact 10400.0666…, 2600.0166… twice, cut to 10400.06 + 2600.01 + 2600.01 = 15600.08;
+        // the three tie on the fraction cut off, so the first two take the two cents: 10400.07 + 2600.02 and 2600.01.
+        summary.Totals.Should().BeEquivalentTo(
+        [
+            new MonthTotal("Subscriptions", CurrencyCode.Kzt, 13000.09m),
+            new MonthTotal("Coffee", CurrencyCode.Kzt, 2600.01m),
+            new MonthTotal("Fees & Charges", CurrencyCode.Kzt, 156.00m),
+        ], "a foreign spending counts as what left the wallet, its charge, split across its lines (8b spec A-1)");
+    }
+
+    [Fact]
+    public async Task ThisMonthAsync_gives_a_discount_line_under_a_charge_its_negative_share()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var kaspi = NewWallet(CurrencyCode.Kzt, "Kaspi KZT");
+        db.Wallets.Add(kaspi);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var now = new DateTimeOffset(2026, 9, 10, 12, 0, 0, TimeSpan.Zero);
+        var spending = NewTransaction(kaspi.Id, now, "Europe/Belgrade", TransactionStatus.Completed);
+        db.Transactions.Add(spending);
+        db.LineItems.AddRange(
+            NewLineItem(spending.Id, "Annual plan", new Money(30.00m, CurrencyCode.Usd), SubscriptionsId, null, ordinal: 1),
+            NewLineItem(spending.Id, "Promo discount", new Money(-5.00m, CurrencyCode.Usd), CoffeeId, null, ordinal: 2));
+        db.Charges.Add(new Charge
+        {
+            TransactionId = spending.Id,
+            Currency = CurrencyCode.Usd,
+            ChargedAmount = 2500.00m,
+            FeeAmount = 0m,
+            RateUsed = 100m,
+            Source = ChargeSource.WalletTerms,
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var readModel = new EfSpendingReadModel(db, new FakeTimeProvider(now), TimeZoneInfo.Utc);
+
+        (await readModel.ThisMonthAsync(TestContext.Current.CancellationToken)).Totals.Should().BeEquivalentTo(
+        [
+            new MonthTotal("Subscriptions", CurrencyCode.Kzt, 3000.00m),
+            new MonthTotal("Coffee", CurrencyCode.Kzt, -500.00m),
+        ], "a discount line under a charge takes its negative share, and the shares still add up to the charge");
+    }
+
+    [Fact]
+    public async Task ThisMonthAsync_subtracts_a_fiscal_refund_from_its_categories_and_never_counts_it_as_received()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var raiffeisen = NewWallet(CurrencyCode.Rsd, "Raiffeisen");
+        db.Wallets.Add(raiffeisen);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var now = new DateTimeOffset(2026, 9, 10, 12, 0, 0, TimeSpan.Zero);
+        var purchase = NewTransaction(raiffeisen.Id, now, "Europe/Belgrade", TransactionStatus.Completed);
+        var fiscalRefund = NewTransaction(raiffeisen.Id, now, "Europe/Belgrade", TransactionStatus.Completed);
+        fiscalRefund.Kind = TransactionKind.Income;
+        var saidRefund = NewTransaction(raiffeisen.Id, now, "Europe/Belgrade", TransactionStatus.Completed);
+        saidRefund.Kind = TransactionKind.Income;
+        db.Transactions.AddRange(purchase, fiscalRefund, saidRefund);
+        db.LineItems.AddRange(
+            NewLineItem(purchase.Id, "groceries", new Money(500.00m, CurrencyCode.Rsd), GroceriesId, null),
+            NewLineItem(fiscalRefund.Id, "returned groceries", new Money(800.00m, CurrencyCode.Rsd), GroceriesId, null, ordinal: 1),
+            NewLineItem(fiscalRefund.Id, "returned coffee", new Money(100.00m, CurrencyCode.Rsd), CoffeeId, null, ordinal: 2),
+            NewLineItem(saidRefund.Id, "a friend paid me back", new Money(50.00m, CurrencyCode.Rsd), RefundId, null));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await db.Database.ExecuteSqlAsync(
+            $"""
+            INSERT INTO receipts (id, transaction_id, source, receipt_kind, created_at, total, currency)
+            VALUES ({Guid.NewGuid()}, {fiscalRefund.Id}, {(int)ReceiptSource.FiscalQr}, {(int)ReceiptKind.Refund}, {now}, 900.00, 'RSD')
+            """,
+            TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var readModel = new EfSpendingReadModel(db, new FakeTimeProvider(now), TimeZoneInfo.Utc);
+
+        var summary = await readModel.ThisMonthAsync(TestContext.Current.CancellationToken);
+
+        summary.Totals.Should().BeEquivalentTo(
+        [
+            new MonthTotal("Groceries", CurrencyCode.Rsd, -300.00m),
+            new MonthTotal("Coffee", CurrencyCode.Rsd, -100.00m),
+        ], "a fiscal refund reduces spending in its categories, which may go below zero (8b spec SS-19)");
+        summary.Received.Should().BeEquivalentTo(
+            [new MonthTotal("Refund", CurrencyCode.Rsd, 50.00m)],
+            "only a fiscal Refund receipt makes a refund; an income the operator said stays received");
+    }
+
+    [Fact]
+    public async Task ThisMonthAsync_still_counts_a_line_on_a_record_with_no_wallet_in_its_own_currency()
+    {
+        await using var db = await fixture.CreateMigratedContextAsync();
+        var now = new DateTimeOffset(2026, 9, 10, 12, 0, 0, TimeSpan.Zero);
+        var captured = NewTransaction(null, now, "Europe/Belgrade", TransactionStatus.Captured);
+        db.Transactions.Add(captured);
+        db.LineItems.Add(NewLineItem(captured.Id, "bread", new Money(7.50m, CurrencyCode.Eur), GroceriesId, null));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.ChangeTracker.Clear();
+
+        var readModel = new EfSpendingReadModel(db, new FakeTimeProvider(now), TimeZoneInfo.Utc);
+
+        (await readModel.ThisMonthAsync(TestContext.Current.CancellationToken)).Totals.Should().BeEquivalentTo(
+            [new MonthTotal("Groceries", CurrencyCode.Eur, 7.50m)],
+            "the summary drops a line with no wallet currency to count in; This month, which never converts, keeps it");
     }
 
     [Fact]

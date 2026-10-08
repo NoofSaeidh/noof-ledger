@@ -8,6 +8,7 @@ using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Diagnostics.Integrity;
 using Noof.Ledger.Application.Receipts;
+using Noof.Ledger.Application.Reporting.Summary;
 using Noof.Ledger.Application.Transcription;
 
 namespace Noof.Ledger.Ai;
@@ -32,6 +33,7 @@ public static class AiRegistration
         services.AddScoped<IReceiptVision, ChatReceiptVision>();
         services.AddScoped<IReceiptCategorizer, ChatReceiptCategorizer>();
         services.AddScoped<IFindingExplainer, ChatFindingExplainer>();
+        services.AddScoped<ISummaryExplainer, ChatSummaryExplainer>();
 
         return services;
     }

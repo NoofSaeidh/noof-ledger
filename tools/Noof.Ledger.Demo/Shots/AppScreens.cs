@@ -35,7 +35,7 @@ internal static class AppScreens
             $"/transactions/{MockData.UnconfirmedReceiptTransactionId}/trace", "#trace-receipt-awaiting-confirmation"),
         new("trace-slip-check", "An exchange slip waiting for Record anyway",
             $"/transactions/{MockData.HeldSlipTransactionId}/trace", "#trace-receipt-awaiting-confirmation"),
-        new("diagnostics", "Diagnostics", "/diagnostics", "#diagnostics-checks", Prepare: HideFreeDiskSpaceAsync),
+        new("diagnostics", "Diagnostics", "/diagnostics", "#diagnostics-checks", Prepare: HideLiveHealthSummariesAsync),
         new("integrity", "Integrity", "/diagnostics/integrity", "#integrity-waiting"),
         new("bugs", "Bug reports", "/bugs", "#bugs-list"),
         new("bug-report", "A bug report", "/bugs/2", "#bug-report-explanation"),
@@ -87,11 +87,14 @@ internal static class AppScreens
         await page.Locator(selector).BlurAsync();
     }
 
-    // Free disk space is the machine's live state, not the app's, and differs on every run.
-    static Task HideFreeDiskSpaceAsync(IPage page) => page.EvaluateAsync(
+    // The Disk row's summary is the machine's free space and the Exchange rates row's names the newest rate's day, the
+    // real UTC today in the demo: both would change the picture from one run to the next.
+    public const string HideLiveHealthSummaries =
         """
         () => document.querySelectorAll('#diagnostics-checks tbody tr').forEach(row => {
-            if (row.cells[0]?.textContent.trim() === 'Disk') row.cells[2].style.visibility = 'hidden';
+            if (['Disk', 'Exchange rates'].includes(row.cells[0]?.textContent.trim())) row.cells[2].style.visibility = 'hidden';
         })
-        """);
+        """;
+
+    static Task HideLiveHealthSummariesAsync(IPage page) => page.EvaluateAsync(HideLiveHealthSummaries);
 }
