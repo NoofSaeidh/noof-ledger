@@ -100,6 +100,7 @@ public static class PersistenceRegistration
 
         services.AddScoped<ISystemHealthCheck, MigrationsHealthCheck>();
         services.AddScoped<ISystemHealthCheck, IntegrityHealthCheck>();
+        services.AddScoped<ISystemHealthCheck, FxRatesHealthCheck>();
 
         return services;
     }

@@ -25,6 +25,7 @@ public sealed class DiagnosticsTests(CookieModeHostFixture fixture) : PageTest, 
         await Expect(table).ToContainTextAsync("Disk");
         await Expect(table).ToContainTextAsync("Log sink");
         await Expect(table).ToContainTextAsync("Integrity");
+        await Expect(table).ToContainTextAsync("Exchange rates");
     }
 
     [Fact]
