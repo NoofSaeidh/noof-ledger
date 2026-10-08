@@ -56,18 +56,20 @@ internal sealed class FindingExplanationFlow(
         if (before.Explaining || before.Creating)
             return;
 
-        states[index] = new(Explaining: true);
+        // A report already created for this finding stays its one report, whatever the next answer says.
+        var created = before.CreatedNumber;
+        states[index] = new(Explaining: true, CreatedNumber: created);
 
         var finished = await operations.RunAsync(async token =>
         {
             try
             {
                 var request = findingText.ForFinding(finding, timeProvider.GetUtcNow());
-                states[index] = new(Explanation: await explainer.ExplainAsync(request, token));
+                states[index] = new(Explanation: await explainer.ExplainAsync(request, token), CreatedNumber: created);
             }
             catch (Exception) when (!token.IsCancellationRequested)
             {
-                states[index] = new(ExplainFailed: true);
+                states[index] = new(ExplainFailed: true, CreatedNumber: created);
             }
         }, cancellationToken);
 

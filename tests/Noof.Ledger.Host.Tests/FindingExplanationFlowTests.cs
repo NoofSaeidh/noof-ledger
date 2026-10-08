@@ -104,6 +104,42 @@ public sealed class FindingExplanationFlowTests
     }
 
     [Fact]
+    public async Task Explain_again_after_Create_keeps_the_report_and_never_offers_a_second_one()
+    {
+        var answer = new Explanation("The entries were written wrong. This is a bug — file it.", true);
+        Answers(answer);
+        store.FileAsync(FiledFromDashboard(answer), Arg.Any<CancellationToken>())
+            .Returns(new BugReportSaved(12, Created: true));
+        var flow = Flow();
+        await flow.ExplainAsync(0, Finding, Ct);
+        await flow.CreateAsync(0, Finding, Ct);
+
+        await flow.ExplainAsync(0, Finding, Ct);
+        await flow.CreateAsync(0, Finding, Ct);
+
+        flow.StateOf(0).Should().Be(new FindingExplanationState(Explanation: answer, CreatedNumber: 12));
+        flow.StateOf(0).OffersReport.Should().BeFalse();
+        await store.Received(1).FileAsync(Arg.Any<NewBugReport>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_failed_explain_after_Create_still_keeps_the_report()
+    {
+        var answer = new Explanation("The entries were written wrong. This is a bug — file it.", true);
+        explainer.ExplainAsync(Request, Arg.Any<CancellationToken>()).Returns(
+            Task.FromResult(answer), Task.FromException<Explanation>(new InvalidOperationException("The model went away.")));
+        store.FileAsync(FiledFromDashboard(answer), Arg.Any<CancellationToken>())
+            .Returns(new BugReportSaved(12, Created: true));
+        var flow = Flow();
+        await flow.ExplainAsync(0, Finding, Ct);
+        await flow.CreateAsync(0, Finding, Ct);
+
+        await flow.ExplainAsync(0, Finding, Ct);
+
+        flow.StateOf(0).Should().Be(new FindingExplanationState(ExplainFailed: true, CreatedNumber: 12));
+    }
+
+    [Fact]
     public async Task Create_does_nothing_unless_the_answer_shown_offers_it()
     {
         Answers(new Explanation("Reply to the echo with the amount.", false));

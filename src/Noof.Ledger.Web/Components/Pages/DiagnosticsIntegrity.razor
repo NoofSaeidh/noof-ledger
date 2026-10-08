@@ -74,6 +74,12 @@ else
                     {
                         <MudAlert id="@($"explanation-{i}")" Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-3">
                             @FindingExplanationFlow.CouldNotExplain
+                            @if (state.CreatedNumber is { } number)
+                            {
+                                <div class="mt-2">
+                                    <MudLink id="@($"created-{i}")" Href="@($"/bugs/{number}")">@FindingExplanationFlow.CreatedText(number)</MudLink>
+                                </div>
+                            }
                         </MudAlert>
                     }
                     else if (state.Explanation is { } explanation)
