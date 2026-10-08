@@ -7,5 +7,5 @@ window.noofLedger.downloadText = (fileName, text) => {
     document.body.appendChild(link);
     link.click();
     link.remove();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 0);
 };
