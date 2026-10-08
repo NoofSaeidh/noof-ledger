@@ -12,8 +12,9 @@ namespace Noof.Ledger.Application;
 
 [SuppressMessage("Maintainability", "CA1515",
     Justification = "The one public way into this assembly's own services - ProposalMapper, "
-        + "MerchantScan and RecordEcho are internal, and this is the only way the Host and "
-        + "Telegram can register them without naming an implementation type.")]
+        + "MerchantScan, RecordEcho, MonthlySummaryService and NetWorthService are internal, and "
+        + "this is the only way the Host and Telegram can register them without naming an "
+        + "implementation type.")]
 public static class ApplicationRegistration
 {
     public static IServiceCollection AddNoofApplication(
@@ -27,6 +28,10 @@ public static class ApplicationRegistration
         services.AddSingleton<IFindingText, FindingText>();
         services.AddSingleton<IBugReportMarkdown, BugReportMarkdown>();
         services.AddSingleton<IMonthlySummaryText, MonthlySummaryText>();
+
+        // Scoped, unlike the rest here: both read through Persistence's scoped stores.
+        services.AddScoped<IMonthlySummaryService, MonthlySummaryService>();
+        services.AddScoped<INetWorthService, NetWorthService>();
 
         services.AddSingleton(slowOperations);
         services.AddSingleton<IOperationTimer, OperationTimer>();
