@@ -224,6 +224,99 @@ boundary.
   because DPAPI does not travel, because of the Linux port, and because the app would be exposed.
   Rotating the secrets removes the first; the rest is re-examined.
 
+## Hosting research, 2026-10-08 — desk research, not yet proven
+
+**Recommended: host now on a small EU VPS, with Docker Compose and no public port at launch.**
+- Compose runs three services: the app, `postgres:18`, and a Tailscale sidecar that serves HTTPS on
+  its `*.ts.net` name.
+- Off-site backups go out with restic.
+- Production data, the key ring and every production credential end up on a machine the operator's
+  Windows user holds no standing credential for. That makes it the boundary against agents, and a
+  stronger one than a second Windows account.
+- The objections in the original design's §4 were all about running containers on this PC. On a
+  Linux VPS they are gone.
+- Docker Desktop at home isolates nothing: the user who started the engine controls it, so an agent
+  running as that user can `docker exec` into the containers.
+
+**Shape.**
+- **Server.** Hetzner CX23 or netcup VPS 500 G12, about €6–8 a month, running Ubuntu 24.04 with
+  unattended upgrades and a nightly reboot. The firewall admits nothing inbound but Tailscale.
+- **The app container.**
+  - It shares the Tailscale sidecar's network and binds `127.0.0.1`, so `LoopbackGuard` holds
+    unchanged.
+  - `restart: unless-stopped` restarts it on any exit code, including 0.
+  - `TZ=Europe/Belgrade`.
+  - Its data sits on a volume owned by the app's non-root user.
+- **Telegram.** Long polling stays. Development uses a separate dev bot, so the production token
+  never exists on the PC.
+- **Deploy.**
+  - A `v*` tag builds the image in GitHub Actions, smoke-tests it (Skia loads, the time zone
+    resolves, `/healthz`) and pushes it to GHCR by digest.
+  - The operator then runs `ssh noof deploy <tag>`. That command pulls the image, restarts the app,
+    checks `/healthz` and rolls back on failure.
+  - GitHub holds no production credential. A GitHub environment approval was not chosen: the
+    operator's `gh` token on the PC has the scope to approve a deployment, so an agent could too.
+  - The SSH key needs a touch or a prompt for every use (a FIDO2 `-sk` key, or 1Password's agent).
+    A plain key loaded into the Windows `ssh-agent` would let any process use it silently.
+- **Secrets.**
+  - "Encrypted in the database, entered through the UI" still holds. The three rotated secrets are
+    entered after the first start.
+  - The database password is a Docker secret file.
+  - The key ring is protected by the volume's permissions only. Root on the VPS can already read the
+    app's memory, so a certificate on the same disk adds little.
+- **Backups.**
+  - `BackupWorker` keeps its local dumps; the image carries `pg_dump` 18.
+  - A systemd timer runs restic over the dumps and the key ring, to object storage in the EU with
+    versioning or object lock. Q8 becomes "both, encrypted by restic".
+  - The restic password lives on the VPS (root only) and in the operator's password manager, never
+    on the PC.
+  - OneDrive is at most a mirror of the already-encrypted repository.
+  - The restore drill runs on a throwaway VPS, not on the PC.
+- **Monitoring.** A dead-man's-switch ping after `/healthz` and after each backup.
+- **Still within an agent's reach.** The repository (code reaches production only through the
+  operator's deploy), the operator's `gh` token, the signed-in browser, and the dashboard over the
+  tailnet behind its password. That is enough against accidents, not against malice.
+
+**This replaces, from the separate-account option:** the production Windows account, SSPI, the
+certificate re-wrap, the Windows service and its exit-code fix (the `OperationCanceledException` filter
+stays, as a correctness fix), and moving test hosts off the real key ring (production keys no longer
+live on the PC). It closes the 24-hour Telegram gap and gives phone access through the Tailscale app.
+
+**Port work for launch** (about 1.5–2 days of code and 2–3 days of infrastructure):
+- **DataProtection.** `ProtectKeysWithDpapi()` only on Windows; on Linux the key ring goes on the
+  volume.
+- **SkiaSharp.** Add `SkiaSharp.NativeAssets.Linux.NoDependencies`, with THIRD-PARTY-NOTICES updated
+  in the same commit. Without it, receipt scaling and QR reading fail on Linux.
+- **Paths.** The Windows default paths in `appsettings.json`, `LoggingSetup`, `BackupWorkerOptions`,
+  `PgDumpDatabaseDumper` and `DataProtectionSetup` become overridable, and an unexpanded `%VAR%`
+  fails fast.
+- **Image.** A Dockerfile on `aspnet:10.0` with `postgresql-client-18`, running as non-root.
+- **Proxy.** `UseForwardedHeaders` (with `KnownIPNetworks`) and `CookieSecurePolicy.Always`.
+- **Time zone.** `DiagnosticsLogs.razor` stops using `TimeZoneInfo.Local`.
+- **Ops.** `deploy/compose.yaml`, provisioning, the restic timer, the deploy-and-rollback script, a
+  Linux restore check, a release workflow with the container smoke test (CI is Windows-only today),
+  and a RUNBOOK section.
+- **Admin commands.** `user set-password` and `bugs export` run through `docker compose exec`.
+
+**Later:** the Mini App and public HTTPS, with initData validation, `frame-ancestors`, a login rate
+limit and lockout, `RevalidatingServerAuthenticationStateProvider`, security headers and the security
+review; a Linux test job in CI.
+
+**To prove:**
+- whether a Mini App on a tailnet-only URL loads for a phone on the tailnet;
+- the Hetzner backup price;
+- the dead-man's-switch service's free tier.
+
+**Operator's questions still open:**
+- Which VPS and term, and the billing country for VAT.
+- Is the Tailscale app on the phone enough at launch?
+- How the SSH key is protected: a FIDO2 key or 1Password.
+- Which off-site target, and whether OneDrive stays as a mirror.
+- Does the key ring go into the encrypted backup?
+- Are `/bugs` exports handed to agents as files?
+- Is there a domain, for later?
+- Is plaintext data on an EU host's disk acceptable?
+
 ## Next steps
 
 1. **Phase 8b merges** (another session owns it).
