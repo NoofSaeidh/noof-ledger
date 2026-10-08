@@ -40,11 +40,14 @@ paths:
   resets a required `ToolMode` after the first round and strips every tool declaration on its own
   last iteration — verified by decompiling, not by its docs.
 - **`record_transaction` is not the only forced answer tool** *(Phase 6)*. `ChatReceiptVision`'s vision
-  fallback forces `read_receipt`, `ChatReceiptCategorizer` forces `categorize_receipt`, and
-  `ChatFindingExplainer` forces `write_explanation` (Phase 8a); all three use
+  fallback forces `read_receipt`, `ChatReceiptCategorizer` forces `categorize_receipt`,
+  `ChatFindingExplainer` forces `write_explanation` (Phase 8a), and `ChatSummaryExplainer` forces
+  `write_summary_comment` (Phase 8b); all four use
   `ChatToolMode.RequireSpecific` for a single round with no `FunctionInvokingChatClient` loop, unlike
   `record_transaction`'s multi-round `ChatCategorizer`/`DelegatingChatClient` path above.
 - **The model explains, never decides** *(Phase 8a, IR-6)*. `write_explanation`'s `looks_like_bug` only
   shows or hides an offer — *Create bug report* on the integrity page, *Close report* in the bot. Nothing the
   model says changes a finding, a report's status or a health level, and every figure it is given is computed
   and formatted by C#. An integrity or health check never reaches the model (`HealthCheckBoundaryTests`).
+  `write_summary_comment` (Phase 8b) comments on a summary `MonthlySummaryText` rendered; its own figures are
+  not checked, and nothing it says changes a figure or a setting.

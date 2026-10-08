@@ -6,7 +6,8 @@ namespace Noof.Ledger.Architecture.Tests;
 // Scope item for Phase 5 Task 6: the LLM plays no part in health. AiKeysHealthCheck reads
 // IModelProvider/ISpeechProvider - both Application interfaces - never Noof.Ledger.Ai's own model
 // or speech types directly. Phase 8a (spec §1 "Boundary"): the integrity checks feed the health tile,
-// so they are held to the same rule, and neither may name the finding explainer. Persistence cannot
+// so they are held to the same rule, and neither may name the finding explainer - nor, since Phase 8b,
+// the summary explainer, so the exchange-rates check cannot reach the model either. Persistence cannot
 // reference the Ai assembly, so naming an Application interface that Ai implements with a model call
 // is the only way a check could reach one - those interfaces are all listed. The whole Integrity
 // folder is scanned, so a helper the run executes, or a check that derives from a base class, cannot
@@ -23,7 +24,7 @@ public class HealthCheckBoundaryTests
     static readonly string[] ModelStack =
     [
         "Microsoft.Extensions.AI", "IChatClient", "ISpeechToTextClient", "ICategorizer", "ITranscriber",
-        "IReceiptVision", "IReceiptCategorizer", "IFindingExplainer",
+        "IReceiptVision", "IReceiptCategorizer", "IFindingExplainer", "ISummaryExplainer",
     ];
 
     [Fact]
@@ -46,7 +47,7 @@ public class HealthCheckBoundaryTests
 
         offenders.Should().BeEmpty(
             "health and integrity checks read IModelProvider/ISpeechProvider at most, never the model or speech client "
-            + "stack or the finding explainer");
+            + "stack or an explainer");
         healthCheckFiles.Should().NotBeEmpty(
             "the ISystemHealthCheck pattern must find the real health checks, or an empty offender list proves nothing");
         healthCheckFiles.Select(source => source.Path)
