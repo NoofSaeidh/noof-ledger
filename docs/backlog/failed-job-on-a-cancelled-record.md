@@ -20,3 +20,7 @@ while its photo was cancelled. The general fix needs design: widening `MarkFaile
 records would also stamp reasons on records that were `Completed` before they were cancelled, which
 Restore must bring back `Completed`. A failure would have to remember that the record never got past
 `Captured`, whatever its status is now.
+
+**Since Phase 8a** such a record is no longer silent: once restored and idle for a day, the integrity page lists it
+under *Waiting on you* (I-4, "A correction that never applied"), with the failed job's kind and last error. The gap
+itself is unchanged.

@@ -157,6 +157,8 @@ instrumenting the next time it is seen live rather than chasing from this descri
   when re-run alone. So this is a real timing race, not server degradation: the buffer times out to
   the compiled-in default before the stored level arrives. The fix is to make `ReadyGatedBufferSink`
   wait for the stored level, or for a definite "none stored", instead of flushing at a 5 s timeout.
+  Through Phase 8a (2026-10) it failed on every local `.\run.ps1 test db`, which stops that run before the Demo
+  database classes (`run-test-db-filter-reaches-only-persistence.md`); CI does not run it.
 - **`SecretRedactionSentinelTests` hits an `IOException` in its cleanup — closed 2026-09-26 (Phase 6)**,
   not its assertions:
   `Directory.Delete(logDirectory)` in the `finally` runs while the host's file sink still holds
