@@ -197,6 +197,12 @@ A currency exchange is `Transaction(Kind=Transfer)` with an owned **`FxConversio
 
 **The LLM never returns a health status, never a number, never a branch of control flow** — enforced by an ArchUnitNET rule forbidding health and integrity checks from referencing `Noof.Ledger.Ai`. The realistic failure is someone adding *"if the explainer says it's fine, auto-resolve"* to save a click, so it has to be a build failure.
 
+*Amended by Phase 8a — `docs/specs/2026-10-02-integrity-and-bug-reports-design.md` (2026-10-02): Tier 2 is four
+checks (postings that disagree with their sources, facts that contradict a record's kind, a message stuck in the
+pipeline, something waiting on the operator), run on demand and grouped as Bugs (red) and Waiting on you (amber); Tier 3
+explains in English, and its answer may offer a bug report — the one branch it can show or hide, never a finding, a
+status or a health level (IR-5, IR-6). The boundary is a source-scanning test (`HealthCheckBoundaryTests`).*
+
 **Severity mapping matters more than it sounds:** a socket-level network failure is **amber**, with the text *"Offline — this is normal"*. Only a 401, pending migrations, missing secrets or low disk go **red**. A tile that goes red every time the wifi drops trains you to ignore the dashboard within a week — at which point a real fault goes unnoticed.
 
 ---
@@ -240,6 +246,9 @@ Every bulk operation writes a **`RecategorizationBatch`** with full before/after
 | **6** | Integrity + explainer | Seed a violation → exactly one finding. A fabricated number in a mocked response is **rejected, not displayed**. |
 | **7** | Governance | Edit one merchant rule → a year of history corrects itself in one revertible batch. |
 | **8** | Operations | Restore performed twice from two different dumps. OneDrive sync. Weekly Russian error digest over real data with no fabricated figures. |
+
+*Amended by Phase 8a (2026-10-02): Phase 6 here ("Integrity + explainer", now Phase 8) became 8a and 8b, and its
+fabricated-number acceptance was dropped (IR-5) — `docs/specs/2026-10-02-integrity-and-bug-reports-design.md`.*
 
 > **❓ Q5 — Phase 1 is bigger than a normal vertical slice, and I won't pretend otherwise.** Three of your annotations — secrets in the DB, the deferred queue, merchant identity — are all **capture-path contracts**: each is a rewrite rather than an addition if deferred. I'd rather build them once. Accept the larger Phase 1, or split it and accept rework?
 

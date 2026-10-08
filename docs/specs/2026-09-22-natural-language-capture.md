@@ -93,7 +93,8 @@ Out, each with a home:
 | 5 | Observability | Was 3. |
 | 6 | Receipts | Was 4 (rich capture), minus voice. |
 | 7 | Currency exchange | Was 5. |
-| 8 | Integrity + explainer | Was 6. |
+| 8a | Integrity, explanations and bug reports | Was 6, split by the operator (2026-10-02): integrity checks on demand, a model explaining a finding, `/bug` and the bug-report export — `2026-10-02-integrity-and-bug-reports-design.md`. |
+| 8b | Spending analysis | Was 6's other half: a ready-made period summary in the dashboard and the bot; its own spec. |
 | 9 | Governance | Was 7. |
 | 10 | Operations | Was 8. |
 | **11** | Live calibration | A corpus of real phrasings run against the live model; system instructions tuned. |
