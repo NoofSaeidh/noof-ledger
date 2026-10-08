@@ -56,6 +56,7 @@ public class SummaryFormatTests
             SummaryFormat.Signed(-3.4m).Should().Be("-3.40");
             SummaryFormat.Day(new DateOnly(2026, 10, 7)).Should().Be("7 Oct");
             SummaryFormat.Month(new DateOnly(2026, 10, 1)).Should().Be("October 2026");
+            SummaryFormat.Window(new SummaryPeriod(new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31), true)).Should().Be("October");
         }
         finally
         {
