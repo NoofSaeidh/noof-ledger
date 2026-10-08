@@ -206,4 +206,72 @@ public class TelegramChatNotifierTests
                 && r.ReplyMarkup is ForceReplyMarkup),
             Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public async Task ReplyToBugReportAsync_quotes_the_bug_message_even_once_it_is_deleted_and_returns_the_new_id_as_text()
+    {
+        var client = Substitute.For<ITelegramBotClient>();
+        client.SendRequest(Arg.Any<SendMessageRequest>(), Arg.Any<CancellationToken>()).Returns(new Message { Id = 901 });
+        var notifier = Notifier(client);
+
+        var deliveredAs = await notifier.ReplyToBugReportAsync("42:555", "Bug report #12 saved.", null, TestContext.Current.CancellationToken);
+
+        deliveredAs.Should().Be("901");
+        await client.Received(1).SendRequest(
+            Arg.Is<SendMessageRequest>(r => r.ChatId.Identifier == 42L && r.Text == "Bug report #12 saved."
+                && r.ReplyParameters!.MessageId == 555 && r.ReplyParameters.AllowSendingWithoutReply == true
+                && r.ReplyMarkup == null),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ReplyToBugReportAsync_with_a_report_number_carries_one_close_report_button()
+    {
+        var client = Substitute.For<ITelegramBotClient>();
+        client.SendRequest(Arg.Any<SendMessageRequest>(), Arg.Any<CancellationToken>()).Returns(new Message { Id = 902 });
+        var notifier = Notifier(client);
+
+        await notifier.ReplyToBugReportAsync("42:555", "Reply with the amount.", 12, TestContext.Current.CancellationToken);
+
+        await client.Received(1).SendRequest(
+            Arg.Is<SendMessageRequest>(r => r.ReplyMarkup is InlineKeyboardMarkup
+                && ((InlineKeyboardMarkup)r.ReplyMarkup!).InlineKeyboard.Single().Single().Text == "Close report"
+                && ((InlineKeyboardMarkup)r.ReplyMarkup!).InlineKeyboard.Single().Single().CallbackData == "bug:close:12"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ReplyToBugReportAsync_logs_telegram_sendMessage_exactly_once()
+    {
+        var client = Substitute.For<ITelegramBotClient>();
+        var (notifier, clock, logger) = TimedNotifier(client);
+        client.SendRequest(Arg.Any<SendMessageRequest>(), Arg.Any<CancellationToken>())
+            .Returns(_ => { clock.Advance(TimeSpan.FromMilliseconds(10)); return new Message { Id = 903 }; });
+
+        await notifier.ReplyToBugReportAsync("42:555", "Bug report #12 saved.", null, TestContext.Current.CancellationToken);
+
+        logger.Entries.Should().ContainSingle(entry => (string)entry.Properties["Operation"] == "telegram.sendMessage");
+    }
+
+    [Fact]
+    public async Task ReplyToBugReportAsync_refuses_an_address_that_is_not_a_telegram_one_and_sends_nothing()
+    {
+        var client = Substitute.For<ITelegramBotClient>();
+        var notifier = Notifier(client);
+
+        var act = () => notifier.ReplyToBugReportAsync("tab 7", "Bug report #12 saved.", null, TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<FormatException>();
+        client.ReceivedCalls().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ReplyToBugReportAsync_throws_when_no_client_is_ready_yet()
+    {
+        var notifier = Notifier(null);
+
+        var act = () => notifier.ReplyToBugReportAsync("42:555", "Bug report #12 saved.", null, TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
 }

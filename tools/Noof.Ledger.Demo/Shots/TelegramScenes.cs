@@ -3,8 +3,10 @@ using Noof.Ledger.Application;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Chat;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Diagnostics.BugReports;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Domain;
+using Noof.Ledger.Host.Workers;
 using Noof.Ledger.Persistence.Receipts;
 using Noof.Ledger.Telegram;
 
@@ -25,6 +27,18 @@ internal static class TelegramScenes
     // The host's own appsettings.json value; the echo only needs it to be a valid prefix.
     static readonly FiscalVerificationUrlOptions FiscalLinks = new() { VerificationUrlPrefix = "https://suf.purs.gov.rs/v/?vl=" };
 
+    const string BugText = "/bug the amount is wrong";
+
+    // Explained, linked to the record, one finding (it has waited on a reply for over a day), and the data's fault, not
+    // the app's — so the answer carries Close report. Synthetic text, as the model might write it.
+    static readonly BugReportDelivery BugAnswer = new(
+        Guid.Empty, 4, BugReportSource.Telegram, new TelegramReplyAddress(MockData.TelegramChatId, 1).ToString(),
+        BugExplanationState.Done,
+        "This exchange was not recorded: the message says 100.00 EUR went out but not how many dinars came back, so "
+        + "the bot asked for the amount received and is still waiting for it. That is missing data, not a bug in the "
+        + "app — reply to the echo with the amount, for example \"11700 rsd\", or cancel the record.",
+        LooksLikeBug: false, Linked: true, FindingsCount: 1);
+
     public static IRecordEcho CreateEcho()
     {
         using var services = new ServiceCollection().AddNoofApplication(new SlowOperationOptions(), FiscalLinks).BuildServiceProvider();
@@ -38,6 +52,14 @@ internal static class TelegramScenes
         {
             Lines = [Line("Dinner", 42.00m, CurrencyCode.Eur, "Restaurants", "Walter")],
             WalletBalances = [new Money(5660.00m, CurrencyCode.Eur)],
+        };
+        var waitingExchange = Expense("exchanged 100 eur for dinars", string.Empty, CurrencyCode.Rsd, 0m, []) with
+        {
+            Status = TransactionStatus.Failed,
+            Kind = TransactionKind.Transfer,
+            WalletCurrency = null,
+            WalletBalances = null,
+            FailureReason = RecordFailureReason.MissingReceivedAmount,
         };
 
         return
@@ -141,14 +163,7 @@ internal static class TelegramScenes
             new("exchange-question", "An exchange with no amount received",
             [
                 Operator("exchanged 100 eur for dinars", "10:30"),
-                Reply(echo.Compose(Expense("exchanged 100 eur for dinars", string.Empty, CurrencyCode.Rsd, 0m, []) with
-                {
-                    Status = TransactionStatus.Failed,
-                    Kind = TransactionKind.Transfer,
-                    WalletCurrency = null,
-                    WalletBalances = null,
-                    FailureReason = RecordFailureReason.MissingReceivedAmount,
-                }), "10:30"),
+                Reply(echo.Compose(waitingExchange), "10:30"),
             ]),
             ReceiptScene("receipt-qr", "A receipt photo, read from its fiscal QR", echo, MockData.ReceiptTransactionId, "17:42", 172096.06m),
             ReceiptScene("receipt-vision", "The tax site was down, so the lines were read from the photo", echo,
@@ -182,6 +197,13 @@ internal static class TelegramScenes
             [
                 Operator("/health", "08:00"),
                 new(ChatSide.Bot, HealthReplyFormatter.Format(Health), "08:00"),
+            ]),
+            new("bug", "/bug",
+            [
+                Operator(BugText, "10:31") with { Quote = echo.Compose(waitingExchange).Text },
+                new(ChatSide.Bot, BugCommandHandler.SavedText(4), "10:31", Quote: BugText),
+                new(ChatSide.Bot, BugReportReplies.Compose(BugAnswer), "10:32", Quote: BugText,
+                    Buttons: [BugReportButtons.CloseLabel]),
             ]),
         ];
     }

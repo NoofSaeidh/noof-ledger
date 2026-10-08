@@ -78,7 +78,7 @@ internal sealed class TelegramPollingService(
                 clientHandle.Current = client;
                 activeToken = secret.Value;
 
-                await RegisterHealthCommandAsync(client, secretStore, cancellationToken);
+                await RegisterCommandsAsync(client, secretStore, cancellationToken);
 
                 var offsetStore = scope.ServiceProvider.GetRequiredService<TelegramUpdateOffsetStore>();
                 offset ??= await offsetStore.GetAsync(cancellationToken);
@@ -161,7 +161,7 @@ internal sealed class TelegramPollingService(
         }
     }
 
-    async Task RegisterHealthCommandAsync(ITelegramBotClient client, ISecretStore secretStore, CancellationToken cancellationToken)
+    async Task RegisterCommandsAsync(ITelegramBotClient client, ISecretStore secretStore, CancellationToken cancellationToken)
     {
         var owner = await secretStore.GetAsync(SecretKeys.TelegramOwnerChatId, cancellationToken);
         if (owner.State is not SecretState.Present || !long.TryParse(owner.Value, out var ownerChatId))
@@ -170,13 +170,13 @@ internal sealed class TelegramPollingService(
         try
         {
             await client.SetMyCommands(
-                commands: [new BotCommand("health", "System health")],
+                commands: [new BotCommand("health", "System health"), new BotCommand("bug", "Report a bug")],
                 scope: new BotCommandScopeChat { ChatId = ownerChatId },
                 cancellationToken: cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.HealthCommandRegistrationFailed(ex);
+            logger.CommandRegistrationFailed(ex);
         }
     }
 

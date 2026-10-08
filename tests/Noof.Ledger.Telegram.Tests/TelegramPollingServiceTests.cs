@@ -20,6 +20,9 @@ namespace Noof.Ledger.Telegram.Tests;
 
 public class TelegramPollingServiceTests
 {
+    static readonly string[] RegisteredCommands = ["health", "bug"];
+    static readonly string[] RegisteredDescriptions = ["System health", "Report a bug"];
+
     static IServiceScopeFactory ScopeFactoryFor(
         ISecretStore secretStore, ITelegramUpdateRouter? router = null, IChatNotifier? chatNotifier = null)
     {
@@ -431,7 +434,7 @@ public class TelegramPollingServiceTests
     }
 
     [Fact]
-    public async Task Registers_the_health_command_scoped_to_the_owner_chat_when_the_client_is_first_built()
+    public async Task Registers_the_health_and_bug_commands_scoped_to_the_owner_chat_when_the_client_is_first_built()
     {
         var secretStore = WithToken("tok1");
         secretStore.GetAsync(SecretKeys.TelegramOwnerChatId, Arg.Any<CancellationToken>())
@@ -445,14 +448,14 @@ public class TelegramPollingServiceTests
             .RunTickAsync(TestContext.Current.CancellationToken);
 
         await client.Received(1).SendRequest(
-            Arg.Is<SetMyCommandsRequest>(r => r.Commands!.Single().Command == "health"
-                && r.Commands!.Single().Description == "System health"
+            Arg.Is<SetMyCommandsRequest>(r => r.Commands!.Select(c => c.Command).SequenceEqual(RegisteredCommands)
+                && r.Commands!.Select(c => c.Description).SequenceEqual(RegisteredDescriptions)
                 && r.Scope is BotCommandScopeChat && ((BotCommandScopeChat)r.Scope!).ChatId.Identifier == 555L),
             Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task Skips_registering_the_health_command_when_there_is_no_owner_yet()
+    public async Task Skips_registering_the_commands_when_there_is_no_owner_yet()
     {
         var secretStore = WithToken("tok1");
         secretStore.GetAsync(SecretKeys.TelegramOwnerChatId, Arg.Any<CancellationToken>())
@@ -481,10 +484,12 @@ public class TelegramPollingServiceTests
         var clientFactory = Substitute.For<ITelegramBotClientFactory>();
         clientFactory.Create("tok1").Returns(client);
 
-        var result = await CreateService(secretStore, clientFactory, new TelegramClientHandle())
+        var logger = new CapturingLogger<TelegramPollingService>();
+        var result = await CreateService(secretStore, clientFactory, new TelegramClientHandle(), capturingLogger: logger)
             .RunTickAsync(TestContext.Current.CancellationToken);
 
         result.Should().Be(TelegramPollResult.Processed, "a failed command registration is logged, never fatal");
+        logger.Entries.Should().ContainSingle(entry => entry.EventId.Id == 6101).Which.Exception.Should().NotBeNull();
     }
 
     sealed class ThrowingScopeFactory : IServiceScopeFactory

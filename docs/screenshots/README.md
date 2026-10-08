@@ -170,3 +170,7 @@ Do not edit by hand; a change to what the app shows regenerates them.
 ### /health
 
 <img src="telegram/health.png" width="300" alt="/health">
+
+### /bug
+
+<img src="telegram/bug.png" width="300" alt="/bug">

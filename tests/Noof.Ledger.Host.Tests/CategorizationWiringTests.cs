@@ -3,6 +3,9 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Noof.Ledger.Application.Categorization;
+using Noof.Ledger.Application.Chat;
+using Noof.Ledger.Application.Diagnostics.BugReports;
+using Noof.Ledger.Application.Diagnostics.Integrity;
 using Noof.Ledger.Application.Jobs;
 using Noof.Ledger.Application.Transcription;
 using Noof.Ledger.Host.Workers;
@@ -85,5 +88,26 @@ public class CategorizationWiringTests
         using var factory = Factory();
 
         factory.Services.GetServices<IHostedService>().Should().Contain(service => service is RecordExchangeWorker);
+    }
+
+    [Fact]
+    public void Every_port_the_bug_report_worker_resolves_is_registered_without_touching_the_database()
+    {
+        using var factory = Factory();
+        using var scope = factory.Services.CreateScope();
+
+        scope.ServiceProvider.GetRequiredService<IBugReportStore>();
+        scope.ServiceProvider.GetRequiredService<IFindingExplainer>();
+        scope.ServiceProvider.GetRequiredService<IModelProvider>();
+        scope.ServiceProvider.GetRequiredService<IChatNotifier>();
+        factory.Services.GetRequiredService<IFindingText>();
+    }
+
+    [Fact]
+    public void BugReportExplanationWorker_is_registered_as_a_hosted_service()
+    {
+        using var factory = Factory();
+
+        factory.Services.GetServices<IHostedService>().Should().Contain(service => service is BugReportExplanationWorker);
     }
 }
