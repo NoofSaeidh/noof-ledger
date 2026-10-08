@@ -213,6 +213,17 @@ boundary.
 - Whether to rotate the three secrets at launch anyway.
 - Production's ports.
 
+**Operator's answers to the research, 2026-10-08:**
+- **The three secrets are rotated at launch.** Nothing secret has to survive the move, so the key
+  ring does not need re-wrapping, and production can start from a fresh key ring.
+- **The off-machine copy goes to OneDrive** through an outbox folder (decided for local hosting).
+- **Reconsider containers and hosting right away**, instead of a second Windows account. Containers were
+  declined in the original design (§4) for reasons that were about running on this PC — DPAPI on Linux,
+  the start-up chain through Docker Desktop and WSL, the ledger inside `ext4.vhdx`, WSL clock drift
+  over sleep, and `pg_dump` through PowerShell. Hosting was declined in `p1-6-stay-local-only`
+  because DPAPI does not travel, because of the Linux port, and because the app would be exposed.
+  Rotating the secrets removes the first; the rest is re-examined.
+
 ## Next steps
 
 1. **Phase 8b merges** (another session owns it).
