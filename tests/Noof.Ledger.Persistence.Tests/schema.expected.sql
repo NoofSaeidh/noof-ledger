@@ -61,6 +61,18 @@ CREATE TABLE public.categories (
 );
 
 
+CREATE TABLE public.fx_rates (
+    currency character varying(3) NOT NULL,
+    as_of_date date NOT NULL,
+    source text NOT NULL,
+    units_per_eur numeric(24,12) NOT NULL,
+    fetched_at timestamptz NOT NULL,
+    CONSTRAINT "PK_fx_rates" PRIMARY KEY (currency, as_of_date, source),
+    CONSTRAINT ck_fx_rates_currency_not_eur CHECK (currency <> 'EUR'),
+    CONSTRAINT ck_fx_rates_units_per_eur_positive CHECK (units_per_eur > 0)
+);
+
+
 CREATE TABLE public.merchants (
     id uuid NOT NULL,
     display_name character varying(256) NOT NULL,
