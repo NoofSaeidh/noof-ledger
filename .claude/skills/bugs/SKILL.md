@@ -39,7 +39,7 @@ reads the open ones and triages each. It runs only because the operator typed `/
 
 1. Before changing any file in this checkout, run `.\run.ps1 bugs export`. It builds the host in Release —
    the build `.\run.ps1 start` runs — and a build over a running host's changed files fails on locked
-   files. It prints one line:
+   files. Its result is the last line it prints (the build may print before it):
    - a file path — read that file;
    - `No open bug reports.` (`No bug reports.` with `--all`) — tell the operator and stop;
    - `Cannot reach PostgreSQL (…)` — PostgreSQL is down; tell the operator (`.\run.ps1 pg start` needs an
