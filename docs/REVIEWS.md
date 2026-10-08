@@ -188,3 +188,15 @@ One line per review of the closed trial: confirmed findings by tag. Dated histor
   the skill's wording. Replied without a code change: fiscal-link forms (backlog by the operator), scale (backlog),
   nested log properties, the silence without a model key (P-21), the missing browser test. Both reviewers ran
   against a stale local `master`, so their range also held Phase 7; every finding was in Phase 8a's code.
+- **Phase 8b planning, spec `2026-10-08-spending-summary-design.md`, 2026-10-08** (run the day the trial
+  closed, before the branch had the news): 6 by both (a transfer fee on
+  the source wallet and counted twice against the moved amount, a finished month compared with a clamped window,
+  the average's history start unknowable from four months of rows, the 4 096-character limit not guaranteed,
+  percentages against zero or a negative net, foreign lines with no charge and unconvertible amounts in rankings);
+  6 Codex only (the automatic summary sent before the month's records settle, rate snapshots not validated,
+  Explain rebuilding other figures than shown, displayed parts not adding up, the marker store in no PR, a
+  closing PR where the rules now commit the closing straight to the aggregate branch); 10 Fable
+  only (Explain's model call holding the Telegram update loop, an impossible "No wallet" bucket, stale rates
+  unmarked, `/summary` matching, A-1 superseding a Phase 7 sentence and moving screenshots, refunds counted as
+  income, the automatic summary's zone and logging, archived wallets, one text renderer, payload parsing).
+  None rejected; the PR cut was then redone by stage, as `CLAUDE.md` §5 now asks.
