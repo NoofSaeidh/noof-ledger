@@ -1,3 +1,6 @@
+using Noof.Ledger.Application.Fx;
+using Noof.Ledger.Domain;
+
 namespace Noof.Ledger.TestKit;
 
 // A synthetic answer of open.er-api.com/v6/latest/EUR in the documented shape (exchangerate-api.com/docs/free): the
@@ -37,4 +40,13 @@ public static class OpenErApiPayloads
         var ratesObject = "{" + string.Join(",", (rates ?? Rates).Select(rate => $"\"{rate.Key}\":{rate.Value}")) + "}";
         return $$"""{"result":"{{result}}","provider":"https://www.exchangerate-api.com","documentation":"https://www.exchangerate-api.com/docs/free","terms_of_use":"https://www.exchangerate-api.com/terms",{{updated}}"time_next_update_unix":{{(updatedUnix ?? UpdatedUnix) + 86_400}},"time_eol_unix":{{endOfLifeUnix}},"base_code":"{{baseCode}}","rates":{{ratesObject}}}""";
     }
+
+    // What OpenErApiRateSource reads from Latest(): a test seeds this where a real fetch would have stored.
+    public static FxRateSnapshot Snapshot(DateOnly asOfDate) => new(asOfDate, FxSources.OpenErApi, new Dictionary<CurrencyCode, decimal>
+    {
+        [CurrencyCode.Rsd] = 117.1532m,
+        [CurrencyCode.Usd] = 1.1612m,
+        [CurrencyCode.Rub] = 94.3121m,
+        [CurrencyCode.Kzt] = 625.4417m,
+    });
 }

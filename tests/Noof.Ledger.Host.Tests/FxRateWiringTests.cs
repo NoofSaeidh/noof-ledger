@@ -1,6 +1,8 @@
 using AwesomeAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Noof.Ledger.Host.Workers;
 
 namespace Noof.Ledger.Host.Tests;
 
@@ -26,5 +28,13 @@ public class FxRateWiringTests
         var client = factory.Services.GetRequiredService<IHttpClientFactory>().CreateClient("open-er-api");
 
         client.BaseAddress.Should().Be(new Uri("https://open.er-api.com/"));
+    }
+
+    [Fact]
+    public void FxRateWorker_is_registered_as_a_hosted_service()
+    {
+        using var factory = Factory();
+
+        factory.Services.GetServices<IHostedService>().Should().Contain(service => service is FxRateWorker);
     }
 }
