@@ -2,8 +2,8 @@
 
 Personal finance tracker. Telegram bot captures spending (text, voice, receipt photos), an LLM categorises it per line item, a local Blazor dashboard shows it across multiple wallets and currencies. C# / .NET 10, EF Core, strict TDD, local hosting, **public repo**.
 
-> **Status:** Phases 0, 0b, 1A, 1B, 1C, 1D, 2, 3, 4, 5, 6 and 7 complete — full detail in `docs/STATUS.md`.
-> Editing receipt lines and correcting a vision-read fiscal receipt's amounts remain future phases.
+> **Status:** Phases 0, 0b, 1A, 1B, 1C, 1D, 2, 3, 4, 5, 6, 7 and 8a complete — full detail in `docs/STATUS.md`.
+> Phase 8b (spending analysis) is next; editing receipt lines and correcting a vision-read fiscal receipt's amounts remain future phases.
 > Rules below marked *(settled)* are direct user decisions and are not up for re-litigation.
 >
 > Deferred **decisions** live in `docs/decisions/`; deferred **work** lives in `docs/backlog/`. Check both before proposing something as missing.

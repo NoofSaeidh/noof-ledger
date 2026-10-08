@@ -166,3 +166,18 @@ One line per review: confirmed findings by tag. Dated history, not status.
   wrong contract sentence), plus 13 minor left as they are. Rejected: composite `--filter` unverified (Fable),
   the boundary regex matching constructor parameters (Fable), a non-UTC `@idleSince` (Fable), the CLI host under
   Development (Codex). Fable's first run hit the session limit and was re-run after the reset.
+- **Phase 8a closing (phase-8a vs master), 2026-10-08:** Fable 5.1 found 0 critical, 0 major and 11 minor; Codex
+  (adversarial) 1 high and 2 medium. 2 by both (a transfer's fee line in another currency than its fee leg's wallet
+  passing every check — Codex found it, Fable's F2 touched it from the trace page it breaks; a bug-report reply
+  sent again on every tick once storing its reference failed, holding back later replies — Codex, with Fable's
+  malformed reply address as a minor); 1 Codex only (fiscal links in non-canonical forms, now reaching reports and
+  the export too); 9 Fable only, all minor (a `null` JSON element failing the export, the `/bug` matcher without a
+  match timeout before the owner gate, Explain after Create offering a second report, `download.js` revoking the
+  URL during the click, the skill's "prints one line", a one-record scope still aggregating the whole ledger and
+  the export's full pass per report, nested log properties not scanned for Telegram ids, `/bug` silent while the
+  model key is missing, no browser test for a stranger's `/bug` getting silence). Fixed on the branch: both shared
+  findings (a new I-2 condition; the worker remembers a sent reply's reference and warns once, EventId 1910, on an
+  unreadable reply address), the `null` element, the matcher's timeout, re-explain after Create, `download.js`,
+  the skill's wording. Replied without a code change: fiscal-link forms (backlog by the operator), scale (backlog),
+  nested log properties, the silence without a model key (P-21), the missing browser test. Both reviewers ran
+  against a stale local `master`, so their range also held Phase 7; every finding was in Phase 8a's code.

@@ -415,6 +415,16 @@ Ten minutes, no live model call, this costs nothing.
 5. **Ask the bot for its own health:** send `/health` from the owner's chat. Expect a plain-text
    summary — `Health: all good` or a line per check that is not Ok.
 
+## Bug reports
+
+The operator files them with `/bug` in the bot (as a reply to a record's echo to link it) or with **Create** after
+**Explain** on `/diagnostics/integrity`; `/bugs` lists them, and a report is closed or reopened on its own page,
+`/bugs/{number}`. To triage the open ones with Claude Code, type `/bugs` in a session in this repository: the skill
+runs `.\run.ps1 bugs export` — the one way an agent reads `noof_ledger` — and works through the Markdown it writes to
+`artifacts\bug-reports\`. That file holds the operator's own data: it is git-ignored and never committed or pasted
+into a public issue. The export only reads, works with the app stopped, and needs PostgreSQL up; it builds the
+Release output `.\run.ps1 start` runs from, so run it before changing code in a checkout whose host is running.
+
 ## GitHub bot identity (noof-ledger-bot)
 
 Agents write to GitHub — PRs, comments, review replies, resolving threads — as

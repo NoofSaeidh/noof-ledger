@@ -6,7 +6,7 @@ Capture spending through a Telegram bot — typed, spoken, or photographed — l
 each line item, and see where the money went on a local Blazor dashboard that understands multiple
 wallets and currencies.
 
-> **Status: capture, balances, transfers, backup and observability all work end to end.** A message typed to the
+> **Status: capture, balances, transfers, backup, observability and integrity checks all work end to end.** A message typed to the
 > Telegram bot becomes a categorised expense, income, balance statement or transfer on the dashboard — say it
 > the way you would say it, and the model reads the amount, the date, the kind and which wallet from
 > how you speak it. Every wallet's balance — opening balance, minus spending, plus income, plus or
@@ -48,13 +48,20 @@ wallets and currencies.
 > it is set. The dashboard keeps two
 > lenses apart: spending and income this month, and the month's transfers on their own.
 >
+> The app checks its own data. Four integrity checks, run whenever you look, sort what they find into
+> *Bugs* — data the app itself wrote inconsistently, which turns the health tile red — and *Waiting on you* —
+> something that has waited more than a day for your reply, your "Record anyway" or a cancel, which turns it
+> amber. A model explains any finding on request, and offers to file a bug report when the app looks at
+> fault; `/bug` in the bot files one too, as a reply to the record it is about, and the bot answers with an
+> explanation. Bug reports reach the developer's tooling as Markdown — never anywhere outside the machine.
+>
 > The test suite passes; the tests that call a live model or a live voice provider are skipped
-> unless their keys are set. One known timing race fails now and then under full-suite load
-> (`docs/backlog/loose-ends-phase-5-observability.md`). Browser
+> unless their keys are set. One known timing race fails on local database test runs, which CI does
+> not run (`docs/backlog/loose-ends-phase-5-observability.md`). Browser
 > tests included.
 >
-> Still missing: editing a receipt's own lines, and correcting the amounts of a receipt read by the
-> vision fallback.
+> Still missing: spending analysis, editing a receipt's own lines, and correcting the amounts of a receipt
+> read by the vision fallback.
 
 ## Why it looks the way it does
 
@@ -111,7 +118,7 @@ either sink sees a line; if the database is down or the table sink itself is fai
 still the durable copy.
 
 `/diagnostics` lists every health check (database, pending migrations, Telegram, the AI keys, the
-daily backup, disk space, the log sink, receipts) with a link into `/diagnostics/logs` — a paged,
+daily backup, disk space, the log sink, receipts, integrity) with a link into `/diagnostics/logs` — a paged,
 filterable view over `app_log`; while the database itself is unavailable this page shows the same waiting banner
 as the rest of the app, and the file log is the one to read instead. A check that throws or times out
 shows only the exception's type, never its message. The database only records Information and above
@@ -122,6 +129,12 @@ for a day before it is pruned. Every Telegram message that becomes a transaction
 and a link into the Logs page pre-filtered to that transaction's own Debug detail. The dashboard
 carries a one-line health tile with a link to `/diagnostics`; the operator alone can also ask the bot
 directly by sending `/health`.
+
+`/diagnostics/integrity` runs the integrity checks each time it opens and lists every finding with its facts and a
+link to the record's trace page; **Explain** asks the model about one finding. `/bugs` lists the bug reports filed
+from there or with `/bug` in the bot, each with the findings, log lines and record as they were when it was filed;
+**Download open reports (.md)** and `.\run.ps1 bugs export` give the same Markdown. The checks are database queries and never call
+the model — a test fails if one names it.
 
 If PostgreSQL is stopped, the host does not exit — the sign-in page and every other page show a
 "Waiting for the database…" banner, the log file records every retry, and the app resumes on its own
