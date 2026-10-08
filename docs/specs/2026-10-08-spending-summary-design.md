@@ -302,8 +302,8 @@ two (the rate archive, then the calculation) if its size makes it hard to follow
 against mid-market, and comparing venues (SS-17).
 
 **Reviews** (CLAUDE.md §1): Fable 5.1 and a Codex adversarial review in parallel ran on this spec
-(their findings are folded in above); both run again on the plan and at the close. One Codex review
-per PR; opus at medium effort per task.
+(their findings are folded in above) — the day the operator closed the Codex/Fable trial. The plan and
+the close get a Codex adversarial review only. One Codex review per PR; opus at medium effort per task.
 
 ## Testing
 

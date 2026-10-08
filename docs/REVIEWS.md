@@ -9,7 +9,7 @@ weak evidence. A different family is the cheapest independence available.
 
 ## Per task — opus
 
-Inside a phase or plan, each task's review runs on opus (effort medium). No Codex, no Fable per task.
+Inside a phase or plan, each task's review runs on opus (effort medium). No Codex per task.
 
 ## Per pull request — Codex
 
@@ -43,10 +43,11 @@ the plugin's stop-time review gate: it would review on every Stop and burn the q
 - Codex refuses on its usage limit → don't wait for the window; fall back to an opus review and say
   so in the PR description.
 
-## Per phase — Fable 5.1, three times
+## Per phase — Codex adversarial, three times
 
-Agent tool with `model: "fable"`. Never per PR, never per fix round or Copilot round — a Fable review
-per fix round cost ~5 hours on PR #3.
+A Codex adversarial review *(operator, 2026-10-08)*. It differs from the per-PR review in scope: the
+whole spec, plan or phase rather than one PR. Never per PR, never per fix round or Copilot round — a
+phase-point review per fix round cost ~5 hours on PR #3.
 
 - **The spec**, once it is approved and before the plan is written. It reviews the decision, not
   code: alternatives considered, risks and failure modes, conflicts with *(settled)* rules and
@@ -63,13 +64,10 @@ per fix round cost ~5 hours on PR #3.
   visible in the spec.
 - **At the end**, closing the phase or a batch of PRs.
 
-### The Codex/Fable trial — 3 phases *(operator, 2026-09-28)*
+How to run it:
 
-All three Fable reviews run in parallel with a Codex adversarial review of the same scope:
-
-- **Closing:** `.\run.ps1 codex review -Base <base>` as above.
-- **Spec and plan:** one prompt, given verbatim to both reviewers, naming the files — the spec, and
-  for the plan review every plan file even under the ignored `.superpowers/` — and the focus above:
+- **Spec and plan:** one prompt naming the files — the spec, and for the plan review every plan file
+  even under the ignored `.superpowers/` — and the adversarial focus above:
 
   ```
   codex exec -s read-only "<that prompt>"
@@ -77,10 +75,19 @@ All three Fable reviews run in parallel with a Codex adversarial review of the s
 
   Run it in the background with a long timeout; a plan review reads tens of thousands of lines and
   takes a while. Its findings are the text after the last `tokens used` line of the output.
+- **Closing:** `git fetch origin` first, then `.\run.ps1 codex review -Base origin/master` (or the
+  batch's base) from the aggregate branch's worktree. Never a local `master`: a stale one widens the
+  range — at Phase 8a's close it pulled all of Phase 7 into the review.
+- Codex at its usage limit → an opus review stands in, said so where the findings are recorded.
+- An opus pass triages the findings per §1.
 
-An opus pass merges both lists — deduped, each finding tagged *both* / *Fable only* / *Codex only* —
-then triages them. Each review adds one tally line to [the tally below](#trial-tally) (confirmed
-findings by tag). After the third phase the operator keeps both reviewers or drops one.
+### The Codex/Fable trial — closed *(operator, 2026-09-28 to 2026-10-08)*
+
+For three phases a Fable 5.1 review ran in parallel with the Codex adversarial review at each phase
+point, both given the same prompt; an opus pass merged the lists, tagged each finding *both* /
+*Fable only* / *Codex only*, and added a line to [the tally below](#trial-tally). After the third
+phase the operator dropped Fable *(2026-10-08)*: the real defects came from Codex — at Phase 8a's
+close Fable found 0 critical and 0 major.
 
 ## Copilot
 
@@ -90,7 +97,7 @@ Copilot review does arrive:
 
 - **Fix rounds:** handle every comment in one round — one commit, an opus-only review (effort
   medium), push. At most 2 rounds per PR; then list what's left for the operator.
-- No Codex or Fable for a Copilot round unless it touches money, secrets, a migration or the public
+- No Codex for a Copilot round unless it touches money, secrets, a migration or the public
   surface and a stronger review is judged necessary — say why in the PR.
 - Every reply and resolve goes through `.\ops\gh-bot.ps1` (§5).
 
@@ -112,7 +119,7 @@ gh api graphql -F n=<pr> -f query='query($n:Int!){repository(owner:"NoofSaeidh",
 
 ## Trial tally
 
-One line per review: confirmed findings by tag. Dated history, not status.
+One line per review of the closed trial: confirmed findings by tag. Dated history, not status.
 
 - **Batch after Phase 6 (`801e283..843a777`), closing review, 2026-09-28:** 1 by both (hook quoted
   paths); 2 Codex only (pr-wait CI gating [high], template freshness coverage); 8 Fable only (CI
@@ -181,7 +188,8 @@ One line per review: confirmed findings by tag. Dated history, not status.
   the skill's wording. Replied without a code change: fiscal-link forms (backlog by the operator), scale (backlog),
   nested log properties, the silence without a model key (P-21), the missing browser test. Both reviewers ran
   against a stale local `master`, so their range also held Phase 7; every finding was in Phase 8a's code.
-- **Phase 8b planning, spec `2026-10-08-spending-summary-design.md`, 2026-10-08:** 6 by both (a transfer fee on
+- **Phase 8b planning, spec `2026-10-08-spending-summary-design.md`, 2026-10-08** (run the day the trial
+  closed, before the branch had the news): 6 by both (a transfer fee on
   the source wallet and counted twice against the moved amount, a finished month compared with a clamped window,
   the average's history start unknowable from four months of rows, the 4 096-character limit not guaranteed,
   percentages against zero or a negative net, foreign lines with no charge and unconvertible amounts in rankings);

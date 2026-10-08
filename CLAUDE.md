@@ -34,15 +34,16 @@ policy below names.
 reasoning, never for small tasks. `low` for mechanical work.
 
 **Reviews — three cadences, don't substitute one for another** *(operator's decisions, 2026-09-28)*.
-How to run each, and the trial tally, are in `docs/REVIEWS.md`.
-- **Per task** inside a phase or plan: opus, effort medium. No Codex, no Fable per task.
+How to run each, and the closed trial's tally, are in `docs/REVIEWS.md`.
+- **Per task** inside a phase or plan: opus, effort medium. No Codex per task.
 - **Per PR:** one Codex review, a family different from the implementer — plain for a mechanical PR,
   adversarial for one that makes design choices or when unsure. Codex at its usage limit → an opus
   review, said so in the PR. Never enable the Codex plugin's stop-time review gate.
-- **Per phase:** Fable 5.1 at three points — the spec, the implementation plan (once written, before
-  any implementation starts) *(operator, 2026-10-01)*, and the close of the phase or a batch of PRs;
-  never per PR or per fix round. Trial for 3 phases: each runs in parallel with a Codex adversarial
-  review of the same scope, tallied per review.
+- **Per phase:** a Codex adversarial review at three points — the spec, the implementation plan (once
+  written, before any implementation starts) *(operator, 2026-10-01)*, and the close of the phase or a
+  batch of PRs; never per PR or per fix round *(operator, 2026-10-08, after the three-phase trial;
+  Fable dropped)*. It differs from the per-PR review in scope: the whole spec, plan or phase, not one
+  PR. Codex at its usage limit → an opus review, said so.
 - **Findings are triaged, not all fixed**, for Copilot and Codex alike: fix a critical finding (real
   bug, wrong money/balance, data loss, secret leak, security hole, broken build/test,
   *(settled)*-rule violation); reply with a sentence of reasoning and don't change code for a
@@ -60,7 +61,7 @@ How to run each, and the trial tally, are in `docs/REVIEWS.md`.
 - Choosing the model by how important a task *sounds*. A rename in money code is still sonnet; a
   judgment call in a small doc is still opus. The kind of work decides.
 - Re-running expensive work that is already cached or already done. Check first.
-- A Fable review per fix round or per Copilot round — this cost ~5 hours on PR #3.
+- A phase-point review per fix round or per Copilot round — this cost ~5 hours on PR #3.
 
 ## 2. Subagent usage
 
@@ -236,7 +237,7 @@ the code that builds the echo text.
   The aggregate PR leaves draft only once the phase is finalised, and then merges into `master`.
 - **Committed straight to the aggregate branch, never as a PR:** the phase's spec and its
   amendments *(operator, 2026-10-01)*, and small fixes *(operator, 2026-10-02)* — fixes from any
-  review (Codex, Fable, the phase's closing review), small bugs, follow-ups, plan and doc
+  review (Codex, opus, the phase's closing review), small bugs, follow-ups, plan and doc
   corrections, reference sweeps: anything that adds no behaviour and changes no design. Run the
   tests of the classes a fix touches before pushing; CI on the aggregate PR stays green. A direct
   fix gets no Codex review of its own — the phase's closing review covers it. Fixes made *after*
