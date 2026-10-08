@@ -5,7 +5,8 @@ namespace Noof.Ledger.Application.Diagnostics.BugReports;
 public interface IBugReportStore
 {
     // Idempotent per (Source, ReplyTo) when ReplyTo is set: a redelivered report writes nothing and returns the
-    // existing number. One filed already explained has its record summary and log lines taken now, best-effort.
+    // existing number, so a source writes the same canonical ReplyTo for the same message. One filed already
+    // explained has its record summary and log lines taken now, best-effort.
     Task<BugReportSaved> FileAsync(NewBugReport report, CancellationToken cancellationToken);
 
     // The oldest Open, Pending report whose next attempt is due. No lease: one host runs one worker.
@@ -20,6 +21,7 @@ public interface IBugReportStore
     Task<BugExplanationState> RecordFailedAttemptAsync(
         Guid reportId, DateTimeOffset nextAttemptAt, int maxAttempts, CancellationToken cancellationToken);
 
+    // Open reports with a ReplyTo, explained (Done or Failed) and not yet delivered, by number.
     Task<IReadOnlyList<BugReportDelivery>> PendingDeliveriesAsync(CancellationToken cancellationToken);
 
     // deliveredAs is the source's own reference to the reply it sent, opaque like ReplyTo.

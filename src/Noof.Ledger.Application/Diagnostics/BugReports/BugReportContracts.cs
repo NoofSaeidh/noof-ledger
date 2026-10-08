@@ -9,7 +9,8 @@ public enum BugReportStatus { Unknown = 0, Open = 1, Closed = 2 }
 public enum BugExplanationState { Unknown = 0, Pending = 1, Done = 2, Failed = 3 }
 
 // ReplyTo is the source's own address for its reply, opaque to everything but that source; null when the source
-// expects none. A report filed with a Finding and an Explanation is filed already explained.
+// expects none. Finding and Explanation come both or neither: both is a report filed already explained, as the
+// dashboard files one, and then TransactionId is its finding's.
 public sealed record NewBugReport(
     BugReportSource Source, string? ReplyTo, string? Text, Guid? TransactionId, IntegrityFinding? Finding,
     Explanation? Explanation);
