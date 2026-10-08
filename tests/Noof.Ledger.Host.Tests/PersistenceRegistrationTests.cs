@@ -53,6 +53,7 @@ public class PersistenceRegistrationTests
         scope.ServiceProvider.GetRequiredService<IFxRateStore>().Should().NotBeNull();
         scope.ServiceProvider.GetRequiredService<IReportingCurrencySetting>().Should().NotBeNull();
         scope.ServiceProvider.GetRequiredService<IAutoSummaryMarker>().Should().NotBeNull();
+        scope.ServiceProvider.GetRequiredService<ISummaryRowsReader>().Should().NotBeNull();
     }
 
     // Decision (c), 2026-09-26: a leftover Logging:Retention key (an operator's environment variable

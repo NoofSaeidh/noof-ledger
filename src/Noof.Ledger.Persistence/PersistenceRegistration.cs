@@ -101,6 +101,7 @@ public static class PersistenceRegistration
         services.AddScoped<IFxRateStore, EfFxRateStore>();
         services.AddScoped<IReportingCurrencySetting, EfReportingCurrencySetting>();
         services.AddScoped<IAutoSummaryMarker, EfAutoSummaryMarker>();
+        services.AddScoped<ISummaryRowsReader, EfSummaryRowsReader>();
 
         services.AddScoped<ISystemHealthCheck, MigrationsHealthCheck>();
         services.AddScoped<ISystemHealthCheck, IntegrityHealthCheck>();
