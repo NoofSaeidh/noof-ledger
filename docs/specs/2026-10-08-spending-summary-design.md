@@ -3,7 +3,8 @@
 **Status:** designed with the operator in conversation 2026-10-02 – 2026-10-08, section by section, and
 approved with the agent's decisions A-1 – A-3; amended the same day after the spec reviews (Fable 5.1
 and a Codex adversarial review, run in parallel) — the operator's SS-19, A-4 – A-9 and the changes they
-brought are folded into the sections below.
+brought are folded into the sections below; amended again with the implementation plan — see *Planning amendments*
+below, which win where they differ.
 
 This is the second half of Phase 8, split off by 8a's IR-1
 (`2026-10-02-integrity-and-bug-reports-design.md`): **8b is a ready-made spending summary in the
@@ -304,6 +305,31 @@ against mid-market, and comparing venues (SS-17).
 **Reviews** (CLAUDE.md §1): Fable 5.1 and a Codex adversarial review in parallel ran on this spec
 (their findings are folded in above) — the day the operator closed the Codex/Fable trial. The plan and
 the close get a Codex adversarial review only. One Codex review per PR; opus at medium effort per task.
+
+## Planning amendments (2026-10-08)
+
+Written with the implementation plan. Its review was meant to be Codex adversarial; Codex was at its usage limit, so an
+opus review stood in, and its accepted findings are folded in here (P-13 – P-16). Where this table and a paragraph above
+differ, the table wins.
+
+| # | Amendment | Why |
+|---|---|---|
+| P-1 | **Three stage PRs** — rates and the calculation (with the explainer), the pages, the bot — replacing §6's provisional table; stage A stays one PR (operator). | CLAUDE.md §5: a PR is a stage, not an assembly's slice. |
+| P-2 | `FxRateWorker` fetches only when the newest stored rate is older than today (UTC): at once on a fresh install, then at most four calls a day until the day's rates are in. Every test host — Host.Tests' in-process hosts and the E2E fixture — has today's rates seeded or the source stubbed, so no test reaches the network. | The demo and E2E hosts run every worker, and no test-only configuration key may exist; "older than yesterday" stored every other day. |
+| P-3 | A-7's "settled" means no `Pending` or `Claimed` job, of any kind, on a non-cancelled record dated on or after the month's first day; uptime counts from the worker's start. | A message sent on the 1st about "yesterday" is dated the 1st until categorised. |
+| P-4 | The automatic summary carries the same buttons as `/summary`. | One renderer, one keyboard; the operator can step months or Explain from it. |
+| P-5 | Home and `/summary` may differ on a foreign line with no charge: Home stays per currency and never converts; `/summary` converts it "≈" (A-4). | Home has no rates by design. |
+| P-6 | Home's donut leaves out a category whose month total is ≤ 0 (SS-19); the list and the *Spent* total keep it. | A chart cannot draw a negative slice. |
+| P-7 | A record's merchant is its first Principal line's merchant; an expense's fee counts toward it; a transfer's fee is labelled by its venue, else `Transfer fee`; a record with no merchant by its first line's description. | Merchants are per line; fee lines have none. |
+| P-8 | Bot and model text use two decimals, invariant culture, no grouping, `7 Oct`, `October 2026`; the page keeps the app's `N2` and `yyyy-MM-dd`. §4's sample figures are illustrative. | The app's existing conventions, pinned by tests. |
+| P-9 | No NavBar link: `/summary` is reached from Home's *This month*, `/settings/reporting` from the `/summary` footer. Replaces §3's "linked from NavBar". | The phone NavBar is full. |
+| P-10 | Wallet chips: the wallets with anything counted or moved in the four months read, plus the selected one, the same in every view. | The empty seeded wallet; archived wallets only when they have rows. |
+| P-11 | The rates health check is named `Exchange rates`, order 100, logs under the rate worker, and waits for the database without a query; age is counted in UTC days. | Every check is pinned by name and order. |
+| P-12 | Explain's queue holds 8 waiting presses; one beyond, or one on a message Telegram returns without text, answers "Couldn't explain this right now" at once; a second press on the same summary while one waits is dropped. | Bounded memory; one paid call per summary. |
+| P-13 | `time_last_update_unix` may be up to one day ahead of this PC's clock; further, the snapshot is refused. Replaces §1's "not in the future". | Clock skew. |
+| P-14 | The automatic summary's 24-hour fallback is stored (`app_setting` `summary.auto-waiting-since`) and counted from when the month was first found due, with 10 minutes of uptime; the wait start is logged. After the fallback, an unsettled month is never skipped as empty. | Jobs stay pending for good without a model or speech key, and a PC never up 24 hours in a row would never send. |
+| P-15 | With no rates at all the page shows only the header, the chips, the *Not converted* block, the alert and the footer, as the bot does. | A partial total would read as the total. |
+| P-16 | Screenshots hide the `Exchange rates` health row's summary, which names today's date. | Screenshots must not change with the day. |
 
 ## Testing
 
