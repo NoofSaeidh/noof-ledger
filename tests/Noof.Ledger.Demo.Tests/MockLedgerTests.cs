@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Noof.Ledger.Application.Diagnostics;
 using Noof.Ledger.Application.Diagnostics.BugReports;
 using Noof.Ledger.Application.Diagnostics.Integrity;
+using Noof.Ledger.Application.Fx;
 using Noof.Ledger.Application.Reporting;
 using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
@@ -113,6 +114,28 @@ public sealed class MockLedgerTests(DemoTestDatabase database) : IClassFixture<D
             "Cash EUR", new Money(100.00m, CurrencyCode.Eur), "Cash RSD", new Money(11700.00m, CurrencyCode.Rsd),
             null, null, new ExchangeRate(CurrencyCode.Eur, 117m, CurrencyCode.Rsd)));
         exchange.Transfer.RateStated.Should().BeFalse();
+    }
+
+    // Seeded under the rate worker's own source through the real UTC today, so the demo host, on the real clock, finds
+    // nothing due and never calls the rate endpoint.
+    [Fact]
+    public async Task The_demo_holds_a_rate_for_every_day_through_today_so_the_rate_worker_has_nothing_to_fetch()
+    {
+        if (database.Unavailable)
+            Assert.Skip("No reachable PostgreSQL database - set NOOF_TEST_PG or run ops/reset-database-auth.ps1.");
+
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var seededOn = DateOnly.FromDateTime(DateTime.UtcNow);
+        await Refresh.RunAsync(database.Admin, database.Name, database.Paths, cancellationToken);
+
+        await using var services = DemoServices.Build(database.ConnectionString, database.Paths);
+        await using var scope = services.CreateAsyncScope();
+        var rates = scope.ServiceProvider.GetRequiredService<IFxRateStore>();
+        var firstDay = MockData.FxRates(seededOn)[0].AsOfDate;
+
+        (await rates.NewestAsOfDateAsync(cancellationToken)).Should().BeOnOrAfter(seededOn);
+        (await rates.GetAsync(firstDay, seededOn, cancellationToken)).Count(rate => rate.AsOfDate <= seededOn)
+            .Should().Be((seededOn.DayNumber - firstDay.DayNumber + 1) * 4, "four currencies, one rate each per day");
     }
 
     [Fact]

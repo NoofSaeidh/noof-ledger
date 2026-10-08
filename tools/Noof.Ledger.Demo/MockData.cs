@@ -1,4 +1,5 @@
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Fx;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
@@ -150,6 +151,35 @@ internal static class MockData
         ForeignSpendingTransactionId, "Kaspi", "app store 30 usd", Day(13),
         new MockLine("App Store", 30.00m, "subscriptions", null), CurrencyCode.Usd,
         Charged: 15600.00m, Fee: 156.00m, Rate: 520m, FeePercent: 1m);
+
+    // One snapshot a day from m-4's first day, the four months a summary of the previous month reads, through the day
+    // given: the writer passes the real UTC today, so FxRateWorker finds today's rates stored and never calls out.
+    public static IReadOnlyList<FxRateSnapshot> FxRates(DateOnly throughUtcDay) =>
+    [
+        .. Enumerable.Range(0, throughUtcDay.DayNumber - RatesFrom.DayNumber + 1)
+            .Select(offset => RatesFrom.AddDays(offset))
+            .Select(day => new FxRateSnapshot(
+                day,
+                FxSources.OpenErApi,
+                BaseRates.ToDictionary(rate => rate.Key, rate => RateOn(rate.Value, day)))),
+    ];
+
+    static readonly DateOnly RatesFrom = MonthStart.AddMonths(-4);
+
+    static readonly IReadOnlyDictionary<CurrencyCode, decimal> BaseRates = new Dictionary<CurrencyCode, decimal>
+    {
+        [CurrencyCode.Rsd] = 117.1500m,
+        [CurrencyCode.Usd] = 1.0850m,
+        [CurrencyCode.Rub] = 98.4000m,
+        [CurrencyCode.Kzt] = 565.2000m,
+    };
+
+    // The history months move in a weekly wave of at most ±0.3 %, as real rates do, so the summary's rate dates and
+    // conversions have something to show; from the mock month on the rate holds still, so Home's net worth - at today's
+    // rate - reads the same whichever day the pictures are taken.
+    static decimal RateOn(decimal rate, DateOnly day) => day < MonthStart
+        ? Math.Round(rate * (1m + 0.001m * ((day.DayNumber - RatesFrom.DayNumber) % 7 - 3)), 4, MidpointRounding.AwayFromZero)
+        : rate;
 
     public static Guid Id(int number) => Guid.Parse($"7a1c0000-0000-4000-8000-{number:D12}");
 

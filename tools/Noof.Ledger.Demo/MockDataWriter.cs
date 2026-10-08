@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Noof.Ledger.Application.Auth;
 using Noof.Ledger.Application.Categorization;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Fx;
 using Noof.Ledger.Application.Secrets;
 using Noof.Ledger.Application.Wallets;
 using Noof.Ledger.Domain;
@@ -45,6 +46,13 @@ internal static class MockDataWriter
         await WriteBackupRunAsync(db, cancellationToken);
         await WriteJobStampsAsync(db, cancellationToken);
         await WriteBugReportsAsync(db, wallets, cancellationToken);
+        await WriteFxRatesAsync(services.GetRequiredService<IFxRateStore>(), cancellationToken);
+    }
+
+    static async Task WriteFxRatesAsync(IFxRateStore rates, CancellationToken cancellationToken)
+    {
+        foreach (var snapshot in MockData.FxRates(DateOnly.FromDateTime(DateTime.UtcNow)))
+            await rates.AppendAsync(snapshot, cancellationToken);
     }
 
     static async Task<Dictionary<string, Guid>> WriteWalletsAsync(

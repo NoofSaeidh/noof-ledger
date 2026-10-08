@@ -1,5 +1,6 @@
 using AwesomeAssertions;
 using Noof.Ledger.Application.Diagnostics;
+using Noof.Ledger.Application.Fx;
 using Noof.Ledger.Application.Receipts;
 using Noof.Ledger.Domain;
 
@@ -61,5 +62,43 @@ public sealed class MockDataTests
         MockData.DinarWalletFor(PaymentMethod.Card).Should().Be("Raiffeisen");
         MockData.DinarWalletFor(PaymentMethod.Cash).Should().Be(
             "Cash RSD", "each currency has its own cash default (T-13), and a fiscal receipt is always in dinars");
+    }
+
+    [Fact]
+    public void The_synthetic_rates_hold_every_currency_but_EUR_for_every_day_from_four_months_back_through_the_given_day()
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var firstDay = new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 1).AddMonths(-4);
+
+        var snapshots = MockData.FxRates(today);
+
+        snapshots.Select(snapshot => snapshot.AsOfDate).Should().Equal(
+            Enumerable.Range(0, today.DayNumber - firstDay.DayNumber + 1).Select(firstDay.AddDays));
+        snapshots.Should().AllSatisfy(snapshot =>
+        {
+            snapshot.Source.Should().Be(FxSources.OpenErApi);
+            snapshot.UnitsPerEur.Keys.Should().BeEquivalentTo(CurrencyCode.Supported.Where(currency => currency != CurrencyCode.Eur));
+            snapshot.UnitsPerEur.Values.Should().AllSatisfy(rate => rate.Should().BePositive());
+        });
+    }
+
+    [Fact]
+    public void The_rates_move_in_the_history_months_and_hold_still_from_the_mock_month_on_so_the_net_worth_picture_never_drifts()
+    {
+        var monthStart = new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 1);
+        var snapshots = MockData.FxRates(monthStart.AddDays(40));
+
+        var history = snapshots.Where(snapshot => snapshot.AsOfDate < monthStart).Select(snapshot => snapshot.UnitsPerEur[CurrencyCode.Rsd]);
+        var current = snapshots.Where(snapshot => snapshot.AsOfDate >= monthStart).ToList();
+
+        history.Distinct().Should().HaveCountGreaterThan(1, "the history months show rates moving day to day");
+        current.Should().HaveCount(41);
+        current.Should().AllSatisfy(snapshot => snapshot.UnitsPerEur.Should().BeEquivalentTo(new Dictionary<CurrencyCode, decimal>
+        {
+            [CurrencyCode.Rsd] = 117.1500m,
+            [CurrencyCode.Usd] = 1.0850m,
+            [CurrencyCode.Rub] = 98.4000m,
+            [CurrencyCode.Kzt] = 565.2000m,
+        }));
     }
 }
