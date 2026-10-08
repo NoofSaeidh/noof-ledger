@@ -146,10 +146,77 @@ sweeps (`publicsurfacetests-regex-missing-delegate`, `read-model-current-zone-si
   tested restore. Q8 (dump only, or the key ring too) is decided in the spec.
 - **`zero-value-for-existing-enums` goes in before launch.**
 
+## Isolation research, 2026-10-08 — desk research, not yet proven
+
+**Recommended: a separate standard local Windows account, running the host as a Windows service, with
+its own PostgreSQL cluster that accepts SSPI logins only.**
+
+**Compared and set aside:**
+- **A separate cluster under the same user** is no boundary: an agent can still read `db.connection`
+  and decrypt `dp-keys` through the same user's DPAPI.
+- **A VM on this PC** is no boundary either. Windows 11 Home has no Hyper-V; a VirtualBox or VMware
+  disk image belongs to the operator; and a WSL2 distro is the operator's (`wsl -u root`).
+- **A separate always-on machine** is the strongest boundary and also closes the 24-hour Telegram
+  gap, but it needs the Linux port. It is a later step, not a launch requirement.
+
+**Why the separate account holds.** An agent's unelevated token has the administrator SIDs filtered
+out, so it cannot read the production account's profile, data directory or key ring. With SSPI-only
+`pg_hba` there is no password to steal. What stays reachable is the loopback ports and an operator
+who clicks through a UAC prompt by reflex: Microsoft does not treat same-desktop UAC as a security
+boundary.
+
+**Shape.**
+- **Accounts and PostgreSQL.**
+  - A standard local user `noofledger` runs the host service.
+  - The production cluster has its own data directory, ACL'd to SYSTEM, Administrators and its own
+    `NT SERVICE` account, and listens on its own port on localhost only.
+  - `pg_hba` admits only `sspi` from loopback, and `pg_ident` maps `noofledger` to the database
+    role. The operator's account is never mapped: SSPI names the Windows user, not whether its
+    token is elevated.
+  - The production connection string then holds no secret, which also settles Q1 as SSPI.
+- **Host.**
+  - Releases go under `Program Files`, writable only when elevated. Deploys use an elevated
+    `ops/deploy-production.ps1`: copy, stop, switch, start, `/healthz`, and keep the previous release
+    for rollback.
+  - The service uses recovery actions plus `sc failureflag`.
+  - A scheduled task was rejected: its restart-on-failure does not fire on an exit code.
+- **Exit code 0 is a code change.** `WindowsServiceLifetime` reports a stop the app starts itself as
+  exit code 0, so the service manager runs no recovery. The host must report a non-zero exit when the
+  service manager did not ask it to stop. This ships with the `OperationCanceledException` filter.
+- **Key ring, with the secrets kept.**
+  - Create a long-lived certificate under `noofledger`. Its PFX goes into the operator's password
+    manager and never stays on disk.
+  - A one-off command run as the operator decrypts each key's DPAPI-protected secret in memory and
+    re-encrypts it to the certificate.
+  - The host loads the certificate itself and calls `ProtectKeysWithCertificate(X509Certificate2)`.
+    The thumbprint overload accepts only valid certificates, so it rejects a self-signed one.
+  - The cleaned `noof_ledger` moves with `pg_dump`/`pg_restore` and is checked with `restore-check`.
+  - The old database, the old key ring and the old dumps are deleted afterwards, because together they
+    decrypt the kept secrets.
+  - This corrects `hosting-the-whole-application`: a DPAPI key ring can move by re-wrapping its keys.
+- **Off-machine backup.** Each dump is encrypted to the same certificate (CMS `EnvelopedCms`, in the
+  shared framework). The encrypted dump and the re-wrapped key ring go to an outbox that feeds the
+  off-machine copy. That answers Q8 with both, encrypted. A restore elsewhere needs only the PFX.
+
+**To prove in a spike:**
+- the SSPI user name a local account presents;
+- re-wrapped keys decrypting old payloads;
+- CNG versus CAPI keys for certificate decryption on .NET 10;
+- granting the service logon right by script on Windows 11 Home;
+- the production account writing into a folder that feeds OneDrive.
+
+**Operator's questions still open:**
+- Whether the daily account is a local administrator, and if so how the UAC prompt is gated.
+- Where the PFX lives, and whether the encrypted key ring may go off the machine.
+- The off-machine target.
+- `/bugs` and `user set-password` becoming run-as-production commands.
+- Whether to rotate the three secrets at launch anyway.
+- Production's ports.
+
 ## Next steps
 
 1. **Phase 8b merges** (another session owns it).
-2. **Research the isolation boundary** against the answers above.
+2. **The operator answers the isolation questions above**; a spike proves the unverified points.
 3. **A spec for this item** (`docs/specs/`), from those answers, reviewed per CLAUDE.md §1 — it changes
    ops, Host start-up and the CLAUDE.md rules about `noof_ledger` and `%LOCALAPPDATA%\NoofLedger\`.
 4. **Code first:** the `OperationCanceledException` filter; test hosts off the real key ring, with an
