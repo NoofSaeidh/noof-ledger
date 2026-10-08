@@ -134,20 +134,32 @@ sweeps (`publicsurfacetests-regex-missing-delegate`, `read-model-current-zone-si
 `resharper-42-warning-findings-not-triaged`, `publicapianalyzers-considered-and-deferred`); the demo
 (`demo-review-leftovers`, `demo-cut-from-first-design`).
 
+## Operator's answers, 2026-10-08
+
+- **Isolation boundary: research first.** A production Windows account, another machine or VM, or a
+  separate PostgreSQL server alone — to be researched before the spec.
+- **The database is cleaned, keeping the secrets** — not a fresh one. This constrains the isolation
+  research: if production moves to another Windows account, the DPAPI-protected key ring has to move
+  with it (re-protected for that account, or protected another way), or the kept secrets will not
+  decrypt.
+- **Backups before launch include an encrypted copy off the machine**, beside the local dumps and a
+  tested restore. Q8 (dump only, or the key ring too) is decided in the spec.
+- **`zero-value-for-existing-enums` goes in before launch.**
+
 ## Next steps
 
 1. **Phase 8b merges** (another session owns it).
-2. **The operator decides** the open forks: the isolation boundary (a production Windows account, or
-   another machine); a fresh database or a cleaned one; what backups need before launch beyond a tested
-   restore; whether `zero-value-for-existing-enums` goes in before launch.
+2. **Research the isolation boundary** against the answers above.
 3. **A spec for this item** (`docs/specs/`), from those answers, reviewed per CLAUDE.md §1 — it changes
    ops, Host start-up and the CLAUDE.md rules about `noof_ledger` and `%LOCALAPPDATA%\NoofLedger\`.
 4. **Code first:** the `OperationCanceledException` filter; test hosts off the real key ring, with an
-   architecture guard; the enum migration if chosen; `cancelling-a-transaction-in-the-dashboard`.
+   architecture guard; the enum migration; `cancelling-a-transaction-in-the-dashboard`.
 5. **Ops:** scripts that provision the production account, its PostgreSQL cluster and credential, the
-   deploy folder and the auto-start; a `RUNBOOK` section for deploying a new version and for restoring.
-6. **Launch:** `/bugs` against the old `noof_ledger`; provision; deploy; secrets, password, bot claim;
-   a `restore-check` against the first production dump; then retire the old `noof_ledger` and point the
-   CLAUDE.md rules at the new boundary.
+   deploy folder and the auto-start; encrypted off-machine backup copies; a `RUNBOOK` section for
+   deploying a new version and for restoring.
+6. **Launch:** `/bugs` against `noof_ledger`; provision; move `noof_ledger` to the production server
+   cleaned of everything but its secrets, with the key ring that decrypts them; deploy; a
+   `restore-check` against the first production dump; then drop the old copy and point the CLAUDE.md
+   rules at the new boundary.
 7. **After launch,** in the order above: vision-receipt correction, knowing the app is down, the trace
    page, the small-bug batch.
