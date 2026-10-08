@@ -592,8 +592,7 @@ public class BugReportExplanationWorkerTests
         await harness.Store.DidNotReceiveWithAnyArgs().RecordFailedAttemptAsync(default, default, default, Arg.Any<CancellationToken>());
     }
 
-    // A send that succeeded is not an undeliverable reply: storing its id failing is the database's fault, so it is the
-    // tick's 1901, and the next tick sends again (a duplicate the spec accepts).
+    // A send that succeeded is not an undeliverable reply: storing its id failing is the database's fault, so it is 1901.
     [Fact]
     public async Task A_database_fault_storing_a_sent_reply_is_a_failed_tick_not_an_unsent_reply()
     {
@@ -612,5 +611,80 @@ public class BugReportExplanationWorkerTests
             .Which.Exception.Should().BeOfType<InvalidOperationException>();
         harness.Logger.Entries.Should().NotContain(entry => entry.EventId.Id >= 1905 && entry.EventId.Id <= 1907);
         await harness.Store.DidNotReceiveWithAnyArgs().RecordFailedAttemptAsync(default, default, default, Arg.Any<CancellationToken>());
+    }
+
+    // Spec §4 Delivery: only a crash between sending and storing may send a reply twice.
+    [Fact]
+    public async Task A_sent_reply_whose_reference_fails_to_store_is_stored_later_and_never_sent_again()
+    {
+        var harness = new Harness();
+        IReadOnlyList<BugReportDelivery> pending = [Delivery(5, BugExplanationState.Done, looksLikeBug: false)];
+        harness.Store.PendingDeliveriesAsync(Arg.Any<CancellationToken>()).Returns(pending);
+        harness.ChatNotifier.ReplyToBugReportAsync("reply-to-5", Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
+            .Returns("sent-900", "sent-901");
+        harness.Store.MarkDeliveredAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(
+            _ => Task.FromException(new InvalidOperationException("database unreachable")),
+            _ => Task.FromException(new InvalidOperationException("database unreachable")),
+            _ => Task.CompletedTask);
+        var worker = harness.Worker();
+
+        var results = new List<BugReportTickResult>();
+        for (var tick = 0; tick < 3; tick++)
+            results.Add(await worker.RunTickAsync(Ct));
+
+        results.Should().Equal(BugReportTickResult.Failed, BugReportTickResult.Failed, BugReportTickResult.Processed);
+        await harness.ChatNotifier.Received(1).ReplyToBugReportAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>());
+        await harness.Store.Received(3).MarkDeliveredAsync(ReportId(5), "sent-900", Arg.Any<CancellationToken>());
+        harness.Logger.Entries.Should().ContainSingle(entry => entry.EventId.Id == 1907);
+    }
+
+    [Fact]
+    public async Task A_reply_whose_reference_keeps_failing_to_store_never_holds_back_a_later_reply()
+    {
+        var harness = new Harness();
+        var stuck = Delivery(5, BugExplanationState.Done, looksLikeBug: false);
+        IReadOnlyList<BugReportDelivery> firstTick = [stuck, Delivery(6, BugExplanationState.Done, looksLikeBug: true)];
+        IReadOnlyList<BugReportDelivery> secondTick = [stuck];
+        harness.Store.PendingDeliveriesAsync(Arg.Any<CancellationToken>()).Returns(firstTick, secondTick);
+        harness.ChatNotifier.ReplyToBugReportAsync("reply-to-5", Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
+            .Returns("sent-900");
+        harness.ChatNotifier.ReplyToBugReportAsync("reply-to-6", Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
+            .Returns("sent-901");
+        harness.Store.MarkDeliveredAsync(ReportId(5), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("database unreachable"));
+        var worker = harness.Worker();
+
+        await worker.RunTickAsync(Ct);
+        await worker.RunTickAsync(Ct);
+
+        await harness.ChatNotifier.Received(1).ReplyToBugReportAsync("reply-to-6", Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>());
+        await harness.Store.Received(1).MarkDeliveredAsync(ReportId(6), "sent-901", Arg.Any<CancellationToken>());
+        await harness.ChatNotifier.Received(1).ReplyToBugReportAsync("reply-to-5", Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>());
+        harness.Logger.Entries.Where(entry => entry.EventId.Id == 1901).Should().HaveCount(2)
+            .And.OnlyContain(entry => entry.Exception is InvalidOperationException);
+    }
+
+    [Fact]
+    public async Task A_reply_address_the_chat_cannot_read_warns_once_and_is_not_retried()
+    {
+        var harness = new Harness();
+        IReadOnlyList<BugReportDelivery> pending = [Delivery(5, BugExplanationState.Done, looksLikeBug: false)];
+        harness.Store.PendingDeliveriesAsync(Arg.Any<CancellationToken>()).Returns(pending);
+        harness.ChatNotifier.ReplyToBugReportAsync("reply-to-5", Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new FormatException("A Telegram reply address is \"<chat id>:<message id>\" in invariant digits."));
+        var worker = harness.Worker();
+
+        for (var tick = 0; tick < 3; tick++)
+            await worker.RunTickAsync(Ct);
+
+        var warned = harness.Logger.Entries.Should().ContainSingle(entry => entry.EventId.Id == 1910).Subject;
+        warned.Level.Should().Be(LogLevel.Warning);
+        warned.Properties["Number"].Should().Be(5);
+        warned.Exception.Should().BeNull();
+        harness.Logger.Entries.Should().NotContain(entry => entry.EventId.Id == 1905 || entry.EventId.Id == 1906);
+        await harness.ChatNotifier.Received(1).ReplyToBugReportAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>());
+        await harness.Store.DidNotReceiveWithAnyArgs().MarkDeliveredAsync(default, default!, Arg.Any<CancellationToken>());
     }
 }

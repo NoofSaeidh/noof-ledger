@@ -37,4 +37,8 @@ internal static partial class BugReportExplanationWorkerLog
     [LoggerMessage(EventId = 1909, Level = LogLevel.Warning,
         Message = "Bug report #{Number}: the model refused the account; no attempt spent, explanations paused for {Cooldown}")]
     public static partial void AccountRefused(this ILogger logger, int number, TimeSpan cooldown);
+
+    [LoggerMessage(EventId = 1910, Level = LogLevel.Warning,
+        Message = "Bug report #{Number}: its reply address cannot be read; no reply will be sent")]
+    public static partial void ReplyAddressUnreadable(this ILogger logger, int number);
 }

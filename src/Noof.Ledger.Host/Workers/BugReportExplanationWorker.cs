@@ -24,6 +24,13 @@ internal sealed class BugReportExplanationWorker(
     // it warns once more.
     readonly HashSet<Guid> undeliverable = [];
 
+    // A reply address the chat cannot read is a stored fault no retry mends: warned once, never sent. Per process.
+    readonly HashSet<Guid> unaddressable = [];
+
+    // A sent reply whose reference could not be stored: later ticks store it instead of sending it again, so only a
+    // crash in between sends a reply twice (spec §4, Delivery). Per process.
+    readonly Dictionary<Guid, string> unrecorded = [];
+
     // A paid answer whose write failed: the next tick that takes its report writes it instead of asking the model again,
     // and a failed write spends no attempt (P-11). Per process; after a restart the model is asked once more.
     readonly Dictionary<Guid, Explanation> unwritten = [];
@@ -55,11 +62,11 @@ internal sealed class BugReportExplanationWorker(
             var explained = await TryExplainNextAsync(scope.ServiceProvider, store, now, cancellationToken);
             var delivered = await DeliverAsync(scope.ServiceProvider.GetRequiredService<IChatNotifier>(), store, cancellationToken);
 
-            return explained switch
+            return (explained, delivered) switch
             {
-                null => BugReportTickResult.Failed,
-                true => BugReportTickResult.Processed,
-                false => delivered ? BugReportTickResult.Processed : BugReportTickResult.Idle,
+                (null, _) or (_, null) => BugReportTickResult.Failed,
+                (true, _) or (_, true) => BugReportTickResult.Processed,
+                _ => BugReportTickResult.Idle,
             };
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -164,26 +171,54 @@ internal sealed class BugReportExplanationWorker(
     }
 
     // A failed send spends no attempt and never calls the model again: the answer is stored, only the reply is owed.
-    // A sent reply's reference is stored outside the send's catch: a database fault there is the tick's 1901, not 1905.
-    async Task<bool> DeliverAsync(IChatNotifier chatNotifier, IBugReportStore store, CancellationToken cancellationToken)
+    // Null when a sent reply's reference could not be stored: a database fault, so 1901, not 1905.
+    async Task<bool?> DeliverAsync(IChatNotifier chatNotifier, IBugReportStore store, CancellationToken cancellationToken)
     {
-        var delivered = false;
+        var (delivered, unstored) = (false, false);
         foreach (var delivery in await store.PendingDeliveriesAsync(cancellationToken))
         {
             // R-2: only the chat's own address is the chat's to answer; another source's report is left to that source.
             if (delivery.Source is not BugReportSource.Telegram)
                 continue;
 
-            if (await TrySendReplyAsync(chatNotifier, delivery, cancellationToken) is not { } deliveredAs)
+            if (unaddressable.Contains(delivery.Id))
                 continue;
 
-            await store.MarkDeliveredAsync(delivery.Id, deliveredAs, cancellationToken);
-            undeliverable.Remove(delivery.Id);
-            logger.ReplyDelivered(delivery.Number);
-            delivered = true;
+            if (!unrecorded.TryGetValue(delivery.Id, out var deliveredAs))
+            {
+                if (await TrySendReplyAsync(chatNotifier, delivery, cancellationToken) is not { } sent)
+                    continue;
+
+                unrecorded[delivery.Id] = deliveredAs = sent;
+                undeliverable.Remove(delivery.Id);
+            }
+
+            if (await TryRecordDeliveryAsync(store, delivery, deliveredAs, cancellationToken))
+                delivered = true;
+            else
+                unstored = true;
         }
 
-        return delivered;
+        return unstored ? null : delivered;
+    }
+
+    // Its own failure boundary, so one reply whose reference cannot be stored never holds back the next reply.
+    async Task<bool> TryRecordDeliveryAsync(
+        IBugReportStore store, BugReportDelivery delivery, string deliveredAs, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await store.MarkDeliveredAsync(delivery.Id, deliveredAs, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.TickFailed(ex);
+            return false;
+        }
+
+        unrecorded.Remove(delivery.Id);
+        logger.ReplyDelivered(delivery.Number);
+        return true;
     }
 
     async Task<string?> TrySendReplyAsync(IChatNotifier chatNotifier, BugReportDelivery delivery, CancellationToken cancellationToken)
@@ -192,6 +227,12 @@ internal sealed class BugReportExplanationWorker(
         {
             return await chatNotifier.ReplyToBugReportAsync(
                 delivery.ReplyTo, BugReportReplies.Compose(delivery), CloseButtonNumber(delivery), cancellationToken);
+        }
+        catch (FormatException)
+        {
+            unaddressable.Add(delivery.Id);
+            logger.ReplyAddressUnreadable(delivery.Number);
+            return null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

@@ -10,7 +10,7 @@ public interface IChatNotifier
 
     // A reply to a bug report's own message, sent even when that message no longer exists, with one "Close report"
     // button when closeReportNumber is given. replyTo and the returned reference to the sent reply are opaque outside
-    // the chat's own layer (R-2).
+    // the chat's own layer (R-2); a replyTo the chat cannot read throws FormatException.
     Task<string> ReplyToBugReportAsync(
         string replyTo, string text, int? closeReportNumber, CancellationToken cancellationToken);
 
