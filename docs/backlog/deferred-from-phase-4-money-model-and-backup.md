@@ -3,6 +3,7 @@ title: Deferred from Phase 4 (money model and backup)
 status: deferred
 area: persistence
 since: 2026-09-24
+related: [production-readiness-after-phase-8]
 ---
 **Income in a foreign currency is still not converted (M10, narrowed by Phase 7).** Phase 7 converts a
 spending in a currency other than its wallet's at the wallet's own terms set on `/wallets` (T-6,
@@ -48,7 +49,8 @@ clones off the server that holds `noof_ledger`. Costs a second cluster to start 
 small ops script. The operator has seen the trade-offs (2026-09-24) and not decided; the Phase 4
 rule of running database and E2E tests filtered, and in full once per phase, removed most of the
 contention in the meantime, and Phase 6's `FILE_COPY` clones removed the long checkpoint waits
-themselves (the 2026-09-27 entry below), which weakens the case for a second cluster.
+themselves (the 2026-09-27 entry below), which weakens the case for a second cluster. **Decided
+2026-10-03:** production gets its own server instead — `production-readiness-after-phase-8`.
 
 **A cancelled dump can be recorded as a failed run.** `PgDumpDatabaseDumper` kills `pg_dump` on
 cancellation with `if (!process.HasExited) process.Kill(entireProcessTree: true)`; if `pg_dump` exits
